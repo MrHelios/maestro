@@ -49,4 +49,18 @@ private:
 
     void handleEvent(const Event& event);
     void save();
+
+    struct HistoryState {
+        std::vector<std::string> lines;
+        int line = 0;
+        int col = 0;
+    };
+
+    std::vector<HistoryState> undoStack_;
+    std::vector<HistoryState> redoStack_;
+
+    void pushHistory();
+    void undo();
+    void redo();
+    void applyState(const HistoryState& state);
 };

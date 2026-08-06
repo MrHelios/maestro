@@ -75,6 +75,14 @@ Event Terminal::readEvent() {
         e.type = EventType::Save;
         return e;
     }
+    if (c == 21) { // Ctrl+U -> deshacer
+        e.type = EventType::Undo;
+        return e;
+    }
+    if (c == 25) { // Ctrl+Y -> rehacer
+        e.type = EventType::Redo;
+        return e;
+    }
     if (c == 127 || c == 8) { // Backspace (DEL o BS segun terminal)
         e.type = EventType::Backspace;
         return e;

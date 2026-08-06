@@ -22,6 +22,12 @@ public:
     int lineLength(int line) const;
     const std::string& lineAt(int line) const;
 
+    // Devuelve una copia de todas las lineas (util para undo/redo).
+    std::vector<std::string> snapshot() const;
+
+    // Reemplaza todo el contenido por las lineas dadas.
+    void restore(const std::vector<std::string>& lines);
+
     // --- Mutaciones ---
     // Inserta el caracter c en (line, col). col puede ser igual a
     // lineLength(line) (insertar al final de la linea).

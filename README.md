@@ -61,16 +61,3 @@ el `Editor` nunca sabe qué tecla se apretó, solo qué evento ocurrió.
 Esto deja la puerta abierta a alimentar el engine desde otro lado
 (tests automatizados, macros, otro tipo de input) sin tocar el resto
 del código.
-
-## Qué falta para v0.2 (no incluido a propósito)
-
-- Tecla Enter / salto de línea (el `Document` ya soporta
-  `insertNewline`, solo falta conectar el evento).
-- Selección de texto.
-- Modos (por ejemplo, un modo "comando" al estilo Vim).
-- Scroll horizontal (por ahora las líneas se truncan al ancho de la
-  terminal).
-- Undo/redo.
-
-Se dejó afuera deliberadamente para mantener la v0.1 lo más chica y
-sólida posible, tal como se pidió.

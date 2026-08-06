@@ -68,6 +68,17 @@ const std::string& Document::lineAt(int line) const {
     return lines_[line];
 }
 
+std::vector<std::string> Document::snapshot() const {
+    return lines_;
+}
+
+void Document::restore(const std::vector<std::string>& lines) {
+    lines_ = lines;
+    if (lines_.empty()) {
+        lines_.push_back("");
+    }
+}
+
 void Document::insertChar(int line, int col, char c) {
     if (line < 0 || line >= lineCount()) return;
     std::string& target = lines_[line];

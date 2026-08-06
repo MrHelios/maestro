@@ -16,6 +16,8 @@ enum class EventType {
     MoveEnd,
     Backspace,
     Delete,
+    Undo,
+    Redo,
     Save,
     Quit,
 };
