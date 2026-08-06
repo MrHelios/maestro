@@ -1,0 +1,23 @@
+# Binarios compilados
+edit
+*.out
+
+# Objetos
+*.o
+*.obj
+
+# Dependencias generadas
+*.d
+*.gcda
+*.gcno
+
+# Librerias
+*.a
+*.so
+*.so.*
+*.dll
+*.dylib
+*.lib
+
+# Ejecutables y demás
+*.exe
