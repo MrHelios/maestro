@@ -12,6 +12,16 @@ make
 Esto genera un binario `edit` (requiere Linux/macOS — usa `termios`,
 que es POSIX; en Windows habría que adaptar `Terminal.cpp`).
 
+### Probar
+
+```bash
+make test
+```
+
+Compila y ejecuta la suite de tests en `tests/` (`Document`, `Cursor` y
+`Editor`). El runner imprime cada caso y un resumen final
+(`N tests, M failure(s)`); sale con código 0 solo si no hay fallos.
+
 ## Uso
 
 ```bash
@@ -35,6 +45,13 @@ Si el archivo no existe, se crea uno nuevo en memoria (se guarda al usar Ctrl+S)
 ## Arquitectura
 
 ```
+tests/
+  test_framework.h  -> micro-framework de tests (CHECK/CHECK_EQ, runner)
+  test_main.cpp      -> punto de entrada del runner
+  test_document.cpp  -> carga/guardado, insertar, newline, backspace, delete
+  test_cursor.cpp    -> movimiento horizontal/vertical, home/end, invariantes
+  test_editor.cpp    -> openFile, undo, redo, guardado y quit
+
 src/
   Document.cpp   -> el texto en sí (vector<string>), sin saber nada
                      de cursor, colores, scroll ni selección
