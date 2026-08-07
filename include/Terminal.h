@@ -26,5 +26,9 @@ public:
 
 private:
     bool rawModeEnabled_ = false;
+    // true si EDIT_DEBUG_KEYS esta definida: vuelca a stderr los bytes
+    // crudos de las teclas no reconocidas (util para diagnosticar como
+    // emite la terminal las secuencias, p.ej. Shift+Flecha).
+    bool debugKeys_ = false;
     void* origTermios_; // puntero opaco a struct termios (evita incluir <termios.h> aqui)
 };

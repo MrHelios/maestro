@@ -134,11 +134,34 @@ bool Document::deleteCharAt(int line, int col) {
         return true;
     }
 
-    // col == len: fundir con la linea siguiente, si existe.
+    // col == len: fundir con la siguiente linea, si existe.
     if (line + 1 >= lineCount()) return false;
 
     std::string next = lines_[line + 1];
     lines_.erase(lines_.begin() + line + 1);
     lines_[line] += next;
+    return true;
+}
+
+bool Document::deleteRange(int sl, int sc, int el, int ec) {
+    if (sl < 0 || sl >= lineCount()) return false;
+    if (el < sl || el >= lineCount()) return false;
+    if (sc < 0 || sc > lineLength(sl)) return false;
+    if (ec < 0 || ec > lineLength(el)) return false;
+
+    // Rango vacio: no hay nada que borrar.
+    if (sl == el && sc == ec) return false;
+
+    if (sl == el) {
+        lines_[sl].erase(sc, ec - sc);
+        return true;
+    }
+
+    // Multilinea: pegamos la cola de la ultima linea al final de la
+    // primera y eliminamos las lineas intermedias.
+    std::string tail = lines_[el].substr(ec);
+    lines_[sl].erase(sc);
+    lines_[sl] += tail;
+    lines_.erase(lines_.begin() + sl + 1, lines_.begin() + el + 1);
     return true;
 }

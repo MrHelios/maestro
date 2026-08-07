@@ -49,6 +49,13 @@ public:
     // Devuelve false si no hay nada que borrar (fin absoluto del documento).
     bool deleteCharAt(int line, int col);
 
+    // Borra el texto comprendido entre (sl, sc) y (el, ec), con sl <= el
+    // y sc <= ec, donde el extremo es exclusivo (igual que un substr).
+    // Si (sl, sc) == (el, ec) no borra nada y devuelve false. El cursor
+    // debe quedar despues en (sl, sc). Es la primitiva usada para borrar
+    // una seleccion completa en una sola operacion.
+    bool deleteRange(int sl, int sc, int el, int ec);
+
 private:
     std::vector<std::string> lines_;
 };

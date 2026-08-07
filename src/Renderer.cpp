@@ -48,17 +48,75 @@ std::string utf8Truncate(const std::string& line, int maxCols) {
     return line.substr(0, i);
 }
 
+// Devuelve los bytes de `line` cuyas COLUMNAS VISUALES caen dentro de
+// [fromCol, toCol). No corta caracteres multibyte por la mitad.
+std::string utf8Range(const std::string& line, int fromCol, int toCol) {
+    int col = 0;
+    size_t startByte = line.size();
+    size_t i = 0;
+    while (i < line.size()) {
+        unsigned char c = static_cast<unsigned char>(line[i]);
+        if ((c & 0xC0) != 0x80) {
+            if (col == fromCol) startByte = i;
+            if (col >= toCol) break;
+            col++;
+        }
+        i++;
+    }
+    if (col >= toCol) return line.substr(startByte, i - startByte);
+    return line.substr(startByte); // hasta el final de la linea
+}
+
+// Renderiza una sola linea del documento, aplicando video inverso a los
+// bytes dentro de [selStartByte, selEndByte) si la linea esta seleccionada.
+// selStartByte/selEndByte -1 significa "sin seleccion en esta linea".
+void renderLine(std::ostringstream& out,
+                const std::string& line,
+                int width,
+                int selStartByte = -1,
+                int selEndByte = -1) {
+    if (selStartByte < 0 || selEndByte < 0 || selStartByte >= selEndByte) {
+        // Sin seleccion aqui (o seleccion vacia): caso normal.
+        out << utf8Truncate(line, width);
+        return;
+    }
+
+    // Limitar la seleccion a lo que existe en la linea (si el fin cae
+    // mas alla del largo de la linea, por ejemplo en la ultima).
+    int endByte = std::min<int>(selEndByte, static_cast<int>(line.size()));
+    int startByte = std::min<int>(selStartByte, endByte);
+
+    int startCol = utf8ColumnOf(line, startByte);
+    int endCol = utf8ColumnOf(line, endByte);
+
+    // Parte antes de la seleccion.
+    out << utf8Range(line, 0, std::min(startCol, width));
+
+    // Parte seleccionada, en video inverso.
+    out << "\x1b[7m";
+    out << utf8Range(line, std::min(startCol, width), std::min(endCol, width));
+    out << "\x1b[0m";
+
+    // Parte despues de la seleccion (si queda espacio).
+    out << utf8Range(line, std::min(endCol, width), width);
+}
+
 } // namespace
 
-void Renderer::render(const Document& doc,
-                       const Cursor& cursor,
-                       const Viewport& viewport,
-                       const std::string& filename,
-                       bool modified,
-                       const std::string& statusMessage) {
+std::string Renderer::buildScreen(const Document& doc,
+                                   const Cursor& cursor,
+                                   const Viewport& viewport,
+                                   const std::string& filename,
+                                   bool modified,
+                                   const std::string& statusMessage,
+                                   const std::optional<Selection>& selection) {
     // Armamos todo en un unico buffer y lo escribimos de una sola vez
     // para evitar parpadeo.
     std::ostringstream out;
+
+    // Si hay seleccion, la normalizamos una vez para conocer los limites.
+    std::optional<Normalized> sel = selection.has_value() ? normalize(*selection)
+                                                          : std::nullopt;
 
     out << "\x1b[?25l"; // ocultar cursor mientras dibujamos
     out << "\x1b[H";    // mover cursor a home (fila 1, col 1)
@@ -68,7 +126,30 @@ void Renderer::render(const Document& doc,
         out << "\x1b[K"; // limpiar la linea actual
 
         if (docLine < doc.lineCount()) {
-            out << utf8Truncate(doc.lineAt(docLine), viewport.width);
+            const std::string& line = doc.lineAt(docLine);
+            int selStart = -1, selEnd = -1;
+
+            if (sel.has_value() && docLine >= sel->start.line && docLine <= sel->end.line) {
+                if (sel->start.line == sel->end.line) {
+                    // Seleccion en una sola linea.
+                    selStart = sel->start.col;
+                    selEnd = sel->end.col;
+                } else if (docLine == sel->start.line) {
+                    // Primera linea: desde la seleccion hasta el final.
+                    selStart = sel->start.col;
+                    selEnd = static_cast<int>(line.size());
+                } else if (docLine == sel->end.line) {
+                    // Ultima linea: hasta la seleccion.
+                    selStart = 0;
+                    selEnd = sel->end.col;
+                } else {
+                    // Linea intermedia: toda la linea.
+                    selStart = 0;
+                    selEnd = static_cast<int>(line.size());
+                }
+            }
+
+            renderLine(out, line, viewport.width, selStart, selEnd);
         } else {
             out << "~"; // linea fuera del documento, estilo vim
         }
@@ -98,6 +179,17 @@ void Renderer::render(const Document& doc,
 
     out << "\x1b[?25h"; // volver a mostrar el cursor
 
-    std::string buffer = out.str();
+    return out.str();
+}
+
+void Renderer::render(const Document& doc,
+                       const Cursor& cursor,
+                       const Viewport& viewport,
+                       const std::string& filename,
+                       bool modified,
+                       const std::string& statusMessage,
+                       const std::optional<Selection>& selection) {
+    std::string buffer = buildScreen(doc, cursor, viewport, filename,
+                                     modified, statusMessage, selection);
     write(STDOUT_FILENO, buffer.c_str(), buffer.size());
 }

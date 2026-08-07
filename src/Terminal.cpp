@@ -2,12 +2,14 @@
 
 #include <cstdlib>
 #include <cstdio>
+#include <string>
 #include <unistd.h>
 #include <termios.h>
 #include <sys/ioctl.h>
 
 Terminal::Terminal() {
     origTermios_ = new termios();
+    debugKeys_ = std::getenv("EDIT_DEBUG_KEYS") != nullptr;
 }
 
 Terminal::~Terminal() {
@@ -65,6 +67,22 @@ Event Terminal::readEvent() {
     char c = readRawByte();
 
     Event e;
+    std::string raw; // bytes leidos de esta tecla (para el debug)
+    raw.push_back(c);
+
+    auto dumpUnrecognized = [&]() {
+        if (!debugKeys_) return;
+        std::fprintf(stderr, "[keys] sin reconocer:");
+        for (unsigned char b : raw) {
+            std::fprintf(stderr, " %02X", b);
+        }
+        std::fprintf(stderr, " (%s)\n", raw.c_str());
+    };
+    auto readInto = [&](char* out, int n) -> bool {
+        if (read(STDIN_FILENO, out, n) != n) return false;
+        for (int i = 0; i < n; ++i) raw.push_back(out[i]);
+        return true;
+    };
 
     // Teclas de control basicas
     if (c == 17) { // Ctrl+Q -> salir
@@ -94,41 +112,93 @@ Event Terminal::readEvent() {
     }
 
     // Secuencias de escape: flechas, Home, End, Delete.
+    //
+    // BUG PENDIENTE (no resuelto): en algunas consolas la seleccion con
+    // Shift+Flecha puede no funcionar. El motivo: cada emulador emite la
+    // combinacion Shift+tecla de una forma distinta (algunos no anaden el
+    // modificador, e.g. envian igual que la flecha sola), e incluso hay
+    // consolas que "bloquean"/no entregan esa secuencia de teclas. Si el
+    // usuario reporta que la seleccion no responde, usar EDIT_DEBUG_KEYS=1
+    // para volcar los bytes reales y sumar la secuencia faltante en el
+    // parseo de abajo. Queda como trabajo a futuro.
     if (c == 27) { // ESC
-        char seq[3] = {0, 0, 0};
-        if (read(STDIN_FILENO, &seq[0], 1) != 1) { e.type = EventType::None; return e; }
-        if (read(STDIN_FILENO, &seq[1], 1) != 1) { e.type = EventType::None; return e; }
+        // Leemos los parametros (numeros y ';') hasta el caracter final.
+        std::string params;
+        while (true) {
+            char b = 0;
+            if (!readInto(&b, 1)) { e.type = EventType::None; dumpUnrecognized(); return e; }
+            params.push_back(b);
+            // El caracter final es cualquier cosa distinta de digitos, ';' y ESC.
+            if (b != '[' && !(b >= '0' && b <= '9') && b != ';') break;
+        }
+        const char prefix = params.empty() ? 0 : params[0];
+        const char final = params[params.size() - 1];
 
-        if (seq[0] == '[') {
-            if (seq[1] >= '0' && seq[1] <= '9') {
-                // secuencias tipo ESC [ 3 ~  (Delete)
-                if (read(STDIN_FILENO, &seq[2], 1) != 1) { e.type = EventType::None; return e; }
-                if (seq[2] == '~') {
-                    switch (seq[1]) {
-                        case '3': e.type = EventType::Delete; return e;
-                        case '1': case '7': e.type = EventType::MoveHome; return e;
-                        case '4': case '8': e.type = EventType::MoveEnd; return e;
-                    }
-                }
-            } else {
-                switch (seq[1]) {
-                    case 'A': e.type = EventType::MoveUp; return e;
-                    case 'B': e.type = EventType::MoveDown; return e;
-                    case 'C': e.type = EventType::MoveRight; return e;
-                    case 'D': e.type = EventType::MoveLeft; return e;
-                    case 'H': e.type = EventType::MoveHome; return e;
-                    case 'F': e.type = EventType::MoveEnd; return e;
-                }
-            }
-        } else if (seq[0] == 'O') {
-            switch (seq[1]) {
+        // Solo el prefijo [ y O preceden a los parametros. Las demas
+        // secuencias (p.ej. ESC ~) no nos interesan.
+        if (prefix != '[' && prefix != 'O') {
+            e.type = EventType::None; dumpUnrecognized(); return e;
+        }
+
+        // Creamos "cuerpo" = params sin el prefijo ni el caracter final.
+        std::string body = params.substr(1, params.size() - 2);
+
+        // Sin parametros: flecha/Home/End simples (ESC [ A, ESC [ H, ...).
+        if (body.empty()) {
+            switch (final) {
+                case 'A': e.type = EventType::MoveUp; return e;
+                case 'B': e.type = EventType::MoveDown; return e;
+                case 'C': e.type = EventType::MoveRight; return e;
+                case 'D': e.type = EventType::MoveLeft; return e;
                 case 'H': e.type = EventType::MoveHome; return e;
                 case 'F': e.type = EventType::MoveEnd; return e;
+                default: e.type = EventType::None; dumpUnrecognized(); return e;
             }
         }
 
-        e.type = EventType::None;
-        return e;
+        // Secuencias con parametros. Las clasicas: "3~" (Delete, sin ';'),
+        // y con modificador "1;2" (Shift+Flecha).
+        bool hasColon = body.find(';') != std::string::npos;
+        if (prefix != '[') {
+            e.type = EventType::None; dumpUnrecognized(); return e;
+        }
+        if (!hasColon) {
+            if (final == '~') {
+                switch (body[0]) {
+                    case '3': e.type = EventType::Delete; return e; // Delete
+                    case '1': case '7': e.type = EventType::MoveHome; return e; // Home
+                    case '4': case '8': e.type = EventType::MoveEnd; return e; // End
+                    default: e.type = EventType::None; dumpUnrecognized(); return e;
+                }
+            } else {
+                e.type = EventType::None; dumpUnrecognized(); return e;
+            }
+        }
+
+        // Formato "1;2A" => modificador 2 = Shift.
+        size_t modStart = body.find(';') + 1;
+        std::string modStr = body.substr(modStart);
+        if (modStr.size() != 1 && modStr.size() != 0) {
+            e.type = EventType::None; dumpUnrecognized(); return e;
+        }
+        if (modStr == "2") {
+            e.shift = true;
+        } else if (modStr.empty() || modStr == "1") {
+            e.shift = false; // sin modificador (p.ej. ESC [ 1 ; A)
+        } else {
+            // Otros modificadores (Ctrl, Alt...) no se manejan en v0.1.
+            e.type = EventType::None; dumpUnrecognized(); return e;
+        }
+
+        switch (final) {
+            case 'A': e.type = EventType::MoveUp; return e;
+            case 'B': e.type = EventType::MoveDown; return e;
+            case 'C': e.type = EventType::MoveRight; return e;
+            case 'D': e.type = EventType::MoveLeft; return e;
+            case 'H': e.type = EventType::MoveHome; return e;
+            case 'F': e.type = EventType::MoveEnd; return e;
+            default: e.type = EventType::None; dumpUnrecognized(); return e;
+        }
     }
 
     // Caracter imprimible normal.

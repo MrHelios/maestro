@@ -9,8 +9,12 @@ TEST_INC := -I$(TEST_DIR)
 TEST_SRC := $(TEST_DIR)/test_main.cpp \
             $(TEST_DIR)/test_document.cpp \
             $(TEST_DIR)/test_cursor.cpp \
-            $(TEST_DIR)/test_editor.cpp \
-            $(TEST_DIR)/test_invariants.cpp
+$(TEST_DIR)/test_event.cpp \
+             $(TEST_DIR)/test_terminal_event.cpp \
+             $(TEST_DIR)/test_editor.cpp \
+             $(TEST_DIR)/test_selection.cpp \
+             $(TEST_DIR)/test_renderer.cpp \
+             $(TEST_DIR)/test_invariants.cpp
 TEST_BIN := edit_tests
 # Fuentes del programa que se enlazan en los tests (sin main.cpp)
 SRC_NO_MAIN := $(filter-out src/main.cpp,$(SRC))

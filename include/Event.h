@@ -25,4 +25,5 @@ enum class EventType {
 struct Event {
     EventType type = EventType::None;
     char ch = 0; // solo relevante para InsertChar
+    bool shift = false; // true si la tecla venia con Shift presionado
 };
