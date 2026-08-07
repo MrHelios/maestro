@@ -5,6 +5,8 @@
 #include <string>
 #include <unistd.h>
 #include <termios.h>
+#include <poll.h>
+#include <errno.h>
 #include <sys/ioctl.h>
 
 Terminal::Terminal() {
@@ -63,6 +65,34 @@ static char readRawByte() {
     return c;
 }
 
+// Ventana para distinguir un ESC suelto de una secuencia de escape.
+// Las secuencias de control llegan con todos sus bytes juntos; si tras
+// el ESC no llega el siguiente byte en esta ventana, era un ESC solo
+// (p.ej. cancelar seleccion).
+static const int kEscapeSequenceTimeoutMs = 50;
+
+// Lee el siguiente byte de stdin con un timeout corto. Devuelve false
+// si no llega nada en `timeoutMs` (o si el read() falla), true si se
+// leyo. Sin esto, un read() bloqueante (VMIN=1/VTIME=0) esperaria el
+// siguiente byte indefinidamente y colgaria el editor.
+static bool readByteWithTimeout(char* out, int timeoutMs) {
+    struct pollfd pfd;
+    pfd.fd = STDIN_FILENO;
+    pfd.events = POLLIN;
+
+    int pr;
+    do {
+        pr = poll(&pfd, 1, timeoutMs);
+    } while (pr < 0 && errno == EINTR);
+    if (pr <= 0) return false;
+
+    ssize_t r;
+    do {
+        r = read(STDIN_FILENO, out, 1);
+    } while (r < 0 && errno == EINTR);
+    return r == 1;
+}
+
 Event Terminal::readEvent() {
     char c = readRawByte();
 
@@ -77,11 +107,6 @@ Event Terminal::readEvent() {
             std::fprintf(stderr, " %02X", b);
         }
         std::fprintf(stderr, " (%s)\n", raw.c_str());
-    };
-    auto readInto = [&](char* out, int n) -> bool {
-        if (read(STDIN_FILENO, out, n) != n) return false;
-        for (int i = 0; i < n; ++i) raw.push_back(out[i]);
-        return true;
     };
 
     // Teclas de control basicas
@@ -122,12 +147,22 @@ Event Terminal::readEvent() {
     // para volcar los bytes reales y sumar la secuencia faltante en el
     // parseo de abajo. Queda como trabajo a futuro.
     if (c == 27) { // ESC
-        // Leemos los parametros (numeros y ';') hasta el caracter final.
+        // Leemos los parametros (numeros y ';') hasta el caracter final,
+        // esperando cada byte con un timeout corto. Si no llega nada
+        // tras el ESC, era un ESC suelto (EventType::Escape); si una
+        // secuencia queda a medias, se descarta sin colgar el editor.
         std::string params;
         while (true) {
             char b = 0;
-            if (!readInto(&b, 1)) { e.type = EventType::None; dumpUnrecognized(); return e; }
+            if (!readByteWithTimeout(&b, kEscapeSequenceTimeoutMs)) {
+                if (params.empty()) {
+                    e.type = EventType::Escape; // ESC sin nada mas
+                    return e;
+                }
+                e.type = EventType::None; dumpUnrecognized(); return e;
+            }
             params.push_back(b);
+            raw.push_back(b);
             // El caracter final es cualquier cosa distinta de digitos, ';' y ESC.
             if (b != '[' && !(b >= '0' && b <= '9') && b != ';') break;
         }

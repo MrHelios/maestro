@@ -41,6 +41,7 @@ Si el archivo no existe, se crea uno nuevo en memoria (se guarda al usar Ctrl+S)
 | Backspace      | Borrar carácter anterior     |
 | Delete         | Borrar carácter siguiente    |
 | Cualquier letra| Insertar carácter            |
+| Esc            | Cancelar la selección        |
 | Ctrl+S         | Guardar                      |
 | Ctrl+Q         | Salir                        |
 

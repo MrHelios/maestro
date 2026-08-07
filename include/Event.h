@@ -20,6 +20,9 @@ enum class EventType {
     Redo,
     Save,
     Quit,
+    // ESC suelto (no seguido de una secuencia de flecha/Home/...).
+    // Tipico uso: cancelar la seleccion activa.
+    Escape,
 };
 
 struct Event {

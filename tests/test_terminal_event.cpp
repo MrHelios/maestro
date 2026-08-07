@@ -139,7 +139,29 @@ TEST(terminal_home_via_tilde) {
 }
 
 TEST(terminal_shift_right_via_ss3_prefix) {
-    // Prefijo SS3 (ESCS O) con modificador: igual que bracket pero con 'O'.
+    // Prefijo SS3 (ESC O) con modificador: igual que bracket pero con 'O'.
     Event e = parse("\x1bO1;2C");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None)); // 'O' con params no se soporta
+}
+
+TEST(terminal_lone_escape) {
+    // Un ESC suelto no debe colgar al parser esperando un segundo byte:
+    // tras un timeout corto se traduce a EventType::Escape.
+    Event e = parse("\x1b");
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::Escape));
+    CHECK(!e.shift);
+}
+
+TEST(terminal_incomplete_sequence_times_out) {
+    // ESC + '[' sin caracter final: se descarta (None) tras el timeout,
+    // en lugar de bloquear para siempre esperando el ultimo byte.
+    Event e = parse("\x1b[");
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+}
+
+TEST(terminal_escape_followed_by_char_ignored) {
+    // ESC seguido de algo que no sea una secuencia de control conocida
+    // no es un ESC suelto: la secuencia completa se descarta (None).
+    Event e = parse("\x1bx");
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
 }

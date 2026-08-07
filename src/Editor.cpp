@@ -203,6 +203,11 @@ void Editor::handleEvent(const Event& event) {
             save();
             break;
 
+        case EventType::Escape:
+            // ESC suelto: cancela la seleccion activa sin mover el cursor.
+            clearSelection();
+            break;
+
         case EventType::Quit:
             running_ = false;
             break;

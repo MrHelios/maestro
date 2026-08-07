@@ -192,6 +192,21 @@ TEST(selection_cleared_by_delete) {
     CHECK(!ed.hasSelection());
 }
 
+TEST(selection_cancelled_by_escape) {
+    // ESC suelto cancela la seleccion y deja el documento intacto
+    // (el cursor no se mueve y no hay texto borrado).
+    Editor ed;
+    type(ed, "abc");
+    press(ed, EventType::MoveHome);
+    shiftPress(ed, EventType::MoveRight);
+    CHECK(ed.hasSelection());
+    press(ed, EventType::Escape);
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(ed.document_.lineAt(0), "abc");
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 1);
+}
+
 TEST(selection_cleared_by_newline) {
     Editor ed;
     type(ed, "abc");
