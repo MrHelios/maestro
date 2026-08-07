@@ -285,17 +285,16 @@ TEST(selection_normalized_backward_flips_stored) {
 //   Shift+Left  -> ab[c]de
 //   Shift+Left  -> abcde (cursor en 2, sin seleccion)
 // Shift + Arrow NUNCA modifica Document.
-static Editor setupAbcde() {
-    Editor ed;
+static void setupAbcde(Editor& ed) {
     type(ed, "abcde");          // cursor en (0,5)
     press(ed, EventType::MoveHome);
     press(ed, EventType::MoveRight);
     press(ed, EventType::MoveRight); // cursor en (0,2)
-    return ed;
 }
 
 TEST(editor_selection_shift_right) {
-    Editor ed = setupAbcde();   // cursor (0,2), anchor (0,2)
+    Editor ed;
+    setupAbcde(ed);   // cursor (0,2), anchor (0,2)
     const std::string before = ed.document_.lineAt(0);
 
     shiftPress(ed, EventType::MoveRight); // -> (0,3)
@@ -312,7 +311,8 @@ TEST(editor_selection_shift_right) {
 }
 
 TEST(editor_selection_shift_right_twice) {
-    Editor ed = setupAbcde();   // (0,2)
+    Editor ed;
+    setupAbcde(ed);   // (0,2)
     const std::string before = ed.document_.lineAt(0);
 
     shiftPress(ed, EventType::MoveRight); // -> (0,3)
@@ -329,7 +329,8 @@ TEST(editor_selection_shift_right_twice) {
 }
 
 TEST(editor_selection_shift_left) {
-    Editor ed = setupAbcde();   // (0,2)
+    Editor ed;
+    setupAbcde(ed);   // (0,2)
     const std::string before = ed.document_.lineAt(0);
 
     shiftPress(ed, EventType::MoveLeft); // -> (0,1)
@@ -345,7 +346,8 @@ TEST(editor_selection_shift_left) {
 }
 
 TEST(editor_selection_shift_back_to_anchor) {
-    Editor ed = setupAbcde();   // (0,2)
+    Editor ed;
+    setupAbcde(ed);   // (0,2)
     const std::string before = ed.document_.lineAt(0);
 
     // Seleccionar dos veces hacia la derecha...
@@ -364,7 +366,8 @@ TEST(editor_selection_shift_back_to_anchor) {
 }
 
 TEST(editor_selection_reverses_direction) {
-    Editor ed = setupAbcde();   // (0,2)
+    Editor ed;
+    setupAbcde(ed);   // (0,2)
     const std::string before = ed.document_.lineAt(0);
 
     // Ir a la derecha y luego cruzar el anchor hacia la izquierda.
@@ -396,7 +399,8 @@ TEST(editor_selection_reverses_direction) {
 TEST(editor_selection_arrow_right_clears) {
     // Seleccion hacia adelante: [cde] con cursor al final (ej: "abcde"
     // con cursor en el extremo derecho de la seleccion).
-    Editor ed = setupAbcde();     // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);     // "abcde", cursor (0,2)
     shiftPress(ed, EventType::MoveRight); // (0,3)
     shiftPress(ed, EventType::MoveRight); // (0,4)
     shiftPress(ed, EventType::MoveRight); // (0,5): [cde], cursor == anchor? no
@@ -422,7 +426,8 @@ TEST(editor_selection_arrow_right_clears) {
 }
 
 TEST(editor_selection_arrow_left_clears) {
-    Editor ed = setupAbcde();     // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);     // "abcde", cursor (0,2)
     shiftPress(ed, EventType::MoveLeft);  // (0,1): seleccion hacia atras
     shiftPress(ed, EventType::MoveLeft);  // (0,0): [0..2)
     CHECK(ed.hasSelection());
@@ -498,17 +503,16 @@ TEST(editor_selection_arrow_down_clears) {
 // Reutiliza el comportamiento de preferredCol de Cursor: al moverse en
 // vertical, el cursor conserva la columna deseada y se clampa a lineas
 // mas cortas.
-static Editor editorOfLines(const std::vector<std::string>& lines, int line, int col) {
-    Editor ed;
+static void editorOfLines(const std::vector<std::string>& lines, int line, int col, Editor& ed) {
     ed.document_.restore(lines);
     ed.cursor_.line = line;
     ed.cursor_.col = col;
     ed.cursor_.preferredCol_ = col;
-    return ed;
 }
 
 TEST(editor_selection_shift_down) {
-    Editor ed = editorOfLines({"abcde", "12345", "wxyz"}, 0, 2);
+    Editor ed;
+    editorOfLines({"abcde", "12345", "wxyz"}, 0, 2, ed);
     shiftPress(ed, EventType::MoveDown);  // -> (1,2)
 
     CHECK(ed.hasSelection());
@@ -536,7 +540,8 @@ TEST(editor_selection_shift_down) {
 }
 
 TEST(editor_selection_shift_up) {
-    Editor ed = editorOfLines({"abcde", "12345", "wxyz"}, 1, 2);
+    Editor ed;
+    editorOfLines({"abcde", "12345", "wxyz"}, 1, 2, ed);
     shiftPress(ed, EventType::MoveUp);   // -> (0,2)
 
     CHECK(ed.hasSelection());
@@ -555,7 +560,8 @@ TEST(editor_selection_shift_up) {
 TEST(editor_selection_vertical_shorter_line) {
     // Linea de arriba mas corta: bajar desde una columna grande debe
     // aterrizar al final de la linea corta, conservando la preferida.
-    Editor ed = editorOfLines({"abcdef", "xy"}, 0, 5);
+    Editor ed;
+    editorOfLines({"abcdef", "xy"}, 0, 5, ed);
     shiftPress(ed, EventType::MoveDown); // -> (1,2), preferredCol 5
 
     CHECK(ed.hasSelection());
@@ -571,7 +577,8 @@ TEST(editor_selection_vertical_shorter_line) {
 TEST(editor_selection_vertical_longer_line) {
     // Linea de arriba mas corta: subir hacia una linea larga recupera
     // la columna preferida (se clampa al largo).
-    Editor ed = editorOfLines({"ab", "abcdef"}, 1, 3);
+    Editor ed;
+    editorOfLines({"ab", "abcdef"}, 1, 3, ed);
     shiftPress(ed, EventType::MoveUp); // -> (0,2): preferred 3 clampa a len 2
 
     CHECK(ed.hasSelection());
@@ -585,7 +592,8 @@ TEST(editor_selection_vertical_longer_line) {
 }
 
 TEST(editor_selection_multiline) {
-    Editor ed = editorOfLines({"aaa", "bbb", "ccc", "ddd"}, 0, 1);
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc", "ddd"}, 0, 1, ed);
     shiftPress(ed, EventType::MoveDown); // (1,1)
     shiftPress(ed, EventType::MoveDown); // (2,1)
     shiftPress(ed, EventType::MoveDown); // (3,1)
@@ -601,7 +609,8 @@ TEST(editor_selection_multiline) {
 }
 
 TEST(editor_selection_multiline_reverse) {
-    Editor ed = editorOfLines({"aaa", "bbb", "ccc"}, 2, 1);
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 2, 1, ed);
     shiftPress(ed, EventType::MoveUp);   // (1,1)
     shiftPress(ed, EventType::MoveUp);   // (0,1)
 
@@ -620,7 +629,8 @@ TEST(editor_selection_multiline_reverse) {
 // Paso 7: Shift + Home / End
 // ---------------------------------------------------------------------------
 TEST(editor_selection_shift_home) {
-    Editor ed = setupAbcde();     // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);     // "abcde", cursor (0,2)
     shiftPress(ed, EventType::MoveHome); // -> (0,0), anchor (0,2)
 
     CHECK(ed.hasSelection());
@@ -635,7 +645,8 @@ TEST(editor_selection_shift_home) {
 }
 
 TEST(editor_selection_shift_end) {
-    Editor ed = setupAbcde();     // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);     // "abcde", cursor (0,2)
     shiftPress(ed, EventType::MoveEnd); // -> (0,5), anchor (0,2)
 
     CHECK(ed.hasSelection());
@@ -650,7 +661,8 @@ TEST(editor_selection_shift_end) {
 TEST(editor_selection_shift_home_reduces_selection) {
     // Seleccion hacia adelante [0..4): Shift+Home vuelve al anchor
     // (col 0) y la seleccion desaparece.
-    Editor ed = setupAbcde();     // cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);     // cursor (0,2)
     shiftPress(ed, EventType::MoveRight); // (0,3)
     shiftPress(ed, EventType::MoveRight); // (0,4): [2..4)
     CHECK(ed.hasSelection());
@@ -668,7 +680,8 @@ TEST(editor_selection_shift_home_reduces_selection) {
 TEST(editor_selection_shift_end_reduces_selection) {
     // Seleccion hacia atras: cursor al inicio (0,0), anchor al final (0,5).
     // Shift+End mueve el cursor al anchor: la seleccion se reduce a nada.
-    Editor ed = setupAbcde();     // cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);     // cursor (0,2)
     press(ed, EventType::MoveEnd);        // (0,5)
     shiftPress(ed, EventType::MoveHome);  // -> (0,0): [0..5), anchor 5
     CHECK(ed.hasSelection());
@@ -710,7 +723,8 @@ TEST(editor_selection_shift_end_from_end) {
 // Es una UNICA operacion de Undo.
 // Ej: "hello [world]!" + Delete -> "hello !" con cursor en el hueco.
 TEST(editor_delete_selection) {
-    Editor ed = setupAbcde();             // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);             // "abcde", cursor (0,2)
     shiftPress(ed, EventType::MoveRight); // (0,3)
     shiftPress(ed, EventType::MoveRight); // (0,4): seleccion [cd]
     CHECK(ed.hasSelection());
@@ -734,7 +748,8 @@ TEST(editor_delete_selection) {
 }
 
 TEST(editor_backspace_selection) {
-    Editor ed = setupAbcde();             // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);             // "abcde", cursor (0,2)
     shiftPress(ed, EventType::MoveRight); // (0,3)
     shiftPress(ed, EventType::MoveRight); // (0,4): seleccion [cd]
     CHECK(ed.hasSelection());
@@ -749,7 +764,8 @@ TEST(editor_backspace_selection) {
 }
 
 TEST(editor_delete_multiline_selection) {
-    Editor ed = editorOfLines({"hola", "mundo", "jau"}, 0, 1);
+    Editor ed;
+    editorOfLines({"hola", "mundo", "jau"}, 0, 1, ed);
     shiftPress(ed, EventType::MoveRight);  // (0,2)
     shiftPress(ed, EventType::MoveDown);   // (1,2)
     shiftPress(ed, EventType::MoveDown);   // (2,2)
@@ -767,7 +783,8 @@ TEST(editor_delete_multiline_selection) {
 }
 
 TEST(editor_backspace_multiline_selection) {
-    Editor ed = editorOfLines({"hola", "mundo"}, 0, 2);
+    Editor ed;
+    editorOfLines({"hola", "mundo"}, 0, 2, ed);
     shiftPress(ed, EventType::MoveDown);   // (1,2)
     shiftPress(ed, EventType::MoveRight);  // (1,3)
     CHECK(ed.hasSelection());
@@ -784,7 +801,8 @@ TEST(editor_backspace_multiline_selection) {
 }
 
 TEST(editor_delete_selection_cursor_at_anchor) {
-    Editor ed = setupAbcde();              // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);              // "abcde", cursor (0,2)
     // Seleccion hacia adelante que deja el cursor en el EXTREMO derecho.
     shiftPress(ed, EventType::MoveRight); // (0,3)
     shiftPress(ed, EventType::MoveRight); // (0,4) [cd]
@@ -799,7 +817,8 @@ TEST(editor_delete_selection_cursor_at_anchor) {
 }
 
 TEST(editor_delete_reverse_selection) {
-    Editor ed = setupAbcde();     // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);     // "abcde", cursor (0,2)
     shiftPress(ed, EventType::MoveLeft);   // (0,1) [1..2)
     shiftPress(ed, EventType::MoveLeft);   // (0,0) [0..2), seleccion hacia atras
     CHECK(ed.hasSelection());
@@ -985,7 +1004,8 @@ TEST(selection_empty_document) {
 }
 
 TEST(selection_single_character) {
-    Editor ed = setupAbcde();     // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);     // "abcde", cursor (0,2)
     shiftPress(ed, EventType::MoveRight); // (0,3) solo "c"
     CHECK(ed.hasSelection());
     auto sel = ed.selection();
@@ -1014,7 +1034,8 @@ TEST(selection_empty_line) {
 }
 
 TEST(selection_entire_document) {
-    Editor ed = editorOfLines({"linea1", "linea2", "linea3"}, 0, 0);
+    Editor ed;
+    editorOfLines({"linea1", "linea2", "linea3"}, 0, 0, ed);
     shiftPress(ed, EventType::MoveDown); // (1,0)
     shiftPress(ed, EventType::MoveDown); // (2,0)
     shiftPress(ed, EventType::MoveHome);
@@ -1028,7 +1049,8 @@ TEST(selection_entire_document) {
 }
 
 TEST(delete_entire_document_selection) {
-    Editor ed = editorOfLines({"linea1", "linea2", "linea3"}, 0, 0);
+    Editor ed;
+    editorOfLines({"linea1", "linea2", "linea3"}, 0, 0, ed);
     shiftPress(ed, EventType::MoveDown);
     shiftPress(ed, EventType::MoveDown);
     shiftPress(ed, EventType::MoveHome);
@@ -1046,7 +1068,8 @@ TEST(delete_entire_document_selection) {
 }
 
 TEST(replace_entire_document_selection) {
-    Editor ed = editorOfLines({"linea1", "linea2", "linea3"}, 0, 0);
+    Editor ed;
+    editorOfLines({"linea1", "linea2", "linea3"}, 0, 0, ed);
     shiftPress(ed, EventType::MoveDown);
     shiftPress(ed, EventType::MoveDown);
     shiftPress(ed, EventType::MoveHome);
@@ -1065,7 +1088,8 @@ TEST(replace_entire_document_selection) {
 // ---------------------------------------------------------------------------
 // El historial debe restaurar contenido, cursor, y seleccion, todo junto.
 TEST(editor_undo_delete_selection) {
-    Editor ed = setupAbcde();     // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);     // "abcde", cursor (0,2)
     shiftPress(ed, EventType::MoveRight); // (0,3)
     shiftPress(ed, EventType::MoveRight); // (0,4): [cd]
     CHECK(ed.hasSelection());
@@ -1086,7 +1110,8 @@ TEST(editor_undo_delete_selection) {
 }
 
 TEST(editor_redo_delete_selection) {
-    Editor ed = setupAbcde();
+    Editor ed;
+    setupAbcde(ed);
     shiftPress(ed, EventType::MoveRight); // (0,3)
     shiftPress(ed, EventType::MoveRight); // (0,4) [cd]
     press(ed, EventType::Delete);         // "abe"
@@ -1102,7 +1127,8 @@ TEST(editor_redo_delete_selection) {
 }
 
 TEST(editor_undo_replace_selection) {
-    Editor ed = setupAbcde();
+    Editor ed;
+    setupAbcde(ed);
     shiftPress(ed, EventType::MoveRight); // (0,3)
     shiftPress(ed, EventType::MoveRight); // (0,4) [cd]
     ed.handleEvent(insert('X'));          // "abXe"
@@ -1120,7 +1146,8 @@ TEST(editor_undo_replace_selection) {
 }
 
 TEST(editor_redo_replace_selection) {
-    Editor ed = setupAbcde();
+    Editor ed;
+    setupAbcde(ed);
     shiftPress(ed, EventType::MoveRight); // (0,3)
     shiftPress(ed, EventType::MoveRight); // (0,4) [cd]
     ed.handleEvent(insert('X'));          // "abXe"
@@ -1136,7 +1163,8 @@ TEST(editor_redo_replace_selection) {
 
 TEST(editor_undo_multiline_selection) {
     // Seleccion [0,1 .. 1,1) sobre "aaa"/"bbb".
-    Editor ed = editorOfLines({"aaa", "bbb"}, 0, 1);
+    Editor ed;
+    editorOfLines({"aaa", "bbb"}, 0, 1, ed);
     shiftPress(ed, EventType::MoveDown);  // (1,1)
     ed.handleEvent(insert('Q'));          // borra rango y pone Q -> "aQbb"
     CHECK_EQ(ed.document_.lineAt(0), "aQbb");
@@ -1160,7 +1188,8 @@ TEST(editor_undo_multiline_selection) {
 
 TEST(editor_redo_multiline_selection)  {
     // Seleccion [0,1 .. 1,1) sobre "aaa"/"bbb".
-    Editor ed = editorOfLines({"aaa", "bbb"}, 0, 1);
+    Editor ed;
+    editorOfLines({"aaa", "bbb"}, 0, 1, ed);
     shiftPress(ed, EventType::MoveDown);  // (1,1)
     ed.handleEvent(insert('Q'));
     press(ed, EventType::Undo);
@@ -1177,7 +1206,8 @@ TEST(editor_redo_multiline_selection)  {
 
 // Ciclo seleccion -> delete -> undo -> redo -> undo, sin corromper estado.
 TEST(editor_undo_redo_delete_cycle) {
-    Editor ed = setupAbcde();
+    Editor ed;
+    setupAbcde(ed);
     shiftPress(ed, EventType::MoveRight); // (0,3)
     shiftPress(ed, EventType::MoveRight); // (0,4) [cd]
     press(ed, EventType::Delete);         // "abe"
@@ -1200,7 +1230,8 @@ TEST(editor_undo_redo_delete_cycle) {
 // unica operacion de Undo.
 // Ej: "hello [world]" + X -> "hello X" con cursor despues de la X.
 TEST(editor_replace_selection_char) {
-    Editor ed = setupAbcde();     // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);     // "abcde", cursor (0,2)
     shiftPress(ed, EventType::MoveRight); // (0,3)
     shiftPress(ed, EventType::MoveRight); // (0,4): [cd]
     CHECK(ed.hasSelection());
@@ -1223,7 +1254,8 @@ TEST(editor_replace_selection_char) {
 TEST(editor_replace_reverse_selection_char) {
     // Seleccion hacia atras (cursor < anchor): el resultado debe ser el
     // mismo, el caracter se inserta en el inicio del rango.
-    Editor ed = setupAbcde();     // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);     // "abcde", cursor (0,2)
     shiftPress(ed, EventType::MoveLeft);  // (0,1)
     shiftPress(ed, EventType::MoveLeft);  // (0,0) [0..2)
     CHECK(ed.hasSelection());
@@ -1237,7 +1269,8 @@ TEST(editor_replace_reverse_selection_char) {
 }
 
 TEST(editor_replace_multiline_selection_char) {
-    Editor ed = editorOfLines({"hola", "mundo"}, 0, 2);
+    Editor ed;
+    editorOfLines({"hola", "mundo"}, 0, 2, ed);
     shiftPress(ed, EventType::MoveDown);   // (1,2)
     shiftPress(ed, EventType::MoveRight);  // (1,3)
     ed.handleEvent(insert('Z'));
@@ -1253,7 +1286,8 @@ TEST(editor_replace_multiline_selection_char) {
 
 TEST(editor_replace_selection_cursor_at_start) {
     // El cursor queda donde empezo el reemplazo (inicio del rango + 1).
-    Editor ed = setupAbcde();     // "abcde", cursor (0,2)
+    Editor ed;
+    setupAbcde(ed);     // "abcde", cursor (0,2)
     shiftPress(ed, EventType::MoveRight); // (0,3): [2..3)
     ed.handleEvent(insert('Y'));
 
@@ -1264,7 +1298,8 @@ TEST(editor_replace_selection_cursor_at_start) {
 
 TEST(editor_replace_selection_undo_single_op) {
     // Undo restaura todo de una vez (una sola operacion historica).
-    Editor ed = setupAbcde();
+    Editor ed;
+    setupAbcde(ed);
     shiftPress(ed, EventType::MoveRight); // (0,3)
     shiftPress(ed, EventType::MoveRight); // (0,4) [cd]
     ed.handleEvent(insert('W'));          // "abWe"

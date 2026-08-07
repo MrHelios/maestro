@@ -15,6 +15,12 @@ static Document makeDoc(std::initializer_list<std::string> lines) {
     return d;
 }
 
+// Devuelve el contenido crudo del archivo (para verificar bytes exactos).
+static std::string fileContent(const std::string& p) {
+    std::ifstream f(p, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+}
+
 // ---------------------------------------------------------------------------
 // 1. Inicio: documento vacio
 // ---------------------------------------------------------------------------
@@ -459,6 +465,84 @@ TEST(doc_save_large) {
 TEST(doc_save_to_directory_fails) {
     Document d = makeDoc({"x"});
     CHECK(!d.saveToFile("/tmp"));
+}
+
+// ---------------------------------------------------------------------------
+// 12b. Newline final: abrir+guardar debe respetar (no perder) el '\n' final
+// ---------------------------------------------------------------------------
+TEST(doc_roundtrip_preserves_trailing_newline) {
+    // Un archivo "bien formado" que termina en '\n' debe conservar ese
+    // '\n' tras abrirlo y guardarlo (antes se perdia silenciosamente).
+    TempFile f;
+    f.write("a\nb\n");
+    Document d;
+    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.lineCount(), 2);
+    CHECK_EQ(d.lineAt(0), "a");
+    CHECK_EQ(d.lineAt(1), "b");
+    CHECK(d.saveToFile(f.path));
+    CHECK_EQ(fileContent(f.path), "a\nb\n");
+}
+
+TEST(doc_roundtrip_preserves_no_trailing_newline) {
+    // Un archivo SIN '\n' final no debe ganarse uno al guardar.
+    TempFile f;
+    f.write("a\nb");
+    Document d;
+    CHECK(d.loadFromFile(f.path));
+    CHECK(d.saveToFile(f.path));
+    CHECK_EQ(fileContent(f.path), "a\nb");
+}
+
+TEST(doc_open_save_single_line_without_newline) {
+    TempFile f;
+    f.write("hola");
+    Document d;
+    CHECK(d.loadFromFile(f.path));
+    CHECK(d.saveToFile(f.path));
+    CHECK_EQ(fileContent(f.path), "hola");
+}
+
+TEST(doc_open_save_single_line_with_newline) {
+    TempFile f;
+    f.write("hola\n");
+    Document d;
+    CHECK(d.loadFromFile(f.path));
+    CHECK(d.saveToFile(f.path));
+    CHECK_EQ(fileContent(f.path), "hola\n");
+}
+
+TEST(doc_roundtrip_trailing_newline_after_edit) {
+    // Editar (agregar una frase) no debe quitar el '\n' final original.
+    TempFile f;
+    f.write("a\n");
+    Document d;
+    CHECK(d.loadFromFile(f.path));
+    d.insertChar(0, d.lineLength(0), 'b');
+    CHECK_EQ(d.lineAt(0), "ab");
+    CHECK(d.saveToFile(f.path));
+    CHECK_EQ(fileContent(f.path), "ab\n");
+}
+
+// ---------------------------------------------------------------------------
+// 14b. deleteRange: guarda de invariante de orden en una sola linea
+// ---------------------------------------------------------------------------
+TEST(doc_delete_range_requires_ordered_columns) {
+    // Incluso si se llama con (sc > ec) en una sola linea (rango no
+    // normalizado), deleteRange debe rechazarlo y NO borrar nada. Antes
+    // el (ec - sc) negativo se convertia a size_t gigante y erase()
+    // borraba desde sc hasta el final de la linea, silenciosamente.
+    Document d = makeDoc({"abcdef"});
+    CHECK(!d.deleteRange(0, 4, 0, 1)); // sc > ec -> rechazado
+    CHECK_EQ(d.lineAt(0), "abcdef");   // nada se borro
+    CHECK_EQ(d.lineCount(), 1);
+}
+
+TEST(doc_delete_range_ordered_same_line_still_works) {
+    // La misma operacion con el rango bien ordenado (sc <= ec) si borra.
+    Document d = makeDoc({"abcdef"});
+    CHECK(d.deleteRange(0, 1, 0, 4));
+    CHECK_EQ(d.lineAt(0), "aef");
 }
 
 // ---------------------------------------------------------------------------

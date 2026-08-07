@@ -31,4 +31,15 @@ private:
     // emite la terminal las secuencias, p.ej. Shift+Flecha).
     bool debugKeys_ = false;
     void* origTermios_; // puntero opaco a struct termios (evita incluir <termios.h> aqui)
+
+    // Terminal es un recurso unico ligado a la terminal fisica del
+    // proceso (modo raw, tamano de la ventana, el mismo STDIN_FILENO).
+    // No tiene sentido copiar/mover una instancia: gestiona memoria
+    // (new/delete de struct termios), asi que copiarla llevaria a doble
+    // delete y comportamiento indefinido. Prohibir copia y movimiento
+    // convierte ese bug potencial en un error de compilacion.
+    Terminal(const Terminal&) = delete;
+    Terminal& operator=(const Terminal&) = delete;
+    Terminal(Terminal&&) = delete;
+    Terminal& operator=(Terminal&&) = delete;
 };

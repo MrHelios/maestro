@@ -58,4 +58,11 @@ public:
 
 private:
     std::vector<std::string> lines_;
+
+    // true si el archivo original terminaba en salto de linea ('\n'). El
+    // modelo de lineas no representa esa nueva linea final (una "linea
+    // vacia" al final equivale a no tenerla), asi que sin este flag la
+    // guardar y abrir un archivo bien formado perderia su '\n' final.
+    // Se respeta al escribir para que abrir+guardar no altere el archivo.
+    bool trailingNewline_ = false;
 };

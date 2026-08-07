@@ -11,17 +11,28 @@ Document::Document() {
 }
 
 bool Document::loadFromFile(const std::string& path) {
-    std::ifstream file(path);
+    std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
-        // Archivo nuevo: dejamos el documento con una linea vacia.
+        // Archivo nuevo: dejamos el documento con una linea vacia y sin
+        // newline final (aun no hay archivo original que preservar).
         lines_.clear();
         lines_.push_back("");
+        trailingNewline_ = false;
         return false;
     }
 
+    // Leemos todo el contenido para poder detectar si el archivo
+    // terminaba en '\n' (el modelo de lineas, via getline, no refleja
+    // esa nueva linea final y sin esto se perderia al volver a guardar).
+    std::ostringstream ss;
+    ss << file.rdbuf();
+    std::string content = ss.str();
+    trailingNewline_ = !content.empty() && content.back() == '\n';
+
     lines_.clear();
     std::string line;
-    while (std::getline(file, line)) {
+    std::istringstream in(content);
+    while (std::getline(in, line)) {
         // getline ya nos da la linea sin el '\n'.
         // Si el archivo usa \r\n, sacamos el \r final.
         if (!line.empty() && line.back() == '\r') {
@@ -48,6 +59,13 @@ bool Document::saveToFile(const std::string& path) const {
         if (i + 1 < lines_.size()) {
             file << '\n';
         }
+    }
+
+    // Respetar el salto de linea final del archivo original: sin esto,
+    // abrir y guardar un archivo que terminaba en '\n' lo dejaria sin
+    // su nueva linea final (perdida silenciosa del '\n').
+    if (!lines_.empty() && trailingNewline_) {
+        file << '\n';
     }
 
     return true;
@@ -148,6 +166,13 @@ bool Document::deleteRange(int sl, int sc, int el, int ec) {
     if (el < sl || el >= lineCount()) return false;
     if (sc < 0 || sc > lineLength(sl)) return false;
     if (ec < 0 || ec > lineLength(el)) return false;
+
+    // Guarda de invariante: en una sola linea el rango debe venir
+    // ordenado (sc <= ec). No confiamos SOLO en que quien llama pase
+    // siempre el rango normalizado: si sc > ec, ec - sc es negativo y
+    // al pasarlo a erase() como size_t se seriala gigante y borraria
+    // todo desde sc hasta el final de la linea, corrompiendo el texto.
+    if (sl == el && sc > ec) return false;
 
     // Rango vacio: no hay nada que borrar.
     if (sl == el && sc == ec) return false;
