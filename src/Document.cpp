@@ -101,6 +101,11 @@ void Document::insertNewline(int line, int col) {
 bool Document::deleteCharBefore(int line, int col) {
     if (line < 0 || line >= lineCount()) return false;
 
+    // Clamp de la columna para que erase() nunca salga de rango.
+    const int len = lineLength(line);
+    if (col < 0) col = 0;
+    if (col > len) col = len;
+
     if (col > 0) {
         std::string& target = lines_[line];
         target.erase(target.begin() + (col - 1));

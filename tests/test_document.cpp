@@ -1,4 +1,5 @@
 #include <fstream>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -7,6 +8,12 @@
 
 using Lines = std::vector<std::string>;
 using testfw::TempFile;
+
+static Document makeDoc(std::initializer_list<std::string> lines) {
+    Document d;
+    d.restore(Lines(lines));
+    return d;
+}
 
 // ---------------------------------------------------------------------------
 // 1. Inicio: documento vacio
@@ -107,10 +114,9 @@ TEST(doc_load_long_lines) {
 // ---------------------------------------------------------------------------
 // 1. Archivo inexistente / errores
 // ---------------------------------------------------------------------------
-TEST(doc_load_nonexistent_creates_empty) {
-    TempFile f;
+TEST(doc_load_nonexistent) {
     Document d;
-    CHECK(!d.loadFromFile(f.path));
+    CHECK(!d.loadFromFile("/no/such/file/xyz_editor_never"));
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "");
 }
@@ -124,13 +130,6 @@ TEST(doc_load_directory_no_crash) {
     CHECK_EQ(d.lineAt(0), "");
 }
 
-TEST(doc_load_nonexistent_returns_false) {
-    Document d;
-    const std::string bad = "/no/such/file/xyz_editor_never";
-    CHECK(!d.loadFromFile(bad));
-    CHECK_EQ(d.lineCount(), 1);
-}
-
 // ---------------------------------------------------------------------------
 // 2. Insertar un caracter
 // ---------------------------------------------------------------------------
@@ -141,31 +140,41 @@ TEST(doc_insert_into_empty) {
 }
 
 TEST(doc_insert_at_start) {
-    Document d;
-    d.restore(Lines{"bc"});
+    Document d = makeDoc({"bc"});
     d.insertChar(0, 0, 'a');
     CHECK_EQ(d.lineAt(0), "abc");
 }
 
 TEST(doc_insert_middle) {
-    Document d;
-    d.restore(Lines{"ac"});
+    Document d = makeDoc({"ac"});
     d.insertChar(0, 1, 'b');
     CHECK_EQ(d.lineAt(0), "abc");
 }
 
 TEST(doc_insert_at_end) {
-    Document d;
-    d.restore(Lines{"ab"});
+    Document d = makeDoc({"ab"});
     d.insertChar(0, 2, 'c');
     CHECK_EQ(d.lineAt(0), "abc");
 }
 
 TEST(doc_insert_col_beyond_clamps) {
-    Document d;
-    d.restore(Lines{"ab"});
+    Document d = makeDoc({"ab"});
     d.insertChar(0, 100, 'Z');
     CHECK_EQ(d.lineAt(0), "abZ");
+}
+
+TEST(doc_insert_invalid_line_ignored) {
+    Document d = makeDoc({"abc"});
+    d.insertChar(50, 0, 'a');
+    CHECK_EQ(d.lineCount(), 1);
+    CHECK_EQ(d.lineAt(0), "abc");
+}
+
+TEST(doc_restore_empty_vector) {
+    Document d;
+    d.restore(Lines{});
+    CHECK_EQ(d.lineCount(), 1);
+    CHECK_EQ(d.lineAt(0), "");
 }
 
 TEST(doc_insert_many_characters) {
@@ -207,8 +216,7 @@ TEST(doc_newline_empty) {
 }
 
 TEST(doc_newline_start) {
-    Document d;
-    d.restore(Lines{"abc"});
+    Document d = makeDoc({"abc"});
     d.insertNewline(0, 0);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "");
@@ -216,8 +224,7 @@ TEST(doc_newline_start) {
 }
 
 TEST(doc_newline_middle) {
-    Document d;
-    d.restore(Lines{"abcd"});
+    Document d = makeDoc({"abcd"});
     d.insertNewline(0, 2);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "ab");
@@ -225,8 +232,7 @@ TEST(doc_newline_middle) {
 }
 
 TEST(doc_newline_end) {
-    Document d;
-    d.restore(Lines{"abc"});
+    Document d = makeDoc({"abc"});
     d.insertNewline(0, 3);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "abc");
@@ -241,8 +247,7 @@ TEST(doc_newline_repeated) {
 }
 
 TEST(doc_newline_many_lines) {
-    Document d;
-    d.restore(Lines{"texto"});
+    Document d = makeDoc({"texto"});
     for (int i = 0; i < 100; ++i)
         d.insertNewline(0, 0);
     CHECK_EQ(d.lineCount(), 101);
@@ -250,34 +255,46 @@ TEST(doc_newline_many_lines) {
 }
 
 TEST(doc_newline_oob_line_ignored) {
-    Document d;
-    d.restore(Lines{"abc"});
+    Document d = makeDoc({"abc"});
     d.insertNewline(5, 0); // indice de linea invalido: no hace nada
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "abc");
+}
+
+TEST(doc_newline_col_beyond_clamps_to_end) {
+    // col fuera de rango se recorta al final de la linea: crea nueva linea vacia.
+    Document d = makeDoc({"abc"});
+    d.insertNewline(0, 1000);
+    CHECK_EQ(d.lineCount(), 2);
+    CHECK_EQ(d.lineAt(0), "abc");
+    CHECK_EQ(d.lineAt(1), "");
 }
 
 // ---------------------------------------------------------------------------
 // 8. Backspace (deleteCharBefore)
 // ---------------------------------------------------------------------------
 TEST(doc_backspace_mid_line) {
-    Document d;
-    d.restore(Lines{"abc"});
+    Document d = makeDoc({"abc"});
     CHECK(d.deleteCharBefore(0, 2));
     CHECK_EQ(d.lineAt(0), "ac");
 }
 
+TEST(doc_backspace_col_beyond_clamps_to_last) {
+    // col fuera de rango se recorta al final: borra el ultimo caracter.
+    Document d = makeDoc({"abc"});
+    CHECK(d.deleteCharBefore(0, 500));
+    CHECK_EQ(d.lineAt(0), "ab");
+}
+
 TEST(doc_backspace_several) {
-    Document d;
-    d.restore(Lines{"abcdef"});
+    Document d = makeDoc({"abcdef"});
     while (d.lineAt(0).size() > 3)
         CHECK(d.deleteCharBefore(0, static_cast<int>(d.lineAt(0).size())));
     CHECK_EQ(d.lineAt(0), "abc");
 }
 
 TEST(doc_backspace_erase_whole_line) {
-    Document d;
-    d.restore(Lines{"zzz"});
+    Document d = makeDoc({"zzz"});
     while (!d.lineAt(0).empty())
         CHECK(d.deleteCharBefore(0, static_cast<int>(d.lineAt(0).size())));
     CHECK_EQ(d.lineAt(0), "");
@@ -285,16 +302,14 @@ TEST(doc_backspace_erase_whole_line) {
 }
 
 TEST(doc_backspace_start_joins_previous) {
-    Document d;
-    d.restore(Lines{"aa", "bb"});
+    Document d = makeDoc({"aa", "bb"});
     CHECK(d.deleteCharBefore(1, 0));
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "aabb");
 }
 
 TEST(doc_backspace_first_line_noop) {
-    Document d;
-    d.restore(Lines{"ab"});
+    Document d = makeDoc({"ab"});
     CHECK(!d.deleteCharBefore(0, 0));
     CHECK_EQ(d.lineAt(0), "ab");
 }
@@ -306,8 +321,7 @@ TEST(doc_backspace_empty_doc_noop) {
 }
 
 TEST(doc_backspace_empty_line_merges) {
-    Document d;
-    d.restore(Lines{"a", "", "b"});
+    Document d = makeDoc({"a", "", "b"});
     CHECK(d.deleteCharBefore(1, 0));
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "a");
@@ -318,23 +332,27 @@ TEST(doc_backspace_empty_line_merges) {
 // 9. Delete (deleteCharAt)
 // ---------------------------------------------------------------------------
 TEST(doc_delete_mid_line) {
-    Document d;
-    d.restore(Lines{"abc"});
+    Document d = makeDoc({"abc"});
     CHECK(d.deleteCharAt(0, 1));
     CHECK_EQ(d.lineAt(0), "ac");
 }
 
+TEST(doc_delete_col_beyond_range_noop) {
+    Document d = makeDoc({"ab"});
+    CHECK(!d.deleteCharAt(0, 100));
+    CHECK_EQ(d.lineCount(), 1);
+    CHECK_EQ(d.lineAt(0), "ab");
+}
+
 TEST(doc_delete_end_joins_next) {
-    Document d;
-    d.restore(Lines{"ab", "cd"});
+    Document d = makeDoc({"ab", "cd"});
     CHECK(d.deleteCharAt(0, 2));
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "abcd");
 }
 
 TEST(doc_delete_last_line_noop) {
-    Document d;
-    d.restore(Lines{"ab"});
+    Document d = makeDoc({"ab"});
     d.insertNewline(0, 2);
     CHECK(!d.deleteCharAt(1, 2));
     CHECK_EQ(d.lineCount(), 2);
@@ -348,8 +366,7 @@ TEST(doc_delete_empty_doc_noop) {
 }
 
 TEST(doc_delete_till_whole_line) {
-    Document d;
-    d.restore(Lines{"abc"});
+    Document d = makeDoc({"abc"});
     CHECK(d.deleteCharAt(0, 0));
     CHECK(d.deleteCharAt(0, 0));
     CHECK(d.deleteCharAt(0, 0));
@@ -361,8 +378,7 @@ TEST(doc_delete_till_whole_line) {
 // ---------------------------------------------------------------------------
 TEST(doc_save_roundtrip) {
     TempFile f;
-    Document d;
-    d.restore(Lines{"uno", "dos", "tres"});
+    Document d = makeDoc({"uno", "dos", "tres"});
     CHECK(d.saveToFile(f.path));
     Document d2;
     CHECK(d2.loadFromFile(f.path));
@@ -376,8 +392,7 @@ TEST(doc_save_trailing_empty_line_collapses) {
     // Una linea vacia final equivale a "terminar con \n": al recargar
     // ambas representaciones de la misma forma (sin linea vacia extra).
     TempFile f;
-    Document d;
-    d.restore(Lines{"a", "b", ""});
+    Document d = makeDoc({"a", "b", ""});
     CHECK(d.saveToFile(f.path));
     Document d2;
     CHECK(d2.loadFromFile(f.path));
@@ -409,8 +424,7 @@ TEST(doc_save_large) {
 }
 
 TEST(doc_save_to_directory_fails) {
-    Document d;
-    d.restore(Lines{"x"});
+    Document d = makeDoc({"x"});
     CHECK(!d.saveToFile("/tmp"));
 }
 
@@ -418,8 +432,7 @@ TEST(doc_save_to_directory_fails) {
 // 15. Invariantes / contenido correcto
 // ---------------------------------------------------------------------------
 TEST(doc_invariants_after_ops) {
-    Document d;
-    d.restore(Lines{"ab", "def"});
+    Document d = makeDoc({"ab", "def"});
 
     d.insertChar(0, 1, 'X');   // line0: "aXb"
     d.insertNewline(0, 2);       // line0 "aX", line1 "b", line2 "def"
@@ -442,8 +455,7 @@ TEST(doc_invariants_after_ops) {
 }
 
 TEST(doc_no_unexpected_chars) {
-    Document d;
-    d.restore(Lines{"abc"});
+    Document d = makeDoc({"abc"});
     d.insertChar(0, 1, 'X');
     CHECK(d.deleteCharBefore(0, 3));
     CHECK_EQ(d.lineAt(0), "aXc");
@@ -454,8 +466,7 @@ TEST(doc_no_unexpected_chars) {
 // ---------------------------------------------------------------------------
 TEST(doc_large_1MB_operations) {
     const int target = 1 << 20;
-    Document d;
-    d.restore(Lines{std::string(target, 'z')});
+    Document d = makeDoc({std::string(target, 'z')});
 
     CHECK(d.deleteCharAt(0, target / 2));
     CHECK_EQ(d.lineLength(0), target - 1);
@@ -476,13 +487,15 @@ TEST(doc_large_10mb_roundtrip) {
     const int target = 10 * (1 << 20);
     TempFile f;
     {
-        std::ofstream out(f.path, std::ios::trunc);
+        std::ofstream out(f.path, std::ios::binary | std::ios::trunc);
+        CHECK(out.good());
         const std::string filler(65536, 'y');
         int written = 0;
         while (written < target) {
             out << filler;
             written += static_cast<int>(filler.size());
         }
+        CHECK(out.good());
     }
     Document d;
     CHECK(d.loadFromFile(f.path));
@@ -493,8 +506,7 @@ TEST(doc_large_10mb_roundtrip) {
 }
 
 TEST(doc_large_newline_split) {
-    Document d;
-    d.restore(Lines{std::string(2000000, 'm')});
+    Document d = makeDoc({std::string(2000000, 'm')});
     d.insertNewline(0, 1000000);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineLength(0), 1000000);
@@ -527,10 +539,58 @@ TEST(doc_repeated_newline_merge) {
 TEST(doc_repeated_edit_consistency) {
     Document d;
     for (int i = 0; i < 1000; ++i)
-        d.insertChar(0, static_cast<int>(d.lineAt(0).size()), 'z');
+        d.insertChar(0, static_cast<int>(d.lineAt(0).size()), 'a');
     const int n = d.lineLength(0);
     for (int i = 0; i < 500; ++i)
         d.deleteCharBefore(0, static_cast<int>(d.lineAt(0).size()));
     CHECK_EQ(d.lineLength(0), n - 500);
     CHECK_EQ(d.lineAt(0).size(), std::size_t(n - 500));
+}
+
+// ---------------------------------------------------------------------------
+// 22. Stress: fuzzer deterministico sobre Document
+// ---------------------------------------------------------------------------
+// Elige operaciones (y lineas/columnas, algunas fuera de rango) al azar y
+// comprueba los invariantes tras cada paso: nunca 0 lineas y que la longitud
+// que reporta lineLength sea exactamente el tamano del string de la linea.
+// El numero de lineas se topa para que la comprobacion siga siendo O(1) por
+// linea y el test corra rapido.
+TEST(doc_stress_random_operations) {
+    Document d;
+    std::mt19937 rng(0xC0FFEE);
+
+    const auto rnd = [&](int lo, int hi) {
+        std::uniform_int_distribution<int> dist(lo, hi);
+        return dist(rng);
+    };
+
+    const int maxLines = 400;
+    const int totalOps = 100000;
+
+    for (int step = 0; step < totalOps; ++step) {
+        // Linea valida o un poco fuera de rango, para ejercitar los clamps.
+        const int line = rnd(0, d.lineCount() + 5);
+        const int col = rnd(0, d.lineLength(d.lineCount() - 1) + 5);
+
+        switch (rnd(0, 3)) {
+            case 0:
+                d.insertChar(line, col, static_cast<char>('a' + rnd(0, 25)));
+                break;
+            case 1:
+                if (d.lineCount() < maxLines)
+                    d.insertNewline(line, col);
+                break;
+            case 2:
+                d.deleteCharAt(line, col);
+                break;
+            default:
+                d.deleteCharBefore(line, col);
+                break;
+        }
+
+        // Invariantes: nunca 0 lineas y lineLength == string::size().
+        CHECK(d.lineCount() >= 1);
+        for (int i = 0; i < d.lineCount(); ++i)
+            CHECK_EQ(d.lineLength(i), static_cast<int>(d.lineAt(i).size()));
+    }
 }

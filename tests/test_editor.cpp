@@ -27,7 +27,7 @@ static void type(Editor& ed, const std::string& s) {
 }
 
 static std::string fileContent(const std::string& p) {
-    std::ifstream f(p);
+    std::ifstream f(p, std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
 }
 

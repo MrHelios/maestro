@@ -117,7 +117,7 @@ TEST(sequence_open_insert_save_close) {
     ed.handleEvent(ev(EventType::Quit));
     CHECK(!ed.running_);
 
-    std::ifstream in(f.path);
+    std::ifstream in(f.path, std::ios::binary);
     std::string content((std::istreambuf_iterator<char>(in)),
                         std::istreambuf_iterator<char>());
     CHECK_EQ(content, "hola");
@@ -133,7 +133,7 @@ TEST(sequence_open_edit_undo_redo_save) {
     ed.handleEvent(ev(EventType::Save));
     CHECK(!ed.modified_);
 
-    std::ifstream in(f.path);
+    std::ifstream in(f.path, std::ios::binary);
     std::string content((std::istreambuf_iterator<char>(in)),
                         std::istreambuf_iterator<char>());
     CHECK_EQ(content, "hola mundo");
