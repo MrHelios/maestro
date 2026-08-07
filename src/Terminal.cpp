@@ -69,6 +69,17 @@ static char readRawByte() {
 // Las secuencias de control llegan con todos sus bytes juntos; si tras
 // el ESC no llega el siguiente byte en esta ventana, era un ESC solo
 // (p.ej. cancelar seleccion).
+//
+// - TUNING SSH (trabajo futuro): 50ms es instantaneo en loopback local,
+//   pero en conexiones lentas con jitter (SSH) el segundo byte de una
+//   flecha puede tardar mas y el editor lo leeria como ESC suelto y el
+//   resto como None. Si algun dia se reporta "a veces se cancela la
+//   seleccion sola por SSH", subir este valor (Vim usa 100ms por defecto).
+// - DOBLE ESC RAPIDO (caso raro, consciente): un segundo 27 presionado
+//   dentro de esta ventana se lee como "siguiente byte" de la primera
+//   secuencia y se descarta como invalida, sin emitir su propio Escape.
+//   Si en el futuro se quiere "doble ESC = comando especial", habra que
+//   manejar explicitamente ese patron aqui.
 static const int kEscapeSequenceTimeoutMs = 50;
 
 // Lee el siguiente byte de stdin con un timeout corto. Devuelve false
