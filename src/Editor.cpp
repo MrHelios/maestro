@@ -158,7 +158,7 @@ void Editor::pushHistory() {
     state.line = cursor_.line;
     state.col = cursor_.col;
     undoStack_.push_back(state);
-    if (undoStack_.size() > 1000) {
+    if (undoStack_.size() > MAX_UNDO) {
         undoStack_.erase(undoStack_.begin());
     }
     redoStack_.clear();

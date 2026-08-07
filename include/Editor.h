@@ -62,6 +62,8 @@ private:
         int col = 0;
     };
 
+    static constexpr size_t MAX_UNDO = 1000;
+
     std::vector<HistoryState> undoStack_;
     std::vector<HistoryState> redoStack_;
 

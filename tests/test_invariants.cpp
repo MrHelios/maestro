@@ -47,7 +47,8 @@ static void assertStateConsistent(Editor& ed) {
     CHECK(ed.cursor_.line < d.lineCount());
     CHECK(ed.cursor_.col <= d.lineLength(ed.cursor_.line));
 
-    CHECK(ed.undoStack_.size() <= 1000);
+    CHECK(ed.undoStack_.size() <= Editor::MAX_UNDO);
+    CHECK(ed.redoStack_.size() <= Editor::MAX_UNDO);
 }
 
 TEST(state_consistent_after_random_events) {
@@ -100,8 +101,12 @@ TEST(state_history_coherent_after_sequence) {
     ed.handleEvent(ev(EventType::Undo));  // -> "a"
     ed.handleEvent(ev(EventType::Redo));  // -> "ab"
     CHECK_EQ(ed.document_.lineAt(0), "ab");
-    CHECK(!ed.undoStack_.empty());
-    CHECK(!ed.redoStack_.empty());
+    // pushHistory guarda el snapshot ANTERIOR a cada mutacion, asi que tras
+    // teclear "abc" el undoStack_ es [init, "a", "ab"]. La secuencia
+    // undo/undo/redo/undo/redo deja undoStack_ == [init, "a"] (2) y
+    // redoStack_ == ["abc"] (1).
+    CHECK_EQ(ed.undoStack_.size(), size_t(2));
+    CHECK_EQ(ed.redoStack_.size(), size_t(1));
 }
 
 // ---------------------------------------------------------------------------
@@ -157,10 +162,10 @@ TEST(sequence_move_insert_move_delete) {
     type(ed, "abc");
     ed.handleEvent(ev(EventType::MoveLeft));  // col 2
     ed.handleEvent(insert('X'));              // "abXc", col 3
-    ed.handleEvent(ev(EventType::MoveRight)); // col 4
-    ed.handleEvent(ev(EventType::Delete));    // no-op (fin de doc)
-    CHECK_EQ(ed.document_.lineAt(0), "abXc");
-    CHECK_EQ(ed.cursor_.col, 4);
+    ed.handleEvent(ev(EventType::MoveLeft));  // col 2
+    ed.handleEvent(ev(EventType::Delete));    // elimina la 'X'
+    CHECK_EQ(ed.document_.lineAt(0), "abc");
+    CHECK_EQ(ed.cursor_.col, 2);
     assertStateConsistent(ed);
 }
 
@@ -312,6 +317,27 @@ TEST(invariant_save_reload_exact) {
     assertRoundTrip(f.path, ed);
 }
 
+TEST(invariant_save_does_not_change_document) {
+    TempFile f;
+    Editor ed;
+
+    ed.openFile(f.path);
+    type(ed, "abc");
+
+    const std::string before = ed.document_.lineAt(0);
+    const int line = ed.cursor_.line;
+    const int col = ed.cursor_.col;
+
+    ed.handleEvent(ev(EventType::Save));
+
+    CHECK_EQ(ed.document_.lineAt(0), before);
+    CHECK_EQ(ed.cursor_.line, line);
+    CHECK_EQ(ed.cursor_.col, col);
+    CHECK(!ed.modified_);
+
+    assertStateConsistent(ed);
+}
+
 TEST(invariant_undo_redo_never_corrupts) {
     Editor ed;
     type(ed, "a");
@@ -332,26 +358,39 @@ TEST(invariant_undo_redo_never_corrupts) {
 
 TEST(invariant_line_count_matches_content) {
     Editor ed;
-    std::string content;
     type(ed, "hola");
-    content += "hola";
     ed.handleEvent(ev(EventType::InsertNewline));
-    content += "\n";
     type(ed, "mundo");
-    content += "mundo";
 
+    // lineCount() y lineAt(i) son coherentes entre si.
     CHECK_EQ(ed.document_.lineCount(), 2);
     CHECK_EQ(ed.document_.lineAt(0), "hola");
     CHECK_EQ(ed.document_.lineAt(1), "mundo");
-
-    // Reconstruir el contenido y comparar con lo tecleado.
-    std::string rebuilt;
-    for (int i = 0; i < ed.document_.lineCount(); ++i)
-        rebuilt += ed.document_.lineAt(i) + "\n";
-    CHECK_EQ(rebuilt, content + "\n");
 }
 
-TEST(invariant_no_crash_on_valid_inputs) {
+// Serializacion: como se ve el contenido en el archivo al guardar.
+// Intentamos/no asumimos el formato exacto (p.ej. si hay newline final).
+TEST(invariant_serialize_joins_lines) {
+    TempFile f;
+    Editor ed;
+    ed.openFile(f.path);
+    type(ed, "hola");
+    ed.handleEvent(ev(EventType::InsertNewline));
+    type(ed, "mundo");
+    ed.handleEvent(ev(EventType::Save));
+
+    std::ifstream in(f.path, std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
+
+    // "hola\nmundo" -- las lineas se unen con \n, sin newline final.
+    CHECK_EQ(content, "hola\nmundo");
+}
+
+TEST(invariant_no_crash_on_event_sequence) {
+    // Secuencia de eventos (incluye Save sin archivo abierto y Quit, que
+    // corta el loop). No busca cubrir cada tipo de forma uniforme, solo
+    // que ninguna secuencia arbitraria rompa el estado.
     Editor ed;
     // Todos los tipos de evento ante un editor recien creado.
     const std::vector<EventType> types = {
