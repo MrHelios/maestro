@@ -51,6 +51,7 @@ TEST(cursor_left_empty_doc) {
     c.moveLeft(d);
     CHECK_EQ(c.line, 0);
     CHECK_EQ(c.col, 0);
+    assertCursorConsistent(c, d);
 }
 
 TEST(cursor_left_first_position_noop) {
@@ -59,6 +60,34 @@ TEST(cursor_left_first_position_noop) {
     c.moveLeft(d);
     CHECK_EQ(c.line, 0);
     CHECK_EQ(c.col, 0);
+}
+
+TEST(cursor_left_wraps_from_empty_line) {
+    Document d = docOf({"abc", ""});
+    Cursor c;
+
+    c.line = 1;
+    c.col = 0;
+
+    c.moveLeft(d);
+
+    CHECK_EQ(c.line, 0);
+    CHECK_EQ(c.col, 3);
+    assertCursorConsistent(c, d);
+}
+
+TEST(cursor_left_wraps_to_empty_line) {
+    Document d = docOf({"", "abc"});
+    Cursor c;
+
+    c.line = 1;
+    c.col = 0;
+
+    c.moveLeft(d);
+
+    CHECK_EQ(c.line, 0);
+    CHECK_EQ(c.col, 0);
+    assertCursorConsistent(c, d);
 }
 
 // ---------------------------------------------------------------------------
@@ -82,12 +111,41 @@ TEST(cursor_right_end_wraps_to_next) {
     CHECK_EQ(c.col, 0);
 }
 
+TEST(cursor_right_wraps_to_empty_line) {
+    Document d = docOf({"abc", ""});
+    Cursor c;
+
+    c.line = 0;
+    c.col = 3;
+
+    c.moveRight(d);
+
+    CHECK_EQ(c.line, 1);
+    CHECK_EQ(c.col, 0);
+    assertCursorConsistent(c, d);
+}
+
+TEST(cursor_right_wraps_from_empty_line) {
+    Document d = docOf({"", "abc"});
+    Cursor c;
+
+    c.line = 0;
+    c.col = 0;
+
+    c.moveRight(d);
+
+    CHECK_EQ(c.line, 1);
+    CHECK_EQ(c.col, 0);
+    assertCursorConsistent(c, d);
+}
+
 TEST(cursor_right_empty_doc) {
     Document d;
     Cursor c;
     c.moveRight(d);
     CHECK_EQ(c.line, 0);
     CHECK_EQ(c.col, 0);
+    assertCursorConsistent(c, d);
 }
 
 TEST(cursor_right_last_char_noop) {
@@ -126,6 +184,7 @@ TEST(cursor_up_empty_doc) {
     c.moveUp(d);
     CHECK_EQ(c.line, 0);
     CHECK_EQ(c.col, 0);
+    assertCursorConsistent(c, d);
 }
 
 TEST(cursor_up_shorter_line_clamps_and_remembers) {
@@ -176,6 +235,7 @@ TEST(cursor_down_empty_doc) {
     Cursor c;
     c.moveDown(d);
     CHECK_EQ(c.line, 0);
+    assertCursorConsistent(c, d);
 }
 
 TEST(cursor_down_shorter_line_clamps_and_remembers) {
@@ -188,6 +248,65 @@ TEST(cursor_down_shorter_line_clamps_and_remembers) {
     CHECK_EQ(c.col, 2);
     c.moveDown(d); // ya no hay mas
     CHECK_EQ(c.line, 1);
+    assertCursorConsistent(c, d);
+}
+
+// Moverse horizontalmente debe actualizar la columna preferida, de modo
+// que la siguiente navegacion vertical use la nueva posicion, no la anterior.
+TEST(cursor_horizontal_move_updates_preferred_column) {
+    Document d = docOf({"aaaaa", "bb", "ccccc"});
+    Cursor c;
+
+    for (int i = 0; i < 4; ++i)
+        c.moveRight(d); // preferredCol = col = 4
+    CHECK_EQ(c.line, 0);
+    CHECK_EQ(c.col, 4);
+
+    c.moveDown(d); // -> linea 1 corta, se clampa a col 2
+    CHECK_EQ(c.line, 1);
+    CHECK_EQ(c.col, 2);
+
+    c.moveLeft(d); // ahora la posicion deseada pasa a 1
+    CHECK_EQ(c.line, 1);
+    CHECK_EQ(c.col, 1);
+
+    c.moveDown(d); // linea 2 larga, usa la nueva preferredCol (1)
+    CHECK_EQ(c.line, 2);
+    CHECK_EQ(c.col, 1);
+
+    assertCursorConsistent(c, d);
+}
+
+// Home actualiza la columna preferida a 0: el movimiento vertical
+// siguiente apunta a principios de linea.
+TEST(cursor_home_updates_preferred_column) {
+    Document d = docOf({"abcdef", "123456"});
+    Cursor c;
+
+    c.col = 5;
+    c.moveHome();
+    CHECK_EQ(c.col, 0);
+
+    c.moveDown(d);
+    CHECK_EQ(c.line, 1);
+    CHECK_EQ(c.col, 0);
+
+    assertCursorConsistent(c, d);
+}
+
+// End lleva la columna preferida al final de linea: la navegacion
+// vertical posterior busca ese final (clampandose si es mas corto).
+TEST(cursor_end_updates_preferred_column) {
+    Document d = docOf({"abcdef", "12"});
+    Cursor c;
+
+    c.moveEnd(d);
+    CHECK_EQ(c.col, 6);
+
+    c.moveDown(d); // linea mas corta: clampa a 2
+    CHECK_EQ(c.line, 1);
+    CHECK_EQ(c.col, 2);
+
     assertCursorConsistent(c, d);
 }
 
@@ -264,7 +383,7 @@ TEST(cursor_end_already_end) {
 // ---------------------------------------------------------------------------
 // 14. Consistencia tras muchas operaciones
 // ---------------------------------------------------------------------------
-TEST(cursor_consistent_after_edits) {
+TEST(cursor_consistent_after_navigation) {
     Document d = docOf({"hola", "mundo", "cruel"});
     Cursor c;
     for (int i = 0; i < 200; ++i) {
@@ -276,6 +395,32 @@ TEST(cursor_consistent_after_edits) {
         }
         assertCursorConsistent(c, d);
     }
+}
+
+// Movimientos inversos deben devolver el cursor a la posicion original.
+TEST(cursor_navigation_roundtrip) {
+    Document d = docOf({"abc", "def", "ghi"});
+    Cursor c;
+
+    c.col = 1;
+
+    c.moveRight(d);
+    c.moveRight(d);
+    c.moveLeft(d);
+    c.moveLeft(d);
+
+    CHECK_EQ(c.line, 0);
+    CHECK_EQ(c.col, 1);
+
+    c.moveDown(d);
+    c.moveDown(d);
+    c.moveUp(d);
+    c.moveUp(d);
+
+    CHECK_EQ(c.line, 0);
+    CHECK_EQ(c.col, 1);
+
+    assertCursorConsistent(c, d);
 }
 
 TEST(cursor_clamp_after_backspace) {
@@ -290,12 +435,35 @@ TEST(cursor_clamp_after_backspace) {
     assertCursorConsistent(c, d);
 }
 
-TEST(cursor_col_never_negative) {
-    Document d = docOf({"abc"});
+// clampToLine solo corrige col dentro de la linea actual; no toca line.
+TEST(cursor_clamp_after_line_becomes_empty) {
+    Document d = docOf({"abc", "abcdef"});
     Cursor c;
-    c.col = 50;
-    c.moveHome();
-    c.moveLeft(d);
-    CHECK(c.col >= 0);
-    CHECK(c.line >= 0);
+
+    c.line = 1;
+    c.col = 6;
+
+    d.restore({"abc", ""});
+    c.clampToLine(d);
+
+    CHECK_EQ(c.line, 1);
+    CHECK_EQ(c.col, 0);
+    assertCursorConsistent(c, d);
+}
+
+// clampToLine no modifica line, aunque la linea actual desaparezca:
+// solo garantiza que col quede dentro de los limites de esa linea.
+TEST(cursor_clamp_shorter_than_current_col) {
+    Document d = docOf({"abcdefgh"});
+    Cursor c;
+
+    c.line = 0;
+    c.col = 7;
+
+    d.restore({"ab"});
+    c.clampToLine(d);
+
+    CHECK_EQ(c.line, 0);
+    CHECK_EQ(c.col, 2);
+    assertCursorConsistent(c, d);
 }
