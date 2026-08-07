@@ -124,6 +124,9 @@ bool Document::deleteCharBefore(int line, int col) {
 bool Document::deleteCharAt(int line, int col) {
     if (line < 0 || line >= lineCount()) return false;
 
+    // Clamp de la columna para que erase() nunca salga de rango.
+    if (col < 0) col = 0;
+
     int len = lineLength(line);
     if (col < len) {
         std::string& target = lines_[line];

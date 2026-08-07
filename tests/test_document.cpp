@@ -163,6 +163,12 @@ TEST(doc_insert_col_beyond_clamps) {
     CHECK_EQ(d.lineAt(0), "abZ");
 }
 
+TEST(doc_insert_col_negative_clamps_to_start) {
+    Document d = makeDoc({"bc"});
+    d.insertChar(0, -1, 'Z');
+    CHECK_EQ(d.lineAt(0), "Zbc");
+}
+
 TEST(doc_insert_invalid_line_ignored) {
     Document d = makeDoc({"abc"});
     d.insertChar(50, 0, 'a');
@@ -270,6 +276,14 @@ TEST(doc_newline_col_beyond_clamps_to_end) {
     CHECK_EQ(d.lineAt(1), "");
 }
 
+TEST(doc_newline_col_negative_clamps_to_start) {
+    Document d = makeDoc({"abc"});
+    d.insertNewline(0, -1);
+    CHECK_EQ(d.lineCount(), 2);
+    CHECK_EQ(d.lineAt(0), "");
+    CHECK_EQ(d.lineAt(1), "abc");
+}
+
 // ---------------------------------------------------------------------------
 // 8. Backspace (deleteCharBefore)
 // ---------------------------------------------------------------------------
@@ -284,6 +298,13 @@ TEST(doc_backspace_col_beyond_clamps_to_last) {
     Document d = makeDoc({"abc"});
     CHECK(d.deleteCharBefore(0, 500));
     CHECK_EQ(d.lineAt(0), "ab");
+}
+
+TEST(doc_backspace_col_negative_clamps_to_start) {
+    // col negativa se recorta a 0: en la primera linea no hay nada que borrar.
+    Document d = makeDoc({"abc"});
+    CHECK(!d.deleteCharBefore(0, -1));
+    CHECK_EQ(d.lineAt(0), "abc");
 }
 
 TEST(doc_backspace_several) {
@@ -344,6 +365,12 @@ TEST(doc_delete_col_beyond_range_noop) {
     CHECK_EQ(d.lineAt(0), "ab");
 }
 
+TEST(doc_delete_col_negative_clamps_to_start) {
+    Document d = makeDoc({"abc"});
+    CHECK(d.deleteCharAt(0, -1));
+    CHECK_EQ(d.lineAt(0), "bc");
+}
+
 TEST(doc_delete_end_joins_next) {
     Document d = makeDoc({"ab", "cd"});
     CHECK(d.deleteCharAt(0, 2));
@@ -389,8 +416,14 @@ TEST(doc_save_roundtrip) {
 }
 
 TEST(doc_save_trailing_empty_line_collapses) {
-    // Una linea vacia final equivale a "terminar con \n": al recargar
-    // ambas representaciones de la misma forma (sin linea vacia extra).
+    // DECISION DE DISENO (especificacion, no accidente):
+    // Una ultima linea vacia no tiene representacion en disco. saveToFile
+    // escribe separadores ENTRE lineas (nunca uno tras la ultima), asi que
+    // {"a","b",""} se guarda como "a\nb"; y loadFromFile de "a\nb" devuelve
+    // 2 lineas. Por lo tanto {"a","b",""} y {"a","b"} son equivalentes al
+    // persistir: la linea vacia final es un estado de memoria, no del archivo.
+    // Si algun dia se quiere preservar la linea vacia final, hay que cambiar
+    // saveToFile Y loadFromFile a la vez.
     TempFile f;
     Document d = makeDoc({"a", "b", ""});
     CHECK(d.saveToFile(f.path));
@@ -570,7 +603,14 @@ TEST(doc_stress_random_operations) {
     for (int step = 0; step < totalOps; ++step) {
         // Linea valida o un poco fuera de rango, para ejercitar los clamps.
         const int line = rnd(0, d.lineCount() + 5);
-        const int col = rnd(0, d.lineLength(d.lineCount() - 1) + 5);
+
+        // Si la linea es valida, la columna se genera respecto a esa linea
+        // (valida o apenas fuera de rango). Si la linea no existe, col arbitraria.
+        int col;
+        if (line < d.lineCount())
+            col = rnd(0, d.lineLength(line) + 5);
+        else
+            col = rnd(0, 5);
 
         switch (rnd(0, 3)) {
             case 0:
