@@ -1,24 +1,12 @@
-#include <cstdio>
 #include <fstream>
 #include <string>
-#include <unistd.h>
 #include <vector>
 
 #include "Document.h"
 #include "test_framework.h"
 
 using Lines = std::vector<std::string>;
-
-static std::string tmpPath() {
-    static int n = 0;
-    return "/tmp/edit_doc_" + std::to_string(static_cast<long>(::getpid())) + "_" +
-           std::to_string(n++) + ".txt";
-}
-
-static void writeFile(const std::string& path, const std::string& content) {
-    std::ofstream f(path, std::ios::trunc);
-    f << content;
-}
+using testfw::TempFile;
 
 // ---------------------------------------------------------------------------
 // 1. Inicio: documento vacio
@@ -34,104 +22,95 @@ TEST(doc_new_empty) {
 // 1. Abrir archivo existente
 // ---------------------------------------------------------------------------
 TEST(doc_load_empty_file) {
-    std::string p = tmpPath();
-    writeFile(p, "");
+    TempFile f;
+    f.write("");
     Document d;
-    CHECK(d.loadFromFile(p));
+    CHECK(d.loadFromFile(f.path));
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "");
-    std::remove(p.c_str());
 }
 
 TEST(doc_load_one_line) {
-    std::string p = tmpPath();
-    writeFile(p, "hola");
+    TempFile f;
+    f.write("hola");
     Document d;
-    CHECK(d.loadFromFile(p));
+    CHECK(d.loadFromFile(f.path));
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "hola");
-    std::remove(p.c_str());
 }
 
 TEST(doc_load_multiple_lines) {
-    std::string p = tmpPath();
-    writeFile(p, "uno\ndos\ntres");
+    TempFile f;
+    f.write("uno\ndos\ntres");
     Document d;
-    CHECK(d.loadFromFile(p));
+    CHECK(d.loadFromFile(f.path));
     CHECK_EQ(d.lineCount(), 3);
     CHECK_EQ(d.lineAt(0), "uno");
     CHECK_EQ(d.lineAt(1), "dos");
     CHECK_EQ(d.lineAt(2), "tres");
-    std::remove(p.c_str());
 }
 
 TEST(doc_load_trailing_newline) {
-    std::string p = tmpPath();
-    writeFile(p, "a\nb\n");
+    TempFile f;
+    f.write("a\nb\n");
     Document d;
-    CHECK(d.loadFromFile(p));
+    CHECK(d.loadFromFile(f.path));
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "a");
     CHECK_EQ(d.lineAt(1), "b");
-    std::remove(p.c_str());
 }
 
 TEST(doc_load_no_trailing_newline) {
-    std::string p = tmpPath();
-    writeFile(p, "x\ny");
+    TempFile f;
+    f.write("x\ny");
     Document d;
-    CHECK(d.loadFromFile(p));
+    CHECK(d.loadFromFile(f.path));
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(1), "y");
-    std::remove(p.c_str());
 }
 
 TEST(doc_load_crlf) {
-    std::string p = tmpPath();
-    writeFile(p, "a\r\nb\r\n");
+    TempFile f;
+    f.write("a\r\nb\r\n");
     Document d;
-    CHECK(d.loadFromFile(p));
+    CHECK(d.loadFromFile(f.path));
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "a");
     CHECK_EQ(d.lineAt(1), "b");
-    std::remove(p.c_str());
 }
 
 TEST(doc_load_large_file) {
-    std::string p = tmpPath();
+    TempFile f;
     std::string big;
     big.reserve(1024 * 1024);
     for (int i = 0; i < 100000; ++i)
         big += "linea\n";
-    writeFile(p, big);
+    f.write(big);
     Document d;
-    CHECK(d.loadFromFile(p));
+    CHECK(d.loadFromFile(f.path));
     CHECK_EQ(d.lineCount(), 100000);
     CHECK_EQ(d.lineAt(0), "linea");
     CHECK_EQ(d.lineAt(99999), "linea");
-    std::remove(p.c_str());
 }
 
 TEST(doc_load_long_lines) {
-    std::string p = tmpPath();
+    TempFile f;
     std::string line(100000, 'x');
-    writeFile(p, line + "\nfin");
+    f.write(line + "\nfin");
     Document d;
-    CHECK(d.loadFromFile(p));
+    CHECK(d.loadFromFile(f.path));
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineLength(0), 100000);
     CHECK_EQ(d.lineAt(1), "fin");
-    std::remove(p.c_str());
 }
 
 // ---------------------------------------------------------------------------
 // 1. Archivo inexistente / errores
 // ---------------------------------------------------------------------------
 TEST(doc_load_nonexistent_creates_empty) {
-    std::string p = tmpPath() + "_no_existe";
-    std::remove(p.c_str());
+    TempFile f;
     Document d;
-    CHECK(!d.loadFromFile(p));
+    CHECK(!d.loadFromFile(f.path));
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "");
 }
@@ -381,56 +360,52 @@ TEST(doc_delete_till_whole_line) {
 // 12. Guardado (nivel Document)
 // ---------------------------------------------------------------------------
 TEST(doc_save_roundtrip) {
-    std::string p = tmpPath();
+    TempFile f;
     Document d;
     d.restore(Lines{"uno", "dos", "tres"});
-    CHECK(d.saveToFile(p));
+    CHECK(d.saveToFile(f.path));
     Document d2;
-    CHECK(d2.loadFromFile(p));
+    CHECK(d2.loadFromFile(f.path));
     CHECK_EQ(d2.lineCount(), 3);
     CHECK_EQ(d2.lineAt(0), "uno");
     CHECK_EQ(d2.lineAt(1), "dos");
     CHECK_EQ(d2.lineAt(2), "tres");
-    std::remove(p.c_str());
 }
 
 TEST(doc_save_trailing_empty_line_collapses) {
     // Una linea vacia final equivale a "terminar con \n": al recargar
     // ambas representaciones de la misma forma (sin linea vacia extra).
-    std::string p = tmpPath();
+    TempFile f;
     Document d;
     d.restore(Lines{"a", "b", ""});
-    CHECK(d.saveToFile(p));
+    CHECK(d.saveToFile(f.path));
     Document d2;
-    CHECK(d2.loadFromFile(p));
+    CHECK(d2.loadFromFile(f.path));
     CHECK_EQ(d2.lineCount(), 2);
     CHECK_EQ(d2.lineAt(1), "b");
-    std::remove(p.c_str());
 }
 
 TEST(doc_save_empty) {
-    std::string p = tmpPath();
+    TempFile f;
     Document d;
-    CHECK(d.saveToFile(p));
+    CHECK(d.saveToFile(f.path));
     Document d2;
-    CHECK(d2.loadFromFile(p));
+    CHECK(d2.loadFromFile(f.path));
     CHECK_EQ(d2.lineCount(), 1);
     CHECK_EQ(d2.lineAt(0), "");
-    std::remove(p.c_str());
 }
 
 TEST(doc_save_large) {
-    std::string p = tmpPath();
+    TempFile f;
     Document d;
     Lines big(50000, "linea grande de prueba");
     d.restore(big);
-    CHECK(d.saveToFile(p));
+    CHECK(d.saveToFile(f.path));
     Document d2;
-    CHECK(d2.loadFromFile(p));
+    CHECK(d2.loadFromFile(f.path));
     CHECK_EQ(d2.lineCount(), 50000);
     CHECK_EQ(d2.lineAt(0), "linea grande de prueba");
     CHECK_EQ(d2.lineAt(49999), "linea grande de prueba");
-    std::remove(p.c_str());
 }
 
 TEST(doc_save_to_directory_fails) {
@@ -489,34 +464,32 @@ TEST(doc_large_1MB_operations) {
     CHECK_EQ(d.lineLength(0), target);
     CHECK_EQ(d.lineAt(0)[0], 'A');
 
-    std::string save = tmpPath();
-    CHECK(d.saveToFile(save));
+    TempFile f;
+    CHECK(d.saveToFile(f.path));
     Document d2;
-    CHECK(d2.loadFromFile(save));
+    CHECK(d2.loadFromFile(f.path));
     CHECK_EQ(d2.lineCount(), 1);
     CHECK_EQ(d2.lineLength(0), target);
-    std::remove(save.c_str());
 }
 
 TEST(doc_large_10mb_roundtrip) {
     const int target = 10 * (1 << 20);
-    std::string p = tmpPath();
+    TempFile f;
     {
-        std::ofstream f(p, std::ios::trunc);
+        std::ofstream out(f.path, std::ios::trunc);
         const std::string filler(65536, 'y');
         int written = 0;
         while (written < target) {
-            f << filler;
+            out << filler;
             written += static_cast<int>(filler.size());
         }
     }
     Document d;
-    CHECK(d.loadFromFile(p));
+    CHECK(d.loadFromFile(f.path));
     CHECK_EQ(d.lineCount(), 1);
     CHECK(d.lineLength(0) >= target - 65536);
     d.insertChar(0, 0, 'Q');
-    CHECK(d.saveToFile(p));
-    std::remove(p.c_str());
+    CHECK(d.saveToFile(f.path));
 }
 
 TEST(doc_large_newline_split) {

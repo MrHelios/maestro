@@ -1,4 +1,3 @@
-#include <cstdio>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -10,6 +9,8 @@
 #define private public
 #include "Editor.h"
 #undef private
+
+using testfw::TempFile;
 
 static Event ev(EventType t) {
     Event e;
@@ -81,15 +82,13 @@ TEST(state_modified_flag_tracks_changes) {
 }
 
 TEST(state_filename_unchanged_by_edits) {
-    std::string p = "/tmp/edit_inv_filename_test.txt";
-    std::remove(p.c_str());
+    TempFile f;
     Editor ed;
-    ed.openFile(p);
+    ed.openFile(f.path);
     type(ed, "contenido");
     ed.handleEvent(ev(EventType::Undo));
     ed.handleEvent(ev(EventType::Redo));
-    CHECK_EQ(ed.filename_, p);
-    std::remove(p.c_str());
+    CHECK_EQ(ed.filename_, f.path);
 }
 
 TEST(state_history_coherent_after_sequence) {
@@ -109,39 +108,35 @@ TEST(state_history_coherent_after_sequence) {
 // 20. Secuencias de operaciones completas
 // ---------------------------------------------------------------------------
 TEST(sequence_open_insert_save_close) {
-    std::string p = "/tmp/edit_inv_oi.txt";
-    std::remove(p.c_str());
+    TempFile f;
     Editor ed;
-    ed.openFile(p);
+    ed.openFile(f.path);
     type(ed, "hola");
     ed.handleEvent(ev(EventType::Save));
     CHECK(!ed.modified_);
     ed.handleEvent(ev(EventType::Quit));
     CHECK(!ed.running_);
 
-    std::ifstream f(p);
-    std::string content((std::istreambuf_iterator<char>(f)),
+    std::ifstream in(f.path);
+    std::string content((std::istreambuf_iterator<char>(in)),
                         std::istreambuf_iterator<char>());
     CHECK_EQ(content, "hola");
-    std::remove(p.c_str());
 }
 
 TEST(sequence_open_edit_undo_redo_save) {
-    std::string p = "/tmp/edit_inv_oeu.txt";
-    std::remove(p.c_str());
+    TempFile f;
     Editor ed;
-    ed.openFile(p);
+    ed.openFile(f.path);
     type(ed, "hola mundo");
     ed.handleEvent(ev(EventType::Undo));
     ed.handleEvent(ev(EventType::Redo));
     ed.handleEvent(ev(EventType::Save));
     CHECK(!ed.modified_);
 
-    std::ifstream f(p);
-    std::string content((std::istreambuf_iterator<char>(f)),
+    std::ifstream in(f.path);
+    std::string content((std::istreambuf_iterator<char>(in)),
                         std::istreambuf_iterator<char>());
     CHECK_EQ(content, "hola mundo");
-    std::remove(p.c_str());
 }
 
 TEST(sequence_insert_enter_write_backspace_undo) {
@@ -274,21 +269,19 @@ TEST(edge_cursor_at_absolute_end) {
 }
 
 TEST(edge_millions_of_chars_roundtrip) {
-    std::string p = "/tmp/edit_inv_millions.txt";
-    std::remove(p.c_str());
+    TempFile f;
     Editor ed;
-    ed.openFile(p);
+    ed.openFile(f.path);
     const int n = 1000000;
     ed.document_.restore({std::string(n, 'y')});
     ed.handleEvent(ev(EventType::Save));
     CHECK(!ed.modified_);
 
     Editor ed2;
-    CHECK(ed2.openFile(p));
+    CHECK(ed2.openFile(f.path));
     CHECK_EQ(ed2.document_.lineLength(0), n);
     for (int i = 0; i < n; i += 10000)
         CHECK_EQ(ed2.document_.lineAt(0)[i], 'y');
-    std::remove(p.c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -307,18 +300,16 @@ static void assertRoundTrip(const std::string& path, const Editor& ed) {
 }
 
 TEST(invariant_save_reload_exact) {
-    std::string p = "/tmp/edit_inv_roundtrip.txt";
-    std::remove(p.c_str());
+    TempFile f;
     Editor ed;
-    ed.openFile(p);
+    ed.openFile(f.path);
     type(ed, "primera");
     ed.handleEvent(ev(EventType::InsertNewline));
     type(ed, "segunda");
     ed.handleEvent(ev(EventType::InsertNewline));
     type(ed, "tercera");
     ed.handleEvent(ev(EventType::Save));
-    assertRoundTrip(p, ed);
-    std::remove(p.c_str());
+    assertRoundTrip(f.path, ed);
 }
 
 TEST(invariant_undo_redo_never_corrupts) {

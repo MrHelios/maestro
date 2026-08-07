@@ -1,11 +1,42 @@
 #pragma once
 
+#include <atomic>
+#include <cstdio>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <string>
+#include <unistd.h>
 #include <vector>
 
 namespace testfw {
+
+inline std::string tmpPath() {
+    static std::atomic<int> n{0};
+    return "/tmp/edit_test_" + std::to_string(static_cast<long>(::getpid())) + "_" +
+           std::to_string(n++) + ".txt";
+}
+
+// Archivo temporal que se elimina en ~TempFile, aunque un CHECK falle antes.
+struct TempFile {
+    std::string path;
+
+    TempFile() : path(tmpPath()) {}
+
+    explicit TempFile(std::string p) : path(std::move(p)) {}
+
+    ~TempFile() {
+        std::remove(path.c_str());
+    }
+
+    TempFile(const TempFile&) = delete;
+    TempFile& operator=(const TempFile&) = delete;
+
+    void write(const std::string& content) const {
+        std::ofstream f(path, std::ios::trunc);
+        f << content;
+    }
+};
 
 struct Test {
     std::string name;

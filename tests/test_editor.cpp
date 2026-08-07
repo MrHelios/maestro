@@ -1,8 +1,6 @@
-#include <cstdio>
 #include <fstream>
 #include <iterator>
 #include <string>
-#include <unistd.h>
 
 #include "test_framework.h"
 
@@ -14,11 +12,7 @@
 #include "Editor.h"
 #undef private
 
-static std::string tmpPath() {
-    static int n = 0;
-    return "/tmp/edit_ed_" + std::to_string(static_cast<long>(::getpid())) + "_" +
-           std::to_string(n++) + ".txt";
-}
+using testfw::TempFile;
 
 static Event insert(char c) {
     Event e;
@@ -49,10 +43,9 @@ TEST(editor_start_empty) {
 }
 
 TEST(editor_open_new_file_empty) {
-    std::string p = tmpPath();
-    std::remove(p.c_str());
+    TempFile f;
     Editor ed;
-    CHECK(!ed.openFile(p));
+    CHECK(!ed.openFile(f.path));
     CHECK(!ed.modified_);
     CHECK_EQ(ed.cursor_.line, 0);
     CHECK_EQ(ed.cursor_.col, 0);
@@ -60,14 +53,13 @@ TEST(editor_open_new_file_empty) {
 }
 
 TEST(editor_open_existing) {
-    std::string p = tmpPath();
-    { std::ofstream f(p, std::ios::trunc); f << "one\ntwo\n"; }
+    TempFile f;
+    f.write("one\ntwo\n");
     Editor ed;
-    CHECK(ed.openFile(p));
+    CHECK(ed.openFile(f.path));
     CHECK(!ed.modified_);
     CHECK_EQ(ed.document_.lineCount(), 2);
     CHECK_EQ(ed.document_.lineAt(1), "two");
-    std::remove(p.c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -185,25 +177,22 @@ TEST(editor_redo_empty_noop) {
 // 12. Guardado (nivel Editor / modified_)
 // ---------------------------------------------------------------------------
 TEST(editor_save_new_document) {
-    std::string p = tmpPath();
-    std::remove(p.c_str());
+    TempFile f;
     Editor ed;
-    ed.openFile(p);
+    ed.openFile(f.path);
     type(ed, "Hi");
     CHECK(ed.modified_);
     ed.handleEvent(Event{EventType::Save});
     CHECK(!ed.modified_);
-    CHECK_EQ(fileContent(p), "Hi");
-    std::remove(p.c_str());
+    CHECK_EQ(fileContent(f.path), "Hi");
 }
 
 TEST(editor_save_empty_document) {
-    std::string p = tmpPath();
+    TempFile f;
     Editor ed;
-    ed.openFile(p);
+    ed.openFile(f.path);
     ed.handleEvent(Event{EventType::Save});
-    CHECK(fileContent(p).empty());
-    std::remove(p.c_str());
+    CHECK(fileContent(f.path).empty());
 }
 
 TEST(editor_save_error_path) {
@@ -234,12 +223,11 @@ TEST(editor_quit) {
 }
 
 TEST(editor_quit_after_save) {
-    std::string p = tmpPath();
+    TempFile f;
     Editor ed;
-    ed.openFile(p);
+    ed.openFile(f.path);
     type(ed, "a");
     ed.handleEvent(Event{EventType::Save});
     ed.handleEvent(Event{EventType::Quit});
     CHECK(!ed.running_);
-    std::remove(p.c_str());
 }
