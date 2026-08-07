@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include "Document.h"
 #include "Cursor.h"
 #include "Viewport.h"
@@ -46,6 +47,11 @@ private:
     bool modified_ = false;
     bool running_ = true;
     std::string statusMessage_;
+
+    // Ultimo contenido persistido (o el estado inicial si nunca se guardo).
+    // modified_ = (contenido actual != savedLines_). Eso permite que undo
+    // "limpie" modified_ si vuelve al estado guardado.
+    std::vector<std::string> savedLines_;
 
     void handleEvent(const Event& event);
     void save();

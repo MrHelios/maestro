@@ -4,12 +4,14 @@
 
 Editor::Editor() {
     statusMessage_ = "Ctrl+S guardar | Ctrl+Q salir";
+    savedLines_ = document_.snapshot();
 }
 
 bool Editor::openFile(const std::string& path) {
     filename_ = path;
     bool existed = document_.loadFromFile(path);
     modified_ = false;
+    savedLines_ = document_.snapshot();
     cursor_.line = 0;
     cursor_.col = 0;
     if (!existed) {
@@ -143,6 +145,7 @@ void Editor::handleEvent(const Event& event) {
 void Editor::save() {
     if (document_.saveToFile(filename_)) {
         modified_ = false;
+        savedLines_ = document_.snapshot();
         statusMessage_ = "Guardado.";
     } else {
         statusMessage_ = "Error al guardar.";
@@ -166,7 +169,8 @@ void Editor::applyState(const HistoryState& state) {
     cursor_.line = state.line;
     cursor_.col = state.col;
     cursor_.clampToLine(document_);
-    modified_ = true;
+    // modified_ = "¿el contenido difiere del ultimo guardado?"
+    modified_ = (document_.snapshot() != savedLines_);
 }
 
 void Editor::undo() {

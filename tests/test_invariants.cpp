@@ -74,9 +74,9 @@ TEST(state_modified_flag_tracks_changes) {
     CHECK(!ed.modified_);
     type(ed, "x");
     CHECK(ed.modified_);
-    // Undo no restaura modified_: el historial no guarda la bandera.
+    // Undo vuelve al estado inicial (== al guardado): modified_ se limpia.
     ed.handleEvent(ev(EventType::Undo));
-    CHECK(ed.modified_);
+    CHECK(!ed.modified_);
     ed.handleEvent(ev(EventType::Redo));
     CHECK(ed.modified_);
 }
