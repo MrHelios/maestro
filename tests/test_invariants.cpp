@@ -251,6 +251,8 @@ TEST(sequence_open_insert_save_close) {
     type(ed, "hola");
     ed.handleEvent(ev(EventType::Save));
     CHECK(!ed.modified_);
+    // v0.3: Quit solo sale via prefijo (Ctrl+K -> Ctrl+Q).
+    ed.handleEvent(ev(EventType::Prefix));
     ed.handleEvent(ev(EventType::Quit));
     CHECK(!ed.running_);
 
@@ -530,7 +532,7 @@ TEST(invariant_no_crash_on_event_sequence) {
         EventType::Delete,     EventType::Undo,          EventType::Redo,
         EventType::MoveLeft,   EventType::MoveRight,     EventType::MoveUp,
         EventType::MoveDown,   EventType::MoveHome,      EventType::MoveEnd,
-        EventType::Save,       EventType::Quit,          EventType::None,
+        EventType::Prefix,     EventType::Save,          EventType::None,
     };
     for (int round = 0; round < 1000; ++round) {
         Event e;

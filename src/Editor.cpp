@@ -269,10 +269,11 @@ void Editor::handleEvent(const Event& event) {
             clearSelection();
             break;
 
-        case EventType::Quit:
-            running_ = false;
-            break;
-
+        // Quit deliberadamente NO se maneja aqui: el usuario debe pasar
+        // por el prefijo (Ctrl+K -> Ctrl+Q) para salir. Un evento Quit
+        // suelto (p.ej. Ctrl+Q sin prefix) se ignora y no mata el editor.
+        // Esto es una mejora de seguridad: evitar salir por accidente con
+        // una sola tecla. handlePrefixKey se encarga del Quit real.
         case EventType::None:
         default:
             break;

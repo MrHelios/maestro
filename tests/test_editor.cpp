@@ -621,29 +621,40 @@ TEST(editor_modified_until_undo_then_redo) {
 // ---------------------------------------------------------------------------
 // 13. Quit
 // ---------------------------------------------------------------------------
-TEST(editor_quit) {
+TEST(editor_quit_illegals_without_prefix) {
+    // Contrato v0.3 (seguridad): un Quit suelto (sin Ctrl+K antes)
+    // NO sale del editor. Debe pasarse por el prefijo (Ctrl+K -> Ctrl+Q).
     Editor ed;
     CHECK(ed.running_);
     press(ed, EventType::Quit);
-    CHECK(!ed.running_);
+    CHECK(ed.running_);
 }
 
-TEST(editor_quit_after_save) {
+TEST(editor_quit_after_save_via_prefix) {
     TempFile f;
     Editor ed;
     ed.openFile(f.path);
     type(ed, "a");
     press(ed, EventType::Save);
+    // Quit suelto no sale...
+    press(ed, EventType::Quit);
+    CHECK(ed.running_);
+    // ...pero con el prefijo (Ctrl+K -> Ctrl+Q) si.
+    press(ed, EventType::Prefix);
     press(ed, EventType::Quit);
     CHECK(!ed.running_);
 }
 
-TEST(editor_quit_with_unsaved_changes) {
-    // Contrato actual: Quit sale SIEMPRE, sin preguntar por cambios sin
-    // guardar. Si algun dia se agrega un aviso, este test debe cambiar.
+TEST(editor_quit_with_unsaved_changes_via_prefix) {
+    // Contrato v0.3: Quit no sale suelto; sale solo via prefijo. Sigue sin
+    // preguntar por cambios sin guardar. Si algun dia se agrega un aviso,
+    // este test debe cambiar.
     Editor ed;
     type(ed, "a");
     CHECK(ed.modified_);
+    press(ed, EventType::Quit);
+    CHECK(ed.running_);
+    press(ed, EventType::Prefix);
     press(ed, EventType::Quit);
     CHECK(!ed.running_);
 }
