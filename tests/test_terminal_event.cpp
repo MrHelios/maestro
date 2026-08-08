@@ -10,7 +10,11 @@
 //
 // Estas pruebas redirigen temporalmente STDIN a un pipe y le escriben
 // la secuencia de bytes que emite la terminal, para verificar que
-// readEvent() la traduce al Event correcto (tipo + estado shift).
+// readEvent() la traduce al Event correcto.
+//
+// v0.3: no hay campo shift. La seleccion se activa con Ctrl+S; los
+// modificadores (Shift/Ctrl/Alt) que una terminal pueda anadir sobre las
+// flechas se ignoran y solo importa el caracter final.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -56,76 +60,66 @@ Event parse(const char* seq) {
 TEST(terminal_plain_right_arrow) {
     Event e = parse("\x1b[C");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveRight));
-    CHECK(!e.shift);
 }
 
 TEST(terminal_plain_left_arrow) {
     Event e = parse("\x1b[D");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveLeft));
-    CHECK(!e.shift);
 }
 
-TEST(terminal_shift_right_arrow) {
+TEST(terminal_modified_right_arrow_ignored) {
+    // "ESC [ 1;2C" = flecha derecha con modificador. El modificador (2=
+    // shift... ) se ignora: se traduce al mismo movimiento.
     Event e = parse("\x1b[1;2C");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveRight));
-    CHECK(e.shift);
 }
 
-TEST(terminal_shift_left_arrow) {
+TEST(terminal_modified_left_arrow_ignored) {
     Event e = parse("\x1b[1;2D");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveLeft));
-    CHECK(e.shift);
 }
 
-TEST(terminal_shift_up_arrow) {
+TEST(terminal_modified_up_arrow_ignored) {
     Event e = parse("\x1b[1;2A");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveUp));
-    CHECK(e.shift);
 }
 
-TEST(terminal_shift_down_arrow) {
+TEST(terminal_modified_down_arrow_ignored) {
     Event e = parse("\x1b[1;2B");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveDown));
-    CHECK(e.shift);
 }
 
-TEST(terminal_shift_home) {
+TEST(terminal_modified_home_ignored) {
     Event e = parse("\x1b[1;2H");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveHome));
-    CHECK(e.shift);
 }
 
-TEST(terminal_shift_end) {
+TEST(terminal_modified_end_ignored) {
     Event e = parse("\x1b[1;2F");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveEnd));
-    CHECK(e.shift);
 }
 
-TEST(terminal_shift_bare_modifier_sequence) {
-    // Algunas terminales envian "ESC [ 2 A" (modificador sin el "1;"
-    // del parametro). No es un formato estandar de flecha, pero no debe
-    // romper nada (se ignora como None).
+TEST(terminal_bare_modifier_sequence) {
+    // "ESC [ 2 A" (modificador sin parametro "1;"). Con los modificadores
+    // ignorados termina siendo una flecha arriba.
     Event e = parse("\x1b[2A");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveUp));
 }
 
-TEST(terminal_non_shift_modifier_ignored) {
-    // Modificador ctrl (codigo 5) no es shift y v0.1 no lo maneja.
+TEST(terminal_ctrl_modifier_ignored) {
+    // Modificador ctrl (codigo 5): tambien se ignora, es una flecha derecha.
     Event e = parse("\x1b[1;5C");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
-    CHECK(!e.shift);
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveRight));
 }
 
 TEST(terminal_plain_home_via_bracket) {
     Event e = parse("\x1b[H");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveHome));
-    CHECK(!e.shift);
 }
 
 TEST(terminal_plain_end_via_bracket) {
     Event e = parse("\x1b[F");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveEnd));
-    CHECK(!e.shift);
 }
 
 TEST(terminal_delete_key) {
@@ -138,18 +132,15 @@ TEST(terminal_home_via_tilde) {
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveHome));
 }
 
-TEST(terminal_shift_right_via_ss3_prefix) {
-    // Prefijo SS3 (ESC O) con modificador: igual que bracket pero con 'O'.
+TEST(terminal_ss3_with_params_unsupported) {
+    // Prefijo SS3 (ESC O) con parametros no se soporta: None.
     Event e = parse("\x1bO1;2C");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None)); // 'O' con params no se soporta
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
 }
 
 TEST(terminal_lone_escape) {
-    // Un ESC suelto no debe colgar al parser esperando un segundo byte:
-    // tras un timeout corto se traduce a EventType::Escape.
     Event e = parse("\x1b");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::Escape));
-    CHECK(!e.shift);
 }
 
 TEST(terminal_incomplete_sequence_times_out) {

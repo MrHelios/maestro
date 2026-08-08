@@ -30,13 +30,6 @@ static void type(Editor& ed, const std::string& s) {
         ed.handleEvent(insert(c));
 }
 
-static Event shift(EventType t) {
-    Event e;
-    e.type = t;
-    e.shift = true;
-    return e;
-}
-
 // ---------------------------------------------------------------------------
 // 19. Estado del editor: invariantes de estado tras cada evento
 // ---------------------------------------------------------------------------
@@ -103,13 +96,15 @@ TEST(state_consistent_after_random_events) {
         ev(EventType::Delete), ev(EventType::MoveDown), insert('z'),
         ev(EventType::MoveUp), ev(EventType::Undo), ev(EventType::Redo),
         ev(EventType::MoveHome), ev(EventType::MoveEnd), insert('!'),
-        // Paso 8: movimientos con Shift.
-        shift(EventType::MoveLeft), shift(EventType::MoveRight),
-        shift(EventType::MoveRight), shift(EventType::MoveUp),
-        shift(EventType::MoveDown), shift(EventType::MoveHome),
-        shift(EventType::MoveEnd), ev(EventType::MoveRight),
-        insert('#'), shift(EventType::MoveLeft), ev(EventType::MoveRight),
-        ev(EventType::Undo), ev(EventType::Undo), ev(EventType::Redo),
+        // Paso 8: movimientos dentro del modo seleccion (Ctrl+S).
+        ev(EventType::Select), ev(EventType::MoveLeft),
+        ev(EventType::MoveRight), ev(EventType::MoveRight),
+        ev(EventType::MoveUp), ev(EventType::MoveDown),
+        ev(EventType::MoveHome), ev(EventType::MoveEnd),
+        ev(EventType::Escape), ev(EventType::MoveRight),
+        insert('#'), ev(EventType::Select), ev(EventType::MoveLeft),
+        ev(EventType::Escape), ev(EventType::Undo), ev(EventType::Undo),
+        ev(EventType::Redo),
     };
     for (const Event& e : seq) {
         ed.handleEvent(e);
@@ -117,10 +112,11 @@ TEST(state_consistent_after_random_events) {
     }
 }
 
-// Paso 8: estresar la seleccion con movimientos Shift aleatorios sobre un
-// documento de varias lineas de distinto largo. La seleccion introduce un
-// segundo par de coordenadas (anchor/position) que debe quedar siempre
-// dentro del documento, aunque el cursor vaya y vuelva cruzando el anchor.
+// Paso 8: estresar la seleccion alternando entrada/salida del modo
+// seleccion con movimientos sobre un documento de varias lineas de
+// distinto largo. La seleccion introduce un segundo par de coordenadas
+// (anchor/position) que debe quedar siempre dentro del documento,
+// aunque el cursor vaya y vuelva cruzando el anchor.
 TEST(state_selection_consistent_after_shift_moves) {
     Editor ed;
     ed.document_.restore({"abcde", "xy", "", "abcdefghij", "uv"});
@@ -135,10 +131,13 @@ TEST(state_selection_consistent_after_shift_moves) {
     };
     for (int i = 0; i < 400; ++i) {
         EventType t = moves[i % 6];
-        // Mitad con Shift, mitad sin: asi se arma y se desarma seleccion.
+        // Mitad arma seleccion (Ctrl+S), mitad la cancela (ESC): asi se
+        // arma y se desarma la seleccion al mover.
         if (i % 2 == 0) {
-            ed.handleEvent(shift(t));
+            ed.handleEvent(ev(EventType::Select));
+            ed.handleEvent(ev(t));
         } else {
+            ed.handleEvent(ev(EventType::Escape));
             ed.handleEvent(ev(t));
         }
         assertStateConsistent(ed);
@@ -160,7 +159,7 @@ TEST(state_modified_flag_tracks_changes) {
 // ---------------------------------------------------------------------------
 // Paso 16: stress determinista que mezcla todo tipo de operacion sobre un
 // documento multilinea, verificando las invariantes de estado tras CADA
-// evento. Combina edicion, movimiento con/sin Shift, borrado de seleccion,
+// evento. Combina edicion, modo seleccion Ctrl+S, movimiento, borrado y
 // reemplazo de seleccion, y undo/redo (incluidas las operaciones sobre
 // seleccion del Paso 12).
 // ---------------------------------------------------------------------------
@@ -192,25 +191,22 @@ TEST(state_stress_mixed_operations_selection) {
                 e.type = EventType::InsertChar;
                 e.ch = static_cast<char>('a' + (rnd() % 26));
                 break;
-            case 1: // movimiento con Shift (arma/ajusta seleccion)
+            case 1: // modo seleccion: Ctrl+S (arma/ajusta seleccion)
+                e.type = EventType::Select;
+                break;
+            case 2: // movimiento (en modo seleccion estira; sin el, mueve)
                 e.type = static_cast<EventType>(
                     static_cast<int>(EventType::MoveLeft) + (rnd() % 6));
-                e.shift = true;
                 break;
-            case 2: // movimiento sin Shift (cancela la seleccion)
-                e.type = static_cast<EventType>(
-                    static_cast<int>(EventType::MoveLeft) + (rnd() % 6));
-                e.shift = false;
+            case 3: // cancelar seleccion
+                e.type = EventType::Escape;
                 break;
-            case 3: // borrado: Backspace o Delete (con seleccion o no)
+            case 4: // borrado: Backspace o Delete (con seleccion o no)
                 e.type = (rnd() % 2) ? EventType::Backspace
                                      : EventType::Delete;
                 break;
-            case 4: // ediciones que arman/desarman undo/redo
+            case 5: // ediciones que arman/desarman undo/redo
                 e.type = (rnd() % 2) ? EventType::Undo : EventType::Redo;
-                break;
-            default: // InsertNewline: cambia la estructura de lineas
-                e.type = EventType::InsertNewline;
                 break;
         }
         ed.handleEvent(e);

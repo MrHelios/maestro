@@ -11,11 +11,17 @@
 #include "Terminal.h"
 #include "Event.h"
 
-// Modo del editor. En v0.1 solo existe el modo de edicion normal,
-// pero la enum ya deja lugar para "Comando" (guardar-como, buscar, etc)
-// en versiones futuras.
-enum class Mode {
-    Editing,
+// Maquina de estados interna del editor.
+//   Normal:  edicion corriente. Ctrl+S entra a seleccion, Ctrl+K al prefijo.
+//   Prefix:  tras Ctrl+K; el siguiente evento decide (Ctrl+S guarda,
+//            Ctrl+Q sale, cualquier otra cosa lo cancela y se descarta).
+//   Select:  modo seleccion (activo con Ctrl+S). Las flechas/Home/End
+//            extienden la seleccion; ESC la cancela y sale; un caracter
+//            o Enter la reemplaza y sale del modo.
+enum class State {
+    Normal,
+    Prefix,
+    Select,
 };
 
 // Editor es el "engine": conoce el Documento, el Cursor, el Viewport,
@@ -50,7 +56,12 @@ private:
     Renderer renderer_;
     Terminal terminal_;
 
-Mode mode_ = Mode::Editing;
+// Estado de la maquina de estados (Normal/Prefix/Select).
+    State state_ = State::Normal;
+    // Estado previo, guardado al entrar en Prefix para volver a el si
+    // el prefijo se cancela o ejecuta (p.ej. guardar sin salir de
+    // seleccion si el prefijo se abrio estando en Select).
+    State priorState_ = State::Normal;
     std::string filename_;
     bool modified_ = false;
     bool running_ = true;
@@ -76,6 +87,10 @@ Mode mode_ = Mode::Editing;
 
     void handleEvent(const Event& event);
     void save();
+    // Procesa el siguiente evento cuando el editor esta en modo Prefix
+    // (tras Ctrl+K). Ctrl+S/Guardar persiste, Ctrl+Q sale; cualquier
+    // otra tecla descarta el evento y cancela el prefijo.
+    void handlePrefixKey(const Event& event);
 
     struct HistoryState {
         std::vector<std::string> lines;

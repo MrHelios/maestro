@@ -30,11 +30,15 @@ static void press(Editor& ed, EventType type) {
     ed.handleEvent(Event{type});
 }
 
+// v0.3: el "Shift+flecha" del modelo viejo ahora equivale a activar el
+// modo seleccion (Ctrl+S = evento Select) y mover la tecla. Este helper
+// lo emula: si no se esta seleccionando, entra al modo; si ya se estaba
+// (un cursor previo), Ctrl+S se ignora y solo mueve/estira la seleccion.
 static void shiftPress(Editor& ed, EventType type) {
-    Event e;
-    e.type = type;
-    e.shift = true;
-    ed.handleEvent(e);
+    if (ed.state_ != State::Select) {
+        ed.handleEvent(Event{EventType::Select});
+    }
+    ed.handleEvent(Event{type});
 }
 
 // ---------------------------------------------------------------------------
@@ -53,6 +57,27 @@ TEST(selection_not_started_by_plain_move) {
     press(ed, EventType::MoveRight);
     press(ed, EventType::MoveRight);
     CHECK(!ed.hasSelection());
+}
+
+TEST(selection_enter_select_mode_alone_is_empty) {
+    // Regresion: al entrar al modo seleccion con Ctrl+S sin mover nada,
+    // no debe quedar seleccionado texto por encima del cursor.
+    Editor ed;
+    type(ed, "abc");                 // cursor (0,3)
+    press(ed, EventType::InsertNewline);
+    type(ed, "def");                 // cursor (1,3), cursor lejos de (0,0)
+    const int undoBefore = static_cast<int>(ed.undoStack_.size());
+    const bool modified = ed.modified_;
+
+    press(ed, EventType::Select);    // Ctrl+S: solo entra al modo
+
+    CHECK(!ed.hasSelection());
+    CHECK(!ed.selection().has_value());
+    // No es una edicion ni mueve el cursor.
+    CHECK_EQ(ed.cursor_.line, 1);
+    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore));
+    CHECK_EQ(ed.modified_, modified);
 }
 
 TEST(selection_shift_move_stays_empty_if_no_movement) {
@@ -152,13 +177,13 @@ TEST(selection_anchor_survives_reverse_direction) {
     CHECK_EQ(sel->end.col, 2);
 }
 
-TEST(selection_cleared_by_plain_move) {
+TEST(selection_cleared_by_escape_after_select) {
     Editor ed;
     type(ed, "abc");
     press(ed, EventType::MoveHome);
     shiftPress(ed, EventType::MoveRight);
     CHECK(ed.hasSelection());
-    press(ed, EventType::MoveRight);       // sin shift: seleccion se descarta
+    press(ed, EventType::Escape);       // en v0.3 se sale del modo con ESC
     CHECK(!ed.hasSelection());
 }
 
@@ -389,13 +414,12 @@ TEST(editor_selection_reverses_direction) {
 }
 
 // ---------------------------------------------------------------------------
-// Paso 5: cancelar la seleccion con flechas normales (sin Shift)
+// Paso 5: cancelar la seleccion con ESC
 // ---------------------------------------------------------------------------
-// Regla: una flecha sin Shift cancela la seleccion. Deja intactos el
-// Document, modified_ y el undoStack (cancelar una seleccion NO es
-// una edicion). La flecha derecha ademas mantiene la posicion del
-// cursor (extremo de una seleccion hacia adelante); Left/Up/Down
-// realizan su movimiento normal.
+// Regla (v0.3): el modo seleccion se cancela con ESC (ya no con una
+// flecha normal, que ahora sirve para extender). Cancela deja intactos
+// el Document, modified_ y el undoStack (cancelar no es una edicion).
+// El cursor NO se mueve con ESC.
 TEST(editor_selection_arrow_right_clears) {
     // Seleccion hacia adelante: [cde] con cursor al final (ej: "abcde"
     // con cursor en el extremo derecho de la seleccion).
@@ -413,9 +437,9 @@ TEST(editor_selection_arrow_right_clears) {
     const int undoBefore = static_cast<int>(ed.undoStack_.size());
     const bool modified = ed.modified_;
 
-    press(ed, EventType::MoveRight);      // sin shift: cancelar
+    press(ed, EventType::Escape);         // cancelar seleccion (v0.3)
     CHECK(!ed.hasSelection());
-    // Flecha derecha: el cursor MANTIENE su posicion (extremo derecho).
+    // ESC no mueve el cursor: queda en el extremo derecho.
     CHECK_EQ(ed.cursor_.line, 0);
     CHECK_EQ(ed.cursor_.col, 5);
     // No es una edicion.
@@ -437,9 +461,9 @@ TEST(editor_selection_arrow_left_clears) {
     const int undoBefore = static_cast<int>(ed.undoStack_.size());
     const bool modified = ed.modified_;
 
-    press(ed, EventType::MoveLeft);       // sin shift
+    press(ed, EventType::Escape);         // cancelar seleccion (v0.3)
     CHECK(!ed.hasSelection());
-    // Left realiza el movimiento normal (ya estaria en (0,0), noop).
+    // ESC no mueve el cursor: queda en (0,0).
     CHECK_EQ(ed.cursor_.line, 0);
     CHECK_EQ(ed.cursor_.col, 0);
     CHECK_EQ(ed.document_.lineAt(0), content);
@@ -460,9 +484,9 @@ TEST(editor_selection_arrow_up_clears) {
     const int undoBefore = static_cast<int>(ed.undoStack_.size());
     const bool modified = ed.modified_;
 
-    press(ed, EventType::MoveUp);          // sin shift: cancela, sube
+    press(ed, EventType::Escape);         // cancelar seleccion (v0.3)
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.line, 1);
     CHECK_EQ(ed.cursor_.col, 0);
     CHECK_EQ(ed.document_.lineAt(0), line0);
     CHECK_EQ(ed.document_.lineAt(1), line1);
@@ -486,9 +510,9 @@ TEST(editor_selection_arrow_down_clears) {
     const int undoBefore = static_cast<int>(ed.undoStack_.size());
     const bool modified = ed.modified_;
 
-    press(ed, EventType::MoveDown);                   // sin shift
+    press(ed, EventType::Escape);                   // cancelar seleccion (v0.3)
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 1);                     // baja una linea
+    CHECK_EQ(ed.cursor_.line, 1);                     // ESC no mueve el cursor
     CHECK_EQ(ed.cursor_.col, 0);
     CHECK_EQ(ed.document_.lineAt(0), line0);
     CHECK_EQ(ed.document_.lineAt(1), line1);
@@ -865,8 +889,8 @@ TEST(selection_cancel_does_not_set_modified) {
     shiftPress(ed, EventType::MoveRight);
     CHECK(ed.hasSelection());
 
-    // Cancelar la seleccion con una flecha normal tampoco modifica.
-    press(ed, EventType::MoveRight);
+    // Cancelar la seleccion con ESC tampoco modifica.
+    press(ed, EventType::Escape);
     CHECK(!ed.hasSelection());
     CHECK(!ed.modified_);
 }
@@ -961,7 +985,7 @@ TEST(editor_save_after_selection_cancel) {
     type(ed, "hello");
     press(ed, EventType::MoveHome);
     shiftPress(ed, EventType::MoveRight);
-    press(ed, EventType::MoveRight); // cancelar seleccion
+    press(ed, EventType::Escape); // cancelar seleccion (v0.3)
 
     press(ed, EventType::Save);
 

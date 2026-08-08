@@ -3,7 +3,7 @@
 #include <unistd.h>
 
 Editor::Editor() {
-    statusMessage_ = "Ctrl+S guardar | Ctrl+Q salir";
+    statusMessage_ = "Ctrl+S seleccion | Ctrl+K guardar/salir | Ctrl+U deshacer | Ctrl+Y rehacer";
     savedLines_ = document_.snapshot();
 }
 
@@ -15,6 +15,8 @@ bool Editor::openFile(const std::string& path) {
     cursor_.line = 0;
     cursor_.col = 0;
     clearSelection();
+    state_ = State::Normal;
+    statusMessage_ = "";
     if (!existed) {
         statusMessage_ = "Archivo nuevo: " + path;
     }
@@ -55,6 +57,13 @@ void Editor::run() {
 }
 
 void Editor::handleEvent(const Event& event) {
+    // En modo Prefix (tras Ctrl+K) todo pasa por handlePrefixKey: el
+    // siguiente evento decide guardar/salir/cancelar.
+    if (state_ == State::Prefix) {
+        handlePrefixKey(event);
+        return;
+    }
+
     switch (event.type) {
         case EventType::InsertChar: {
             // Si hay seleccion, escribir reemplaza el texto seleccionado:
@@ -70,25 +79,66 @@ void Editor::handleEvent(const Event& event) {
                 document_.insertChar(cursor_.line, cursor_.col, event.ch);
                 cursor_.col++;
                 clearSelection();
+                state_ = State::Normal;
                 modified_ = true;
                 break;
             }
 
-            // Sin seleccion: insertar como siempre.
+            // Sin seleccion: insertar como siempre. Salir del modo
+            // seleccion si estaba activo (seleccion vacia).
             clearSelection();
             pushHistory();
             document_.insertChar(cursor_.line, cursor_.col, event.ch);
             cursor_.col++;
+            state_ = State::Normal;
+            clearSelection();
             modified_ = true;
             break;
         }
 
+        case EventType::Prefix:
+            // Ctrl+K: entra al modo prefijo. Guardamos el estado previo
+            // para poder volver a el (guardar sin salir de seleccion).
+            priorState_ = state_;
+            state_ = State::Prefix;
+            statusMessage_ = "Ctrl+K: Ctrl+S guardar | Ctrl+Q salir";
+            break;
+
+        case EventType::Select:
+            // Ctrl+S: entrar al modo seleccion. Si ya estabamos en
+            // seleccion, se ignora (sin efecto). En modo prefijo este
+            // evento ya fue consumido arriba y equivale a guardar.
+            if (state_ == State::Select) break;
+            beginSelection();
+            state_ = State::Select;
+            statusMessage_ = "SELECCION (ESC sale)";
+            break;
+
         case EventType::InsertNewline:
+            // En modo seleccion, Enter reemplaza el rango por una nueva
+            // linea (el "reemplaza la seleccion" de v0.3).
+            if (selection_.has_value() && selection_->anchor != selection_->position) {
+                pushHistory();
+                auto sel = normalize(*selection_);
+                document_.deleteRange(sel->start.line, sel->start.col,
+                                      sel->end.line, sel->end.col);
+                cursor_.line = sel->start.line;
+                cursor_.col = sel->start.col;
+                document_.insertNewline(cursor_.line, cursor_.col);
+                cursor_.line++;
+                cursor_.col = 0;
+                clearSelection();
+                state_ = State::Normal;
+                modified_ = true;
+                break;
+            }
+
             clearSelection();
             pushHistory();
             document_.insertNewline(cursor_.line, cursor_.col);
             cursor_.line++;
             cursor_.col = 0;
+            state_ = State::Normal;
             modified_ = true;
             break;
 
@@ -106,6 +156,7 @@ void Editor::handleEvent(const Event& event) {
                 cursor_.col = sel->start.col;
                 cursor_.clampToLine(document_);
                 clearSelection();
+                state_ = State::Normal;
                 modified_ = true;
                 statusMessage_ = "Seleccion borrada.";
                 break;
@@ -144,23 +195,24 @@ void Editor::handleEvent(const Event& event) {
             break;
 
         case EventType::MoveLeft: {
-            if (event.shift) beginSelection(); else clearSelection();
+            if (state_ == State::Select) beginSelection();
+            else clearSelection();
             cursor_.moveLeft(document_);
             updateSelectionPosition();
             break;
         }
 
         case EventType::MoveRight: {
-            if (event.shift) {
+            if (state_ == State::Select) {
+                // En modo seleccion la flecha derecha siempre extiende.
                 beginSelection();
                 cursor_.moveRight(document_);
                 updateSelectionPosition();
             } else {
-                // Flecha derecha SIN Shift con una seleccion hacia
-                // adelante: el cursor ya esta en el extremo derecho de
-                // la seleccion. Se cancela la seleccion y el cursor
-                // MANTIENE su posicion actual (no avanza sobre el texto
-                // seleccionado).
+                // Flecha derecha con una seleccion hacia adelante: el
+                // cursor ya esta en el extremo derecho de la seleccion.
+                // Se cancela la seleccion y el cursor MANTIENE su posicion
+                // actual (no avanza sobre el texto seleccionado).
                 bool cursorAtSelectionEnd = selection_.has_value() &&
                                             selection_->anchor < selection_->position;
                 clearSelection();
@@ -172,28 +224,32 @@ void Editor::handleEvent(const Event& event) {
         }
 
         case EventType::MoveUp: {
-            if (event.shift) beginSelection(); else clearSelection();
+            if (state_ == State::Select) beginSelection();
+            else clearSelection();
             cursor_.moveUp(document_);
             updateSelectionPosition();
             break;
         }
 
         case EventType::MoveDown: {
-            if (event.shift) beginSelection(); else clearSelection();
+            if (state_ == State::Select) beginSelection();
+            else clearSelection();
             cursor_.moveDown(document_);
             updateSelectionPosition();
             break;
         }
 
         case EventType::MoveHome: {
-            if (event.shift) beginSelection(); else clearSelection();
+            if (state_ == State::Select) beginSelection();
+            else clearSelection();
             cursor_.moveHome();
             updateSelectionPosition();
             break;
         }
 
         case EventType::MoveEnd: {
-            if (event.shift) beginSelection(); else clearSelection();
+            if (state_ == State::Select) beginSelection();
+            else clearSelection();
             cursor_.moveEnd(document_);
             updateSelectionPosition();
             break;
@@ -205,6 +261,11 @@ void Editor::handleEvent(const Event& event) {
 
         case EventType::Escape:
             // ESC suelto: cancela la seleccion activa sin mover el cursor.
+            // Si estabamos en modo seleccion, salimos de el.
+            if (state_ == State::Select) {
+                state_ = State::Normal;
+                statusMessage_ = "Seleccion cancelada.";
+            }
             clearSelection();
             break;
 
@@ -214,6 +275,27 @@ void Editor::handleEvent(const Event& event) {
 
         case EventType::None:
         default:
+            break;
+    }
+}
+
+void Editor::handlePrefixKey(const Event& event) {
+    switch (event.type) {
+        case EventType::Save:
+        case EventType::Select: // Ctrl+S tras Ctrl+K = guardar archivo
+            save();
+            state_ = priorState_;
+            break;
+
+        case EventType::Quit:
+            running_ = false;
+            break;
+
+        default:
+            // Cualquier otra tecla (incl. ESC, flechas, caracteres...):
+            // se descarta el evento y se cancela el prefijo, volviendo al
+            // estado anterior sin tocar la seleccion ni el documento.
+            state_ = priorState_;
             break;
     }
 }
@@ -231,6 +313,7 @@ void Editor::beginSelection() {
     if (!selection_.has_value()) {
         selection_ = Selection{};
         selection_->anchor = {cursor_.line, cursor_.col};
+        selection_->position = {cursor_.line, cursor_.col};
     }
 }
 
@@ -284,6 +367,9 @@ selection_ = state.selection;
             clearSelection();
         }
 }
+    // La seleccion restaurada vuelve a estar VIGENTE (modo seleccion
+    // si hay algo seleccionado, Normal si no).
+    state_ = selection_.has_value() ? State::Select : State::Normal;
     // modified_ = "¿el contenido difiere del ultimo guardado?"
     modified_ = (document_.snapshot() != savedLines_);
 }

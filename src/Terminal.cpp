@@ -120,13 +120,18 @@ Event Terminal::readEvent() {
         std::fprintf(stderr, " (%s)\n", raw.c_str());
     };
 
-    // Teclas de control basicas
+    // Teclas de control basicas. Todas son bytes UNICOS (no secuencias
+    // de escape), asi que funcionan igual en cualquier emulador.
     if (c == 17) { // Ctrl+Q -> salir
         e.type = EventType::Quit;
         return e;
     }
-    if (c == 19) { // Ctrl+S -> guardar
-        e.type = EventType::Save;
+    if (c == 19) { // Ctrl+S -> entrar al modo seleccion
+        e.type = EventType::Select;
+        return e;
+    }
+    if (c == 11) { // Ctrl+K -> prefijo de comando (Ctrl+S guarda, Ctrl+Q sale)
+        e.type = EventType::Prefix;
         return e;
     }
     if (c == 21) { // Ctrl+U -> deshacer
@@ -149,14 +154,11 @@ Event Terminal::readEvent() {
 
     // Secuencias de escape: flechas, Home, End, Delete.
     //
-    // BUG PENDIENTE (no resuelto): en algunas consolas la seleccion con
-    // Shift+Flecha puede no funcionar. El motivo: cada emulador emite la
-    // combinacion Shift+tecla de una forma distinta (algunos no anaden el
-    // modificador, e.g. envian igual que la flecha sola), e incluso hay
-    // consolas que "bloquean"/no entregan esa secuencia de teclas. Si el
-    // usuario reporta que la seleccion no responde, usar EDIT_DEBUG_KEYS=1
-    // para volcar los bytes reales y sumar la secuencia faltante en el
-    // parseo de abajo. Queda como trabajo a futuro.
+    // DESDE v0.3, la seleccion ya NO depende de estas secuencias: el modo
+    // seleccion se activa con Ctrl+S (un byte unico y fiable), no con
+    // Shift+Flecha. Los modificadores (Shift/Ctrl/Alt) que alguna terminal
+    // pueda anadir en el formato "ESC [ 1;2X" se ignoran: solo nos
+    // interesa el caracter final para saber que flecha/Home/End es.
     if (c == 27) { // ESC
         // Leemos los parametros (numeros y ';') hasta el caracter final,
         // esperando cada byte con un timeout corto. Si no llega nada
@@ -202,40 +204,23 @@ Event Terminal::readEvent() {
             }
         }
 
-        // Secuencias con parametros. Las clasicas: "3~" (Delete, sin ';'),
-        // y con modificador "1;2" (Shift+Flecha).
-        bool hasColon = body.find(';') != std::string::npos;
+        // Secuencias con parametros: p. ej. "3~" (Delete) o "1;2A"
+        // (flecha con modificador). Los modificadores se ignoran: desde
+        // v0.3 la seleccion se activa con Ctrl+S, no con Shift.
         if (prefix != '[') {
             e.type = EventType::None; dumpUnrecognized(); return e;
         }
-        if (!hasColon) {
-            if (final == '~') {
-                switch (body[0]) {
-                    case '3': e.type = EventType::Delete; return e; // Delete
-                    case '1': case '7': e.type = EventType::MoveHome; return e; // Home
-                    case '4': case '8': e.type = EventType::MoveEnd; return e; // End
-                    default: e.type = EventType::None; dumpUnrecognized(); return e;
-                }
-            } else {
-                e.type = EventType::None; dumpUnrecognized(); return e;
+
+        if (final == '~') {
+            switch (body[0]) {
+                case '3': e.type = EventType::Delete; return e; // Delete
+                case '1': case '7': e.type = EventType::MoveHome; return e; // Home
+                case '4': case '8': e.type = EventType::MoveEnd; return e; // End
+                default: e.type = EventType::None; dumpUnrecognized(); return e;
             }
         }
 
-        // Formato "1;2A" => modificador 2 = Shift.
-        size_t modStart = body.find(';') + 1;
-        std::string modStr = body.substr(modStart);
-        if (modStr.size() != 1 && modStr.size() != 0) {
-            e.type = EventType::None; dumpUnrecognized(); return e;
-        }
-        if (modStr == "2") {
-            e.shift = true;
-        } else if (modStr.empty() || modStr == "1") {
-            e.shift = false; // sin modificador (p.ej. ESC [ 1 ; A)
-        } else {
-            // Otros modificadores (Ctrl, Alt...) no se manejan en v0.1.
-            e.type = EventType::None; dumpUnrecognized(); return e;
-        }
-
+        // Flecha/Home/End con parametros: nos da igual el modificador.
         switch (final) {
             case 'A': e.type = EventType::MoveUp; return e;
             case 'B': e.type = EventType::MoveDown; return e;
