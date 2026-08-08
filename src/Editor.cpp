@@ -91,7 +91,6 @@ void Editor::handleEvent(const Event& event) {
             document_.insertChar(cursor_.line, cursor_.col, event.ch);
             cursor_.col++;
             state_ = State::Normal;
-            clearSelection();
             modified_ = true;
             break;
         }
@@ -301,6 +300,7 @@ void Editor::handlePrefixKey(const Event& event) {
             // se descarta el evento y se cancela el prefijo, volviendo al
             // estado anterior sin tocar la seleccion ni el documento.
             state_ = priorState_;
+            statusMessage_ = "Comando cancelado.";
             break;
     }
 }

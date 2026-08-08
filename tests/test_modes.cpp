@@ -67,7 +67,9 @@ TEST(prefix_quit_sets_running_false) {
 
 TEST(prefix_other_key_cancels_and_discards) {
     // Ctrl+K + una flecha: se descarta todo y se vuelve a Normal sin
-    // mover el cursor (el evento de la flecha no se propaga).
+    // mover el cursor (el evento de la flecha no se propaga). El mensaje
+    // del prefijo no debe quedar colgado: se reemplaza por "Comando
+    // cancelado.".
     Editor ed;
     type(ed, "abc");
     ed.handleEvent(Event{EventType::Prefix});
@@ -75,6 +77,7 @@ TEST(prefix_other_key_cancels_and_discards) {
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Normal));
     CHECK_EQ(ed.cursor_.col, 3);
     CHECK(ed.hasSelection() == false);
+    CHECK_EQ(ed.statusMessage_, "Comando cancelado.");
 }
 
 TEST(prefix_other_key_keeps_selection) {
