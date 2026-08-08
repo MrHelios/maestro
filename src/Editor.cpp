@@ -163,7 +163,11 @@ void Editor::handleEvent(const Event& event) {
             }
 
             // Sin seleccion: comportamiento clasico de cada tecla.
+            // Salimos del modo seleccion si estaba activo (seleccion
+            // vacia): aunque no haya texto borrado, el modo ya no aplica.
             clearSelection();
+            state_ = State::Normal;
+            statusMessage_ = "";
             pushHistory();
             if (event.type == EventType::Backspace) {
                 bool willMergeLines = (cursor_.col == 0 && cursor_.line > 0);

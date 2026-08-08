@@ -207,6 +207,44 @@ TEST(selection_cleared_by_backspace) {
     CHECK(!ed.hasSelection());
 }
 
+TEST(selection_empty_backspace_exits_select_mode) {
+    // Regresion: entrar a seleccion sin mover nada (anchor == position) y
+    // presionar Backspace. Un Backspace normal borra un caracter, pero el
+    // estado debe volver a Normal (no quedarse en Select con barra de
+    // status engañosa).
+    Editor ed;
+    type(ed, "abc");               // cursor (0,3)
+    press(ed, EventType::Select);  // entra a modo seleccion con sel vacia
+
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Select));
+    CHECK(!ed.hasSelection());
+
+    press(ed, EventType::Backspace);
+
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Normal));
+    CHECK_EQ(ed.document_.lineAt(0), "ab");
+
+    // Ahora un Ctrl+S de nuevo SI entra a seleccion (no queda "ya estoy
+    // seleccionando" sin efecto).
+    press(ed, EventType::Select);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Select));
+}
+
+TEST(selection_empty_selection_delete_exits_select_mode) {
+    // Igual que el anterior pero con Delete (modo seleccion vacio).
+    Editor ed;
+    type(ed, "abc");               // cursor (0,3)
+    press(ed, EventType::MoveHome); // cursor a (0,0)
+    press(ed, EventType::Select);  // sel vacia (anchor == position == (0,0))
+
+    press(ed, EventType::Delete);  // borra el caracter bajo el cursor
+
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Normal));
+    CHECK_EQ(ed.document_.lineAt(0), "bc");
+}
+
 TEST(selection_cleared_by_delete) {
     Editor ed;
     type(ed, "abc");
