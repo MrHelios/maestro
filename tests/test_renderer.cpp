@@ -203,6 +203,19 @@ TEST(statusbar_path_sacrificed_before_name) {
     CHECK(contains(out, "Linea: 1 Col: 1"));
 }
 
+TEST(statusbar_path_uses_rest_after_name_reserved) {
+    // El nombre se reserva primero; la ruta toma SOLO lo que sobra y se
+    // agota (hasta "..." ) antes de tocar el nombre. En un presupuesto
+    // apretado, el nombre queda completo y la ruta se reduce a lo minimo.
+    std::string out = barFrame(
+        "/some/verylongdirectorychainloading/ending.txt",
+        false, "", State::Normal, 41);
+    CHECK(contains(out, "ending.txt - ... - NORMAL"));
+    // La ruta casi no deja componente visible: su nombre de archivo no
+    // debe colarse en el recorte.
+    CHECK(!contains(out, "verylongdirectory"));
+}
+
 TEST(statusbar_second_row_message_independent) {
     // La fila de mensajes es propia: se muestra tal cual y se trunca al
     // ancho de la terminal sin competir con la barra fija.

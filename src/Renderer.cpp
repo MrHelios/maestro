@@ -106,35 +106,32 @@ std::string stateLabel(State state) {
     }
 }
 
-// Une `name SEP path` dentro de `budget` columnas. La ruta cede espacio
-// de forma prioritaria (se trunca por la IZQUIERDA, con "..." al
-// inicio); el nombre solo se sacrifica como ultimo recurso. Devuelve la
-// parte que cabe del bloque (sin la etiqueta de estado).
+// Une `name SEP path` dentro de `budget` columnas, respetando la
+// prioridad de sacrificio: la ruta se agota primero (truncada por la
+// IZQUIERDA, con "..." al inicio) y el nombre se toca solo como ultimo
+// recurso. Para eso se RESERVA el nombre (fijo, sin truncarlo si se
+// puede evitar), se resta del presupuesto y el resto entero se da a la
+// ruta. Devuelve la parte que cabe del bloque (sin la etiqueta de
+// estado).
 std::string buildLeftParts(int budget, const std::string& name,
                            const std::string& path) {
+    if (budget <= 0) return "";
+
+    int nameW = colCount(name);
+    // Si el nombre ya ocupa el presupuesto entero (o mas), se trunca el
+    // nombre: no queda lugar para la ruta ni el separador.
+    if (nameW >= budget) return utf8Truncate(name, budget);
+
     const std::string sep = " - ";
-    std::string out;
-    int used = 0;
+    int sepW = static_cast<int>(sep.size());
 
-    auto append = [&](const std::string& frag, bool keepTail) {
-        int w = colCount(frag);
-        if (used + w <= budget) {
-            out += frag;
-            used += w;
-            return true;
-        }
-        if (used >= budget) return false;
-        int room = budget - used;
-        out += keepTail ? utf8TruncateFront(frag, room) : utf8Truncate(frag, room);
-        used = budget;
-        return false;
-    };
+    // Resto del presupuesto para la ruta (separiendo tambien el separador).
+    int pathBudget = budget - nameW - sepW;
 
-    append(name, /*keepTail=*/false);
-    if (!path.empty() && used < budget) {
-        if (append(sep, false)) {
-            append(path, /*keepTail=*/true);
-        }
+    std::string out = name;
+    if (!path.empty() && pathBudget > 0) {
+        out += sep;
+        out += utf8TruncateFront(path, pathBudget);
     }
     return out;
 }

@@ -18,6 +18,19 @@
 //   Select:  modo seleccion (activo con Ctrl+S). Las flechas/Home/End
 //            extienden la seleccion; ESC la cancela y sale; un caracter
 //            o Enter la reemplaza y sale del modo.
+//
+// IMPORTANTE: estas son DOS cosas distintas que NO hay que confundir.
+//   state_ == State::Select  == "el modo seleccion esta ACTIVO" (modo).
+//   hasSelection()            == "existe un rango de texto seleccionado",
+//                               es decir un rango NO vacio (anchor != position).
+//
+// Al entrar al modo (Ctrl+S) sin haber movido el cursor, beginSelection()
+// fija anchor == position, asi que es posible tener:
+//     state_ == State::Select   y   hasSelection() == false
+// (modo seleccion listo pero todavia sin texto marcado). Eso es correcto
+// por diseño: el modo es la capacidad de extender; hasSelection() es el
+// resultado concreto. Un estado solo significa lo que anuncia: "modo"
+// NO implica "texto seleccionado".
 enum class State {
     Normal,
     Prefix,
@@ -44,7 +57,10 @@ public:
     void run();
 
     // --- Consultas sobre la seleccion ---
-    // false si no hay texto seleccionado (anchor == position).
+    // true solo si hay un rango NO vacio seleccionado (anchor != position).
+    // No confundir con state_ == State::Select (modo activo), que puede ser
+    // true aunque no haya texto marcado todavia. "Seleccion activa" (modo)
+    // y "texto seleccionado" (rango) son cosas distintas.
     bool hasSelection() const;
     // Seleccion actual, si la hay (normalizada: start antes que end).
     std::optional<Normalized> selection() const;
@@ -57,6 +73,10 @@ private:
     Terminal terminal_;
 
 // Estado de la maquina de estados (Normal/Prefix/Select).
+// state_ == Select significa SOLO "modo seleccion activo". No implica
+// que haya texto seleccionado: ver hasSelection() (rango no vacio).
+// Los dos se pueden mismatchear (Select sin seleccion, p.ej. justo
+// despues de Ctrl+S sin mover el cursor).
     State state_ = State::Normal;
     // Estado previo, guardado al entrar en Prefix para volver a el si
     // el prefijo se cancela o ejecuta (p.ej. guardar sin salir de

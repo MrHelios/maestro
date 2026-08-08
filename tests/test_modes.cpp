@@ -146,6 +146,69 @@ TEST(select_ctrl_s_while_in_selection_ignored) {
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Select));
 }
 
+TEST(select_repeat_ctrl_s_empty_selection_ignored) {
+    // Ctrl+S repetido con seleccion VACIA: el 2do no hace nada (ni arma
+    // rango ni toca el historial). El modo Select se mantiene sin marca.
+    Editor ed;
+    type(ed, "abc");                 // cursor (0,3)
+    press(ed, EventType::Select);    // Ctrl+S: entra, seleccion vacia
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Select));
+
+    const int undoBefore = static_cast<int>(ed.undoStack_.size());
+    press(ed, EventType::Select);    // Ctrl+S repetido: se ignora
+
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Select));
+    CHECK_EQ(ed.document_.lineAt(0), "abc");     // sin edicion
+    CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore));
+}
+
+TEST(select_prefix_cancel_returns_to_select) {
+    // Dentro del modo seleccion, Ctrl+K abre el prefijo; si se cancela
+    // (tecla que no guarde ni salga), se vuelve al modo Select con la
+    // seleccion intacta. No es edicion ni consume el historial.
+    Editor ed;
+    type(ed, "hello");
+    press(ed, EventType::MoveHome);
+    press(ed, EventType::Select);
+    press(ed, EventType::MoveRight);          // [h]
+    CHECK(ed.hasSelection());
+
+    const int undoBefore = static_cast<int>(ed.undoStack_.size());
+    press(ed, EventType::Prefix);             // Ctrl+K -> prefijo
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Prefix));
+    press(ed, EventType::MoveRight);          // no guarda/sale: cancela
+
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Select));
+    CHECK(ed.hasSelection());                 // la seleccion se mantiene
+    CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore));
+}
+
+TEST(select_save_keeps_selection_and_mode) {
+    // Save directo estando en modo seleccion: guarda el archivo, mantiene
+    // la seleccion y NO sale del modo Select.
+    TempFile f;
+    f.write("hello");
+    Editor ed;
+    CHECK(ed.openFile(f.path));
+
+    press(ed, EventType::MoveEnd);
+    type(ed, "!");                  // "hello!", modified_
+    CHECK(ed.modified_);
+    press(ed, EventType::MoveHome);
+    press(ed, EventType::Select);   // entra a seleccion
+    press(ed, EventType::MoveRight); // [h]
+    CHECK(ed.hasSelection());
+
+    press(ed, EventType::Save);     // guarda directo, sin salir de seleccion
+
+    CHECK(!ed.modified_);
+    CHECK_EQ(fileContent(f.path), "hello!");
+    CHECK(ed.hasSelection());                     // sigue marcada
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Select));
+}
+
 TEST(select_escape_exits_mode) {
     Editor ed;
     type(ed, "abc");

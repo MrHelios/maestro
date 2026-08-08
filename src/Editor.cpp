@@ -389,9 +389,15 @@ selection_ = state.selection;
             clearSelection();
         }
 }
-    // La seleccion restaurada vuelve a estar VIGENTE (modo seleccion
-    // si hay algo seleccionado, Normal si no).
-    state_ = selection_.has_value() ? State::Select : State::Normal;
+    // La seleccion restaurada vuelve a estar VIGENTE. Importante: el modo
+    // Select solo debe activarse si el rango restaurado es realmente NO
+    // vacio. Usar `has_value()` como criterio dejaria el estado en Select
+    // para una seleccion vacia (anchor == position), con la barra de estado
+    // mostrando "SELECCION" sin texto resaltado. Compartimos el criterio
+    // con hasSelection() (anchor != position).
+    state_ = (selection_.has_value() && selection_->anchor != selection_->position)
+           ? State::Select
+           : State::Normal;
     // modified_ = "¿el contenido difiere del ultimo guardado?"
     modified_ = (document_.snapshot() != savedLines_);
 }

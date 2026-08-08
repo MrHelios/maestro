@@ -83,7 +83,8 @@ static void assertStateConsistent(Editor& ed) {
 }
 
 // Secuencia determinista de eventos que cubre todas las mutaciones,
-// incluidos los movimientos con Shift que arman y anulan seleccion.
+// incluido el modo seleccion: entrar (Ctrl+S) y extender con las flechas,
+// lo que arma y anula la seleccion (rango vacio <-> no vacio).
 // Tras cada evento el estado completo (Document, Cursor, undo/redo y
 // ahora la seleccion) debe seguir siendo consistente.
 TEST(state_consistent_after_random_events) {
@@ -172,8 +173,8 @@ TEST(state_stress_mixed_operations_selection) {
 
     assertStateConsistent(ed);
 
-    // Generador deterministico (LGC simple) para las posiciones Shift /
-    // no-Shift y las letras.
+    // Generador deterministico (LGC simple) para las posiciones de los
+    // movimientos con/sin seleccion (modo Select o Normal) y las letras.
     unsigned long seed = 12345;
     auto rnd = [&seed]() {
         seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
