@@ -2,13 +2,29 @@
 
 #include <unistd.h>
 
+namespace {
+
+// Convierte una ruta posiblemente relativa en una absoluta (cwd() + "/"
+// + ruta) para mostrarla en la barra de estado. Las rutas ya absolutas
+// o vacias se devuelven tal cual.
+std::string resolveAbsolutePath(const std::string& path) {
+    if (path.empty() || path.front() == '/') return path;
+    char buf[4096];
+    if (!getcwd(buf, sizeof buf)) return path;
+    return std::string(buf) + "/" + path;
+}
+
+} // namespace
+
 Editor::Editor() {
     statusMessage_ = "Ctrl+S seleccion | Ctrl+K guardar/salir | Ctrl+U deshacer | Ctrl+Y rehacer";
     savedLines_ = document_.snapshot();
 }
 
 bool Editor::openFile(const std::string& path) {
-    filename_ = path;
+    // La barra de estado muestra siempre una ruta absoluta: si el
+    // archivo se abrio con ruta relativa, la resolvemos contra cwd().
+    filename_ = resolveAbsolutePath(path);
     bool existed = document_.loadFromFile(path);
     modified_ = false;
     savedLines_ = document_.snapshot();
@@ -26,8 +42,9 @@ bool Editor::openFile(const std::string& path) {
 void Editor::run() {
     int rows, cols;
     terminal_.getWindowSize(rows, cols);
-    // Reservamos la ultima fila para la barra de estado.
-    viewport_.height = rows > 1 ? rows - 1 : 1;
+    // La barra de estado ocupa las ultimas DOS filas: la fila fija (en
+    // video inverso) y la fila de mensajes. El viewport usa el resto.
+    viewport_.height = rows > 2 ? rows - 2 : 1;
     viewport_.width = cols;
 
     terminal_.enableRawMode();
@@ -39,7 +56,7 @@ void Editor::run() {
 
     // Primer render antes de esperar el primer evento.
     viewport_.scrollToCursor(cursor_);
-    renderer_.render(document_, cursor_, viewport_, filename_, modified_, statusMessage_, selection_);
+    renderer_.render(document_, cursor_, viewport_, filename_, modified_, statusMessage_, state_, selection_);
 
     while (running_) {
         Event event = terminal_.readEvent();
@@ -48,7 +65,7 @@ void Editor::run() {
         if (!running_) break;
 
         viewport_.scrollToCursor(cursor_);
-        renderer_.render(document_, cursor_, viewport_, filename_, modified_, statusMessage_, selection_);
+        renderer_.render(document_, cursor_, viewport_, filename_, modified_, statusMessage_, state_, selection_);
     }
 
     terminal_.disableRawMode();

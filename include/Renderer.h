@@ -7,6 +7,10 @@
 #include "Selection.h"
 #include "Viewport.h"
 
+// Hacia adelante para el estado de la maquina de estados (definido en
+// Editor.h). Solo se usa como etiqueta visual en la barra de estado.
+enum class State;
+
 // El Renderer sabe DIBUJAR, pero nunca modifica el Document, el
 // Cursor ni el Viewport (salvo scrollToCursor, que es responsabilidad
 // del propio Viewport, llamada desde Editor antes de renderizar).
@@ -25,6 +29,7 @@ public:
                             const std::string& filename,
                             bool modified,
                             const std::string& statusMessage,
+                            State state,
                             const std::optional<Selection>& selection = std::nullopt);
 
     // Construye el frame con buildScreen() y lo escribe a STDOUT.
@@ -34,5 +39,6 @@ public:
                 const std::string& filename,
                 bool modified,
                 const std::string& statusMessage,
+                State state,
                 const std::optional<Selection>& selection = std::nullopt);
 };

@@ -80,6 +80,18 @@ TEST(editor_open_existing) {
     CHECK_EQ(ed.document_.lineAt(1), "two");
 }
 
+TEST(editor_open_relative_resolves_absolute) {
+    // v0.4: la barra de estado muestra siempre ruta absoluta. Abrir con
+    // ruta relativa la resuelve contra cwd(). El archivo no existe, asi
+    // que no se toca disco y el nombre queda resuelto.
+    Editor ed;
+    CHECK(!ed.openFile("archivo_rel_zz_no_existe.txt"));
+
+    char cwd[4096];
+    CHECK(getcwd(cwd, sizeof cwd) != nullptr);
+    CHECK_EQ(ed.filename_, std::string(cwd) + "/archivo_rel_zz_no_existe.txt");
+}
+
 // ---------------------------------------------------------------------------
 // 2. Navegacion del cursor a nivel Editor (via eventos)
 // ---------------------------------------------------------------------------

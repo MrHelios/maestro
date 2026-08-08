@@ -1,7 +1,4 @@
-# edit — editor de texto de terminal (v0.3)
-
-Editor de texto minimalista en C++17, sin interfaz gráfica, pensado
-como base extensible.
+# edit — editor de texto de terminal (v0.4)
 
 Editor de texto minimalista en C++17, sin interfaz gráfica, pensado
 como base extensible.
@@ -50,6 +47,19 @@ Si el archivo no existe, se crea uno nuevo en memoria (se guarda con Ctrl+K, Ctr
 | Delete               | Borrar carácter siguiente                      |
 | Cualquier letra      | Insertar carácter                              |
 | Esc                  | Salir del modo selección                       |
+
+### Barra de estado (v0.4)
+
+La barra de estado ocupa las dos últimas filas de la terminal:
+
+- **Fila 1 (fija)** en video inverso, a ancho completo: bloque izquierdo
+  `nombre - ruta - ESTADO` (`NORMAL` / `SELECCION` / `COMANDO`), con
+  `[modificado]` junto al nombre si hay cambios sin guardar, y la ruta
+  resuelta siempre a absoluta. Bloque derecho `Linea: N Col: M`, anclado
+  a la derecha y nunca truncado. Ante una terminal chica se sacrifica
+  primero la ruta (con `...` al inicio) y luego el nombre.
+- **Fila 2 (mensajes)**: `statusMessage` (ayudas, avisos de undo/guardado…)
+  sin inverso, truncada a su propio ancho, reservada aunque esté vacía.
 
 ### Modo selección
 
