@@ -37,7 +37,20 @@ static int utf8Len(unsigned char b) {
     return 1;
 }
 
+// Abre el modo Interaccion (presiona 'i') si no estamos ya en el: es lo
+// que en v0.5 permite escribir libremente.
+static void enterInteraccion(Editor& ed) {
+    if (ed.state_ != State::Interaccion) {
+        if (ed.state_ == State::Seleccion) {
+            Event esc; esc.type = EventType::Escape; ed.handleEvent(esc);
+        }
+        ed.handleEvent(insert('i'));
+    }
+}
+
 static void type(Editor& ed, const std::string& s) {
+    if (s.empty()) return;
+    enterInteraccion(ed);
     for (size_t i = 0; i < s.size();) {
         int len = utf8Len(static_cast<unsigned char>(s[i]));
         ed.handleEvent(insertBytes(s.substr(i, static_cast<size_t>(len))));
@@ -49,6 +62,13 @@ static void press(Editor& ed, EventType type) {
     Event e;
     e.type = type;
     ed.handleEvent(e);
+}
+
+// v0.5: un Save suelto (Ctrl+S) es no-op fuera del prefijo. Guardar pasa
+// obligatoriamente por Ctrl+K -> Ctrl+S (Prefix -> Save).
+static void save(Editor& ed) {
+    press(ed, EventType::Prefix);
+    Event e; e.type = EventType::Save; ed.handleEvent(e);
 }
 
 static std::string fileContent(const std::string& p) {
@@ -263,6 +283,7 @@ TEST(editor_vertical_remembers_preferred_column) {
 // ---------------------------------------------------------------------------
 TEST(editor_insert_character) {
     Editor ed;
+    ed.handleEvent(insert('i'));          // entrar a Interaccion
     ed.handleEvent(insert('A'));
     ed.handleEvent(insert('B'));
     CHECK_EQ(ed.document_.lineAt(0), "AB");
@@ -283,7 +304,7 @@ TEST(editor_insert_inserts_at_cursor_position) {
 TEST(editor_insert_marks_modified) {
     Editor ed;
     CHECK(!ed.modified_);
-    ed.handleEvent(insert('x'));
+    type(ed, "x");
     CHECK(ed.modified_);
 }
 
@@ -522,7 +543,7 @@ TEST(editor_redo_invalidated_by_new_change) {
     Editor ed;
     type(ed, "a");
     press(ed, EventType::Undo);
-    ed.handleEvent(insert('Z'));
+    type(ed, "Z");
     press(ed, EventType::Redo);
     CHECK_EQ(ed.document_.lineAt(0), "Z");
     CHECK_EQ(ed.cursor_.line, 0);
@@ -548,7 +569,7 @@ TEST(editor_save_new_document) {
     ed.openFile(f.path);
     type(ed, "Hi");
     CHECK(ed.modified_);
-    press(ed, EventType::Save);
+    save(ed);
     CHECK(!ed.modified_);
     CHECK_EQ(fileContent(f.path), "Hi");
 }
@@ -557,7 +578,7 @@ TEST(editor_save_empty_document) {
     TempFile f;
     Editor ed;
     ed.openFile(f.path);
-    press(ed, EventType::Save);
+    save(ed);
     CHECK(fileContent(f.path).empty());
 }
 
@@ -569,12 +590,14 @@ TEST(editor_save_overwrites_content) {
     Editor ed;
     CHECK(ed.openFile(f.path));
 
-    // El cursor abre en (0,0): muevo al final, borro "old" y escribo "new".
+    // El cursor abre en (0,0): muevo al final, entro en Interaccion para
+    // poder borrar "old" y luego escribo "new".
     press(ed, EventType::MoveEnd);
+    enterInteraccion(ed);
     for (int i = 0; i < 3; ++i)
         press(ed, EventType::Backspace);
     type(ed, "new");
-    press(ed, EventType::Save);
+    save(ed);
 
     CHECK(!ed.modified_);
     CHECK_EQ(fileContent(f.path), "new");
@@ -590,7 +613,7 @@ TEST(editor_save_error_path) {
     ed.openFile("/no/such/dir/file.txt");
     type(ed, "a");
     CHECK(ed.modified_);
-    press(ed, EventType::Save);
+    save(ed);
     CHECK(ed.modified_);
 }
 
@@ -605,7 +628,7 @@ TEST(editor_modified_after_change_after_save) {
     ed.openFile(f.path);
 
     type(ed, "a");
-    press(ed, EventType::Save);
+    save(ed);
     CHECK(!ed.modified_);
 
     type(ed, "b");
@@ -627,7 +650,7 @@ TEST(editor_modified_undo_redo) {
     ed.openFile(f.path);
 
     type(ed, "a");
-    press(ed, EventType::Save);
+    save(ed);
     CHECK(!ed.modified_);
 
     type(ed, "b");
@@ -668,7 +691,7 @@ TEST(editor_quit_after_save_via_prefix) {
     Editor ed;
     ed.openFile(f.path);
     type(ed, "a");
-    press(ed, EventType::Save);
+    save(ed);
     // Quit suelto no sale...
     press(ed, EventType::Quit);
     CHECK(ed.running_);
@@ -692,16 +715,10 @@ TEST(editor_quit_with_unsaved_changes_via_prefix) {
     CHECK(!ed.running_);
 }
 
-// ---------------------------------------------------------------------------
-// 14. Cursor despues de una seleccion UTF-8 (Editor + Renderer de la mano).
-// Verifica que Editor y Renderer coinciden en la posicion del cursor: el
-// Editor deja cursor_.col como offset de bytes y el Renderer lo dibuja como
-// COLUMNA VISUAL (columnOf). Para "abcédef" borrar/reemplazar "[éde]".
-// ---------------------------------------------------------------------------
+// Cursor: columna VISUAL (1-based, la de la secuencia "\x1b[1;<col>H") a la
+// que el Renderer moveria el cursor para `line` con cursor en el byte
+// `byteCol`. Usado por los tests de cursor tras tipear multibyte.
 namespace {
-
-// Columna VISUAL (1-based, la de la secuencia "\x1b[1;<col>H") a la que el
-// Renderer moveria el cursor para `line` con cursor en el byte `byteCol`.
 int cursorScreenCol(const std::string& line, int byteCol) {
     Document doc;
     doc.restore({line});
@@ -710,140 +727,13 @@ int cursorScreenCol(const std::string& line, int byteCol) {
     Cursor c;
     c.line = 0; c.col = byteCol;
     Renderer r;
-    std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Normal, std::nullopt);
+    std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
     size_t pos = f.rfind("\x1b[1;");
     if (pos == std::string::npos) return -1;
     size_t end = f.find('H', pos);
     return std::stoi(f.substr(pos + 4, end - pos - 4));
 }
-
-// Prepara un Editor con "abcédef" y la seleccion "[éde]" (bytes 3..7).
-void setupWithEde(Editor& ed) {
-    ed.document_.restore({"abc\xc3\xa9" "def"});
-    ed.selection_ = Selection{};
-    ed.selection_->anchor   = {0, 3};
-    ed.selection_->position = {0, 7};
-    ed.state_ = State::Select;
-    ed.cursor_.line = 0;
-    ed.cursor_.col = 7;
-}
-
 } // namespace
-
-TEST(editor_delete_selection_utf8_cursor_position) {
-    // "[éde]" -> Delete. Resultado "abcf"; el cursor queda como offset de
-    // bytes 3 (tras 'c') que el Renderer dibuja en la columna visual 3.
-    Editor ed;
-    setupWithEde(ed);
-    press(ed, EventType::Delete);
-
-    CHECK_EQ(ed.document_.lineAt(0), "abcf");
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 3);          // contrato del Editor
-    CHECK(!ed.hasSelection());
-
-    // El Renderer lo pinta en la columna visual correcta: tras 'c', antes
-    // de 'f' -> columna 3 (0-indexada) -> secuencia 1;4H. Con un offset de
-    // bytes mal usado, "abcf" tiene 4 bytes pero aqui NO da 4+1.
-    CHECK_EQ(ed.cursor_.col, static_cast<int>(utf8::columnOf(ed.document_.lineAt(0), 3)));
-}
-
-TEST(editor_replace_selection_utf8_cursor_position) {
-    // "[éde]" -> 'X'. Resultado "abcXf"; el cursor justo despues de 'X'.
-    Editor ed;
-    setupWithEde(ed);
-    ed.handleEvent(insert('X'));
-
-    CHECK_EQ(ed.document_.lineAt(0), "abcXf");
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 4);          // byte offset inmediatamente tras la X
-    CHECK(!ed.hasSelection());
-
-    // El Renderer dibuja el cursor justo despues de la X (columna visual 4
-    // -> secuencia 1;5H), no despues de contar bytes.
-    CHECK_EQ(cursorScreenCol(ed.document_.lineAt(0), ed.cursor_.col), 5);
-}
-
-// ---------------------------------------------------------------------------
-// 15. UTF-8 + Undo/Redo. El historial guarda lineas + cursor + seleccion
-// (posiciones en BYTES). Para "abc[é—😀]def" verificar Delete y Replace con
-// su ciclo Undo/Redo: contenido, cursor, seleccion y posiciones visuales.
-// ---------------------------------------------------------------------------
-namespace {
-
-// "abcé—😀def": a b c é — 😀 d e f. El bloque "[é—😀]" son los bytes 3..12.
-const char* edemo = "abc\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80" "def";
-
-void setupDemo(Editor& ed) {
-    ed.document_.restore({edemo});
-    ed.selection_ = Selection{};
-    ed.selection_->anchor   = {0, 3};
-    ed.selection_->position = {0, 12};
-    ed.state_ = State::Select;
-    ed.cursor_.line = 0;
-    ed.cursor_.col = 12;
-}
-
-} // namespace
-
-TEST(editor_undo_redo_delete_selection_utf8) {
-    Editor ed;
-    setupDemo(ed);
-
-    // Delete: borra "[é—😀]".
-    press(ed, EventType::Delete);
-    CHECK_EQ(ed.document_.lineAt(0), "abcdef");
-    CHECK_EQ(ed.cursor_.col, 3);          // inicio del rango borrado
-    CHECK(!ed.hasSelection());
-    CHECK_EQ(cursorScreenCol("abcdef", 3), 4);
-
-    // Undo: vuelve "abcé—😀def" restaurando la seleccion completa.
-    press(ed, EventType::Undo);
-    CHECK_EQ(ed.document_.lineAt(0), edemo);
-    CHECK_EQ(ed.cursor_.col, 12);         // se restaura la posicion previa
-    CHECK(ed.hasSelection());
-    auto sel = ed.selection();            // empieza y termina exactamente en el bloque
-    CHECK(sel.has_value());
-    CHECK(sel->start.col == 3 && sel->end.col == 12);
-    // El cursor se sigue dibujando con la columna VISUAL (tras "😀"),
-    // no con el offset de bytes.
-    CHECK_EQ(cursorScreenCol(edemo, ed.cursor_.col), 7);
-
-    // Redo: repite el borrado.
-    press(ed, EventType::Redo);
-    CHECK_EQ(ed.document_.lineAt(0), "abcdef");
-    CHECK_EQ(ed.cursor_.col, 3);
-    CHECK(!ed.hasSelection());
-}
-
-TEST(editor_undo_redo_replace_selection_utf8) {
-    Editor ed;
-    setupDemo(ed);
-
-    // Replace "[é—😀]" -> 'X'.
-    ed.handleEvent(insert('X'));
-    CHECK_EQ(ed.document_.lineAt(0), "abcXdef");
-    CHECK_EQ(ed.cursor_.col, 4);          // justo despues de la X
-    CHECK(!ed.hasSelection());
-    CHECK_EQ(cursorScreenCol("abcXdef", 4), 5);
-
-    // Undo: restaura el texto UTF-8 y la seleccion de 3 multibyte.
-    press(ed, EventType::Undo);
-    CHECK_EQ(ed.document_.lineAt(0), edemo);
-    CHECK_EQ(ed.cursor_.col, 12);
-    CHECK(ed.hasSelection());
-    auto sel = ed.selection();
-    CHECK(sel.has_value());
-    CHECK(sel->start.col == 3 && sel->end.col == 12);
-    CHECK_EQ(cursorScreenCol(edemo, ed.cursor_.col), 7);
-
-    // Redo: vuelve a "abcXdef" con el cursor tras la X.
-    press(ed, EventType::Redo);
-    CHECK_EQ(ed.document_.lineAt(0), "abcXdef");
-    CHECK_EQ(ed.cursor_.col, 4);
-    CHECK(!ed.hasSelection());
-    CHECK_EQ(cursorScreenCol("abcXdef", 4), 5);
-}
 
 // ---------------------------------------------------------------------------
 // 16. Cursor desplazandose por caracteres UTF-8 CONSECUTIVOS ("éééé",
@@ -894,6 +784,7 @@ TEST(editor_cursor_moves_char_by_char_consecutive_utf8) {
 TEST(editor_type_accented_multibyte) {
     Editor ed;
     // Tipear "ñ" (0xC3 0xB1) y "á" (0xC3 0xA1) como un solo evento cada uno.
+    enterInteraccion(ed);
     ed.handleEvent(insertBytes("\xc3\xb1"));
     CHECK_EQ(ed.document_.lineAt(0), "\xc3\xb1");
     CHECK_EQ(ed.cursor_.col, 2); // avanza los 2 bytes del caracter
@@ -934,6 +825,7 @@ TEST(editor_backspace_removes_whole_multibyte) {
     ed.document_.restore({"\xc3\xb1\xc3\xa1"}); // "ñá"
     ed.cursor_.line = 0;
     ed.cursor_.col = 4; // tras "á"
+    enterInteraccion(ed); // Backspace solo actua en Interaccion (v0.5)
     press(ed, EventType::Backspace);
     CHECK_EQ(ed.document_.lineAt(0), "\xc3\xb1"); // queda "ñ"
     CHECK_EQ(ed.cursor_.col, 2); // limite tras "ñ", no un byte suelto

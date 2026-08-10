@@ -126,8 +126,8 @@ Event Terminal::readEvent() {
         e.type = EventType::Quit;
         return e;
     }
-    if (c == 19) { // Ctrl+S -> entrar al modo seleccion
-        e.type = EventType::Select;
+    if (c == 19) { // Ctrl+S -> guardar (solo efectivo tras el prefijo Ctrl+K)
+        e.type = EventType::Save;
         return e;
     }
     if (c == 11) { // Ctrl+K -> prefijo de comando (Ctrl+S guarda, Ctrl+Q sale)
@@ -154,11 +154,11 @@ Event Terminal::readEvent() {
 
     // Secuencias de escape: flechas, Home, End, Delete.
     //
-    // DESDE v0.3, la seleccion ya NO depende de estas secuencias: el modo
-    // seleccion se activa con Ctrl+S (un byte unico y fiable), no con
-    // Shift+Flecha. Los modificadores (Shift/Ctrl/Alt) que alguna terminal
-    // pueda anadir en el formato "ESC [ 1;2X" se ignoran: solo nos
-    // interesa el caracter final para saber que flecha/Home/End es.
+    // DESDE v0.5, la seleccion ya NO depende de estas secuencias: el modo
+    // seleccion se activa con la letra 's' (un byte unico y fiable) en
+    // modo Navegacion, no con Shift+Flecha. Los modificadores (Shift/Ctrl/Alt)
+    // que alguna terminal pueda anadir en el formato "ESC [ 1;2X" se ignoran:
+    // solo nos interesa el caracter final para saber que flecha/Home/End es.
     if (c == 27) { // ESC
         // Leemos los parametros (numeros y ';') hasta el caracter final,
         // esperando cada byte con un timeout corto. Si no llega nada
@@ -206,7 +206,7 @@ Event Terminal::readEvent() {
 
         // Secuencias con parametros: p. ej. "3~" (Delete) o "1;2A"
         // (flecha con modificador). Los modificadores se ignoran: desde
-        // v0.3 la seleccion se activa con Ctrl+S, no con Shift.
+        // v0.5 la seleccion se activa con 's', no con Shift.
         if (prefix != '[') {
             e.type = EventType::None; dumpUnrecognized(); return e;
         }

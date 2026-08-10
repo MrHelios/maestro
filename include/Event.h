@@ -20,16 +20,16 @@ enum class EventType {
     Delete,
     Undo,
     Redo,
-    Save,
     Quit,
     // Ctrl+K: entra en "modo prefijo"; el siguiente evento decide
     // (Ctrl+S guarda, Ctrl+Q sale, cualquier otra cosa lo cancela).
     Prefix,
-    // Ctrl+S: entra al modo seleccion (reemplaza a Shift+Flecha, que
-    // no funciona de forma fiable en todos los emuladores).
-    Select,
+    // Ctrl+S: guardar. Solo tiene efecto tras el prefijo (Ctrl+K); fuera
+    // de el se ignora. La entrada a seleccion ya NO es por Ctrl+S: desde
+    // v0.5 se hace con la letra 's' dentro del modo Navegacion.
+    Save,
     // ESC suelto (no seguido de una secuencia de flecha/Home/...).
-    // Tipico uso: cancelar la seleccion activa.
+    // Tipico uso: cancelar la seleccion activa o salir de Interaccion.
     Escape,
 };
 
@@ -40,7 +40,7 @@ struct Event {
     // multibyte (2-4 bytes, p.ej. "á", "ñ", "—", "😀"). Asi el Editor
     // recibee el caracter completo, no byte por byte.
     std::string text;
-    // Nota: desde v0.3 no hay campo "shift". La seleccion se activa con
-    // Ctrl+S (evento Select) y NO depende del modificador Shift, que
-    // cada terminal emite de forma distinta.
+    // Nota: desde v0.3 no hay campo "shift". La seleccion no depende del
+    // modificador Shift (que cada terminal emite de forma distinta); la
+    // entrada a seleccion se hace con la letra 's' en modo Navegacion.
 };

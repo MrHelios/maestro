@@ -21,7 +21,25 @@ static Event insert(char c) {
     return e;
 }
 
+static Event escapeEvent() {
+    Event e;
+    e.type = EventType::Escape;
+    return e;
+}
+
+// v0.5: escribir requiere el modo Interaccion (letra 'i').
+static void enterInteraccion(Editor& ed) {
+    if (ed.state_ != State::Interaccion) {
+        if (ed.state_ == State::Seleccion) {
+            ed.handleEvent(escapeEvent());
+        }
+        ed.handleEvent(insert('i'));
+    }
+}
+
 static void type(Editor& ed, const std::string& s) {
+    if (s.empty()) return;
+    enterInteraccion(ed);
     for (char c : s)
         ed.handleEvent(insert(c));
 }
@@ -32,15 +50,28 @@ static void press(Editor& ed, EventType type) {
     ed.handleEvent(e);
 }
 
-// El test anciano simulaba "Shift+flecha"; en v0.3 la seleccion se activa
-// con Ctrl+S (evento Select) y luego la flecha extiende. Este helper emula
-// ese flujo: si no se esta en modo seleccion, entra (Ctrl+S); si ya se
-// estaba, Ctrl+S se ignora y la flecha solo extiende la seleccion.
-static void selectPress(Editor& ed, EventType type) {
-    if (ed.state_ != State::Select) {
-        press(ed, EventType::Select);
+// v0.5: la seleccion se activa con la letra 's' desde Navegacion. Este
+// helper emula el flujo del usuario: si no estamos en modo seleccion,
+// salimos de Interaccion si hace falta (ESC) y presionamos 's'; la
+// flecha posterior extiende la seleccion.
+static void enterSeleccion(Editor& ed) {
+    if (ed.state_ != State::Seleccion) {
+        if (ed.state_ == State::Interaccion) {
+            ed.handleEvent(escapeEvent());
+        }
+        ed.handleEvent(insert('s'));
     }
+}
+
+static void selectPress(Editor& ed, EventType type) {
+    enterSeleccion(ed);
     press(ed, type);
+}
+
+// v0.5: guardar pasa por el prefijo (Ctrl+K + Ctrl+S); un Save suelto no-op.
+static void save(Editor& ed) {
+    press(ed, EventType::Prefix);
+    Event e; e.type = EventType::Save; ed.handleEvent(e);
 }
 
 // ---------------------------------------------------------------------------
@@ -62,8 +93,8 @@ TEST(selection_not_started_by_plain_move) {
 }
 
 TEST(selection_enter_select_mode_alone_is_empty) {
-    // Regresion: al entrar al modo seleccion con Ctrl+S sin mover nada,
-    // no debe quedar seleccionado texto por encima del cursor.
+    // Regresion: al entrar al modo seleccion con la letra 's' sin mover
+    // nada, no debe quedar seleccionado texto por encima del cursor.
     Editor ed;
     type(ed, "abc");                 // cursor (0,3)
     press(ed, EventType::InsertNewline);
@@ -71,7 +102,7 @@ TEST(selection_enter_select_mode_alone_is_empty) {
     const int undoBefore = static_cast<int>(ed.undoStack_.size());
     const bool modified = ed.modified_;
 
-    press(ed, EventType::Select);    // Ctrl+S: solo entra al modo
+    enterSeleccion(ed);              // 's': solo entra al modo
 
     CHECK(!ed.hasSelection());
     CHECK(!ed.selection().has_value());
@@ -185,75 +216,7 @@ TEST(selection_cleared_by_escape_after_select) {
     press(ed, EventType::MoveHome);
     selectPress(ed, EventType::MoveRight);
     CHECK(ed.hasSelection());
-    press(ed, EventType::Escape);       // en v0.3 se sale del modo con ESC
-    CHECK(!ed.hasSelection());
-}
-
-TEST(selection_cleared_by_insert) {
-    Editor ed;
-    type(ed, "abc");
-    press(ed, EventType::MoveHome);
-    selectPress(ed, EventType::MoveRight);
-    CHECK(ed.hasSelection());
-    ed.handleEvent(insert('X'));
-    CHECK(!ed.hasSelection());
-}
-
-TEST(selection_cleared_by_backspace) {
-    Editor ed;
-    type(ed, "abc");
-    press(ed, EventType::MoveHome);
-    selectPress(ed, EventType::MoveRight);
-    CHECK(ed.hasSelection());
-    press(ed, EventType::Backspace);
-    CHECK(!ed.hasSelection());
-}
-
-TEST(selection_empty_backspace_exits_select_mode) {
-    // Regresion: entrar a seleccion sin mover nada (anchor == position) y
-    // presionar Backspace. Un Backspace normal borra un caracter, pero el
-    // estado debe volver a Normal (no quedarse en Select con barra de
-    // status engañosa).
-    Editor ed;
-    type(ed, "abc");               // cursor (0,3)
-    press(ed, EventType::Select);  // entra a modo seleccion con sel vacia
-
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Select));
-    CHECK(!ed.hasSelection());
-
-    press(ed, EventType::Backspace);
-
-    CHECK(!ed.hasSelection());
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Normal));
-    CHECK_EQ(ed.document_.lineAt(0), "ab");
-
-    // Ahora un Ctrl+S de nuevo SI entra a seleccion (no queda "ya estoy
-    // seleccionando" sin efecto).
-    press(ed, EventType::Select);
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Select));
-}
-
-TEST(selection_empty_selection_delete_exits_select_mode) {
-    // Igual que el anterior pero con Delete (modo seleccion vacio).
-    Editor ed;
-    type(ed, "abc");               // cursor (0,3)
-    press(ed, EventType::MoveHome); // cursor a (0,0)
-    press(ed, EventType::Select);  // sel vacia (anchor == position == (0,0))
-
-    press(ed, EventType::Delete);  // borra el caracter bajo el cursor
-
-    CHECK(!ed.hasSelection());
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Normal));
-    CHECK_EQ(ed.document_.lineAt(0), "bc");
-}
-
-TEST(selection_cleared_by_delete) {
-    Editor ed;
-    type(ed, "abc");
-    press(ed, EventType::MoveHome);
-    selectPress(ed, EventType::MoveRight);
-    CHECK(ed.hasSelection());
-    press(ed, EventType::Delete);
+    press(ed, EventType::Escape);       // ESC sale del modo seleccion
     CHECK(!ed.hasSelection());
 }
 
@@ -270,16 +233,6 @@ TEST(selection_cancelled_by_escape) {
     CHECK_EQ(ed.document_.lineAt(0), "abc");
     CHECK_EQ(ed.cursor_.line, 0);
     CHECK_EQ(ed.cursor_.col, 1);
-}
-
-TEST(selection_cleared_by_newline) {
-    Editor ed;
-    type(ed, "abc");
-    press(ed, EventType::MoveHome);
-    selectPress(ed, EventType::MoveRight);
-    CHECK(ed.hasSelection());
-    press(ed, EventType::InsertNewline);
-    CHECK(!ed.hasSelection());
 }
 
 TEST(selection_cleared_by_undo_redo) {
@@ -320,8 +273,8 @@ TEST(selection_does_not_clear_redo) {
     const size_t undoBefore = ed.undoStack_.size();
     const size_t redoBefore = ed.redoStack_.size();
 
-    press(ed, EventType::Select);         // Ctrl+S: solo entra al modo
-    press(ed, EventType::MoveRight);      // extiende: selecciona "b"
+    enterSeleccion(ed);               // 's': solo entra al modo
+    press(ed, EventType::MoveRight);  // extiende: selecciona "b"
     CHECK(ed.hasSelection());
     CHECK_EQ(ed.document_.lineAt(0), "ab"); // sin edicion
 
@@ -349,12 +302,12 @@ TEST(selection_escape_does_not_alter_undo_redo) {
     const size_t undoBefore = ed.undoStack_.size();
     const size_t redoBefore = ed.redoStack_.size();
 
-    press(ed, EventType::Select);         // Ctrl+S: entra al modo
-    press(ed, EventType::MoveLeft);       // extiende (no edita)
-    press(ed, EventType::Escape);         // cancela la seleccion
+    enterSeleccion(ed);               // 's': entra al modo
+    press(ed, EventType::MoveLeft);   // extiende (no edita)
+    press(ed, EventType::Escape);     // cancela la seleccion
 
     CHECK(!ed.hasSelection());
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Normal));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.document_.lineAt(0), "ab");
 
     // ESC no crea undo ni consume redo.
@@ -405,7 +358,7 @@ TEST(selection_normalized_backward_flips_stored) {
 // ---------------------------------------------------------------------------
 // Paso 4: flechas en modo seleccion (primer comportamiento funcional)
 // ---------------------------------------------------------------------------
-// Ejemplo: "abcde" cursor en 2 (Ctrl+S, luego flechas para extender).
+// Ejemplo: "abcde" cursor en 2 (s, luego flechas para extender).
 //   -> ab[c]de
 //   -> ab[cd]e
 //   -> ab[c]de
@@ -517,8 +470,7 @@ TEST(editor_selection_reverses_direction) {
 // ---------------------------------------------------------------------------
 // Paso 5: cancelar la seleccion con ESC
 // ---------------------------------------------------------------------------
-// Regla (v0.3): el modo seleccion se cancela con ESC (ya no con una
-// flecha normal, que ahora sirve para extender). Cancela deja intactos
+// Regla (v0.5): el modo seleccion se cancela con ESC. Cancela deja intactos
 // el Document, modified_ y el undoStack (cancelar no es una edicion).
 // El cursor NO se mueve con ESC.
 TEST(editor_selection_arrow_right_clears) {
@@ -528,7 +480,7 @@ TEST(editor_selection_arrow_right_clears) {
     setupAbcde(ed);     // "abcde", cursor (0,2)
     selectPress(ed, EventType::MoveRight); // (0,3)
     selectPress(ed, EventType::MoveRight); // (0,4)
-    selectPress(ed, EventType::MoveRight); // (0,5): [cde], cursor == anchor? no
+    selectPress(ed, EventType::MoveRight); // (0,5): [cde]
     CHECK(ed.hasSelection());
     // Anchor fijo en 2, cursor adelante en 5.
     CHECK_EQ(ed.selection_->anchor.col, 2);
@@ -538,7 +490,7 @@ TEST(editor_selection_arrow_right_clears) {
     const int undoBefore = static_cast<int>(ed.undoStack_.size());
     const bool modified = ed.modified_;
 
-    press(ed, EventType::Escape);         // cancelar seleccion (v0.3)
+    press(ed, EventType::Escape);         // cancelar seleccion (v0.5)
     CHECK(!ed.hasSelection());
     // ESC no mueve el cursor: queda en el extremo derecho.
     CHECK_EQ(ed.cursor_.line, 0);
@@ -562,7 +514,7 @@ TEST(editor_selection_arrow_left_clears) {
     const int undoBefore = static_cast<int>(ed.undoStack_.size());
     const bool modified = ed.modified_;
 
-    press(ed, EventType::Escape);         // cancelar seleccion (v0.3)
+    press(ed, EventType::Escape);         // cancelar seleccion (v0.5)
     CHECK(!ed.hasSelection());
     // ESC no mueve el cursor: queda en (0,0).
     CHECK_EQ(ed.cursor_.line, 0);
@@ -585,7 +537,7 @@ TEST(editor_selection_arrow_up_clears) {
     const int undoBefore = static_cast<int>(ed.undoStack_.size());
     const bool modified = ed.modified_;
 
-    press(ed, EventType::Escape);         // cancelar seleccion (v0.3)
+    press(ed, EventType::Escape);         // cancelar seleccion (v0.5)
     CHECK(!ed.hasSelection());
     CHECK_EQ(ed.cursor_.line, 1);
     CHECK_EQ(ed.cursor_.col, 0);
@@ -611,7 +563,7 @@ TEST(editor_selection_arrow_down_clears) {
     const int undoBefore = static_cast<int>(ed.undoStack_.size());
     const bool modified = ed.modified_;
 
-    press(ed, EventType::Escape);                   // cancelar seleccion (v0.3)
+    press(ed, EventType::Escape);                   // cancelar seleccion (v0.5)
     CHECK(!ed.hasSelection());
     CHECK_EQ(ed.cursor_.line, 1);                     // ESC no mueve el cursor
     CHECK_EQ(ed.cursor_.col, 0);
@@ -620,51 +572,6 @@ TEST(editor_selection_arrow_down_clears) {
     CHECK_EQ(ed.document_.lineCount(), 2);
     CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore));
     CHECK_EQ(ed.modified_, modified);
-}
-
-// ---------------------------------------------------------------------------
-// Right suelto (modo Normal) con una seleccion activa
-// ---------------------------------------------------------------------------
-// A diferencia de ESC, una flecha derecha en modo Normal cancela la
-// seleccion y, si el cursor no estaba ya en el extremo derecho de una
-// seleccion hacia adelante, avanza un paso.
-TEST(selection_right_clears_at_forward_end) {
-    // Seleccion hacia adelante: el cursor ya esta en el extremo derecho,
-    // asi que Right cancela y NO avanza sobre el texto seleccionado.
-    Editor ed;
-    setupAbcde(ed);                  // "abcde", cursor (0,2)
-    selectPress(ed, EventType::MoveRight); // (0,3)
-    selectPress(ed, EventType::MoveRight); // (0,4): [cd], cursor en el extremo
-    CHECK(ed.hasSelection());
-    CHECK_EQ(ed.selection_->anchor.col, 2); // anchor < position (hacia adelante)
-    CHECK(ed.selection_->anchor.col < ed.selection_->position.col);
-
-    ed.state_ = State::Normal;      // flecha derecha "suelta" (no extiende)
-
-    press(ed, EventType::MoveRight);
-
-    CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 4);   // NO avanza: se queda al final de la seleccion
-}
-
-TEST(selection_right_moves_after_reverse_selection) {
-    // Seleccion hacia atras: el cursor esta en el extremo IZQUIERDO, asi
-    // que Right cancela y SI avanza un paso.
-    Editor ed;
-    setupAbcde(ed);              // "abcde", cursor (0,2)
-    selectPress(ed, EventType::MoveLeft);  // (0,1)
-    selectPress(ed, EventType::MoveLeft);  // (0,0): [0..2), hacia atras
-    CHECK(ed.hasSelection());
-    CHECK(ed.selection_->anchor.col > ed.selection_->position.col); // reversa
-
-    ed.state_ = State::Normal;   // flecha derecha "suelta" (sin extender)
-
-    press(ed, EventType::MoveRight);
-
-    CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 1); // avanza hasta el inicio del rango
 }
 
 // ---------------------------------------------------------------------------
@@ -683,21 +590,19 @@ static void editorOfLines(const std::vector<std::string>& lines, int line, int c
 // ---------------------------------------------------------------------------
 // Transicion: Seleccion activa -> ESC -> movimiento normal
 // ---------------------------------------------------------------------------
-// Despues de ESC el editor vuelve a un estado Normal SIN seleccion (estado
-// religioso y selection_ limpios). Una flecha posterior es, por tanto,
-// movimiento normal: no extiende ni re-crea la seleccion cancelada. Esto
-// cubre que state_ y selection_ sean dos conceptos distintos y queden
-// sincronizados tras la cancelacion.
+// Despues de ESC el editor vuelve a Navegacion SIN seleccion (state_ y
+// selection_ limpios). Una flecha posterior es, por tanto, movimiento
+// normal: no extiende ni re-crea la seleccion cancelada.
 TEST(selection_escape_then_right_moves_normally) {
     Editor ed;
     setupAbcde(ed);                  // "abcde", cursor (0,2)
     selectPress(ed, EventType::MoveRight); // (0,3): seleccion activa [c)
     CHECK(ed.hasSelection());
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Select));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
 
-    press(ed, EventType::Escape);   // cancela seleccion, -> Normal, cursor se queda
+    press(ed, EventType::Escape);   // cancela seleccion, -> Navegacion, cursor se queda
     CHECK(!ed.hasSelection());
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Normal));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.cursor_.col, 3);
 
     press(ed, EventType::MoveRight); // movimiento normal
@@ -709,9 +614,9 @@ TEST(selection_escape_then_left_moves_normally) {
     Editor ed;
     setupAbcde(ed);                  // cursor (0,2)
     selectPress(ed, EventType::MoveRight); // (0,3): seleccion activa
-    press(ed, EventType::Escape);   // -> Normal, sin seleccion, cursor (0,3)
+    press(ed, EventType::Escape);   // -> Navegacion, sin seleccion, cursor (0,3)
     CHECK(!ed.hasSelection());
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Normal));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     press(ed, EventType::MoveLeft);  // normal: una posicion a la izquierda
     CHECK(!ed.hasSelection());
@@ -725,9 +630,9 @@ TEST(selection_escape_then_up_moves_normally) {
     selectPress(ed, EventType::MoveDown); // (2,1): seleccion activa
     CHECK(ed.hasSelection());
 
-    press(ed, EventType::Escape);       // -> Normal, sin seleccion, cursor (2,1)
+    press(ed, EventType::Escape);       // -> Navegacion, sin seleccion, cursor (2,1)
     CHECK(!ed.hasSelection());
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Normal));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.cursor_.line, 2);
 
     press(ed, EventType::MoveUp);       // normal: sube una linea
@@ -742,9 +647,9 @@ TEST(selection_escape_then_down_moves_normally) {
     selectPress(ed, EventType::MoveDown); // (2,1): seleccion activa
     CHECK(ed.hasSelection());
 
-    press(ed, EventType::Escape);       // -> Normal, sin seleccion, cursor (2,1)
+    press(ed, EventType::Escape);       // -> Navegacion, sin seleccion, cursor (2,1)
     CHECK(!ed.hasSelection());
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Normal));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.cursor_.line, 2);
 
     press(ed, EventType::MoveDown);     // normal: una sola linea hacia abajo
@@ -961,123 +866,6 @@ TEST(editor_selection_end_from_end) {
 }
 
 // ---------------------------------------------------------------------------
-// Paso 10: borrar una seleccion con Backspace / Delete
-// ---------------------------------------------------------------------------
-// Seleccion -> borrar TODO el rango -> cursor al inicio -> selection = none.
-// Es una UNICA operacion de Undo.
-// Ej: "hello [world]!" + Delete -> "hello !" con cursor en el hueco.
-TEST(editor_delete_selection) {
-    Editor ed;
-    setupAbcde(ed);             // "abcde", cursor (0,2)
-    selectPress(ed, EventType::MoveRight); // (0,3)
-    selectPress(ed, EventType::MoveRight); // (0,4): seleccion [cd]
-    CHECK(ed.hasSelection());
-
-    const int undoBefore = static_cast<int>(ed.undoStack_.size());
-    press(ed, EventType::Delete);
-
-    // Rango borrado, cursor en el inicio (== anchor), sin seleccion.
-    CHECK_EQ(ed.document_.lineAt(0), "abe");
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 2);
-    CHECK(!ed.hasSelection());
-    CHECK(ed.modified_);
-
-    // Una sola operacion de undo: un solo pushHistory.
-    CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore + 1));
-
-    // Undo restaura todo el texto de una.
-    press(ed, EventType::Undo);
-    CHECK_EQ(ed.document_.lineAt(0), "abcde");
-}
-
-TEST(editor_backspace_selection) {
-    Editor ed;
-    setupAbcde(ed);             // "abcde", cursor (0,2)
-    selectPress(ed, EventType::MoveRight); // (0,3)
-    selectPress(ed, EventType::MoveRight); // (0,4): seleccion [cd]
-    CHECK(ed.hasSelection());
-
-    press(ed, EventType::Backspace);
-
-    CHECK_EQ(ed.document_.lineAt(0), "abe");
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 2);
-    CHECK(!ed.hasSelection());
-    CHECK(ed.modified_);
-}
-
-TEST(editor_delete_multiline_selection) {
-    Editor ed;
-    editorOfLines({"hola", "mundo", "jau"}, 0, 1, ed);
-    selectPress(ed, EventType::MoveRight);  // (0,2)
-    selectPress(ed, EventType::MoveDown);   // (1,2)
-    selectPress(ed, EventType::MoveDown);   // (2,2)
-    CHECK(ed.hasSelection());
-
-    press(ed, EventType::Delete);
-
-    // Rango [0,1 .. 2,2): "ola\nmundo\nja" se borra. Queda "h" + "u" = "hu".
-    CHECK_EQ(ed.document_.lineCount(), 1);
-    CHECK_EQ(ed.document_.lineAt(0), "hu");
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 1);
-    CHECK(!ed.hasSelection());
-    CHECK(ed.modified_);
-}
-
-TEST(editor_backspace_multiline_selection) {
-    Editor ed;
-    editorOfLines({"hola", "mundo"}, 0, 2, ed);
-    selectPress(ed, EventType::MoveDown);   // (1,2)
-    selectPress(ed, EventType::MoveRight);  // (1,3)
-    CHECK(ed.hasSelection());
-
-    press(ed, EventType::Backspace);
-
-    // Seleccion [0,2 .. 1,4): "la\nmun" borrado. Resultado "hom do".
-    // "ho" + "do" = "hodo".
-    CHECK_EQ(ed.document_.lineCount(), 1);
-    CHECK_EQ(ed.document_.lineAt(0), "hodo");
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 2);
-    CHECK(!ed.hasSelection());
-}
-
-TEST(editor_delete_selection_cursor_at_anchor) {
-    Editor ed;
-    setupAbcde(ed);              // "abcde", cursor (0,2)
-    // Seleccion hacia adelante que deja el cursor en el EXTREMO derecho.
-    selectPress(ed, EventType::MoveRight); // (0,3)
-    selectPress(ed, EventType::MoveRight); // (0,4) [cd]
-    const bool reversed = ed.selection_->anchor.col > ed.cursor_.col;
-    CHECK(!reversed); // anchor(2) < cursor(4)
-
-    // Borrar: cursor debe quedar en el ANCHOR (2), no donde estaba (4).
-    press(ed, EventType::Delete);
-    CHECK_EQ(ed.cursor_.col, 2);
-    CHECK_EQ(ed.document_.lineAt(0), "abe");
-    CHECK(!ed.hasSelection());
-}
-
-TEST(editor_delete_reverse_selection) {
-    Editor ed;
-    setupAbcde(ed);     // "abcde", cursor (0,2)
-    selectPress(ed, EventType::MoveLeft);   // (0,1) [1..2)
-    selectPress(ed, EventType::MoveLeft);   // (0,0) [0..2), seleccion hacia atras
-    CHECK(ed.hasSelection());
-    CHECK(ed.selection_->anchor.col > ed.selection_->position.col); // reversa
-
-    press(ed, EventType::Delete);
-
-    // Se borra [0..2): "cd" de "abcde" -> "cde". Cursor va al inicio (0).
-    CHECK_EQ(ed.document_.lineAt(0), "cde");
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
-    CHECK(!ed.hasSelection());
-}
-
-// ---------------------------------------------------------------------------
 // Paso 13: seleccionar NO modifica el documento (modified_)
 // ---------------------------------------------------------------------------
 // Seleccion es estado del editor, no una edicion al texto.
@@ -1115,109 +903,6 @@ TEST(selection_cancel_does_not_set_modified) {
     CHECK(!ed.modified_);
 }
 
-TEST(delete_selection_sets_modified) {
-    Editor ed;
-    type(ed, "hello");
-    markSaved(ed);
-    press(ed, EventType::MoveHome);
-    selectPress(ed, EventType::MoveRight); // [1..)
-    selectPress(ed, EventType::MoveRight);
-
-    press(ed, EventType::Delete);
-    CHECK_EQ(ed.document_.lineAt(0), "llo");
-    CHECK(ed.modified_);
-}
-
-TEST(replace_selection_sets_modified) {
-    Editor ed;
-    type(ed, "hello");
-    markSaved(ed);
-    press(ed, EventType::MoveHome);
-    selectPress(ed, EventType::MoveRight); // [h] seleccionada
-    ed.handleEvent(insert('H'));
-
-    CHECK_EQ(ed.document_.lineAt(0), "Hello");
-    CHECK(ed.modified_);
-}
-
-TEST(undo_delete_selection_restores_modified) {
-    Editor ed;
-    type(ed, "hello");
-    markSaved(ed);
-    press(ed, EventType::MoveHome);
-    selectPress(ed, EventType::MoveRight); // seleccion "h"
-    press(ed, EventType::Delete);         // "ello"
-    CHECK(ed.modified_);
-
-    press(ed, EventType::Undo);           // vuelve a "hello" == guardado
-    CHECK_EQ(ed.document_.lineAt(0), "hello");
-    CHECK(!ed.modified_);
-}
-
-TEST(undo_delete_selection_after_real_save) {
-    // Combina la parte mas delicada: SAVE real + selection + delete + undo.
-    //   abrir "hello"
-    //   modificar -> "hello!" (savedLines_ queda en "hello!al guardarse")
-    //   SAVE       -> savedLines_ = "hello!", modified_ = false
-    //   seleccionar "he"
-    //   delete     -> "llo!",  modified_ = true
-    //   undo       -> vuelve a "hello!" == savedLines_ -> modified_ = false
-    //                y la seleccion "he" se restaura.
-    using testfw::TempFile;
-    TempFile f;
-    f.write("hello");
-
-    Editor ed;
-    CHECK(ed.openFile(f.path));
-    CHECK(!ed.modified_);
-
-    press(ed, EventType::MoveEnd);
-    type(ed, "!");                    // "hello!", modified_
-    CHECK(ed.modified_);
-    CHECK_EQ(ed.document_.lineAt(0), "hello!");
-
-    press(ed, EventType::Save);       // saved_ = "hello!", modified_ = false
-    CHECK(!ed.modified_);
-
-    press(ed, EventType::MoveHome);
-    selectPress(ed, EventType::MoveRight);  // "h"
-    selectPress(ed, EventType::MoveRight);  // "he"
-    CHECK(ed.hasSelection());
-    CHECK_EQ(ed.selection_->anchor.col, 0);
-    CHECK_EQ(ed.selection_->position.col, 2);
-
-    press(ed, EventType::Delete);     // "llo!"
-    CHECK_EQ(ed.document_.lineAt(0), "llo!");
-    CHECK(ed.modified_);
-
-    press(ed, EventType::Undo);       // de vuelta a "hello!" == savedLines_
-
-    // Las tres invariantes del caso.
-    CHECK_EQ(ed.document_.lineAt(0), "hello!");
-    CHECK(ed.document_.snapshot() == ed.savedLines_); // == el guardado
-    CHECK(!ed.modified_);
-    CHECK(ed.hasSelection());          // la seleccion se restaura
-    auto sel = ed.selection();
-    CHECK(sel.has_value());
-    CHECK_EQ(sel->start.col, 0);
-    CHECK_EQ(sel->end.col, 2);
-}
-
-TEST(redo_delete_selection_sets_modified) {
-    Editor ed;
-    type(ed, "hello");
-    markSaved(ed);
-    press(ed, EventType::MoveHome);
-    selectPress(ed, EventType::MoveRight); // seleccion "h"
-    press(ed, EventType::Delete);         // "ello"
-    press(ed, EventType::Undo);           // "hello"
-    CHECK(!ed.modified_);
-
-    press(ed, EventType::Redo);           // "ello" de nuevo
-    CHECK_EQ(ed.document_.lineAt(0), "ello");
-    CHECK(ed.modified_);
-}
-
 // ---------------------------------------------------------------------------
 // Paso 14: la seleccion no se guarda (solo el documento)
 // ---------------------------------------------------------------------------
@@ -1238,7 +923,7 @@ TEST(editor_save_with_selection) {
     selectPress(ed, EventType::MoveRight); // [he]
     CHECK(ed.hasSelection());
 
-    press(ed, EventType::Save);
+    save(ed);   // Ctrl+K + Ctrl+S
 
     // El archivo guarda SOLO el documento, sin nada de seleccion.
     CHECK_EQ(selSavedContent(f.path), "hello");
@@ -1254,27 +939,11 @@ TEST(editor_save_after_selection_cancel) {
     type(ed, "hello");
     press(ed, EventType::MoveHome);
     selectPress(ed, EventType::MoveRight);
-    press(ed, EventType::Escape); // cancelar seleccion (v0.3)
+    press(ed, EventType::Escape); // cancelar seleccion (v0.5)
 
-    press(ed, EventType::Save);
+    save(ed);   // Ctrl+K + Ctrl+S
 
     CHECK_EQ(selSavedContent(f.path), "hello");
-    CHECK(!ed.modified_);
-}
-
-TEST(editor_save_after_replacement) {
-    using testfw::TempFile;
-    TempFile f;
-    Editor ed;
-    ed.openFile(f.path);
-    type(ed, "hello");
-    press(ed, EventType::MoveHome);
-    selectPress(ed, EventType::MoveRight); // [h]
-    ed.handleEvent(insert('H'));          // "Hello"
-
-    press(ed, EventType::Save);
-
-    CHECK_EQ(selSavedContent(f.path), "Hello");
     CHECK(!ed.modified_);
 }
 
@@ -1295,21 +964,6 @@ TEST(selection_empty_document) {
     CHECK_EQ(ed.cursor_.line, 0);
     CHECK_EQ(ed.cursor_.col, 0);
     CHECK_EQ(ed.document_.lineAt(0), "");
-}
-
-TEST(selection_single_character) {
-    Editor ed;
-    setupAbcde(ed);     // "abcde", cursor (0,2)
-    selectPress(ed, EventType::MoveRight); // (0,3) solo "c"
-    CHECK(ed.hasSelection());
-    auto sel = ed.selection();
-    CHECK_EQ(sel->start.col, 2);
-    CHECK_EQ(sel->end.col, 3);
-
-    press(ed, EventType::Delete);
-    CHECK_EQ(ed.document_.lineAt(0), "abde");
-    CHECK_EQ(ed.cursor_.col, 2);
-    CHECK(!ed.hasSelection());
 }
 
 TEST(selection_empty_line) {
@@ -1342,290 +996,28 @@ TEST(selection_entire_document) {
     CHECK_EQ(sel->end.col, 6);
 }
 
-TEST(delete_entire_document_selection) {
+// v0.5: salir de seleccion es siempre a Navegacion. 'c' (como 'x', y como
+// ESC) termina la seleccion sin efecto sobre el documento.
+TEST(selection_c_exits_to_navegacion) {
     Editor ed;
-    editorOfLines({"linea1", "linea2", "linea3"}, 0, 0, ed);
-    selectPress(ed, EventType::MoveDown);
-    selectPress(ed, EventType::MoveDown);
-    selectPress(ed, EventType::MoveHome);
-    selectPress(ed, EventType::MoveEnd);
-
-    press(ed, EventType::Delete);
-
-    // Borrar todo deja el doc en su estado minimo: una linea vacia.
-    CHECK_EQ(ed.document_.lineCount(), 1);
-    CHECK_EQ(ed.document_.lineAt(0), "");
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
+    setupAbcde(ed);
+    selectPress(ed, EventType::MoveRight); // [c]
+    CHECK(ed.hasSelection());
+    ed.handleEvent(insert('c'));
     CHECK(!ed.hasSelection());
-    CHECK(ed.modified_);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.document_.lineAt(0), "abcde");
 }
 
-TEST(replace_entire_document_selection) {
+TEST(selection_other_char_ignored) {
+    // En v0.5 una letra que no sea c/x ya NO reemplaza la seleccion: se
+    // ignora y el modo sigue activo.
     Editor ed;
-    editorOfLines({"linea1", "linea2", "linea3"}, 0, 0, ed);
-    selectPress(ed, EventType::MoveDown);
-    selectPress(ed, EventType::MoveDown);
-    selectPress(ed, EventType::MoveHome);
-    selectPress(ed, EventType::MoveEnd);
-
+    setupAbcde(ed);
+    selectPress(ed, EventType::MoveRight); // [c]
+    CHECK(ed.hasSelection());
     ed.handleEvent(insert('Z'));
-
-    CHECK_EQ(ed.document_.lineCount(), 1);
-    CHECK_EQ(ed.document_.lineAt(0), "Z");
-    CHECK_EQ(ed.cursor_.col, 1);
-    CHECK(!ed.hasSelection());
-}
-
-// ---------------------------------------------------------------------------
-// Paso 12: Undo/Redo de operaciones sobre seleccion
-// ---------------------------------------------------------------------------
-// El historial debe restaurar contenido, cursor, y seleccion, todo junto.
-TEST(editor_undo_delete_selection) {
-    Editor ed;
-    setupAbcde(ed);     // "abcde", cursor (0,2)
-    selectPress(ed, EventType::MoveRight); // (0,3)
-    selectPress(ed, EventType::MoveRight); // (0,4): [cd]
     CHECK(ed.hasSelection());
-
-    press(ed, EventType::Delete);
-    CHECK_EQ(ed.document_.lineAt(0), "abe");
-    CHECK(!ed.hasSelection());
-
-    press(ed, EventType::Undo);
-
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     CHECK_EQ(ed.document_.lineAt(0), "abcde");
-    // La seleccion [cd] se restaura.
-    CHECK(ed.hasSelection());
-    auto sel = ed.selection();
-    CHECK(sel.has_value());
-    CHECK_EQ(sel->start.col, 2);
-    CHECK_EQ(sel->end.col, 4);
-}
-
-TEST(undo_empty_selection_does_not_enter_select_mode) {
-    // Regresion: una seleccion VACIA (anchor == position) guardada por
-    // pushHistory() NO debe restaurarse como modo Select al deshacer.
-    // Si applyState() usa solo has_value() como criterio, el estado queda
-    // en Select (barra "SELECCION" sin texto) aunque hasSelection() sea
-    // falso. Aquí la seleccion que se restore debe seguir vacia y el
-    // editor debe quedar en modo Normal.
-    Editor ed;
-    type(ed, "abc");            // cursor (0,3), undoStack: 'a','b','c'
-    press(ed, EventType::Select);   // entra a seleccion vacia: anchor == position
-    CHECK(!ed.hasSelection());
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Select));
-
-    ed.handleEvent(insert('X')); // "abcX": pushHistory() guarda la sel vacia
-    CHECK_EQ(ed.document_.lineAt(0), "abcX");
-
-    press(ed, EventType::Undo);  // vuelve al punto con la sel vacia guardada
-
-    // La seleccion no debe volver a estar activa (rango vacio).
-    CHECK(!ed.hasSelection());
-    CHECK(!ed.selection_.has_value());
-    CHECK_EQ(ed.document_.lineAt(0), "abc");
-    // Y el editor NO debe quedar en modo Select.
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Normal));
-}
-
-TEST(editor_redo_delete_selection) {
-    Editor ed;
-    setupAbcde(ed);
-    selectPress(ed, EventType::MoveRight); // (0,3)
-    selectPress(ed, EventType::MoveRight); // (0,4) [cd]
-    press(ed, EventType::Delete);         // "abe"
-    press(ed, EventType::Undo);           // "abcde" + seleccion
-    CHECK(ed.hasSelection());
-
-    press(ed, EventType::Redo);
-
-    // Redo re-aplica el borrado: sin seleccion y "abe".
-    CHECK_EQ(ed.document_.lineAt(0), "abe");
-    CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.col, 2);
-}
-
-TEST(editor_undo_replace_selection) {
-    Editor ed;
-    setupAbcde(ed);
-    selectPress(ed, EventType::MoveRight); // (0,3)
-    selectPress(ed, EventType::MoveRight); // (0,4) [cd]
-    ed.handleEvent(insert('X'));          // "abXe"
-    CHECK_EQ(ed.document_.lineAt(0), "abXe");
-
-    press(ed, EventType::Undo);
-
-    CHECK_EQ(ed.document_.lineAt(0), "abcde");
-    // Vuelve la seleccion [cd] que fue reemplazada.
-    CHECK(ed.hasSelection());
-    auto sel = ed.selection();
-    CHECK(sel.has_value());
-    CHECK_EQ(sel->start.col, 2);
-    CHECK_EQ(sel->end.col, 4);
-}
-
-TEST(editor_redo_replace_selection) {
-    Editor ed;
-    setupAbcde(ed);
-    selectPress(ed, EventType::MoveRight); // (0,3)
-    selectPress(ed, EventType::MoveRight); // (0,4) [cd]
-    ed.handleEvent(insert('X'));          // "abXe"
-    press(ed, EventType::Undo);           // "abcde" + seleccion
-    CHECK(ed.hasSelection());
-
-    press(ed, EventType::Redo);
-
-    CHECK_EQ(ed.document_.lineAt(0), "abXe");
-    CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.col, 3); // tras la X
-}
-
-TEST(editor_undo_multiline_selection) {
-    // Seleccion [0,1 .. 1,1) sobre "aaa"/"bbb".
-    Editor ed;
-    editorOfLines({"aaa", "bbb"}, 0, 1, ed);
-    selectPress(ed, EventType::MoveDown);  // (1,1)
-    ed.handleEvent(insert('Q'));          // borra rango y pone Q -> "aQbb"
-    CHECK_EQ(ed.document_.lineAt(0), "aQbb");
-    CHECK_EQ(ed.cursor_.col, 2);
-    CHECK(!ed.hasSelection());
-
-    press(ed, EventType::Undo);
-
-    CHECK_EQ(ed.document_.lineCount(), 2);
-    CHECK_EQ(ed.document_.lineAt(0), "aaa");
-    CHECK_EQ(ed.document_.lineAt(1), "bbb");
-    // La seleccion multilinea original se restaura.
-    CHECK(ed.hasSelection());
-    auto sel = ed.selection();
-    CHECK(sel.has_value());
-    CHECK_EQ(sel->start.line, 0);
-    CHECK_EQ(sel->start.col, 1);
-    CHECK_EQ(sel->end.line, 1);
-    CHECK_EQ(sel->end.col, 1);
-}
-
-TEST(editor_redo_multiline_selection)  {
-    // Seleccion [0,1 .. 1,1) sobre "aaa"/"bbb".
-    Editor ed;
-    editorOfLines({"aaa", "bbb"}, 0, 1, ed);
-    selectPress(ed, EventType::MoveDown);  // (1,1)
-    ed.handleEvent(insert('Q'));
-    press(ed, EventType::Undo);
-    CHECK(ed.hasSelection());
-
-    press(ed, EventType::Redo);
-
-    // Redo re-hace el reemplazo multilinea -> "a" + "bb" = "aQbb".
-    CHECK_EQ(ed.document_.lineCount(), 1);
-    CHECK_EQ(ed.document_.lineAt(0), "aQbb");
-    CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.col, 2);
-}
-
-// Ciclo seleccion -> delete -> undo -> redo -> undo, sin corromper estado.
-TEST(editor_undo_redo_delete_cycle) {
-    Editor ed;
-    setupAbcde(ed);
-    selectPress(ed, EventType::MoveRight); // (0,3)
-    selectPress(ed, EventType::MoveRight); // (0,4) [cd]
-    press(ed, EventType::Delete);         // "abe"
-    press(ed, EventType::Undo);           // "abcde" + sel
-    CHECK(ed.hasSelection());
-    press(ed, EventType::Redo);           // "abe", sin sel
-    CHECK_EQ(ed.document_.lineAt(0), "abe");
-    CHECK(!ed.hasSelection());
-    press(ed, EventType::Undo);           // vuelve "abcde" + sel
-
-    CHECK_EQ(ed.document_.lineAt(0), "abcde");
-    CHECK(ed.hasSelection());
-    CHECK(ed.modified_);
-}
-
-// ---------------------------------------------------------------------------
-// Paso 11: escribir un caracter reemplaza la seleccion
-// ---------------------------------------------------------------------------
-// InsertChar con seleccion => borrar rango + insertar caracter, como UNA
-// unica operacion de Undo.
-// Ej: "hello [world]" + X -> "hello X" con cursor despues de la X.
-TEST(editor_replace_selection_char) {
-    Editor ed;
-    setupAbcde(ed);     // "abcde", cursor (0,2)
-    selectPress(ed, EventType::MoveRight); // (0,3)
-    selectPress(ed, EventType::MoveRight); // (0,4): [cd]
-    CHECK(ed.hasSelection());
-
-    const int undoBefore = static_cast<int>(ed.undoStack_.size());
-    ed.handleEvent(insert('X'));
-
-    // Rango borrado y X insertada en su lugar.
-    CHECK_EQ(ed.document_.lineAt(0), "abXe");
-    CHECK_EQ(ed.cursor_.col, 3);   // despues de la X
-    CHECK(!ed.hasSelection());
-    CHECK(ed.modified_);
-    CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore + 1));
-
-    // Undo restaura YA el texto original en una sola operacion.
-    press(ed, EventType::Undo);
-    CHECK_EQ(ed.document_.lineAt(0), "abcde");
-}
-
-TEST(editor_replace_reverse_selection_char) {
-    // Seleccion hacia atras (cursor < anchor): el resultado debe ser el
-    // mismo, el caracter se inserta en el inicio del rango.
-    Editor ed;
-    setupAbcde(ed);     // "abcde", cursor (0,2)
-    selectPress(ed, EventType::MoveLeft);  // (0,1)
-    selectPress(ed, EventType::MoveLeft);  // (0,0) [0..2)
-    CHECK(ed.hasSelection());
-
-    ed.handleEvent(insert('Y'));
-
-    // [0..2) -> "cd" reemplazado por "Y": "Ycde". Cursor tras la Y.
-    CHECK_EQ(ed.document_.lineAt(0), "Ycde");
-    CHECK_EQ(ed.cursor_.col, 1);
-    CHECK(!ed.hasSelection());
-}
-
-TEST(editor_replace_multiline_selection_char) {
-    Editor ed;
-    editorOfLines({"hola", "mundo"}, 0, 2, ed);
-    selectPress(ed, EventType::MoveDown);   // (1,2)
-    selectPress(ed, EventType::MoveRight);  // (1,3)
-    ed.handleEvent(insert('Z'));
-
-    // Rango [0,2..1,4): "la\nmun" -> reemplazado por "Z". "ho"+"do"="hodo",
-    // luego 'Z' -> "hoZdo". Cursor tras la Z (indice 3).
-    CHECK_EQ(ed.document_.lineCount(), 1);
-    CHECK_EQ(ed.document_.lineAt(0), "hoZdo");
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 3);
-    CHECK(!ed.hasSelection());
-}
-
-TEST(editor_replace_selection_cursor_at_start) {
-    // El cursor queda donde empezo el reemplazo (inicio del rango + 1).
-    Editor ed;
-    setupAbcde(ed);     // "abcde", cursor (0,2)
-    selectPress(ed, EventType::MoveRight); // (0,3): [2..3)
-    ed.handleEvent(insert('Y'));
-
-    CHECK_EQ(ed.document_.lineAt(0), "abYde");
-    CHECK_EQ(ed.cursor_.col, 3);
-    CHECK(!ed.hasSelection());
-}
-
-TEST(editor_replace_selection_undo_single_op) {
-    // Undo restaura todo de una vez (una sola operacion historica).
-    Editor ed;
-    setupAbcde(ed);
-    selectPress(ed, EventType::MoveRight); // (0,3)
-    selectPress(ed, EventType::MoveRight); // (0,4) [cd]
-    ed.handleEvent(insert('W'));          // "abWe"
-    CHECK_EQ(ed.document_.lineAt(0), "abWe");
-
-    press(ed, EventType::Undo);
-    CHECK_EQ(ed.document_.lineAt(0), "abcde");
-    CHECK_EQ(ed.cursor_.col, 4); // undo restaura la posicion previa al borrado
 }

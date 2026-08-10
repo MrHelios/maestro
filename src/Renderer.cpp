@@ -57,10 +57,12 @@ std::string dirName(const std::string& path) {
 // Etiqueta de estado, mapeada 1 a 1 con State.
 std::string stateLabel(State state) {
     switch (state) {
-        case State::Select: return "SELECCION";
+        case State::Navegacion: return "NAVEGACION";
+        case State::Interaccion: return "INTERACCION";
+        case State::Seleccion: return "SELECCION";
         case State::Prefix: return "COMANDO";
-        case State::Normal: default: return "NORMAL";
     }
+    return "";
 }
 
 // Une `name SEP path` dentro de `budget` columnas, respetando la

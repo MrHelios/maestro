@@ -25,9 +25,33 @@ static Event insert(char c) {
     return e;
 }
 
+// v0.5: entra al modo Interaccion ('i') si no estamos ya en el.
+static void enterInteraccion(Editor& ed) {
+    if (ed.state_ != State::Interaccion) {
+        if (ed.state_ == State::Seleccion) {
+            Event esc; esc.type = EventType::Escape; ed.handleEvent(esc);
+        }
+        ed.handleEvent(insert('i'));
+    }
+}
+
 static void type(Editor& ed, const std::string& s) {
+    if (s.empty()) return;
+    // v0.5: escribir requiere el modo Interaccion (letra 'i').
+    if (ed.state_ != State::Interaccion) {
+        if (ed.state_ == State::Seleccion) {
+            Event esc; esc.type = EventType::Escape; ed.handleEvent(esc);
+        }
+        ed.handleEvent(insert('i'));
+    }
     for (char c : s)
         ed.handleEvent(insert(c));
+}
+
+// v0.5: guardar pasa por el prefijo (Ctrl+K + Ctrl+S); un Save suelto no-op.
+static void save(Editor& ed) {
+    ed.handleEvent(ev(EventType::Prefix));
+    Event e; e.type = EventType::Save; ed.handleEvent(e);
 }
 
 // ---------------------------------------------------------------------------
@@ -104,13 +128,13 @@ TEST(state_consistent_after_random_events) {
         ev(EventType::Delete), ev(EventType::MoveDown), insert('z'),
         ev(EventType::MoveUp), ev(EventType::Undo), ev(EventType::Redo),
         ev(EventType::MoveHome), ev(EventType::MoveEnd), insert('!'),
-        // Paso 8: movimientos dentro del modo seleccion (Ctrl+S).
-        ev(EventType::Select), ev(EventType::MoveLeft),
+        // Paso 8: movimientos dentro del modo seleccion (letra 's').
+        insert('s'), ev(EventType::MoveLeft),
         ev(EventType::MoveRight), ev(EventType::MoveRight),
         ev(EventType::MoveUp), ev(EventType::MoveDown),
         ev(EventType::MoveHome), ev(EventType::MoveEnd),
         ev(EventType::Escape), ev(EventType::MoveRight),
-        insert('#'), ev(EventType::Select), ev(EventType::MoveLeft),
+        insert('#'), insert('s'), ev(EventType::MoveLeft),
         ev(EventType::Escape), ev(EventType::Undo), ev(EventType::Undo),
         ev(EventType::Redo),
     };
@@ -139,10 +163,10 @@ TEST(state_selection_consistent_after_shift_moves) {
     };
     for (int i = 0; i < 400; ++i) {
         EventType t = moves[i % 6];
-        // Mitad arma seleccion (Ctrl+S), mitad la cancela (ESC): asi se
+        // Mitad arma seleccion (letra 's'), mitad la cancela (ESC): asi se
         // arma y se desarma la seleccion al mover.
         if (i % 2 == 0) {
-            ed.handleEvent(ev(EventType::Select));
+            ed.handleEvent(insert('s'));
             ed.handleEvent(ev(t));
         } else {
             ed.handleEvent(ev(EventType::Escape));
@@ -164,8 +188,8 @@ TEST(state_selection_shift_cycle_preserves_preferred_col) {
     ed.cursor_.col = 5;
     ed.cursor_.preferredCol_ = 5;
 
-    // Entrar en modo seleccion (Ctrl+S): arma el anchor {0, 5}.
-    ed.handleEvent(ev(EventType::Select));
+    // Entrar en modo seleccion (letra 's'): arma el anchor {0, 5}.
+    ed.handleEvent(insert('s'));
     CHECK(ed.selection_.has_value());
     const Position anchor{0, 5};
     CHECK(ed.selection_->anchor == anchor);
@@ -250,8 +274,9 @@ TEST(state_stress_mixed_operations_selection) {
                 e.type = EventType::InsertChar;
                 e.text = std::string(1, static_cast<char>('a' + (rnd() % 26)));
                 break;
-            case 1: // modo seleccion: Ctrl+S (arma/ajusta seleccion)
-                e.type = EventType::Select;
+            case 1: // entrar en modo seleccion con la letra 's'
+                e.type = EventType::InsertChar;
+                e.text = "s";
                 break;
             case 2: // movimiento (en modo seleccion estira; sin el, mueve)
                 e.type = static_cast<EventType>(
@@ -308,7 +333,7 @@ TEST(sequence_open_insert_save_close) {
     Editor ed;
     ed.openFile(f.path);
     type(ed, "hola");
-    ed.handleEvent(ev(EventType::Save));
+    save(ed);
     CHECK(!ed.modified_);
     // v0.3: Quit solo sale via prefijo (Ctrl+K -> Ctrl+Q).
     ed.handleEvent(ev(EventType::Prefix));
@@ -328,7 +353,7 @@ TEST(sequence_open_edit_undo_redo_save) {
     type(ed, "hola mundo");
     ed.handleEvent(ev(EventType::Undo));
     ed.handleEvent(ev(EventType::Redo));
-    ed.handleEvent(ev(EventType::Save));
+    save(ed);
     CHECK(!ed.modified_);
 
     std::ifstream in(f.path, std::ios::binary);
@@ -394,6 +419,7 @@ TEST(edge_empty_document) {
 
 TEST(edge_single_empty_line) {
     Editor ed;
+    enterInteraccion(ed);
     ed.handleEvent(ev(EventType::InsertNewline));  // "", ""
     CHECK_EQ(ed.document_.lineCount(), 2);
     CHECK_EQ(ed.document_.lineAt(0), "");
@@ -405,6 +431,7 @@ TEST(edge_single_empty_line) {
 
 TEST(edge_single_letter) {
     Editor ed;
+    enterInteraccion(ed);
     ed.handleEvent(insert('a'));
     CHECK_EQ(ed.document_.lineAt(0), "a");
     CHECK_EQ(ed.cursor_.col, 1);
@@ -419,6 +446,7 @@ TEST(edge_long_line_million_chars) {
     ed.cursor_.col = n;
     CHECK_EQ(ed.document_.lineLength(0), n);
     CHECK_EQ(ed.cursor_.col, n);
+    enterInteraccion(ed); // Backspace solo actua en Interaccion (v0.5)
     ed.handleEvent(ev(EventType::Backspace));
     CHECK_EQ(ed.document_.lineLength(0), n - 1);
     ed.handleEvent(ev(EventType::Undo));
@@ -429,6 +457,7 @@ TEST(edge_long_line_million_chars) {
 TEST(edge_many_empty_lines) {
     Editor ed;
     const int n = 5000;
+    enterInteraccion(ed);
     for (int i = 0; i < n; ++i)
         ed.handleEvent(ev(EventType::InsertNewline));
     CHECK_EQ(ed.document_.lineCount(), n + 1);
@@ -472,7 +501,7 @@ TEST(edge_millions_of_chars_roundtrip) {
     ed.openFile(f.path);
     const int n = 1000000;
     ed.document_.restore({std::string(n, 'y')});
-    ed.handleEvent(ev(EventType::Save));
+    save(ed);
     CHECK(!ed.modified_);
 
     Editor ed2;
@@ -506,7 +535,7 @@ TEST(invariant_save_reload_exact) {
     type(ed, "segunda");
     ed.handleEvent(ev(EventType::InsertNewline));
     type(ed, "tercera");
-    ed.handleEvent(ev(EventType::Save));
+    save(ed);
     assertRoundTrip(f.path, ed);
 }
 
@@ -521,7 +550,7 @@ TEST(invariant_save_does_not_change_document) {
     const int line = ed.cursor_.line;
     const int col = ed.cursor_.col;
 
-    ed.handleEvent(ev(EventType::Save));
+    save(ed);
 
     CHECK_EQ(ed.document_.lineAt(0), before);
     CHECK_EQ(ed.cursor_.line, line);
@@ -570,7 +599,7 @@ TEST(invariant_serialize_joins_lines) {
     type(ed, "hola");
     ed.handleEvent(ev(EventType::InsertNewline));
     type(ed, "mundo");
-    ed.handleEvent(ev(EventType::Save));
+    save(ed);
 
     std::ifstream in(f.path, std::ios::binary);
     std::string content((std::istreambuf_iterator<char>(in)),

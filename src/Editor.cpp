@@ -17,7 +17,7 @@ std::string resolveAbsolutePath(const std::string& path) {
 } // namespace
 
 Editor::Editor() {
-    statusMessage_ = "Ctrl+S seleccion | Ctrl+K guardar/salir | Ctrl+U deshacer | Ctrl+Y rehacer";
+    statusMessage_ = "NAVEGACION: i escribir | s seleccionar | Ctrl+K guardar/salir | Ctrl+U/Y deshacer/rehacer";
     savedLines_ = document_.snapshot();
 }
 
@@ -31,7 +31,7 @@ bool Editor::openFile(const std::string& path) {
     cursor_.line = 0;
     cursor_.col = 0;
     clearSelection();
-    state_ = State::Normal;
+    state_ = State::Navegacion;
     statusMessage_ = "";
     if (!existed) {
         statusMessage_ = "Archivo nuevo: " + path;
@@ -81,119 +81,97 @@ void Editor::handleEvent(const Event& event) {
         return;
     }
 
-    switch (event.type) {
-        case EventType::InsertChar: {
-            // Si hay seleccion, escribir reemplaza el texto seleccionado:
-            // borra el rango y luego inserta el caracter. Es UNA sola
-            // operacion de Undo (un unico pushHistory).
-            if (selection_.has_value() && selection_->anchor != selection_->position) {
-                pushHistory();
-                auto sel = normalize(*selection_);
-                document_.deleteRange(sel->start.line, sel->start.col,
-                                      sel->end.line, sel->end.col);
-                cursor_.line = sel->start.line;
-                cursor_.col = sel->start.col;
-                document_.insertText(cursor_.line, cursor_.col, event.text);
-                // El cursor avanza un caracter (byte por byte si es multibyte).
-                cursor_.col += static_cast<int>(event.text.size());
-                clearSelection();
-                state_ = State::Normal;
-                modified_ = true;
-                break;
-            }
+    // Undo/Redo y la entrada al prefijo estan disponibles en los 3 modos
+    // y no dependen de state_, asi que se evaluan ANTES del despacho por
+    // modo. Nota: Ctrl+S (Save) SOLO tiene efecto tras el prefijo (lo
+    // consume handlePrefixKey). Sin prefijo llega aqui y cae como no-op
+    // en cada modo: Ctrl+S deja de tener significado especial.
+    if (event.type == EventType::Undo) { undo(); return; }
+    if (event.type == EventType::Redo) { redo(); return; }
+    if (event.type == EventType::Prefix) {
+        priorState_ = state_;
+        state_ = State::Prefix;
+        statusMessage_ = "Ctrl+K: Ctrl+S guardar | Ctrl+Q salir";
+        return;
+    }
 
-            // Sin seleccion: insertar como siempre. Salir del modo
-            // seleccion si estaba activo (seleccion vacia).
-            clearSelection();
+    // El resto se interpreta segun el modo actual. Terminal emite los
+    // InsertChar ('i'/'s'/'c'/'x' y cualquier letra) tal cual; es el
+    // Editor quien decide, segun state_, si una letra puntual es un
+    // comando de modo o texto real.
+    switch (state_) {
+        case State::Navegacion:
+            handleNavegacionEvent(event);
+            break;
+        case State::Interaccion:
+            handleInteraccionEvent(event);
+            break;
+        case State::Seleccion:
+            handleSeleccionEvent(event);
+            break;
+        default:
+            break;
+    }
+}
+
+void Editor::handleNavegacionEvent(const Event& event) {
+    switch (event.type) {
+        case EventType::InsertChar:
+            // En navegacion no se escribe: las letras solo pueden ser
+            // comandos de modo. 'i' entra a edicion; 's' a seleccion.
+            // 'c'/'x'/'p' y cualquier otra letra son no-op en v0.5.
+            if (event.text == "i") {
+                state_ = State::Interaccion;
+                statusMessage_ = "INTERACCION (ESC vuelve a navegacion)";
+            } else if (event.text == "s") {
+                beginSelection();
+                state_ = State::Seleccion;
+                statusMessage_ = "SELECCION (ESC/c/x terminan)";
+            }
+            break;
+
+        // Movimientos libres, sin iniciar seleccion (a diferencia de
+        // como Select extendia en v0.3-v0.4).
+        case EventType::MoveLeft: cursor_.moveLeft(document_); break;
+        case EventType::MoveRight: cursor_.moveRight(document_); break;
+        case EventType::MoveUp: cursor_.moveUp(document_); break;
+        case EventType::MoveDown: cursor_.moveDown(document_); break;
+        case EventType::MoveHome: cursor_.moveHome(); break;
+        case EventType::MoveEnd: cursor_.moveEnd(document_); break;
+
+        // InsertNewline/Backspace/Delete y Escape: no-op (no hay edicion
+        // posible y ya estamos en navegacion, no hay a donde volver).
+        default:
+            break;
+    }
+}
+
+void Editor::handleInteraccionEvent(const Event& event) {
+    switch (event.type) {
+        case EventType::InsertChar:
+            // Edicion libre real: cualquier letra (incluida i/s/p/c/x)
+            // se inserta como texto. Aqui no son comandos de modo.
             pushHistory();
             document_.insertText(cursor_.line, cursor_.col, event.text);
             cursor_.col += static_cast<int>(event.text.size());
-            state_ = State::Normal;
             modified_ = true;
-            break;
-        }
-
-        case EventType::Prefix:
-            // Ctrl+K: entra al modo prefijo. Guardamos el estado previo
-            // para poder volver a el (guardar sin salir de seleccion).
-            priorState_ = state_;
-            state_ = State::Prefix;
-            statusMessage_ = "Ctrl+K: Ctrl+S guardar | Ctrl+Q salir";
-            break;
-
-        case EventType::Select:
-            // Ctrl+S: entrar al modo seleccion. Si ya estabamos en
-            // seleccion, se ignora (sin efecto). En modo prefijo este
-            // evento ya fue consumido arriba y equivale a guardar.
-            if (state_ == State::Select) break;
-            beginSelection();
-            state_ = State::Select;
-            statusMessage_ = "SELECCION (ESC sale)";
             break;
 
         case EventType::InsertNewline:
-            // En modo seleccion, Enter reemplaza el rango por una nueva
-            // linea (el "reemplaza la seleccion" de v0.3).
-            if (selection_.has_value() && selection_->anchor != selection_->position) {
-                pushHistory();
-                auto sel = normalize(*selection_);
-                document_.deleteRange(sel->start.line, sel->start.col,
-                                      sel->end.line, sel->end.col);
-                cursor_.line = sel->start.line;
-                cursor_.col = sel->start.col;
-                document_.insertNewline(cursor_.line, cursor_.col);
-                cursor_.line++;
-                cursor_.col = 0;
-                clearSelection();
-                state_ = State::Normal;
-                modified_ = true;
-                break;
-            }
-
-            clearSelection();
             pushHistory();
             document_.insertNewline(cursor_.line, cursor_.col);
             cursor_.line++;
             cursor_.col = 0;
-            state_ = State::Normal;
             modified_ = true;
             break;
 
         case EventType::Backspace:
         case EventType::Delete: {
-            // Si hay texto seleccionado, lo borramos completo (ambas
-            // teclas hacen lo mismo) y el cursor queda en el inicio del
-            // rango. Es una UNICA operacion de Undo.
-            if (selection_.has_value() && selection_->anchor != selection_->position) {
-                pushHistory();
-                auto sel = normalize(*selection_);
-                document_.deleteRange(sel->start.line, sel->start.col,
-                                      sel->end.line, sel->end.col);
-                cursor_.line = sel->start.line;
-                cursor_.col = sel->start.col;
-                cursor_.clampToLine(document_);
-                clearSelection();
-                state_ = State::Normal;
-                modified_ = true;
-                statusMessage_ = "Seleccion borrada.";
-                break;
-            }
-
-            // Sin seleccion: comportamiento clasico de cada tecla.
-            // Salimos del modo seleccion si estaba activo (seleccion
-            // vacia): aunque no haya texto borrado, el modo ya no aplica.
-            clearSelection();
-            state_ = State::Normal;
-            statusMessage_ = "";
             pushHistory();
             if (event.type == EventType::Backspace) {
                 bool willMergeLines = (cursor_.col == 0 && cursor_.line > 0);
                 int prevLineLen = willMergeLines ? document_.lineLength(cursor_.line - 1) : 0;
 
-                // Si no funde lineas, calculamos ANTES de borrar donde
-                // empieza el caracter que precede al cursor (su lead byte),
-                // para que tras borrar el cursor quede en un limite de
-                // caracter (no dentro de los bytes de un multibyte).
                 int charStart = cursor_.col;
                 if (!willMergeLines) {
                     const std::string& ln_ = document_.lineAt(cursor_.line);
@@ -206,8 +184,6 @@ void Editor::handleEvent(const Event& event) {
 
                 if (document_.deleteCharBefore(cursor_.line, cursor_.col)) {
                     if (willMergeLines) {
-                        // La linea se fundio con la anterior: el cursor
-                        // queda justo donde terminaba esa linea anterior.
                         cursor_.line--;
                         cursor_.col = prevLineLen;
                     } else {
@@ -221,95 +197,60 @@ void Editor::handleEvent(const Event& event) {
             break;
         }
 
-        case EventType::Undo:
-            undo();
+        case EventType::Escape:
+            state_ = State::Navegacion;
+            statusMessage_ = "NAVEGACION";
             break;
 
-        case EventType::Redo:
-            redo();
-            break;
+        case EventType::MoveLeft: cursor_.moveLeft(document_); break;
+        case EventType::MoveRight: cursor_.moveRight(document_); break;
+        case EventType::MoveUp: cursor_.moveUp(document_); break;
+        case EventType::MoveDown: cursor_.moveDown(document_); break;
+        case EventType::MoveHome: cursor_.moveHome(); break;
+        case EventType::MoveEnd: cursor_.moveEnd(document_); break;
 
-        case EventType::MoveLeft: {
-            if (state_ == State::Select) beginSelection();
-            else clearSelection();
-            cursor_.moveLeft(document_);
-            updateSelectionPosition();
+        default:
             break;
-        }
+    }
+}
 
-        case EventType::MoveRight: {
-            if (state_ == State::Select) {
-                // En modo seleccion la flecha derecha siempre extiende.
-                beginSelection();
-                cursor_.moveRight(document_);
-                updateSelectionPosition();
-            } else {
-                // Flecha derecha con una seleccion hacia adelante: el
-                // cursor ya esta en el extremo derecho de la seleccion.
-                // Se cancela la seleccion y el cursor MANTIENE su posicion
-                // actual (no avanza sobre el texto seleccionado).
-                bool cursorAtSelectionEnd = selection_.has_value() &&
-                                            selection_->anchor < selection_->position;
+void Editor::handleSeleccionEvent(const Event& event) {
+    switch (event.type) {
+        // Los movimientos extienden la seleccion, igual que hacia v0.3-v0.4.
+        case EventType::MoveLeft:
+            beginSelection(); cursor_.moveLeft(document_); updateSelectionPosition(); break;
+        case EventType::MoveRight:
+            beginSelection(); cursor_.moveRight(document_); updateSelectionPosition(); break;
+        case EventType::MoveUp:
+            beginSelection(); cursor_.moveUp(document_); updateSelectionPosition(); break;
+        case EventType::MoveDown:
+            beginSelection(); cursor_.moveDown(document_); updateSelectionPosition(); break;
+        case EventType::MoveHome:
+            beginSelection(); cursor_.moveHome(); updateSelectionPosition(); break;
+        case EventType::MoveEnd:
+            beginSelection(); cursor_.moveEnd(document_); updateSelectionPosition(); break;
+
+        // 'c' y 'x' terminan la seleccion y vuelven a navegacion. En v0.5
+        // ambos hacen lo mismo (sin efecto de buffer); la diferencia real
+        // llegara con el buffer en v0.55.
+        case EventType::InsertChar:
+            if (event.text == "c" || event.text == "x") {
                 clearSelection();
-                if (!cursorAtSelectionEnd) {
-                    cursor_.moveRight(document_);
-                }
+                state_ = State::Navegacion;
+                statusMessage_ = "NAVEGACION";
             }
-            break;
-        }
-
-        case EventType::MoveUp: {
-            if (state_ == State::Select) beginSelection();
-            else clearSelection();
-            cursor_.moveUp(document_);
-            updateSelectionPosition();
-            break;
-        }
-
-        case EventType::MoveDown: {
-            if (state_ == State::Select) beginSelection();
-            else clearSelection();
-            cursor_.moveDown(document_);
-            updateSelectionPosition();
-            break;
-        }
-
-        case EventType::MoveHome: {
-            if (state_ == State::Select) beginSelection();
-            else clearSelection();
-            cursor_.moveHome();
-            updateSelectionPosition();
-            break;
-        }
-
-        case EventType::MoveEnd: {
-            if (state_ == State::Select) beginSelection();
-            else clearSelection();
-            cursor_.moveEnd(document_);
-            updateSelectionPosition();
-            break;
-        }
-
-        case EventType::Save:
-            save();
+            // Cualquier otra letra ya NO reemplaza la seleccion: se ignora.
             break;
 
         case EventType::Escape:
-            // ESC suelto: cancela la seleccion activa sin mover el cursor.
-            // Si estabamos en modo seleccion, salimos de el.
-            if (state_ == State::Select) {
-                state_ = State::Normal;
-                statusMessage_ = "Seleccion cancelada.";
-            }
             clearSelection();
+            state_ = State::Navegacion;
+            statusMessage_ = "Seleccion cancelada.";
             break;
 
-        // Quit deliberadamente NO se maneja aqui: el usuario debe pasar
-        // por el prefijo (Ctrl+K -> Ctrl+Q) para salir. Un evento Quit
-        // suelto (p.ej. Ctrl+Q sin prefix) se ignora y no mata el editor.
-        // Esto es una mejora de seguridad: evitar salir por accidente con
-        // una sola tecla. handlePrefixKey se encarga del Quit real.
-        case EventType::None:
+        // InsertNewline/Backspace/Delete (y el resto): no-op. Salir de
+        // seleccion es siempre a navegacion, nunca a interaccion con
+        // reemplazo del rango.
         default:
             break;
     }
@@ -317,8 +258,7 @@ void Editor::handleEvent(const Event& event) {
 
 void Editor::handlePrefixKey(const Event& event) {
     switch (event.type) {
-        case EventType::Save:
-        case EventType::Select: // Ctrl+S tras Ctrl+K = guardar archivo
+        case EventType::Save: // Ctrl+S tras Ctrl+K = guardar archivo
             save();
             state_ = priorState_;
             break;
@@ -405,14 +345,18 @@ selection_ = state.selection;
         }
 }
     // La seleccion restaurada vuelve a estar VIGENTE. Importante: el modo
-    // Select solo debe activarse si el rango restaurado es realmente NO
-    // vacio. Usar `has_value()` como criterio dejaria el estado en Select
+    // Seleccion solo debe activarse si el rango restaurado es realmente NO
+    // vacio. Usar `has_value()` como criterio dejaria el estado en Seleccion
     // para una seleccion vacia (anchor == position), con la barra de estado
     // mostrando "SELECCION" sin texto resaltado. Compartimos el criterio
-    // con hasSelection() (anchor != position).
+    // con hasSelection() (anchor != position). Nota: si el usuario estaba
+    // en Interaccion al momento del pushHistory (sin seleccion), el undo
+    // vuelve a Navegacion (el historial no distinguie Navegacion de
+    // Interaccion; solo sabe si hay o no seleccion). Es un criterio
+    // aceptado: undo es del documento, no de la UI.
     state_ = (selection_.has_value() && selection_->anchor != selection_->position)
-           ? State::Select
-           : State::Normal;
+           ? State::Seleccion
+           : State::Navegacion;
     // modified_ = "¿el contenido difiere del ultimo guardado?"
     modified_ = (document_.snapshot() != savedLines_);
 }

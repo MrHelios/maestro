@@ -32,7 +32,7 @@ std::string frame(const std::vector<std::string>& lines,
 
     Renderer r;
     return r.buildScreen(doc, cursor, viewport, "test.txt", false, "",
-                         State::Normal, sel);
+                         State::Navegacion, sel);
 }
 
 bool contains(const std::string& hay, const std::string& needle) {
@@ -63,7 +63,7 @@ std::string curFrame(const std::string& line, int byteCol) {
 
     Renderer r;
     return r.buildScreen(doc, cursor, viewport, "test.txt", false, "",
-                         State::Normal, std::nullopt);
+                         State::Navegacion, std::nullopt);
 }
 
 // Extrae la columna VISUAL a la que el renderer mueve el cursor al final
@@ -312,7 +312,7 @@ TEST(truncate_line_to_ascii_width) {
     Viewport vp; vp.top = 0; vp.height = 1; vp.width = 3;
     Cursor c; c.line = 0; c.col = 0;
     Renderer r;
-    std::string frame3 = r.buildScreen(doc, c, vp, "t", false, "", State::Normal, std::nullopt);
+    std::string frame3 = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
     CHECK_EQ(docRow(frame3), "abc");
     CHECK(validUtf8(docRow(frame3)));
 }
@@ -324,7 +324,7 @@ TEST(truncate_cafe_just_before_e) {
     Viewport vp; vp.top = 0; vp.height = 1; vp.width = 3;
     Cursor c; c.line = 0; c.col = 0;
     Renderer r;
-    std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Normal, std::nullopt);
+    std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
     CHECK_EQ(docRow(f), "caf");
     CHECK(validUtf8(docRow(f)));
 }
@@ -335,7 +335,7 @@ TEST(truncate_cafe_includes_e) {
     Viewport vp; vp.top = 0; vp.height = 1; vp.width = 4;
     Cursor c; c.line = 0; c.col = 0;
     Renderer r;
-    std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Normal, std::nullopt);
+    std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
     CHECK_EQ(docRow(f), "caf\xc3\xa9");
     CHECK(validUtf8(docRow(f)));
 }
@@ -354,7 +354,7 @@ TEST(truncate_dash_around_em_dash) {
         Viewport vp; vp.top = 0; vp.height = 1; vp.width = cs.w;
         Cursor c; c.line = 0; c.col = 0;
         Renderer r;
-        std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Normal, std::nullopt);
+        std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
         CHECK(validUtf8(docRow(f)));
         CHECK_EQ(docRow(f), cs.expect);
     }
@@ -373,7 +373,7 @@ TEST(truncate_emoji_around) {
         Viewport vp; vp.top = 0; vp.height = 1; vp.width = cs.w;
         Cursor c; c.line = 0; c.col = 0;
         Renderer r;
-        std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Normal, std::nullopt);
+        std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
         CHECK(validUtf8(docRow(f)));
         CHECK_EQ(docRow(f), cs.expect);
     }
@@ -395,7 +395,7 @@ TEST(truncate_never_splits_multibyte_any_width) {
             Viewport vp; vp.top = 0; vp.height = 1; vp.width = w;
             Cursor c; c.line = 0; c.col = 0;
             Renderer r;
-            std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Normal, std::nullopt);
+            std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
             std::string row = docRow(f);
             CHECK(validUtf8(row));
             CHECK(colWidthLocal(row) <= w);
@@ -576,7 +576,7 @@ std::string barFrame(const std::string& file, bool modified,
 TEST(statusbar_two_rows_present) {
     // Debe haber exactamente una fila fija (video inverso) y una fila de
     // mensajes (sin inverso). El texto del mensaje no debe estar invertido.
-    std::string out = barFrame("/a/b.txt", false, "hola", State::Normal, 200);
+    std::string out = barFrame("/a/b.txt", false, "hola", State::Navegacion, 200);
     CHECK(contains(out, ANSI_INV));
     CHECK(contains(out, "hola"));
     CHECK(!contains(out, ANSI_INV "hola"));
@@ -585,14 +585,14 @@ TEST(statusbar_two_rows_present) {
 TEST(statusbar_left_format_name_path_estado) {
     // <nombre> - <ruta> - <ESTADO>, en ese orden, dentro del bloque inverso.
     std::string out = barFrame("/home/alice/proyecto/odo.txt", false, "",
-                               State::Normal, 200);
-    CHECK(contains(out, "odo.txt - /home/alice/proyecto - NORMAL"));
+                               State::Navegacion, 200);
+    CHECK(contains(out, "odo.txt - /home/alice/proyecto - NAVEGACION"));
 }
 
 TEST(statusbar_modified_indicator) {
     // Un cambio sin guardar agrega [modificado] junto al nombre.
-    std::string out = barFrame("/home/a/x.cc", true, "", State::Normal, 200);
-    CHECK(contains(out, "x.cc [modificado] - /home/a - NORMAL"));
+    std::string out = barFrame("/home/a/x.cc", true, "", State::Navegacion, 200);
+    CHECK(contains(out, "x.cc [modificado] - /home/a - NAVEGACION"));
 }
 
 TEST(statusbar_modified_indicator_survives_long_name) {
@@ -602,7 +602,7 @@ TEST(statusbar_modified_indicator_survives_long_name) {
     // usuario siempre sepa que hay cambios sin guardar.
     const std::string nombre = "un_archivo_muy_muy_largo_para_verificar_"
                                "el_indicador_de_modificado_en_la_barra.txt";
-    std::string out = barFrame("/dir/" + nombre, true, "", State::Normal, 200);
+    std::string out = barFrame("/dir/" + nombre, true, "", State::Navegacion, 200);
 
     // El indicador aparece completo (nunca cortado a "modificad").
     CHECK(contains(out, "[modificado]"));
@@ -610,7 +610,7 @@ TEST(statusbar_modified_indicator_survives_long_name) {
     CHECK(!contains(out, "modificad" ANSI_RESET));
 
     // Con el mismo nombre pero sin cambios, el indicador no debe estar.
-    std::string limpio = barFrame("/dir/" + nombre, false, "", State::Normal, 200);
+    std::string limpio = barFrame("/dir/" + nombre, false, "", State::Navegacion, 200);
     CHECK(!contains(limpio, "[modificado]"));
 }
 
@@ -660,33 +660,33 @@ int barVisibleCols(const std::string& frame) {
 
 TEST(statusbar_label_fills_whole_width_edge) {
     // Caso extremo de la revision: ancho de terminal apenas mayor que la
-    // etiqueta de estado (Select -> "SELECCION", 9 columnas). Ahi
+    // etiqueta de estado (Seleccion -> "SELECCION", 9 columnas). Ahi
     // partsBudget = budget - estadoW - sep podia volverse negativo y el
     // bloque final (" - SELECCION") exceder viewport.width. El bloque
     // Ln/Col fijo a la derecha tambien exige ancho: por eso recursemos la
     // ventana de anchos donde el presupuesto izquierdo queda en esa banda.
     for (int width = 15; width <= 40; ++width) {
         std::string out = barFrame("/a/archivo.txt", false, "",
-                                   State::Select, width);
+                                   State::Seleccion, width);
         int barW = barVisibleCols(out);
         CHECK(barW <= width); // nunca debe desbordar el ancho de la terminal
     }
 }
 
 TEST(statusbar_label_fills_whole_width_edge_normal) {
-    // Mismo chequeo con NORMAL (6 cols), cuya banda desbordada cae en
+    // Mismo chequeo con NAVEGACION (10 cols), cuya banda desbordada cae en
     // anchos un poco menores.
     for (int width = 15; width <= 34; ++width) {
         std::string out = barFrame("/a/archivo.txt", false, "",
-                                   State::Normal, width);
+                                   State::Navegacion, width);
         int barW = barVisibleCols(out);
         CHECK(barW <= width);
     }
 }
 
 TEST(statusbar_state_labels) {
-    // SELECCION y COMANDO se mapean 1 a 1 con los estados Select y Prefix.
-    std::string sel = barFrame("/a.txt", false, "", State::Select, 200);
+    // SELECCION y COMANDO se mapean 1 a 1 con los estados Seleccion y Prefix.
+    std::string sel = barFrame("/a.txt", false, "", State::Seleccion, 200);
     CHECK(contains(sel, "a.txt - / - SELECCION"));
 
     std::string pre = barFrame("/a.txt", false, "", State::Prefix, 200);
@@ -698,7 +698,7 @@ TEST(statusbar_right_block_always_visible) {
     // terminal estrecha: no es un derrota del sacrificio.
     std::string out = barFrame(
         "/data/muy/largo/dir/de/archivos/nombre.txt", false, "",
-        State::Normal, 20);
+        State::Navegacion, 20);
     CHECK(contains(out, "Linea: 1 Col: 1"));
 }
 
@@ -707,10 +707,10 @@ TEST(statusbar_path_sacrificed_before_name) {
     // y el bloque Ln/Col se mantienen enteros.
     std::string out = barFrame(
         "/a/very/long/directory/chain/for/the/path/iz/archivo.txt",
-        false, "", State::Normal, 55);
+        false, "", State::Navegacion, 55);
     CHECK(contains(out, "archivo.txt"));   // nombre intacto
     CHECK(contains(out, "..."));           // la ruta se corto con "..." al inicio
-    CHECK(contains(out, "NORMAL"));        // etiqueta de estado intacta
+    CHECK(contains(out, "NAVEGACION"));        // etiqueta de estado intacta
     CHECK(contains(out, "Linea: 1 Col: 1"));
 }
 
@@ -718,10 +718,12 @@ TEST(statusbar_path_uses_rest_after_name_reserved) {
     // El nombre se reserva primero; la ruta toma SOLO lo que sobra y se
     // agota (hasta "..." ) antes de tocar el nombre. En un presupuesto
     // apretado, el nombre queda completo y la ruta se reduce a lo minimo.
+    // (El ancho refleja la etiqueta NAVEGACION, mas larga que la antigua
+    // NORMAL: con menos columnas la ruta ya no deja ni "..." para mostrar.)
     std::string out = barFrame(
         "/some/verylongdirectorychainloading/ending.txt",
-        false, "", State::Normal, 41);
-    CHECK(contains(out, "ending.txt - ... - NORMAL"));
+        false, "", State::Navegacion, 45);
+    CHECK(contains(out, "ending.txt - ... - NAVEGACION"));
     // La ruta casi no deja componente visible: su nombre de archivo no
     // debe colarse en el recorte.
     CHECK(!contains(out, "verylongdirectory"));
@@ -730,7 +732,7 @@ TEST(statusbar_path_uses_rest_after_name_reserved) {
 TEST(statusbar_second_row_message_independent) {
     // La fila de mensajes es propia: se muestra tal cual y se trunca al
     // ancho de la terminal sin competir con la barra fija.
-    std::string out = barFrame("/a.txt", false, "mensaje de estado", State::Normal, 15);
+    std::string out = barFrame("/a.txt", false, "mensaje de estado", State::Navegacion, 15);
     CHECK(contains(out, "mensaje de esta")); // truncado a 15 columnas
     CHECK(!contains(out, "mensaje de estado ")); // no cabe el final
     // La barra fija tiene su propio ancho: en 15 columnas el bloque
@@ -794,7 +796,7 @@ TEST(consecutive_truncate_each_position) {
             Viewport vp; vp.top = 0; vp.height = 1; vp.width = w;
             Cursor cur; cur.line = 0; cur.col = 0;
             Renderer r;
-            std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Normal, std::nullopt);
+            std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
             CHECK_EQ(docRow(f), expect);
             CHECK(validUtf8(docRow(f)));
             CHECK(colWidthLocal(docRow(f)) <= w);
@@ -866,7 +868,7 @@ TEST(mixed_extreme_truncate_each_width) {
         Viewport vp; vp.top = 0; vp.height = 1; vp.width = t.w;
         Cursor cur; cur.line = 0; cur.col = 0;
         Renderer r;
-        std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Normal, std::nullopt);
+        std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
         CHECK_EQ(docRow(f), t.expect);
         CHECK(validUtf8(docRow(f)));
         CHECK(colWidthLocal(docRow(f)) <= t.w);
@@ -884,7 +886,7 @@ std::string renderRow(const std::string& line, int width) {
     Viewport vp; vp.top = 0; vp.height = 1; vp.width = width;
     Cursor cur; cur.line = 0; cur.col = 0;
     Renderer r;
-    std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Normal, std::nullopt);
+    std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
     return docRow(f);
 }
 } // namespace

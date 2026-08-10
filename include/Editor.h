@@ -11,30 +11,35 @@
 #include "Terminal.h"
 #include "Event.h"
 
-// Maquina de estados interna del editor.
-//   Normal:  edicion corriente. Ctrl+S entra a seleccion, Ctrl+K al prefijo.
-//   Prefix:  tras Ctrl+K; el siguiente evento decide (Ctrl+S guarda,
-//            Ctrl+Q sale, cualquier otra cosa lo cancela y se descarta).
-//   Select:  modo seleccion (activo con Ctrl+S). Las flechas/Home/End
-//            extienden la seleccion; ESC la cancela y sale; un caracter
-//            o Enter la reemplaza y sale del modo.
+// Maquina de estados interna del editor (v0.5: modalidad tipo modal).
+//   Navegacion:  estado por defecto. No se puede escribir. Tecla 'i' entra
+//                a Interaccion (edicion), 's' a Seleccion. Las flechas
+//                se mueven libremente sin iniciar seleccion.
+//   Interaccion: edicion libre de texto (todo se inserta tal cual). ESC
+//                vuelve a Navegacion. Antes era el comportamiento "Normal".
+//   Seleccion:   modo seleccion (activo con 's'). Las flechas/Home/End
+//                extienden la seleccion; ESC o 'c'/'x' la terminan y
+//                vuelven a Navegacion. Un caracter ya NO la reemplaza.
+//   Prefix:      tras Ctrl+K; el siguiente evento decide (Ctrl+S guarda,
+//                Ctrl+Q sale, cualquier otra cosa lo cancela y se descarta).
 //
 // IMPORTANTE: estas son DOS cosas distintas que NO hay que confundir.
-//   state_ == State::Select  == "el modo seleccion esta ACTIVO" (modo).
-//   hasSelection()            == "existe un rango de texto seleccionado",
-//                               es decir un rango NO vacio (anchor != position).
+//   state_ == State::Seleccion  == "el modo seleccion esta ACTIVO" (modo).
+//   hasSelection()              == "existe un rango de texto seleccionado",
+//                                  es decir un rango NO vacio (anchor != position).
 //
-// Al entrar al modo (Ctrl+S) sin haber movido el cursor, beginSelection()
+// Al entrar al modo ('s') sin haber movido el cursor, beginSelection()
 // fija anchor == position, asi que es posible tener:
-//     state_ == State::Select   y   hasSelection() == false
+//     state_ == State::Seleccion   y   hasSelection() == false
 // (modo seleccion listo pero todavia sin texto marcado). Eso es correcto
 // por diseño: el modo es la capacidad de extender; hasSelection() es el
 // resultado concreto. Un estado solo significa lo que anuncia: "modo"
 // NO implica "texto seleccionado".
 enum class State {
-    Normal,
+    Navegacion,
+    Interaccion,
+    Seleccion,
     Prefix,
-    Select,
 };
 
 // Editor es el "engine": conoce el Documento, el Cursor, el Viewport,
@@ -72,16 +77,16 @@ private:
     Renderer renderer_;
     Terminal terminal_;
 
-// Estado de la maquina de estados (Normal/Prefix/Select).
-// state_ == Select significa SOLO "modo seleccion activo". No implica
+// Estado de la maquina de estados (Navegacion/Interaccion/Seleccion/Prefix).
+// state_ == Seleccion significa SOLO "modo seleccion activo". No implica
 // que haya texto seleccionado: ver hasSelection() (rango no vacio).
-// Los dos se pueden mismatchear (Select sin seleccion, p.ej. justo
-// despues de Ctrl+S sin mover el cursor).
-    State state_ = State::Normal;
+// Los dos se pueden mismatchear (Seleccion sin seleccion, p.ej. justo
+// despues de 's' sin mover el cursor).
+    State state_ = State::Navegacion;
     // Estado previo, guardado al entrar en Prefix para volver a el si
     // el prefijo se cancela o ejecuta (p.ej. guardar sin salir de
-    // seleccion si el prefijo se abrio estando en Select).
-    State priorState_ = State::Normal;
+    // seleccion si el prefijo se abrio estando en Seleccion).
+    State priorState_ = State::Navegacion;
     std::string filename_;
     bool modified_ = false;
     bool running_ = true;
@@ -111,6 +116,11 @@ private:
     // (tras Ctrl+K). Ctrl+S/Guardar persiste, Ctrl+Q sale; cualquier
     // otra tecla descarta el evento y cancela el prefijo.
     void handlePrefixKey(const Event& event);
+
+    // --- Despacho por modo ---
+    void handleNavegacionEvent(const Event& event);
+    void handleInteraccionEvent(const Event& event);
+    void handleSeleccionEvent(const Event& event);
 
     struct HistoryState {
         std::vector<std::string> lines;
