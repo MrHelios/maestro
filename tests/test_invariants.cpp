@@ -21,7 +21,7 @@ static Event ev(EventType t) {
 static Event insert(char c) {
     Event e;
     e.type = EventType::InsertChar;
-    e.ch = c;
+    e.text = std::string(1, c);
     return e;
 }
 
@@ -57,6 +57,13 @@ static void assertStateConsistent(Editor& ed) {
     CHECK(ed.redoStack_.size() <= Editor::MAX_UNDO);
 
     // --- Invariantes de la seleccion (Paso 8) ---
+    // hasSelection() y selection_ deben estar en concordancia explicita.
+    if (ed.hasSelection())
+        CHECK(ed.selection_.has_value());
+
+    if (!ed.selection_.has_value())
+        CHECK(!ed.hasSelection());
+
     // Si el estado interno guarda una seleccion (incluso vacia), sus dos
     // coordenadas deben ser validas.
     if (ed.selection_.has_value()) {
@@ -145,6 +152,57 @@ TEST(state_selection_consistent_after_shift_moves) {
     }
 }
 
+// Paso 8/19: en modo seleccion, Up/Down sobre lineas de distinto largo usan
+// preferredCol_ para recuperar la columna original. El ciclo
+// Shift+Down, Shift+Down, Shift+Up, Shift+Up debe llevar el cursor de vuelta
+// exactamente al anchor (y por tanto anular la seleccion), sin corromper
+// preferredCol_.
+TEST(state_selection_shift_cycle_preserves_preferred_col) {
+    Editor ed;
+    ed.document_.restore({"abcdef", "xy", "abcdef"});
+    ed.cursor_.line = 0;
+    ed.cursor_.col = 5;
+    ed.cursor_.preferredCol_ = 5;
+
+    // Entrar en modo seleccion (Ctrl+S): arma el anchor {0, 5}.
+    ed.handleEvent(ev(EventType::Select));
+    CHECK(ed.selection_.has_value());
+    const Position anchor{0, 5};
+    CHECK(ed.selection_->anchor == anchor);
+
+    // Shift+Down -> linea "xy" (largo 2), el cursor se clampa a col 2.
+    ed.handleEvent(ev(EventType::MoveDown));
+    assertStateConsistent(ed);
+    CHECK_EQ(ed.cursor_.line, 1);
+    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK_EQ(ed.cursor_.preferredCol_, 5);
+
+    // Shift+Down -> "abcdef" (largo 6), recupera la col 5 preferida.
+    ed.handleEvent(ev(EventType::MoveDown));
+    assertStateConsistent(ed);
+    CHECK_EQ(ed.cursor_.line, 2);
+    CHECK_EQ(ed.cursor_.col, 5);
+
+    // Shift+Up -> "xy" de nuevo, clamped a col 2.
+    ed.handleEvent(ev(EventType::MoveUp));
+    assertStateConsistent(ed);
+    CHECK_EQ(ed.cursor_.line, 1);
+    CHECK_EQ(ed.cursor_.col, 2);
+
+    // Shift+Up -> linea 0, recupera col 5 == anchor.
+    ed.handleEvent(ev(EventType::MoveUp));
+    assertStateConsistent(ed);
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 5);
+    CHECK_EQ(ed.cursor_.preferredCol_, 5);
+
+    // El ciclo completo devuelve el cursor exactamente al anchor; la
+    // seleccion queda vacia (anchor == position) de forma consistente.
+    CHECK(ed.selection_->anchor == anchor);
+    CHECK(ed.selection_->position == anchor);
+    CHECK(!ed.hasSelection());
+}
+
 TEST(state_modified_flag_tracks_changes) {
     Editor ed;
     CHECK(!ed.modified_);
@@ -190,7 +248,7 @@ TEST(state_stress_mixed_operations_selection) {
         switch (k) {
             case 0: // InsertChar (a veces reemplaza la seleccion activa)
                 e.type = EventType::InsertChar;
-                e.ch = static_cast<char>('a' + (rnd() % 26));
+                e.text = std::string(1, static_cast<char>('a' + (rnd() % 26)));
                 break;
             case 1: // modo seleccion: Ctrl+S (arma/ajusta seleccion)
                 e.type = EventType::Select;
@@ -539,7 +597,7 @@ TEST(invariant_no_crash_on_event_sequence) {
         Event e;
         e.type = types[round % types.size()];
         if (e.type == EventType::InsertChar)
-            e.ch = static_cast<char>('a' + (round % 26));
+            e.text = std::string(1, static_cast<char>('a' + (round % 26)));
         ed.handleEvent(e);
         assertStateConsistent(ed);
         if (!ed.running_) break;

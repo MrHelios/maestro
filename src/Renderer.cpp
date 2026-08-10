@@ -8,6 +8,8 @@
 #include <sstream>
 #include <algorithm>
 
+#include "utf8.h"
+
 namespace {
 
 // ---- Limites fijos de la barra de estado (bloque izquierdo) ----
@@ -15,70 +17,25 @@ constexpr int kNameMax    = 30;   // columnas maximas del nombre
 constexpr int kPathMax    = 40;   // columnas maximas de la ruta
 constexpr int kNamePathMax = 60;  // tope combinado nombre + ruta
 
-// Cuenta cuantas COLUMNAS VISUALES ocupan los primeros `byteCol` bytes
-// de `line`. Es necesario porque un caracter UTF-8 (por ejemplo "—",
-// un guion largo) puede ocupar varios bytes en el std::string pero
-// UNA sola columna en la terminal. Si contamos bytes en vez de
-// columnas, el cursor termina posicionado mas a la derecha de donde
-// realmente esta el texto, dejando un hueco visual.
-//
-// Nota: esto asume caracteres de ancho 1 (correcto para acentos, "—",
-// etc). Caracteres de ancho doble (CJK, emojis) quedan fuera del
-// alcance de v0.1.
-int utf8ColumnOf(const std::string& line, int byteCol) {
-    int col = 0;
-    int limit = std::min<int>(byteCol, static_cast<int>(line.size()));
-    for (int i = 0; i < limit; ++i) {
-        unsigned char c = static_cast<unsigned char>(line[i]);
-        // Un byte es "inicio de caracter" si NO es un byte de
-        // continuacion UTF-8 (los bytes de continuacion tienen el
-        // patron 10xxxxxx).
-        if ((c & 0xC0) != 0x80) {
-            col++;
-        }
-    }
-    return col;
-}
-
-// Trunca `line` a lo sumo `maxCols` COLUMNAS VISUALES, sin cortar un
-// caracter multibyte por la mitad (lo que generaria bytes invalidos
-// y corromperia el resto del render).
-std::string utf8Truncate(const std::string& line, int maxCols) {
-    int col = 0;
-    size_t i = 0;
-    while (i < line.size()) {
-        unsigned char c = static_cast<unsigned char>(line[i]);
-        if ((c & 0xC0) != 0x80) {
-            if (col >= maxCols) break;
-            col++;
-        }
-        i++;
-    }
-    return line.substr(0, i);
-}
-
-// Ancho (columnas visuales) de una cadena completa.
-std::string utf8Range(const std::string& line, int fromCol, int toCol);
-
 std::string utf8Tail(const std::string& line, int maxTailCols) {
-    int total = utf8ColumnOf(line, static_cast<int>(line.size()));
+    int total = utf8::columnOf(line, static_cast<int>(line.size()));
     if (maxTailCols <= 0 || total <= maxTailCols) return line;
-    return utf8Range(line, total - maxTailCols, total);
+    return utf8::range(line, total - maxTailCols, total);
 }
 
 // Trunca manteniendo el INICIO (los primeros `maxCols` visibles).
 // No corta caracteres multibyte por la mitad.
 std::string utf8TruncateFront(const std::string& line, int maxCols) {
     if (maxCols <= 0) return line;
-    if (utf8ColumnOf(line, static_cast<int>(line.size())) <= maxCols) return line;
+    if (utf8::columnOf(line, static_cast<int>(line.size())) <= maxCols) return line;
     const std::string ellipsis = "...";
     if (maxCols <= static_cast<int>(ellipsis.size()))
-        return utf8Truncate(ellipsis, maxCols);
+        return utf8::truncate(ellipsis, maxCols);
     return ellipsis + utf8Tail(line, maxCols - static_cast<int>(ellipsis.size()));
 }
 
 int colCount(const std::string& s) {
-    return utf8ColumnOf(s, static_cast<int>(s.size()));
+    return utf8::columnOf(s, static_cast<int>(s.size()));
 }
 
 // Nombre del archivo (la parte tras el ultimo '/' ; o el mismo si no
@@ -120,7 +77,7 @@ std::string buildLeftParts(int budget, const std::string& name,
     int nameW = colCount(name);
     // Si el nombre ya ocupa el presupuesto entero (o mas), se trunca el
     // nombre: no queda lugar para la ruta ni el separador.
-    if (nameW >= budget) return utf8Truncate(name, budget);
+    if (nameW >= budget) return utf8::truncate(name, budget);
 
     const std::string sep = " - ";
     int sepW = static_cast<int>(sep.size());
@@ -147,12 +104,16 @@ std::string buildLeftBlock(const std::string& filename, bool modified,
 
     std::string name = baseName(filename);
     if (name.empty()) name = "[sin nombre]";
-    if (modified) name += " [modificado]";
+    const std::string modificado = " [modificado]";
 
     std::string path = filename.empty() ? "" : dirName(filename);
 
-    // Limites fijos (columnas visuales).
-    name = utf8Truncate(name, kNameMax);
+    // Limites fijos (columnas visuales). El sufijo [modificado] se
+    // RESERVA entero: se trunca el nombre (no el indicador) para que
+    // jamás se pierda la señal de "cambios sin guardar" en pantalla.
+    int nameBudget = kNameMax - (modified ? colCount(modificado) : 0);
+    name = utf8::truncate(name, nameBudget);
+    if (modified) name += modificado;
     // La ruta se acorta por la izquierda: se pierde el inicio cuando
     // excede, manteniendo la cola (donde esta el nombre de archivo).
     if (colCount(path) > kPathMax)
@@ -161,34 +122,23 @@ std::string buildLeftBlock(const std::string& filename, bool modified,
         path = utf8TruncateFront(path, std::max(0, kNamePathMax - colCount(name)));
 
     int estadoW = colCount(estado);
-    if (budget <= estadoW) return utf8Truncate(estado, budget);
+    if (budget <= estadoW) return utf8::truncate(estado, budget);
 
     // Reservamos el espacio del estado (a la derecha) y el separador
-    // anterior; el resto es para nombre + ruta.
+    // anterior; el resto es para nombre + ruta. Si aun no cabe el
+    // separador entero (partsBudget negativo), no hay lugar para ningun
+    // nombre: mostramos solo el estado, sin usar el separador, para no
+    // exceder `budget` (y de paso viewport.width).
     const std::string sep = " - ";
     int partsBudget = budget - estadoW - static_cast<int>(sep.size());
+    if (partsBudget < 0) return utf8::truncate(estado, budget);
     std::string izquierda = buildLeftParts(partsBudget, name, path);
     return izquierda + sep + estado;
 }
 
 // Devuelve los bytes de `line` cuyas COLUMNAS VISUALES caen dentro de
 // [fromCol, toCol). No corta caracteres multibyte por la mitad.
-std::string utf8Range(const std::string& line, int fromCol, int toCol) {
-    int col = 0;
-    size_t startByte = line.size();
-    size_t i = 0;
-    while (i < line.size()) {
-        unsigned char c = static_cast<unsigned char>(line[i]);
-        if ((c & 0xC0) != 0x80) {
-            if (col == fromCol) startByte = i;
-            if (col >= toCol) break;
-            col++;
-        }
-        i++;
-    }
-    if (col >= toCol) return line.substr(startByte, i - startByte);
-    return line.substr(startByte); // hasta el final de la linea
-}
+// (Implementado y testado en utf8.h como utf8::range.)
 
 // Renderiza una sola linea del documento, aplicando video inverso a los
 // bytes dentro de [selStartByte, selEndByte) si la linea esta seleccionada.
@@ -200,7 +150,7 @@ void renderLine(std::ostringstream& out,
                 int selEndByte = -1) {
     if (selStartByte < 0 || selEndByte < 0 || selStartByte >= selEndByte) {
         // Sin seleccion aqui (o seleccion vacia): caso normal.
-        out << utf8Truncate(line, width);
+        out << utf8::truncate(line, width);
         return;
     }
 
@@ -209,19 +159,19 @@ void renderLine(std::ostringstream& out,
     int endByte = std::min<int>(selEndByte, static_cast<int>(line.size()));
     int startByte = std::min<int>(selStartByte, endByte);
 
-    int startCol = utf8ColumnOf(line, startByte);
-    int endCol = utf8ColumnOf(line, endByte);
+    int startCol = utf8::columnOf(line, startByte);
+    int endCol = utf8::columnOf(line, endByte);
 
     // Parte antes de la seleccion.
-    out << utf8Range(line, 0, std::min(startCol, width));
+    out << utf8::range(line, 0, std::min(startCol, width));
 
     // Parte seleccionada, en video inverso.
     out << "\x1b[7m";
-    out << utf8Range(line, std::min(startCol, width), std::min(endCol, width));
+    out << utf8::range(line, std::min(startCol, width), std::min(endCol, width));
     out << "\x1b[0m";
 
     // Parte despues de la seleccion (si queda espacio).
-    out << utf8Range(line, std::min(endCol, width), width);
+    out << utf8::range(line, std::min(endCol, width), width);
 }
 
 } // namespace
@@ -306,14 +256,14 @@ std::string Renderer::buildScreen(const Document& doc,
     // ---- Fila 2: mensajes de estado (sin inverso, fila propia) ----
     out << "\r\n";
     out << "\x1b[K";
-    out << utf8Truncate(statusMessage, viewport.width);
+    out << utf8::truncate(statusMessage, viewport.width);
 
     // Posicionar el cursor real de la terminal donde corresponde.
     // OJO: cursor.col es un offset en BYTES dentro de la linea (asi
     // esta modelado en Document/Cursor). Para la terminal necesitamos
-    // la columna VISUAL, asi que la convertimos con utf8ColumnOf en
+    // la columna VISUAL, asi que la convertimos con utf8::columnOf en
     // vez de usar cursor.col directamente.
-    int visualCol = utf8ColumnOf(doc.lineAt(cursor.line), cursor.col);
+    int visualCol = utf8::columnOf(doc.lineAt(cursor.line), cursor.col);
     int screenRow = cursor.line - viewport.top + 1; // +1: terminal es 1-indexada
     int screenCol = visualCol + 1;
     out << "\x1b[" << screenRow << ";" << screenCol << "H";

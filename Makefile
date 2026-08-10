@@ -15,7 +15,10 @@ $(TEST_DIR)/test_event.cpp \
              $(TEST_DIR)/test_selection.cpp \
              $(TEST_DIR)/test_renderer.cpp \
              $(TEST_DIR)/test_modes.cpp \
-             $(TEST_DIR)/test_invariants.cpp
+             $(TEST_DIR)/test_invariants.cpp \
+             $(TEST_DIR)/test_utf8.cpp \
+             $(TEST_DIR)/test_truncate.cpp \
+             $(TEST_DIR)/test_utf8range.cpp
 TEST_BIN := edit_tests
 # Fuentes del programa que se enlazan en los tests (sin main.cpp)
 SRC_NO_MAIN := $(filter-out src/main.cpp,$(SRC))

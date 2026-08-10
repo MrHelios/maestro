@@ -33,6 +33,11 @@ public:
     // lineLength(line) (insertar al final de la linea).
     void insertChar(int line, int col, char c);
 
+    // Inserta una secuencia de BYTES UTF-8 en (line, col). `text` es un
+    // caracter UTF-8 completo (1-4 bytes): ASCII o un codepoint multibyte.
+    // col puede ser igual a lineLength(line).
+    void insertText(int line, int col, const std::string& text);
+
     // Parte la linea `line` en la posicion `col` en dos lineas.
     // Se usa para la tecla Enter (no forma parte de v0.1, pero el
     // Documento ya queda preparado para soportarlo).

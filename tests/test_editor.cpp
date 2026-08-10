@@ -11,23 +11,44 @@
 #define private public
 #include "Editor.h"
 #undef private
+#include "utf8.h"
 
 using testfw::TempFile;
 
 static Event insert(char c) {
     Event e;
     e.type = EventType::InsertChar;
-    e.ch = c;
+    e.text = std::string(1, c);
     return e;
 }
 
+static Event insertBytes(const std::string& text) {
+    Event e;
+    e.type = EventType::InsertChar;
+    e.text = text;
+    return e;
+}
+
+// Cuantos bytes UTF-8 ocupa el caracter cuyo byte de inicio es `b`.
+static int utf8Len(unsigned char b) {
+    if ((b & 0xE0) == 0xC0) return 2;
+    if ((b & 0xF0) == 0xE0) return 3;
+    if ((b & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
 static void type(Editor& ed, const std::string& s) {
-    for (char c : s)
-        ed.handleEvent(insert(c));
+    for (size_t i = 0; i < s.size();) {
+        int len = utf8Len(static_cast<unsigned char>(s[i]));
+        ed.handleEvent(insertBytes(s.substr(i, static_cast<size_t>(len))));
+        i += static_cast<size_t>(len);
+    }
 }
 
 static void press(Editor& ed, EventType type) {
-    ed.handleEvent(Event{type});
+    Event e;
+    e.type = type;
+    ed.handleEvent(e);
 }
 
 static std::string fileContent(const std::string& p) {
@@ -669,4 +690,255 @@ TEST(editor_quit_with_unsaved_changes_via_prefix) {
     press(ed, EventType::Prefix);
     press(ed, EventType::Quit);
     CHECK(!ed.running_);
+}
+
+// ---------------------------------------------------------------------------
+// 14. Cursor despues de una seleccion UTF-8 (Editor + Renderer de la mano).
+// Verifica que Editor y Renderer coinciden en la posicion del cursor: el
+// Editor deja cursor_.col como offset de bytes y el Renderer lo dibuja como
+// COLUMNA VISUAL (columnOf). Para "abcédef" borrar/reemplazar "[éde]".
+// ---------------------------------------------------------------------------
+namespace {
+
+// Columna VISUAL (1-based, la de la secuencia "\x1b[1;<col>H") a la que el
+// Renderer moveria el cursor para `line` con cursor en el byte `byteCol`.
+int cursorScreenCol(const std::string& line, int byteCol) {
+    Document doc;
+    doc.restore({line});
+    Viewport vp;
+    vp.top = 0; vp.height = 1; vp.width = 200;
+    Cursor c;
+    c.line = 0; c.col = byteCol;
+    Renderer r;
+    std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Normal, std::nullopt);
+    size_t pos = f.rfind("\x1b[1;");
+    if (pos == std::string::npos) return -1;
+    size_t end = f.find('H', pos);
+    return std::stoi(f.substr(pos + 4, end - pos - 4));
+}
+
+// Prepara un Editor con "abcédef" y la seleccion "[éde]" (bytes 3..7).
+void setupWithEde(Editor& ed) {
+    ed.document_.restore({"abc\xc3\xa9" "def"});
+    ed.selection_ = Selection{};
+    ed.selection_->anchor   = {0, 3};
+    ed.selection_->position = {0, 7};
+    ed.state_ = State::Select;
+    ed.cursor_.line = 0;
+    ed.cursor_.col = 7;
+}
+
+} // namespace
+
+TEST(editor_delete_selection_utf8_cursor_position) {
+    // "[éde]" -> Delete. Resultado "abcf"; el cursor queda como offset de
+    // bytes 3 (tras 'c') que el Renderer dibuja en la columna visual 3.
+    Editor ed;
+    setupWithEde(ed);
+    press(ed, EventType::Delete);
+
+    CHECK_EQ(ed.document_.lineAt(0), "abcf");
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 3);          // contrato del Editor
+    CHECK(!ed.hasSelection());
+
+    // El Renderer lo pinta en la columna visual correcta: tras 'c', antes
+    // de 'f' -> columna 3 (0-indexada) -> secuencia 1;4H. Con un offset de
+    // bytes mal usado, "abcf" tiene 4 bytes pero aqui NO da 4+1.
+    CHECK_EQ(ed.cursor_.col, static_cast<int>(utf8::columnOf(ed.document_.lineAt(0), 3)));
+}
+
+TEST(editor_replace_selection_utf8_cursor_position) {
+    // "[éde]" -> 'X'. Resultado "abcXf"; el cursor justo despues de 'X'.
+    Editor ed;
+    setupWithEde(ed);
+    ed.handleEvent(insert('X'));
+
+    CHECK_EQ(ed.document_.lineAt(0), "abcXf");
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 4);          // byte offset inmediatamente tras la X
+    CHECK(!ed.hasSelection());
+
+    // El Renderer dibuja el cursor justo despues de la X (columna visual 4
+    // -> secuencia 1;5H), no despues de contar bytes.
+    CHECK_EQ(cursorScreenCol(ed.document_.lineAt(0), ed.cursor_.col), 5);
+}
+
+// ---------------------------------------------------------------------------
+// 15. UTF-8 + Undo/Redo. El historial guarda lineas + cursor + seleccion
+// (posiciones en BYTES). Para "abc[é—😀]def" verificar Delete y Replace con
+// su ciclo Undo/Redo: contenido, cursor, seleccion y posiciones visuales.
+// ---------------------------------------------------------------------------
+namespace {
+
+// "abcé—😀def": a b c é — 😀 d e f. El bloque "[é—😀]" son los bytes 3..12.
+const char* edemo = "abc\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80" "def";
+
+void setupDemo(Editor& ed) {
+    ed.document_.restore({edemo});
+    ed.selection_ = Selection{};
+    ed.selection_->anchor   = {0, 3};
+    ed.selection_->position = {0, 12};
+    ed.state_ = State::Select;
+    ed.cursor_.line = 0;
+    ed.cursor_.col = 12;
+}
+
+} // namespace
+
+TEST(editor_undo_redo_delete_selection_utf8) {
+    Editor ed;
+    setupDemo(ed);
+
+    // Delete: borra "[é—😀]".
+    press(ed, EventType::Delete);
+    CHECK_EQ(ed.document_.lineAt(0), "abcdef");
+    CHECK_EQ(ed.cursor_.col, 3);          // inicio del rango borrado
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(cursorScreenCol("abcdef", 3), 4);
+
+    // Undo: vuelve "abcé—😀def" restaurando la seleccion completa.
+    press(ed, EventType::Undo);
+    CHECK_EQ(ed.document_.lineAt(0), edemo);
+    CHECK_EQ(ed.cursor_.col, 12);         // se restaura la posicion previa
+    CHECK(ed.hasSelection());
+    auto sel = ed.selection();            // empieza y termina exactamente en el bloque
+    CHECK(sel.has_value());
+    CHECK(sel->start.col == 3 && sel->end.col == 12);
+    // El cursor se sigue dibujando con la columna VISUAL (tras "😀"),
+    // no con el offset de bytes.
+    CHECK_EQ(cursorScreenCol(edemo, ed.cursor_.col), 7);
+
+    // Redo: repite el borrado.
+    press(ed, EventType::Redo);
+    CHECK_EQ(ed.document_.lineAt(0), "abcdef");
+    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK(!ed.hasSelection());
+}
+
+TEST(editor_undo_redo_replace_selection_utf8) {
+    Editor ed;
+    setupDemo(ed);
+
+    // Replace "[é—😀]" -> 'X'.
+    ed.handleEvent(insert('X'));
+    CHECK_EQ(ed.document_.lineAt(0), "abcXdef");
+    CHECK_EQ(ed.cursor_.col, 4);          // justo despues de la X
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(cursorScreenCol("abcXdef", 4), 5);
+
+    // Undo: restaura el texto UTF-8 y la seleccion de 3 multibyte.
+    press(ed, EventType::Undo);
+    CHECK_EQ(ed.document_.lineAt(0), edemo);
+    CHECK_EQ(ed.cursor_.col, 12);
+    CHECK(ed.hasSelection());
+    auto sel = ed.selection();
+    CHECK(sel.has_value());
+    CHECK(sel->start.col == 3 && sel->end.col == 12);
+    CHECK_EQ(cursorScreenCol(edemo, ed.cursor_.col), 7);
+
+    // Redo: vuelve a "abcXdef" con el cursor tras la X.
+    press(ed, EventType::Redo);
+    CHECK_EQ(ed.document_.lineAt(0), "abcXdef");
+    CHECK_EQ(ed.cursor_.col, 4);
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(cursorScreenCol("abcXdef", 4), 5);
+}
+
+// ---------------------------------------------------------------------------
+// 16. Cursor desplazandose por caracteres UTF-8 CONSECUTIVOS ("éééé",
+// "😀😀😀", "———"). moveLeft/moveRight debe saltar los bytes de continuacion
+// y caer SIEMPRE en el lead byte del caracter siguiente/anterior (nunca
+// "dentro" de uno). En diesen casos no hay ASCII que enmascare un byte-step.
+// ---------------------------------------------------------------------------
+TEST(editor_cursor_moves_char_by_char_consecutive_utf8) {
+    // (line, nbytes): cada caracter pesa nbytes y son todos adyacentes.
+    struct Case { const char* line; int nbytes; } cases[] = {
+        {"\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9", 2},          // éééé
+        {"\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80", 4}, // 😀😀😀
+        {"\xe2\x80\x94\xe2\x80\x94\xe2\x80\x94", 3},        // ———
+    };
+    for (const Case& cs : cases) {
+        Editor ed;
+        ed.document_.restore({cs.line});
+        ed.cursor_.line = 0;
+        ed.cursor_.col = 0;
+
+        const int nchars = static_cast<int>(std::string(cs.line).size()) / cs.nbytes;
+
+        // Avanzar de a un caracter: 0 -> nbytes -> 2*nbytes -> ... -> fin.
+        for (int i = 1; i <= nchars; ++i) {
+            press(ed, EventType::MoveRight);
+            CHECK_EQ(ed.cursor_.col, cs.nbytes * i);
+        }
+        // Al final, mover derecha no pasa del largo (no "entra" en nul).
+        const int endByte = static_cast<int>(std::string(cs.line).size());
+        press(ed, EventType::MoveRight);
+        CHECK_EQ(ed.cursor_.col, endByte);
+
+        // Volver: fin -> ... -> 2*nbytes -> nbytes -> 0.
+        for (int i = nchars - 1; i >= 1; --i) {
+            press(ed, EventType::MoveLeft);
+            CHECK_EQ(ed.cursor_.col, cs.nbytes * i);
+        }
+        press(ed, EventType::MoveLeft);
+        CHECK_EQ(ed.cursor_.col, 0);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 17. Escribir caracteres acentuados/multibyte ("á", "ñ") via el teclado.
+// Histórico: Terminal descartaba todo byte >= 0x80 como None, asi que no se
+// podia tipear acentos. Ahora cada caracter UTF-8 entra como UN InsertChar.
+// ---------------------------------------------------------------------------
+TEST(editor_type_accented_multibyte) {
+    Editor ed;
+    // Tipear "ñ" (0xC3 0xB1) y "á" (0xC3 0xA1) como un solo evento cada uno.
+    ed.handleEvent(insertBytes("\xc3\xb1"));
+    CHECK_EQ(ed.document_.lineAt(0), "\xc3\xb1");
+    CHECK_EQ(ed.cursor_.col, 2); // avanza los 2 bytes del caracter
+
+    ed.handleEvent(insertBytes("\xc3\xa1"));
+    CHECK_EQ(ed.document_.lineAt(0), "\xc3\xb1\xc3\xa1"); // "ñá"
+    CHECK_EQ(ed.cursor_.col, 4);
+
+    // El render de la linea es UTF-8 valido y el cursor se dibuja en la
+    // columna visual 2 (los 2 caracteres), no en la 4 (los bytes).
+    CHECK_EQ(cursorScreenCol(ed.document_.lineAt(0), ed.cursor_.col), 3);
+}
+
+TEST(editor_type_helper_groups_multibyte) {
+    // El helper type() agrupa los bytes por caracter: escribir "ño" en dos
+    // pasos produce dos caracteres completos, no cuatro bytes sueltos.
+    Editor ed;
+    type(ed, "\xc3\xb1o");
+    CHECK_EQ(ed.document_.lineAt(0), "\xc3\xb1o");
+    CHECK_EQ(ed.cursor_.col, 3); // 2 bytes de "ñ" + 1 de 'o'
+}
+
+TEST(document_insert_text_keeps_whole_char) {
+    Document doc;
+    doc.restore({""});
+    doc.insertText(0, 0, "\xc3\xa1"); // "á" de 2 bytes, una sola operacion
+    CHECK_EQ(doc.lineAt(0), "\xc3\xa1");
+    doc.insertText(0, 2, "\xc3\xa9"); // "é" despues de "á" (limite de caracter)
+    CHECK_EQ(doc.lineAt(0), "\xc3\xa1\xc3\xa9"); // "áé"
+    doc.insertChar(0, 0, 'X');        // un ASCII normal igual funciona
+    CHECK_EQ(doc.lineAt(0), "X\xc3\xa1\xc3\xa9");
+}
+
+TEST(editor_backspace_removes_whole_multibyte) {
+    // Backspace sobre un caracter multibyte debe borrarlo COMPLETO y dejar
+    // el cursor en un limite de caracter (nunca un byte de continuacion).
+    Editor ed;
+    ed.document_.restore({"\xc3\xb1\xc3\xa1"}); // "ñá"
+    ed.cursor_.line = 0;
+    ed.cursor_.col = 4; // tras "á"
+    press(ed, EventType::Backspace);
+    CHECK_EQ(ed.document_.lineAt(0), "\xc3\xb1"); // queda "ñ"
+    CHECK_EQ(ed.cursor_.col, 2); // limite tras "ñ", no un byte suelto
+
+    press(ed, EventType::Backspace);
+    CHECK_EQ(ed.document_.lineAt(0), "");
+    CHECK_EQ(ed.cursor_.col, 0);
 }

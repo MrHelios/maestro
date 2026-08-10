@@ -235,10 +235,40 @@ Event Terminal::readEvent() {
     // Caracter imprimible normal.
     if (c >= 32 && c < 127) {
         e.type = EventType::InsertChar;
-        e.ch = c;
+        e.text = std::string(1, c);
         return e;
     }
 
-    e.type = EventType::None;
-    return e;
+    // Caracter UTF-8 multibyte. El primer byte es el byte de inicio y
+    // define el largo total (2-4 bytes). Sin esto, "á" y "ñ" llegaban
+    // byte por byte (cada byte >= 0x80) y se descartaban como None.
+    {
+        unsigned char uc = static_cast<unsigned char>(c);
+        int len = 0;
+        if ((uc & 0xE0) == 0xC0) len = 2;      // 110xxxxx -> 2 bytes
+        else if ((uc & 0xF0) == 0xE0) len = 3; // 1110xxxx -> 3 bytes
+        else if ((uc & 0xF8) == 0xF0) len = 4; // 11110xxx -> 4 bytes
+        else {
+            // Byte de continuacion suelto o lead invalido: no es imprimible.
+            e.type = EventType::None;
+            return e;
+        }
+
+        std::string bytes;
+        bytes.push_back(c);
+        raw.push_back(c);
+        for (int i = 1; i < len; ++i) {
+            char b = readRawByte(); // VMIN=1: llega junto al lead en una tecla
+            raw.push_back(b);
+            // Todo byte salvo el lead debe ser de continuacion (10xxxxxx).
+            if ((static_cast<unsigned char>(b) & 0xC0) != 0x80) {
+                e.type = EventType::None; dumpUnrecognized(); return e;
+            }
+            bytes.push_back(b);
+        }
+
+        e.type = EventType::InsertChar;
+        e.text = bytes;
+        return e;
+    }
 }

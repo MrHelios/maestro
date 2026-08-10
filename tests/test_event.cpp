@@ -12,7 +12,7 @@ TEST(event_move_left) {
     Event e;
     e.type = EventType::MoveLeft;
     CHECK(e.type == EventType::MoveLeft);
-    CHECK_EQ(e.ch, 0);
+    CHECK(e.text.empty());
 }
 
 TEST(event_move_right) {
@@ -50,7 +50,7 @@ TEST(event_select_is_present) {
     Event e;
     e.type = EventType::Select;
     CHECK(e.type == EventType::Select);
-    CHECK_EQ(e.ch, 0);
+    CHECK(e.text.empty());
 }
 
 // El prefijo Ctrl+K tambien es un evento propio.

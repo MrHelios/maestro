@@ -105,6 +105,14 @@ void Document::insertChar(int line, int col, char c) {
     target.insert(target.begin() + col, c);
 }
 
+void Document::insertText(int line, int col, const std::string& text) {
+    if (line < 0 || line >= lineCount() || text.empty()) return;
+    std::string& target = lines_[line];
+    if (col < 0) col = 0;
+    if (col > static_cast<int>(target.size())) col = static_cast<int>(target.size());
+    target.insert(col, text);
+}
+
 void Document::insertNewline(int line, int col) {
     if (line < 0 || line >= lineCount()) return;
     std::string& target = lines_[line];
@@ -126,7 +134,15 @@ bool Document::deleteCharBefore(int line, int col) {
 
     if (col > 0) {
         std::string& target = lines_[line];
-        target.erase(target.begin() + (col - 1));
+        // Borra el caracter COMPLETO que precede a (line, col): retrocede
+        // desde col-1 hasta el byte de inicio (saltando continuaciones),
+        // para no dejar un byte suelto si era un caracter multibyte.
+        int start = col - 1;
+        while (start > 0 &&
+               (static_cast<unsigned char>(target[start]) & 0xC0) == 0x80) {
+            start--;
+        }
+        target.erase(start, static_cast<size_t>(col - start));
         return true;
     }
 
@@ -148,7 +164,15 @@ bool Document::deleteCharAt(int line, int col) {
     int len = lineLength(line);
     if (col < len) {
         std::string& target = lines_[line];
-        target.erase(target.begin() + col);
+        // Borra el caracter COMPLETO que comienza en (line, col): si es un
+        // lead byte UTF-8, borra todos sus bytes (nunca un continuacion suelto).
+        unsigned char lead = static_cast<unsigned char>(target[col]);
+        int n = 1;
+        if ((lead & 0xE0) == 0xC0) n = 2;
+        else if ((lead & 0xF0) == 0xE0) n = 3;
+        else if ((lead & 0xF8) == 0xF0) n = 4;
+        if (col + n > len) n = 1; // malformado al final: borra 1 byte
+        target.erase(col, static_cast<size_t>(n));
         return true;
     }
 

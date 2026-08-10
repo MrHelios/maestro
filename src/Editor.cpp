@@ -93,8 +93,9 @@ void Editor::handleEvent(const Event& event) {
                                       sel->end.line, sel->end.col);
                 cursor_.line = sel->start.line;
                 cursor_.col = sel->start.col;
-                document_.insertChar(cursor_.line, cursor_.col, event.ch);
-                cursor_.col++;
+                document_.insertText(cursor_.line, cursor_.col, event.text);
+                // El cursor avanza un caracter (byte por byte si es multibyte).
+                cursor_.col += static_cast<int>(event.text.size());
                 clearSelection();
                 state_ = State::Normal;
                 modified_ = true;
@@ -105,8 +106,8 @@ void Editor::handleEvent(const Event& event) {
             // seleccion si estaba activo (seleccion vacia).
             clearSelection();
             pushHistory();
-            document_.insertChar(cursor_.line, cursor_.col, event.ch);
-            cursor_.col++;
+            document_.insertText(cursor_.line, cursor_.col, event.text);
+            cursor_.col += static_cast<int>(event.text.size());
             state_ = State::Normal;
             modified_ = true;
             break;
@@ -189,6 +190,20 @@ void Editor::handleEvent(const Event& event) {
                 bool willMergeLines = (cursor_.col == 0 && cursor_.line > 0);
                 int prevLineLen = willMergeLines ? document_.lineLength(cursor_.line - 1) : 0;
 
+                // Si no funde lineas, calculamos ANTES de borrar donde
+                // empieza el caracter que precede al cursor (su lead byte),
+                // para que tras borrar el cursor quede en un limite de
+                // caracter (no dentro de los bytes de un multibyte).
+                int charStart = cursor_.col;
+                if (!willMergeLines) {
+                    const std::string& ln_ = document_.lineAt(cursor_.line);
+                    charStart = cursor_.col - 1;
+                    while (charStart > 0 &&
+                           (static_cast<unsigned char>(ln_[charStart]) & 0xC0) == 0x80) {
+                        charStart--;
+                    }
+                }
+
                 if (document_.deleteCharBefore(cursor_.line, cursor_.col)) {
                     if (willMergeLines) {
                         // La linea se fundio con la anterior: el cursor
@@ -196,7 +211,7 @@ void Editor::handleEvent(const Event& event) {
                         cursor_.line--;
                         cursor_.col = prevLineLen;
                     } else {
-                        cursor_.col--;
+                        cursor_.col = charStart;
                     }
                     modified_ = true;
                 }

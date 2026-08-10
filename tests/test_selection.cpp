@@ -17,7 +17,7 @@
 static Event insert(char c) {
     Event e;
     e.type = EventType::InsertChar;
-    e.ch = c;
+    e.text = std::string(1, c);
     return e;
 }
 
@@ -27,7 +27,9 @@ static void type(Editor& ed, const std::string& s) {
 }
 
 static void press(Editor& ed, EventType type) {
-    ed.handleEvent(Event{type});
+    Event e;
+    e.type = type;
+    ed.handleEvent(e);
 }
 
 // El test anciano simulaba "Shift+flecha"; en v0.3 la seleccion se activa
@@ -36,9 +38,9 @@ static void press(Editor& ed, EventType type) {
 // estaba, Ctrl+S se ignora y la flecha solo extiende la seleccion.
 static void selectPress(Editor& ed, EventType type) {
     if (ed.state_ != State::Select) {
-        ed.handleEvent(Event{EventType::Select});
+        press(ed, EventType::Select);
     }
-    ed.handleEvent(Event{type});
+    press(ed, type);
 }
 
 // ---------------------------------------------------------------------------
@@ -573,8 +575,8 @@ TEST(editor_selection_arrow_left_clears) {
 TEST(editor_selection_arrow_up_clears) {
     Editor ed;
     type(ed, "aaa");
-    ed.handleEvent(Event{EventType::InsertNewline}); // (1,0)
-    ed.handleEvent(Event{EventType::MoveUp});        // (0,0)
+    press(ed, EventType::InsertNewline); // (1,0)
+    press(ed, EventType::MoveUp);        // (0,0)
     selectPress(ed, EventType::MoveDown);             // seleccion -> (1,0)
     CHECK(ed.hasSelection());
 
@@ -597,9 +599,9 @@ TEST(editor_selection_arrow_up_clears) {
 TEST(editor_selection_arrow_down_clears) {
     Editor ed;
     type(ed, "aaa");
-    ed.handleEvent(Event{EventType::InsertNewline}); // (1,0)
-    ed.handleEvent(Event{EventType::MoveUp});         // (0,0)
-    ed.handleEvent(Event{EventType::MoveHome});       // (0,0)
+    press(ed, EventType::InsertNewline); // (1,0)
+    press(ed, EventType::MoveUp);         // (0,0)
+    press(ed, EventType::MoveHome);       // (0,0)
 
     selectPress(ed, EventType::MoveDown);              // seleccion -> (1,0)
     CHECK(ed.hasSelection());

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 // En vez de razonar en terminos de "teclas", el Engine razona en
 // terminos de EVENTOS. Esto hace que Editor sea completamente
 // reutilizable: podria alimentarse desde un teclado real, desde un
@@ -33,7 +35,11 @@ enum class EventType {
 
 struct Event {
     EventType type = EventType::None;
-    char ch = 0; // solo relevante para InsertChar
+    // Texto a insertar (solo relevante para InsertChar). Guarda los
+    // BYTES UTF-8 de un solo caracter: un ASCII (1 byte) o un caracter
+    // multibyte (2-4 bytes, p.ej. "á", "ñ", "—", "😀"). Asi el Editor
+    // recibee el caracter completo, no byte por byte.
+    std::string text;
     // Nota: desde v0.3 no hay campo "shift". La seleccion se activa con
     // Ctrl+S (evento Select) y NO depende del modificador Shift, que
     // cada terminal emite de forma distinta.

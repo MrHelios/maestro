@@ -16,7 +16,7 @@ using testfw::TempFile;
 static Event insert(char c) {
     Event e;
     e.type = EventType::InsertChar;
-    e.ch = c;
+    e.text = std::string(1, c);
     return e;
 }
 
@@ -26,12 +26,14 @@ static void type(Editor& ed, const std::string& s) {
 }
 
 static void press(Editor& ed, EventType type) {
-    ed.handleEvent(Event{type});
+    Event e;
+    e.type = type;
+    ed.handleEvent(e);
 }
 
 static void prefix(Editor& ed, EventType first, EventType second) {
-    ed.handleEvent(Event{first});
-    ed.handleEvent(Event{second});
+    press(ed, first);
+    press(ed, second);
 }
 
 static std::string fileContent(const std::string& p) {
@@ -72,8 +74,8 @@ TEST(prefix_other_key_cancels_and_discards) {
     // cancelado.".
     Editor ed;
     type(ed, "abc");
-    ed.handleEvent(Event{EventType::Prefix});
-    ed.handleEvent(Event{EventType::MoveRight});
+    press(ed, EventType::Prefix);
+    press(ed, EventType::MoveRight);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Normal));
     CHECK_EQ(ed.cursor_.col, 3);
     CHECK(ed.hasSelection() == false);
