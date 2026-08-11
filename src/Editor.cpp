@@ -17,7 +17,7 @@ std::string resolveAbsolutePath(const std::string& path) {
 } // namespace
 
 Editor::Editor() {
-    statusMessage_ = "NAVEGACION: i escribir | s seleccionar | Ctrl+K guardar/salir | Ctrl+U/Y deshacer/rehacer";
+    statusMessage_ = "NAVEGACION: i escribir | s seleccionar | c/x copiar/cortar | p pegar | Ctrl+K guardar/salir | Ctrl+U/Y deshacer/rehacer";
     savedLines_ = document_.snapshot();
 }
 
@@ -118,8 +118,9 @@ void Editor::handleNavegacionEvent(const Event& event) {
     switch (event.type) {
         case EventType::InsertChar:
             // En navegacion no se escribe: las letras solo pueden ser
-            // comandos de modo. 'i' entra a edicion; 's' a seleccion.
-            // 'c'/'x'/'p' y cualquier otra letra son no-op en v0.5.
+            // comandos de modo. 'i' entra a edicion; 's' a seleccion;
+            // 'p' pega el contenido del buffer (si hay). 'c'/'x' y
+            // cualquier otra letra son no-op aqui.
             if (event.text == "i") {
                 state_ = State::Interaccion;
                 statusMessage_ = "INTERACCION (ESC vuelve a navegacion)";
@@ -127,6 +128,19 @@ void Editor::handleNavegacionEvent(const Event& event) {
                 beginSelection();
                 state_ = State::Seleccion;
                 statusMessage_ = "SELECCION (ESC/c/x terminan)";
+            } else if (event.text == "p") {
+                if (clipboard_.empty()) {
+                    statusMessage_ = "Nada para pegar.";
+                } else {
+                    pushHistory();
+                    Position end = document_.insertBlock(cursor_.line,
+                                                          cursor_.col,
+                                                          clipboard_);
+                    cursor_.line = end.line;
+                    cursor_.col = end.col;
+                    modified_ = true;
+                    statusMessage_ = "Pegado.";
+                }
             }
             break;
 
@@ -172,22 +186,16 @@ void Editor::handleInteraccionEvent(const Event& event) {
                 bool willMergeLines = (cursor_.col == 0 && cursor_.line > 0);
                 int prevLineLen = willMergeLines ? document_.lineLength(cursor_.line - 1) : 0;
 
-                int charStart = cursor_.col;
-                if (!willMergeLines) {
-                    const std::string& ln_ = document_.lineAt(cursor_.line);
-                    charStart = cursor_.col - 1;
-                    while (charStart > 0 &&
-                           (static_cast<unsigned char>(ln_[charStart]) & 0xC0) == 0x80) {
-                        charStart--;
-                    }
-                }
-
-                if (document_.deleteCharBefore(cursor_.line, cursor_.col)) {
+                // deleteCharBefore devuelve cuantos bytes borro dentro de la
+                // linea (el largo del caracter UTF-8 completo), asi el cursor
+                // se reposiciona sin recalcular el limite del caracter aqui.
+                int deleted = document_.deleteCharBefore(cursor_.line, cursor_.col);
+                if (deleted > 0 || willMergeLines) {
                     if (willMergeLines) {
                         cursor_.line--;
                         cursor_.col = prevLineLen;
                     } else {
-                        cursor_.col = charStart;
+                        cursor_.col -= deleted;
                     }
                     modified_ = true;
                 }
@@ -230,14 +238,38 @@ void Editor::handleSeleccionEvent(const Event& event) {
         case EventType::MoveEnd:
             beginSelection(); cursor_.moveEnd(document_); updateSelectionPosition(); break;
 
-        // 'c' y 'x' terminan la seleccion y vuelven a navegacion. En v0.5
-        // ambos hacen lo mismo (sin efecto de buffer); la diferencia real
-        // llegara con el buffer en v0.55.
+        // 'c' copia el rango al buffer y 'x' lo copia y lo borra; ambos
+        // terminan la seleccion y vuelven a navegacion. Si la seleccion
+        // esta vacia, 'c'/'x' no tocan el buffer (solo se sale del modo).
+        // OJO: el gate es hasSelection() (anchor != position), NO
+        // selection().has_value() (que es true incluso para un objeto
+        // Selection vacio con anchor == position, ya que normalize solo
+        // ordena los puntos). Usar el segundo sobreescribiria el buffer con
+        // un rango vacio y, en 'x', empujaria un historial inutil que ademas
+        // limpia el redo.
         case EventType::InsertChar:
             if (event.text == "c" || event.text == "x") {
+                bool hadSelection = hasSelection();
+                if (hadSelection) {
+                    auto sel = selection();
+                    clipboard_ = document_.extractRange(sel->start.line,
+                                                        sel->start.col,
+                                                        sel->end.line,
+                                                        sel->end.col);
+                    if (event.text == "x") {
+                        pushHistory();
+                        document_.deleteRange(sel->start.line, sel->start.col,
+                                              sel->end.line, sel->end.col);
+                        cursor_.line = sel->start.line;
+                        cursor_.col = sel->start.col;
+                        modified_ = true;
+                    }
+                }
                 clearSelection();
                 state_ = State::Navegacion;
-                statusMessage_ = "NAVEGACION";
+                statusMessage_ = hadSelection ? (event.text == "x" ? "Cortado."
+                                                                    : "Copiado.")
+                                              : "Nada seleccionado.";
             }
             // Cualquier otra letra ya NO reemplaza la seleccion: se ignora.
             break;

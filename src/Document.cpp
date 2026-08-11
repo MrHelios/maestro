@@ -124,8 +124,8 @@ void Document::insertNewline(int line, int col) {
     lines_.insert(lines_.begin() + line + 1, rest);
 }
 
-bool Document::deleteCharBefore(int line, int col) {
-    if (line < 0 || line >= lineCount()) return false;
+int Document::deleteCharBefore(int line, int col) {
+    if (line < 0 || line >= lineCount()) return 0;
 
     // Clamp de la columna para que erase() nunca salga de rango.
     const int len = lineLength(line);
@@ -142,21 +142,22 @@ bool Document::deleteCharBefore(int line, int col) {
                (static_cast<unsigned char>(target[start]) & 0xC0) == 0x80) {
             start--;
         }
-        target.erase(start, static_cast<size_t>(col - start));
-        return true;
+        int bytes = col - start;
+        target.erase(start, static_cast<size_t>(bytes));
+        return bytes;
     }
 
     // col == 0: fundir con la linea anterior, si existe.
-    if (line == 0) return false;
+    if (line == 0) return 0;
 
     std::string current = lines_[line];
     lines_.erase(lines_.begin() + line);
     lines_[line - 1] += current;
-    return true;
+    return 0;
 }
 
-bool Document::deleteCharAt(int line, int col) {
-    if (line < 0 || line >= lineCount()) return false;
+int Document::deleteCharAt(int line, int col) {
+    if (line < 0 || line >= lineCount()) return 0;
 
     // Clamp de la columna para que erase() nunca salga de rango.
     if (col < 0) col = 0;
@@ -173,16 +174,16 @@ bool Document::deleteCharAt(int line, int col) {
         else if ((lead & 0xF8) == 0xF0) n = 4;
         if (col + n > len) n = 1; // malformado al final: borra 1 byte
         target.erase(col, static_cast<size_t>(n));
-        return true;
+        return n;
     }
 
     // col == len: fundir con la siguiente linea, si existe.
-    if (line + 1 >= lineCount()) return false;
+    if (line + 1 >= lineCount()) return 0;
 
     std::string next = lines_[line + 1];
     lines_.erase(lines_.begin() + line + 1);
     lines_[line] += next;
-    return true;
+    return 0;
 }
 
 bool Document::deleteRange(int sl, int sc, int el, int ec) {
@@ -213,4 +214,66 @@ bool Document::deleteRange(int sl, int sc, int el, int ec) {
     lines_[sl] += tail;
     lines_.erase(lines_.begin() + sl + 1, lines_.begin() + el + 1);
     return true;
+}
+
+std::vector<std::string> Document::extractRange(int sl, int sc, int el, int ec) const {
+    // Misma validacion de limites que deleteRange: rango invertido o fuera
+    // de las lineas/columnas se rechaza devolviendo vacio (sin reventar).
+    if (sl < 0 || sl >= lineCount()) return {};
+    if (el < sl || el >= lineCount()) return {};
+    if (sc < 0 || sc > lineLength(sl)) return {};
+    if (ec < 0 || ec > lineLength(el)) return {};
+    if (sl == el && (sc > ec || sc == ec)) return {};
+
+    std::vector<std::string> out;
+    if (sl == el) {
+        // Una sola linea: substring [sc, ec).
+        out.push_back(lines_[sl].substr(sc, ec - sc));
+        return out;
+    }
+
+    // Multilinea: cola de la primera desde sc, lineas completas del medio,
+    // y cabeza de la ultima hasta ec (extremo exclusivo).
+    out.push_back(lines_[sl].substr(sc));
+    for (int l = sl + 1; l < el; ++l) {
+        out.push_back(lines_[l]);
+    }
+    out.push_back(lines_[el].substr(0, ec));
+    return out;
+}
+
+Position Document::insertBlock(int line, int col, const std::vector<std::string>& block) {
+    if (line < 0 || line >= lineCount() || block.empty()) return {line, col};
+
+    std::string& target = lines_[line];
+    if (col < 0) col = 0;
+    if (col > static_cast<int>(target.size())) col = static_cast<int>(target.size());
+
+    if (block.size() == 1) {
+        // Una sola linea: insertar el string completo dentro de la linea
+        // existente, sin partirla.
+        target.insert(col, block[0]);
+        return {line, col + static_cast<int>(block[0].size())};
+    }
+
+    // Multilinea: partimos la linea actual en col (igual que insertNewline),
+    // la primera linea del bloque se pega a la cola izquierda, las
+    // intermedias se insertan como lineas nuevas completas, y la ultima se
+    // une con la cola derecha de la linea original (lo que quedaba tras col).
+    std::string right = target.substr(col);
+    std::string left = target.substr(0, col);
+
+    std::vector<std::string> newLines;
+    newLines.push_back(left + block.front());
+    for (size_t i = 1; i + 1 < block.size(); ++i) {
+        newLines.push_back(block[i]);
+    }
+    newLines.push_back(block.back() + right);
+
+    lines_.erase(lines_.begin() + line);
+    lines_.insert(lines_.begin() + line, newLines.begin(), newLines.end());
+
+    // Cursor al final de la ultima linea insertada del bloque.
+    return {line + static_cast<int>(block.size()) - 1,
+            static_cast<int>(block.back().size())};
 }

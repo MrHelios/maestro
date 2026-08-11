@@ -99,11 +99,13 @@ TEST(navigation_s_enters_selection) {
 }
 
 TEST(navigation_pcx_noop) {
-    // En navegacion 'p'/'c'/'x' no hacen nada en v0.5 (sin buffer todavia).
+    // En navegacion 'c'/'x' no hacen nada. 'p' sin buffer es no-op sobre
+    // el documento (solo informa "Nada para pegar."); con buffer pega
+    // (se cubre en los tests v0.55 de buffer).
     Editor ed;
-    ed.handleEvent(insert('p'));
     ed.handleEvent(insert('c'));
     ed.handleEvent(insert('x'));
+    ed.handleEvent(insert('p'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.document_.lineAt(0), "");
 }
@@ -202,20 +204,23 @@ TEST(selection_c_exits_to_navegacion) {
     ed.handleEvent(insert('c'));
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK_EQ(ed.document_.lineAt(0), "abc"); // sin efecto en el documento
+    CHECK_EQ(ed.document_.lineAt(0), "abc"); // copiar no modifica el documento
 }
 
 TEST(selection_x_exits_to_navegacion) {
-    // En v0.5 'x' se comporta igual que 'c' (sin buffer todavia).
+    // v0.55: 'x' copia el rango al buffer y lo borra del documento.
+    // La "a" queda cortada: doc "bc", buffer ["a"].
     Editor ed;
     type(ed, "abc");
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);
-    press(ed, EventType::MoveRight);
+    press(ed, EventType::MoveRight); // [a]
     ed.handleEvent(insert('x'));
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK_EQ(ed.document_.lineAt(0), "abc");
+    CHECK_EQ(ed.document_.lineAt(0), "bc");
+    CHECK(ed.clipboard_ == (std::vector<std::string>{"a"}));
+    CHECK(ed.modified_);
 }
 
 TEST(selection_escape_cancels) {
@@ -422,4 +427,168 @@ TEST(open_file_starts_in_navegacion) {
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     ed.handleEvent(insert('x'));  // no se inserta: navegacion
     CHECK_EQ(ed.document_.lineAt(0), "contenido");
+}
+
+// ---------------------------------------------------------------------------
+// v0.55: buffer copiar/cortar/pegar
+// ---------------------------------------------------------------------------
+// Helper: deja el editor con el cursor en Home y baja a una seleccion
+// del rango [0, n) de la linea actual (input y seleccion comparten linea).
+// Devuelve el rango seleccionado via ed.hasSelection() si n > 0.
+static void selectChars(Editor& ed, int n) {
+    press(ed, EventType::MoveHome); // -> cursor col 0
+    if (ed.state_ != State::Seleccion) {
+        enterSeleccion(ed);
+    }
+    for (int i = 0; i < n; ++i) {
+        press(ed, EventType::MoveRight);
+    }
+}
+
+TEST(clipboard_c_copies_without_removing) {
+    Editor ed;
+    type(ed, "abc");               // Interaccion, cursor (0,3); modifica + historial
+    size_t undoBefore = ed.undoStack_.size();
+    selectChars(ed, 2);            // selecciona "ab"
+    CHECK(ed.hasSelection());
+    ed.handleEvent(insert('c'));
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.document_.lineAt(0), "abc");     // copiar no borra
+    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));
+    CHECK_EQ(ed.undoStack_.size(), undoBefore);  // copiar no muta: sin pushHistory
+}
+
+TEST(clipboard_c_with_empty_selection_copies_nothing) {
+    // 'c' sobre una seleccion vacia (anchor == position) NO debe tocar el
+    // buffer: si el usuario habia copiado algo antes, se preserva. El gate
+    // correcto es hasSelection(), no selection().has_value() (que es true
+    // incluso para un objeto Selection vacio; ver bug corregido en v0.55).
+    Editor ed;
+    type(ed, "abc");
+    ed.clipboard_ = std::vector<std::string>{"precioso"}; // contenido previo
+    press(ed, EventType::MoveHome);
+    enterSeleccion(ed);            // modo seleccion, pero sin texto marcado
+    CHECK(!ed.hasSelection());
+    ed.handleEvent(insert('c'));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK(ed.clipboard_ == std::vector<std::string>{"precioso"}); // intacto
+    CHECK_EQ(ed.statusMessage_, "Nada seleccionado.");
+    CHECK_EQ(ed.document_.lineAt(0), "abc");
+}
+
+TEST(clipboard_x_cuts_and_pushes_history) {
+    Editor ed;
+    type(ed, "abc");
+    selectChars(ed, 2);            // selecciona "ab"
+    ed.handleEvent(insert('x'));
+    CHECK_EQ(ed.document_.lineAt(0), "c");
+    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));
+    CHECK_EQ(ed.cursor_.col, 0);   // cursor reposicionado al inicio del rango
+    CHECK(ed.modified_);
+    CHECK(!ed.undoStack_.empty()); // cortar SI entra al historial
+}
+
+TEST(clipboard_x_with_empty_selection_cuts_nothing) {
+    Editor ed;
+    type(ed, "abc");
+    press(ed, EventType::Undo);    // deja algo pendiente en redoStack_
+    CHECK(!ed.redoStack_.empty());
+    size_t undoBefore = ed.undoStack_.size();
+    size_t redoBefore = ed.redoStack_.size();
+    ed.clipboard_ = std::vector<std::string>{"precioso"}; // contenido previo
+    press(ed, EventType::MoveHome);
+    enterSeleccion(ed);
+    CHECK(!ed.hasSelection());
+    ed.handleEvent(insert('x'));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK(ed.clipboard_ == std::vector<std::string>{"precioso"}); // intacto
+    CHECK_EQ(ed.statusMessage_, "Nada seleccionado.");
+    CHECK_EQ(ed.document_.lineAt(0), "ab");      // el undo la dejo en "ab"
+    CHECK_EQ(ed.undoStack_.size(), undoBefore);  // sin mutation: no pushHistory
+    CHECK_EQ(ed.redoStack_.size(), redoBefore);  // el redo NO se pierde
+}
+
+TEST(clipboard_p_with_empty_buffer_noop) {
+    Editor ed;
+    type(ed, "abc");
+    press(ed, EventType::Escape);   // -> Navegacion
+    // 'p' con buffer vacio es no-op sobre el documento y NO entra al
+    // historial (cuenta de undo antes/despues identica).
+    size_t undoBefore = ed.undoStack_.size();
+    ed.handleEvent(insert('p'));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.document_.lineAt(0), "abc"); // sin cambios
+    CHECK_EQ(ed.undoStack_.size(), undoBefore);
+    CHECK_EQ(ed.statusMessage_, "Nada para pegar.");
+}
+
+TEST(clipboard_p_pastes_and_repositions_cursor) {
+    Editor ed;
+    type(ed, "abc");
+    selectChars(ed, 2);             // selecciona "ab"
+    ed.handleEvent(insert('c'));    // copia "ab" -> Navegacion, cursor (0,0)
+    ed.handleEvent(insert('p'));    // pega en (0,0)... cursor real (0,2)
+    CHECK_EQ(ed.document_.lineAt(0), "ababc");
+    CHECK_EQ(ed.cursor_.col, 4);    // cursor al final del bloque pegado (2+2)
+    CHECK(ed.modified_);
+    CHECK_EQ(ed.statusMessage_, "Pegado.");
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+}
+
+TEST(clipboard_p_pastes_multiline_block) {
+    // Pegar un bloque multilinea en (line,col) parte la linea actual en
+    // col, inserta el bloque y deja el cursor al final de la ultima linea
+    // insertada del bloque.
+    Editor ed;
+    ed.document_.restore({"Z", "Z"}); // documento de 2 lineas
+    ed.cursor_.line = 0;
+    ed.cursor_.col = 0;
+    ed.clipboard_ = std::vector<std::string>{"X", "Y"};
+    ed.handleEvent(insert('p'));
+    CHECK_EQ(ed.document_.lineCount(), 3);
+    CHECK_EQ(ed.document_.lineAt(0), "X");
+    CHECK_EQ(ed.document_.lineAt(1), "YZ"); // ultima del bloque + cola derecha
+    CHECK_EQ(ed.document_.lineAt(2), "Z");
+    CHECK_EQ(ed.cursor_.line, 1);
+    CHECK_EQ(ed.cursor_.col, 1); // final de la ultima linea insertada
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+}
+
+TEST(clipboard_p_in_interaction_is_literal_p) {
+    // La letra 'p' dentro de Interaccion es texto real, no pegar.
+    Editor ed;
+    type(ed, "ap");
+    CHECK_EQ(ed.document_.lineAt(0), "ap");
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
+}
+
+TEST(clipboard_p_in_selection_is_noop) {
+    // 'p' en el modo Seleccion cae en el mismo default que cualquier letra
+    // que no sea c/x: se ignora, sin pegar y sin salir del modo.
+    Editor ed;
+    type(ed, "abc");
+    selectChars(ed, 1);             // [a]
+    CHECK(ed.hasSelection());
+    ed.handleEvent(insert('p'));
+    CHECK(ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+    CHECK_EQ(ed.document_.lineAt(0), "abc"); // nada se posiciono
+    CHECK(ed.clipboard_.empty());
+}
+
+// Test CENTRAL de v0.55: cortar y luego deshacer restaura el DOCUMENTO,
+// pero el BUFFER no vuelve a su estado anterior (decision de diseno del
+// punto 3 de v0.5: el buffer no participa del historial).
+TEST(clipboard_cut_then_undo_keeps_buffer) {
+    Editor ed;
+    type(ed, "hola");
+    selectChars(ed, 2);             // [ho]
+    ed.handleEvent(insert('x'));    // corta "ho": doc "la", buffer ["ho"]
+    CHECK_EQ(ed.document_.lineAt(0), "la");
+    CHECK(ed.clipboard_ == (std::vector<std::string>{"ho"}));
+
+    press(ed, EventType::Undo);     // deshace el corte
+    CHECK_EQ(ed.document_.lineAt(0), "hola");        // el documento SI se restaura
+    CHECK(ed.clipboard_ == (std::vector<std::string>{"ho"})); // el buffer NO
 }

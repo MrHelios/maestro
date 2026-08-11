@@ -330,7 +330,9 @@ TEST(doc_backspace_erase_whole_line) {
 
 TEST(doc_backspace_start_joins_previous) {
     Document d = makeDoc({"aa", "bb"});
-    CHECK(d.deleteCharBefore(1, 0));
+    // Fundir lineas no borra bytes dentro de una linea: devuelve 0, pero
+    // el efecto (unir ambas lineas) si ocurre.
+    CHECK_EQ(d.deleteCharBefore(1, 0), 0);
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "aabb");
 }
@@ -349,7 +351,7 @@ TEST(doc_backspace_empty_doc_noop) {
 
 TEST(doc_backspace_empty_line_merges) {
     Document d = makeDoc({"a", "", "b"});
-    CHECK(d.deleteCharBefore(1, 0));
+    CHECK_EQ(d.deleteCharBefore(1, 0), 0); // funde: 0 bytes dentro de la linea
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "a");
     CHECK_EQ(d.lineAt(1), "b");
@@ -379,7 +381,7 @@ TEST(doc_delete_col_negative_clamps_to_start) {
 
 TEST(doc_delete_end_joins_next) {
     Document d = makeDoc({"ab", "cd"});
-    CHECK(d.deleteCharAt(0, 2));
+    CHECK_EQ(d.deleteCharAt(0, 2), 0); // funde: 0 bytes dentro de la linea
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "abcd");
 }

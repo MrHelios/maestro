@@ -92,6 +92,15 @@ private:
     bool running_ = true;
     std::string statusMessage_;
 
+    // Buffer de copiar/cortar/pegar (v0.55). Contenido del ultimo rango
+    // copiado/cortado, como bloque de lineas. Vive FUERA de HistoryState:
+    // nunca se guarda en un pushHistory ni se restaura con undo/redo. Es
+    // estado de la UI (que tiene el usuario "en la mano"), no del documento,
+    // asi que deshacer una edicion NO debe deshacer el portapapeles. Si no
+    // parece participar del historial no es un olvido: es la decision de
+    // diseno del punto 3 de v0.5.
+    std::vector<std::string> clipboard_;
+
     // Seleccion de texto. Esta es SU casa: Document y Cursor no saben
     // nada de seleccion. Vacio cuando no hay texto seleccionado.
     // La seleccion pertenece al Editor.
