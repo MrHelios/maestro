@@ -106,6 +106,23 @@ private:
     // La seleccion pertenece al Editor.
     std::optional<Selection> selection_;
 
+    // ---- Seleccion total ('a') ----
+    // 'a', dentro del modo Seleccion, es un prefijo TEMPORAL (no un State
+    // nuevo): selecciona el archivo entero sin mover el cursor. Mientras
+    // esta activo, selectAllActive_ es true y selection_ cubre [BOF, EOF]
+    // aunque cursor_ conserve su posicion anterior (el render muestra el
+    // resaltado completo y el cursor en su sitio). selectAllPrevious_
+    // guarda la seleccion vigente antes de 'a' para que un segundo 'a'
+    // (toggle) vuelva a ella. Flechas saltan a los extremos y terminan el
+    // modo; c/x operan sobre todo el archivo; ESC lo cancela; el resto de
+    // teclas se ignora.
+    bool selectAllActive_ = false;
+    std::optional<Selection> selectAllPrevious_;
+    // Seleccion que cubre el documento entero: [BOF, EOF].
+    std::optional<Selection> selectAllSelection() const;
+    // Maneja los eventos mientras selectAllActive_ es true.
+    void handleSelectAllEvent(const Event& event);
+
     // ---- Helpers de seleccion ----
     // Si no hay seleccion, la inicia poniendo el anchor en la posicion
     // actual del cursor (se llama ANTES de mover el cursor).

@@ -1492,3 +1492,215 @@ TEST(normalize_end_both_directions) {
     selectPress(ed, EventType::MoveLeft); // (0,2): de vuelta al anchor
     CHECK(!ed.hasSelection());
 }
+
+// ---------------------------------------------------------------------------
+// Prefijo 'a' dentro de Seleccion: seleccion total
+// ---------------------------------------------------------------------------
+// Contrato:
+//   s -> a   : selection_ cubre [BOF, EOF], el CURSOR no se mueve.
+//   a -> a   : toggle, vuelve a la seleccion previa (o "sin seleccion" si
+//              la previa era empty) y desactiva el prefijo.
+//   a -> flecha (Right/Down): cursor == anchor == EOF, sin seleccion.
+//   a -> flecha (Left/Up):   cursor == anchor == BOF, sin seleccion.
+//   a -> c   : copia el archivo entero.
+//   a -> x   : corta el archivo entero.
+//   a -> ESC : cancela la seleccion total y vuelve a Navegacion.
+//   a -> tecla desconocida: no pasa nada (el prefijo sigue activo).
+static void enterSelectAll(Editor& ed) {
+    enterSeleccion(ed);
+    ed.handleEvent(insert('a'));
+    CHECK(ed.selectAllActive_);
+}
+
+TEST(select_all_covers_whole_file_cursor_kept) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 1, 1, ed); // cursor (1,1)
+
+    enterSeleccion(ed);
+    ed.handleEvent(insert('a'));
+
+    // El prefijo quedo activo y cubre el archivo entero [0,0]..[2,3).
+    CHECK(ed.selectAllActive_);
+    auto sel = ed.selection();
+    CHECK(sel.has_value());
+    CHECK_EQ(sel->start.line, 0);
+    CHECK_EQ(sel->start.col, 0);
+    CHECK_EQ(sel->end.line, 2);
+    CHECK_EQ(sel->end.col, 3);
+    // El cursor NO se mueve al hacer 'a'.
+    CHECK_EQ(ed.cursor_.line, 1);
+    CHECK_EQ(ed.cursor_.col, 1);
+    CHECK((ed.selection_->anchor == Position{0, 0}));
+    CHECK((ed.selection_->position == Position{2, 3}));
+}
+
+TEST(select_all_toggle_returns_to_previous_selection) {
+    Editor ed;
+    type(ed, "abcdef");
+    press(ed, EventType::MoveHome);
+    selectPress(ed, EventType::MoveRight); // [a]
+    selectPress(ed, EventType::MoveRight); // [ab]
+    CHECK(ed.hasSelection());
+    const auto before = ed.selection();
+
+    ed.handleEvent(insert('a')); // seleccion total
+    CHECK(ed.selectAllActive_);
+
+    ed.handleEvent(insert('a')); // toggle: vuelve a la seleccion previa
+    CHECK(!ed.selectAllActive_);
+    auto sel = ed.selection();
+    CHECK(sel.has_value());
+    CHECK_EQ(sel->start.col, before->start.col);
+    CHECK_EQ(sel->end.col, before->end.col);
+}
+
+TEST(select_all_toggle_from_empty_returns_empty) {
+    // s -> a -> a partiendo de "sin seleccion" (anchor == cursor).
+    Editor ed;
+    type(ed, "abc");
+    press(ed, EventType::MoveHome);
+    enterSeleccion(ed);           // anchor == cursor, sin seleccion
+    CHECK(!ed.hasSelection());
+    const int l = ed.cursor_.line, c = ed.cursor_.col;
+
+    ed.handleEvent(insert('a')); // seleccion total
+    CHECK(ed.hasSelection());
+    ed.handleEvent(insert('a')); // toggle -> vuelve a sin seleccion
+
+    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.hasSelection());
+    CHECK(!ed.selection().has_value());
+    // El cursor queda donde estaba antes de 'a'.
+    CHECK_EQ(ed.cursor_.line, l);
+    CHECK_EQ(ed.cursor_.col, c);
+}
+
+TEST(select_all_right_moves_to_eof) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb"}, 0, 1, ed);
+    enterSelectAll(ed);
+
+    press(ed, EventType::MoveRight);
+    CHECK(!ed.selectAllActive_);
+    // cursor == anchor == EOF, sin seleccion activa.
+    CHECK_EQ(ed.cursor_.line, 1);
+    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK(!ed.hasSelection());
+}
+
+TEST(select_all_down_moves_to_eof) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 0, 1, ed);
+    enterSelectAll(ed);
+
+    press(ed, EventType::MoveDown);
+    CHECK(!ed.selectAllActive_);
+    CHECK_EQ(ed.cursor_.line, 2);
+    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK(!ed.hasSelection());
+}
+
+TEST(select_all_left_moves_to_bof) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb"}, 1, 2, ed);
+    enterSelectAll(ed);
+
+    press(ed, EventType::MoveLeft);
+    CHECK(!ed.selectAllActive_);
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK(!ed.hasSelection());
+}
+
+TEST(select_all_up_moves_to_bof) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 2, 1, ed);
+    enterSelectAll(ed);
+
+    press(ed, EventType::MoveUp);
+    CHECK(!ed.selectAllActive_);
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK(!ed.hasSelection());
+}
+
+TEST(select_all_escape_cancels) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 0, 0, ed);
+    enterSelectAll(ed);
+    CHECK(ed.hasSelection());
+    const int l = ed.cursor_.line, c = ed.cursor_.col;
+
+    press(ed, EventType::Escape);
+    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.cursor_.line, l);
+    CHECK_EQ(ed.cursor_.col, c);
+}
+
+TEST(select_all_unknown_key_is_noop) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb"}, 0, 0, ed);
+    enterSelectAll(ed);
+
+    ed.handleEvent(insert('Z')); // tecla desconocida: no pasa nada
+    CHECK(ed.selectAllActive_);
+    CHECK(ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.line, 0);
+    CHECK_EQ(sel->start.col, 0);
+    CHECK_EQ(sel->end.line, 1);
+    CHECK_EQ(sel->end.col, 3);
+}
+
+TEST(select_all_c_copies_whole_file) {
+    Editor ed;
+    editorOfLines({"linea1", "linea2"}, 1, 0, ed);
+    enterSelectAll(ed);
+
+    ed.handleEvent(insert('c'));
+    CHECK(!ed.selectAllActive_);
+    CHECK(ed.clipboard_ == (std::vector<std::string>{"linea1", "linea2"}));
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    // El documento no cambia al copiar.
+    CHECK(ed.document_.snapshot() == (std::vector<std::string>{"linea1", "linea2"}));
+}
+
+TEST(select_all_x_cuts_whole_file) {
+    Editor ed;
+    editorOfLines({"linea1", "linea2"}, 1, 0, ed);
+    const size_t undoBefore = ed.undoStack_.size();
+    enterSelectAll(ed);
+
+    ed.handleEvent(insert('x'));
+    CHECK(!ed.selectAllActive_);
+    CHECK(ed.clipboard_ == (std::vector<std::string>{"linea1", "linea2"}));
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    // El archivo entero se borro -> queda una unica linea vacia.
+    CHECK_EQ(ed.document_.lineCount(), 1);
+    CHECK_EQ(ed.document_.lineAt(0), "");
+    CHECK(ed.modified_);
+    // Cortar es una edicion: agrega historial.
+    CHECK_EQ(ed.undoStack_.size(), undoBefore + 1);
+}
+
+TEST(select_all_not_active_cursor_and_selection_agree) {
+    // 'a' no deja el estado inconsistente: al salir del prefijo, el cursor
+    // vuelve a ser el extremo movil de la seleccion (el prefijo es solo un
+    // resaltado temporal, no una seleccion "colgante").
+    Editor ed;
+    editorOfLines({"abc", "def", "ghi"}, 1, 1, ed);
+    ed.handleEvent(insert('s'));
+    ed.handleEvent(insert('a'));
+    CHECK(ed.hasSelection());
+    CHECK_EQ(ed.cursor_.line, 1); // cursor intacto durante el prefijo
+
+    press(ed, EventType::Escape); // cancelar
+    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+}

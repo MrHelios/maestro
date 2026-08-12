@@ -223,6 +223,14 @@ void Editor::handleInteraccionEvent(const Event& event) {
 }
 
 void Editor::handleSeleccionEvent(const Event& event) {
+    // Si el prefijo 'a' (seleccion total) esta activo, casi todos los
+    // eventos se interpretan de forma especial, no como extension normal
+    // de la seleccion.
+    if (selectAllActive_) {
+        handleSelectAllEvent(event);
+        return;
+    }
+
     switch (event.type) {
         // Los movimientos extienden la seleccion, igual que hacia v0.3-v0.4.
         case EventType::MoveLeft:
@@ -248,7 +256,24 @@ void Editor::handleSeleccionEvent(const Event& event) {
         // un rango vacio y, en 'x', empujaria un historial inutil que ademas
         // limpia el redo.
         case EventType::InsertChar:
-            if (event.text == "c" || event.text == "x") {
+            // 'a' entra al prefijo de "seleccion total": cubre el archivo
+            // entero sin mover el cursor (guarda la seleccion previa para el
+            // toggle). 'c' copia el rango al buffer y 'x' lo copia y lo borra;
+            // ambos terminan la seleccion y vuelven a navegacion. Si la
+            // seleccion esta vacia, 'c'/'x' no tocan el buffer (solo se sale
+            // del modo).
+            // OJO: el gate es hasSelection() (anchor != position), NO
+            // selection().has_value() (que es true incluso para un objeto
+            // Selection vacio con anchor == position, ya que normalize solo
+            // ordena los puntos). Usar el segundo sobreescribiria el buffer con
+            // un rango vacio y, en 'x', empujaria un historial inutil que ademas
+            // limpia el redo.
+            if (event.text == "a") {
+                selectAllPrevious_ = selection_;
+                selection_ = selectAllSelection();
+                selectAllActive_ = true;
+                statusMessage_ = "SELECCION TOTAL (a togglea | flechas a extremos | c/x/ESC terminan)";
+            } else if (event.text == "c" || event.text == "x") {
                 bool hadSelection = hasSelection();
                 if (hadSelection) {
                     auto sel = selection();
@@ -273,7 +298,6 @@ void Editor::handleSeleccionEvent(const Event& event) {
             }
             // Cualquier otra letra ya NO reemplaza la seleccion: se ignora.
             break;
-
         case EventType::Escape:
             clearSelection();
             state_ = State::Navegacion;
@@ -286,6 +310,96 @@ void Editor::handleSeleccionEvent(const Event& event) {
         default:
             break;
     }
+}
+
+// Prefijo 'a' (seleccion total): interpreta los eventos mientras
+// selectAllActive_ es true. La seleccion entera ya esta puesta en
+// selection_ ([BOF, EOF]); aqu se decide que hace cada tecla con ella.
+void Editor::handleSelectAllEvent(const Event& event) {
+    switch (event.type) {
+        // 'a' de nuevo: toggle -> volvemos a la seleccion previa (o, si la
+        // previa era sin seleccion, a sin seleccion) y se desactiva el modo.
+        case EventType::InsertChar:
+            if (event.text == "a") {
+                selection_ = selectAllPrevious_;
+                selectAllPrevious_.reset();
+                if (!selection_.has_value()) clearSelection();
+                selectAllActive_ = false;
+                statusMessage_ = "SELECCION";
+            } else if (event.text == "c" || event.text == "x") {
+                // c/x operan sobre el archivo entero (la seleccion total es
+                // una seleccion real): copiar copia todo; cortar borra todo.
+                bool hadSelection = hasSelection();
+                if (hadSelection) {
+                    auto sel = selection();
+                    clipboard_ = document_.extractRange(sel->start.line,
+                                                        sel->start.col,
+                                                        sel->end.line,
+                                                        sel->end.col);
+                    if (event.text == "x") {
+                        pushHistory();
+                        document_.deleteRange(sel->start.line, sel->start.col,
+                                              sel->end.line, sel->end.col);
+                        cursor_.line = sel->start.line;
+                        cursor_.col = sel->start.col;
+                        modified_ = true;
+                    }
+                }
+                clearSelection();
+                selectAllPrevious_.reset();
+                selectAllActive_ = false;
+                state_ = State::Navegacion;
+                statusMessage_ = hadSelection ? (event.text == "x" ? "Cortado."
+                                                                    : "Copiado.")
+                                              : "Nada seleccionado.";
+            }
+            // Cualquier otra letra: no pasa nada.
+            break;
+
+        // Flechas: saltan a los extremos, terminan la seleccion total y
+        // dejan el cursor en el extremo (anchor == cursor, sin seleccion).
+        case EventType::MoveRight:
+        case EventType::MoveDown: {
+            int last = document_.lineCount() - 1;
+            cursor_.line = last;
+            cursor_.col = document_.lineLength(last);
+            selection_ = Selection{{cursor_.line, cursor_.col},
+                                   {cursor_.line, cursor_.col}};
+            selectAllActive_ = false;
+            selectAllPrevious_.reset();
+            statusMessage_ = "SELECCION";
+            break;
+        }
+        case EventType::MoveLeft:
+        case EventType::MoveUp:
+            cursor_.line = 0;
+            cursor_.col = 0;
+            selection_ = Selection{{0, 0}, {0, 0}};
+            selectAllActive_ = false;
+            selectAllPrevious_.reset();
+            statusMessage_ = "SELECCION";
+            break;
+
+        // ESC: cancela la seleccion total (y toda seleccion) y vuelve a
+        // navegacion, igual que en el modo Seleccion normal.
+        case EventType::Escape:
+            clearSelection();
+            selectAllPrevious_.reset();
+            selectAllActive_ = false;
+            state_ = State::Navegacion;
+            statusMessage_ = "Seleccion cancelada.";
+            break;
+
+        // Resto (incl. teclas desconocidas): no-op.
+        default:
+            break;
+    }
+}
+
+std::optional<Selection> Editor::selectAllSelection() const {
+    int last = document_.lineCount() - 1;
+    Position end{last, document_.lineLength(last)};
+    return Selection{{0, 0}, end};
 }
 
 void Editor::handlePrefixKey(const Event& event) {
