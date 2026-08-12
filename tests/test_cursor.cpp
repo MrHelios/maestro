@@ -22,6 +22,19 @@ static void assertCursorConsistent(const Cursor& c, const Document& d) {
     CHECK(c.col <= d.lineLength(c.line));
 }
 
+// Invariante UTF-8: el cursor trabaja en BYTES; j/k (y lost movimientos)
+// deben dejar el cursor siempre sobre el LEAD byte de un caracter o en el
+// final de linea, NUNCA en un byte de continuacion (dentro de un caracter
+// multibyte).
+static void assertCursorValidUtf8(const Cursor& c, const Document& d) {
+    assertCursorConsistent(c, d);
+    const int len = d.lineLength(c.line);
+    if (c.col == len) return; // final de linea: posicion valida
+    const std::string& ln = d.lineAt(c.line);
+    const unsigned char b = static_cast<unsigned char>(ln[c.col]);
+    CHECK((b & 0xC0) != 0x80); // no debe caer dentro de un caracter multibyte
+}
+
 // ---------------------------------------------------------------------------
 // 4. MoveLeft
 // ---------------------------------------------------------------------------
@@ -588,6 +601,51 @@ TEST(cursor_k_empty_and_no_previous_block) {
     CHECK_EQ(c.col, 0);     // sin bloque anterior: se queda
 }
 
+// Cruce de VARIAS lineas vacias (vacio = linea sin caracteres): j para
+// delante y k para atras deben atravesar los huecos sin quedarse clavados
+// y sin aterrizar en una linea vacia.
+TEST(cursor_j_crosses_empty_lines_forward) {
+    Document d = docOf({"uno", "", "", "dos"});
+    Cursor c;
+    c.line = 0;
+    c.col = 3;              // fin de "uno"
+    c.moveToNextWord(d);    // cruza 2 lineas vacias -> fin de "dos" (3,3)
+    CHECK_EQ(c.line, 3);
+    CHECK_EQ(c.col, 3);
+}
+
+TEST(cursor_k_crosses_empty_lines_backward) {
+    Document d = docOf({"uno", "", "", "dos"});
+    Cursor c;
+    c.line = 3;
+    c.col = 0;              // inicio de "dos"
+    c.moveToPreviousWord(d); // cruza 2 lineas vacias -> inicio de "uno" (0,0)
+    CHECK_EQ(c.line, 0);
+    CHECK_EQ(c.col, 0);
+}
+
+// Partir desde DENTRO de una linea vacia (bof === eof de esa linea): no
+// debe crashear y debe saltar al bloque adecuado de la linea vecina.
+TEST(cursor_j_from_inside_empty_line_forward) {
+    Document d = docOf({"uno", "", "dos"});
+    Cursor c;
+    c.line = 1;             // la linea vacia intermedia
+    c.col = 0;
+    c.moveToNextWord(d);    // -> fin de "dos" (2,3)
+    CHECK_EQ(c.line, 2);
+    CHECK_EQ(c.col, 3);
+}
+
+TEST(cursor_k_from_inside_empty_line_backward) {
+    Document d = docOf({"uno", "", "dos"});
+    Cursor c;
+    c.line = 1;             // la linea vacia intermedia
+    c.col = 0;
+    c.moveToPreviousWord(d); // -> inicio de "uno" (0,0)
+    CHECK_EQ(c.line, 0);
+    CHECK_EQ(c.col, 0);
+}
+
 TEST(cursor_jk_utf8_no_split) {
     // "hola café mundo": la 'é' es multibyte; j/k deben saltar bloques sin
     // aterrizar en medio de un caracter.
@@ -621,4 +679,156 @@ TEST(cursor_jk_tab_is_separator) {
     CHECK_EQ(c.col, 7);
     c.moveToPreviousWord(d);// inicio de "dos" -> col 4
     CHECK_EQ(c.col, 4);
+}
+
+// ---------------------------------------------------------------------------
+// j/k con GRUPOS de separadores (varios espacios entre palabras)
+// ---------------------------------------------------------------------------
+// Cuando hay mas de un separador seguido, j/k deben atravesar el grupo
+// ENTERO antes de buscar el bloque, tanto desde el fin de la palabra
+// anterior ("abc|   def") como desde el inicio de la siguiente
+// ("abc   |def").
+//   "abc   def   ghi": a0b1c2 ' '3 ' '4 ' '5 d6e7f8 ' '9 ' '10 ' '11 g12h13i14
+TEST(cursor_j_skips_groups_of_separators) {
+    Document d = docOf({"abc   def   ghi"});
+    Cursor c;
+    c.line = 0;
+    // Desde justo despues de "abc" (primer separador del grupo).
+    c.col = 3;
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, 9);     // fin de "def" -> cruzo el grupo 3-5
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, 15);    // fin de "ghi" -> cruzo el grupo 9-11
+    c.moveToNextWord(d);    // EOF: se queda
+    CHECK_EQ(c.col, 15);
+    // Desde el inicio de "def" (delante del muro de espacios).
+    c.col = 6;
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, 9);     // fin de "def" (no hay que saltar nada delante)
+    assertCursorConsistent(c, d);
+}
+
+TEST(cursor_k_skips_groups_of_separators) {
+    Document d = docOf({"abc   def   ghi"});
+    Cursor c;
+    c.line = 0;
+    // Desde el final del documento.
+    c.col = 15;
+    c.moveToPreviousWord(d);
+    CHECK_EQ(c.col, 12);    // inicio de "ghi" -> cruzo el grupo 9-11
+    c.moveToPreviousWord(d);
+    CHECK_EQ(c.col, 6);     // inicio de "def" -> cruzo el grupo 3-5
+    c.moveToPreviousWord(d);
+    CHECK_EQ(c.col, 0);     // inicio de "abc"
+    c.moveToPreviousWord(d); // no hay previo: se queda
+    CHECK_EQ(c.col, 0);
+    assertCursorConsistent(c, d);
+}
+
+TEST(cursor_jk_groups_of_separators_jk_roundtrip) {
+    // j hacia delante y k hacia atras atraviesan los mismos grupos de
+    // separadores de forma simetrica. Desde el FIN de un bloque, k va al
+    // COMIENZO de ese mismo bloque; desde el COMIENZO, k al bloque anterior.
+    Document d = docOf({"abc   def   ghi"});
+    Cursor c;
+    c.line = 0;
+    c.col = 3;              // primer separador tras "abc"
+    c.moveToNextWord(d);    // fin de "def" (9)
+    CHECK_EQ(c.col, 9);
+    c.moveToPreviousWord(d); // inicio de "def" (6)
+    CHECK_EQ(c.col, 6);
+    c.moveToPreviousWord(d); // inicio de "abc" (0)
+    CHECK_EQ(c.col, 0);
+    c.moveToNextWord(d);    // fin de "abc" (3)
+    CHECK_EQ(c.col, 3);
+    c.moveToNextWord(d);    // fin de "def" (9)
+    CHECK_EQ(c.col, 9);
+}
+
+// ---------------------------------------------------------------------------
+// UTF-8 en j/k: el cursor nunca cae dentro de un caracter multibyte
+// ---------------------------------------------------------------------------
+// El cursor trabaja en BYTES; las posiciones que dejan j/k (y MoveLeft/
+// MoveRight) deben caer sobre un lead byte o el final de linea, nunca en un
+// byte de continuacion. Se verifica con assertCursorValidUtf8() en cada paso.
+
+// "uno — dos": la raya (—, 3 bytes) es un bloque de no-separadores por si
+// sola. bytes: u0n1o2' '3 —(4,5,6) ' '7 d8o9s10
+TEST(cursor_jk_utf8_em_dash) {
+    Document d = docOf({"uno — dos"});
+    Cursor c;
+    c.line = 0;
+    c.col = 0;
+    c.moveToNextWord(d);    // fin de "uno" -> 3
+    CHECK_EQ(c.col, 3);
+    assertCursorValidUtf8(c, d);
+    c.moveToNextWord(d);    // fin de "—" -> 7 (tras los 3 bytes)
+    CHECK_EQ(c.col, 7);
+    assertCursorValidUtf8(c, d);
+    c.moveToNextWord(d);    // fin de "dos" -> 11
+    CHECK_EQ(c.col, 11);
+    assertCursorValidUtf8(c, d);
+
+    c.moveToPreviousWord(d); // inicio de "dos" -> 8
+    CHECK_EQ(c.col, 8);
+    assertCursorValidUtf8(c, d);
+    c.moveToPreviousWord(d); // inicio de "—" -> 4 (lead byte)
+    CHECK_EQ(c.col, 4);
+    assertCursorValidUtf8(c, d);
+    c.moveToPreviousWord(d); // inicio de "uno" -> 0
+    CHECK_EQ(c.col, 0);
+    assertCursorValidUtf8(c, d);
+}
+
+// "áéíóú": TODO es multibyte y no hay separadores -> un unico bloque.
+// El bloque entero va de 0 a 10 bytes; j/k saltan al inicio/fin sin nunca
+// aterrizar en medio de una vocal.
+TEST(cursor_jk_utf8_all_multibyte_single_block) {
+    Document d = docOf({"áéíóú"});
+    Cursor c;
+    c.line = 0;
+    c.col = 0;
+    c.moveToNextWord(d);    // fin del unico bloque -> 10
+    CHECK_EQ(c.col, 10);    // == lineLength (todos los bytes de las 5 vocales)
+    assertCursorValidUtf8(c, d);
+    c.moveToPreviousWord(d); // inicio -> 0
+    CHECK_EQ(c.col, 0);
+    assertCursorValidUtf8(c, d);
+    c.moveToPreviousWord(d); // no hay previo: se queda en 0
+    CHECK_EQ(c.col, 0);
+    assertCursorValidUtf8(c, d);
+}
+
+// Combinacion MoveLeft/MoveRight + j/k: todas las paradas caen en limites
+// de caracter validos.
+TEST(cursor_jk_utf8_mixed_character_moves) {
+    Document d = docOf({"hola café mundo"});
+    Cursor c;
+    c.line = 0;
+    c.col = 0;
+    c.moveToNextWord(d);    // fin de "hola" -> 4
+    CHECK_EQ(c.col, 4);
+    assertCursorValidUtf8(c, d);
+
+    c.moveLeft(d);          // -> 3 (lead del ultimo char de "hola")
+    CHECK_EQ(c.col, 3);
+    assertCursorValidUtf8(c, d);
+    c.moveRight(d);         // -> 4
+    CHECK_EQ(c.col, 4);
+    assertCursorValidUtf8(c, d);
+
+    c.moveToNextWord(d);    // fin de "café" -> 10 (tras la é)
+    CHECK_EQ(c.col, 10);
+    assertCursorValidUtf8(c, d);
+
+    c.moveRight(d);         // -> 11 (el espacio tras "café")
+    CHECK_EQ(c.col, 11);
+    assertCursorValidUtf8(c, d);
+
+    c.moveToPreviousWord(d); // inicio de "café" -> 5
+    CHECK_EQ(c.col, 5);
+    assertCursorValidUtf8(c, d);
+    c.moveToNextWord(d);    // fin de "café" -> 10
+    CHECK_EQ(c.col, 10);
+    assertCursorValidUtf8(c, d);
 }

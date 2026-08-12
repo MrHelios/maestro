@@ -546,6 +546,48 @@ TEST(selection_multiline_utf8_utf8_line_to_another) {
 }
 
 // ---------------------------------------------------------------------------
+// Seleccion MULTILINEA que empieza en MITAD de la primera linea y termina en
+// MITAD de la tercera. Es el caso mas propenso a errores de offset
+// byte/columna: los cortes de cada linea estan pegados a caracteres UTF-8
+// (é, ñ, —). Documento:
+//   l0: "café"      (é = \xc3\xa9, 5 bytes / 4 cols)
+//   l1: "mañana"    (ñ = \xc3\xb1, 6 bytes / 5 cols)
+//   l2: "— mundo"   (— = \xe2\x80\x94, 9 bytes / 7 cols)
+// Seleccion de (l0,byte 1) a (l2,byte 5): empieza tras la 'c' de "café" y
+// termina tras "m" de "mundo" (a medio camino de la tercera linea).
+//   bytes:  c a f é         -> [1,5) = "afé"
+//   mañana                  -> linea intermedia, completa
+//   — m u n d o             -> [0,5) = "— m"
+// ---------------------------------------------------------------------------
+TEST(selection_multiline_utf8_mid_first_to_mid_third) {
+    const std::vector<std::string> lines = {"café",
+                                            "mañana",
+                                            "— mundo"};
+    std::string out = frame(lines, selAt({0, 1}, {2, 5}));
+
+    // l0: la 'c' queda sin invertir, "afé" (bytes 1..5, incl. é) invertido.
+    CHECK(contains(out, "c" ANSI_INV "afé" ANSI_RESET));
+    CHECK(!contains(out, ANSI_INV "café"));
+    // l1: linea intermedia invertida entera.
+    CHECK(contains(out, ANSI_INV "mañana" ANSI_RESET));
+    // l2: "— m" (bytes 0..4, incl. — de 3 bytes) invertido, "undo" no.
+    CHECK(contains(out, ANSI_INV "— m" ANSI_RESET));
+    CHECK(contains(out, "undo"));
+    CHECK(!contains(out, ANSI_INV "— mundo"));
+}
+
+TEST(selection_multiline_utf8_mid_first_to_mid_third_reverse) {
+    // Misma seleccion "hacia atras" (cursor < anchor): el render normaliza
+    // y el resultado visual es identico al de la direccion adelante.
+    const std::vector<std::string> lines = {"café",
+                                            "mañana",
+                                            "— mundo"};
+    std::string fwd = frame(lines, selAt({0, 1}, {2, 5}));
+    std::string rev = frame(lines, selAt({2, 5}, {0, 1}));
+    CHECK_EQ(fwd, rev);
+}
+
+// ---------------------------------------------------------------------------
 // v0.4: barra de estado de dos filas
 // ---------------------------------------------------------------------------
 namespace {

@@ -12,9 +12,10 @@
 // la secuencia de bytes que emite la terminal, para verificar que
 // readEvent() la traduce al Event correcto.
 //
-// v0.3: no hay campo shift. La seleccion se activa con Ctrl+S; los
-// modificadores (Shift/Ctrl/Alt) que una terminal pueda anadir sobre las
-// flechas se ignoran y solo importa el caracter final.
+// v0.5: no hay campo shift. La seleccion se activa con la letra 's' dentro
+// del modo Navegacion (no con un modificador); los modificadores
+// (Shift/Ctrl/Alt) que una terminal pueda anadir sobre las flechas se
+// ignoran y solo importa el caracter final.
 // ---------------------------------------------------------------------------
 
 namespace {

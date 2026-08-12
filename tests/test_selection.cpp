@@ -1575,6 +1575,35 @@ TEST(select_all_toggle_from_empty_returns_empty) {
     CHECK_EQ(ed.cursor_.col, c);
 }
 
+TEST(select_all_toggle_back_then_move_right) {
+    // s -> a -> a -> MoveRight: el toggle vuelve a la seleccion previa SIN
+    // mover el cursor; el MoveRight posterior extiende desde esa posicion,
+    // no desde el EOF del 'a'.
+    Editor ed;
+    setupAbcde(ed);           // "abcde", cursor (0,2) -> anchor sera (0,2)
+    enterSeleccion(ed);
+    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK(!ed.hasSelection());
+
+    ed.handleEvent(insert('a')); // seleccion total, cursor intacto
+    CHECK(ed.selectAllActive_);
+    CHECK_EQ(ed.cursor_.col, 2);
+
+    ed.handleEvent(insert('a')); // toggle de vuelta, cursor intacto
+    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(ed.cursor_.col, 2); // NO se movio tras el toggle
+
+    press(ed, EventType::MoveRight);      // extiende desde (0,2) -> (0,3)
+    CHECK(ed.hasSelection());
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK_EQ(ed.selection_->anchor.col, 2); // anchor = posicion original
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.col, 2);
+    CHECK_EQ(sel->end.col, 3);
+}
+
 TEST(select_all_right_moves_to_eof) {
     Editor ed;
     editorOfLines({"aaa", "bbb"}, 0, 1, ed);
@@ -1586,6 +1615,12 @@ TEST(select_all_right_moves_to_eof) {
     CHECK_EQ(ed.cursor_.line, 1);
     CHECK_EQ(ed.cursor_.col, 3);
     CHECK(!ed.hasSelection());
+    // La seleccion total NO quedo colgando: se colapso a {EOF, EOF} (sin
+    // seleccion) en vez de conservar [BOF, EOF].
+    CHECK(ed.selection_.has_value());
+    CHECK(ed.selection_->anchor == ed.selection_->position);
+    CHECK((ed.selection_->anchor == Position{1, 3}));
+    CHECK(!ed.selectAllPrevious_.has_value()); // sin estado previo residual
 }
 
 TEST(select_all_down_moves_to_eof) {
@@ -1598,6 +1633,9 @@ TEST(select_all_down_moves_to_eof) {
     CHECK_EQ(ed.cursor_.line, 2);
     CHECK_EQ(ed.cursor_.col, 3);
     CHECK(!ed.hasSelection());
+    CHECK(ed.selection_.has_value());
+    CHECK(ed.selection_->anchor == ed.selection_->position);
+    CHECK(!ed.selectAllPrevious_.has_value());
 }
 
 TEST(select_all_left_moves_to_bof) {
@@ -1610,6 +1648,10 @@ TEST(select_all_left_moves_to_bof) {
     CHECK_EQ(ed.cursor_.line, 0);
     CHECK_EQ(ed.cursor_.col, 0);
     CHECK(!ed.hasSelection());
+    CHECK(ed.selection_.has_value());
+    CHECK(ed.selection_->anchor == ed.selection_->position);
+    CHECK((ed.selection_->anchor == Position{0, 0}));
+    CHECK(!ed.selectAllPrevious_.has_value());
 }
 
 TEST(select_all_up_moves_to_bof) {
@@ -1622,6 +1664,9 @@ TEST(select_all_up_moves_to_bof) {
     CHECK_EQ(ed.cursor_.line, 0);
     CHECK_EQ(ed.cursor_.col, 0);
     CHECK(!ed.hasSelection());
+    CHECK(ed.selection_.has_value());
+    CHECK(ed.selection_->anchor == ed.selection_->position);
+    CHECK(!ed.selectAllPrevious_.has_value());
 }
 
 TEST(select_all_escape_cancels) {
@@ -1702,6 +1747,91 @@ TEST(select_all_not_active_cursor_and_selection_agree) {
     press(ed, EventType::Escape); // cancelar
     CHECK(!ed.selectAllActive_);
     CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+}
+
+// ---------------------------------------------------------------------------
+// Extensiones del prefijo 'a' (seleccion total)
+// ---------------------------------------------------------------------------
+TEST(select_all_empty_file) {
+    // Archivo vacio (una sola linea sin caracteres): seleccionar todo
+    // cubre un rango degenerado [0,0]..[0,0]. El prefijo queda activo y el
+    // cursor no se mueve.
+    Editor ed;
+    ed.document_.restore({""});
+    enterSeleccion(ed);
+    ed.handleEvent(insert('a'));
+
+    CHECK(ed.selectAllActive_);
+    CHECK(ed.selection_.has_value());
+    CHECK((ed.selection_->anchor == Position{0, 0}));
+    CHECK((ed.selection_->position == Position{0, 0}));
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 0);
+}
+
+TEST(select_all_single_line) {
+    // Archivo de una sola linea: el rango va de [0,0] hasta el final de la
+    // unica linea, sin mover el cursor.
+    Editor ed;
+    ed.document_.restore({"hola"});
+    enterSeleccion(ed);
+    ed.handleEvent(insert('a'));
+
+    CHECK(ed.selectAllActive_);
+    auto sel = ed.selection();
+    CHECK(sel.has_value());
+    CHECK_EQ(sel->start.line, 0);
+    CHECK_EQ(sel->start.col, 0);
+    CHECK_EQ(sel->end.line, 0);
+    CHECK_EQ(sel->end.col, 4);
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 0);
+}
+
+TEST(select_all_toggle_then_copy_copies_previous) {
+    // s -> a -> a -> c: el segundo 'a' devuelve la seleccion PREVIA (no la
+    // total), y 'c' copia ESE rango, no todo el archivo.
+    Editor ed;
+    setupAbcde(ed);              // "abcde", cursor (0,2) -> anchor (0,2)
+    selectPress(ed, EventType::MoveRight); // [c] -> (0,3)
+    const auto before = ed.selection();
+    CHECK(before.has_value());
+    enterSelectAll(ed);          // 'a': seleccion total
+    CHECK(ed.selectAllActive_);
+
+    ed.handleEvent(insert('a')); // toggle -> vuelve al rango previo [2,3)
+    CHECK(!ed.selectAllActive_);
+    auto sel = ed.selection();
+    CHECK(sel.has_value());
+    CHECK_EQ(sel->start.col, before->start.col);
+    CHECK_EQ(sel->end.col, before->end.col);
+
+    ed.handleEvent(insert('c')); // copia SOLO [c]
+    CHECK(ed.clipboard_ == (std::vector<std::string>{"c"}));
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+}
+
+TEST(select_all_toggle_then_cut_cuts_previous) {
+    // s -> a -> a -> x: tras el toggle la seleccion es la previa; 'x' corta
+    // SOLO ese rango, dejando el resto del documento.
+    Editor ed;
+    setupAbcde(ed);              // "abcde", cursor (0,2) -> anchor (0,2)
+    selectPress(ed, EventType::MoveRight); // [c] -> (0,3)
+    enterSelectAll(ed);          // 'a': seleccion total
+    CHECK(ed.selectAllActive_);
+
+    ed.handleEvent(insert('a')); // toggle -> vuelve a [2,3)
+    CHECK(!ed.selectAllActive_);
+
+    ed.handleEvent(insert('x')); // corta SOLO la 'c'
+    CHECK(ed.clipboard_ == (std::vector<std::string>{"c"}));
+    CHECK_EQ(ed.document_.lineAt(0), "abde");
+    // Cursor al inicio de lo cortado (0,2).
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK(ed.modified_);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
@@ -1789,6 +1919,137 @@ TEST(page_small_file_fits_in_viewport) {
     CHECK_EQ(ed.cursor_.line, 0); // inicio del archivo
 }
 
+// ---------------------------------------------------------------------------
+// applyPage() + scrollToCursor(): el scroll posterior no debe destruir la
+// semantica de pagina. run() llama a viewport_.scrollToCursor() despues de
+// cada evento; como applyPage() deja el cursor dentro de [top, top+height),
+// scrollToCursor() debe ser un no-op que conserve el viewport y el cursor.
+// Simulamos ese paso del run loop llamando a scrollToCursor() tras el evento.
+static void runLoopScroll(Editor& ed) {
+    ed.viewport_.scrollToCursor(ed.cursor_);
+}
+
+TEST(page_repag_json_example_with_scroll) {
+    // Ejemplo del enunciado: viewport 60..79, cursor 67 (relativo 7). RePag
+    // -> viewport 40..59, cursor 47. scrollToCursor() no debe mover nada.
+    Editor ed;
+    editorOfLines(linesOf(100), 67, 2, ed);
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 60;
+
+    press(ed, EventType::PageUp);
+    runLoopScroll(ed);
+
+    CHECK_EQ(ed.viewport_.top, 40);
+    CHECK_EQ(ed.cursor_.line, 47);
+    CHECK(ed.cursor_.line >= ed.viewport_.top);
+    CHECK(ed.cursor_.line < ed.viewport_.top + ed.viewport_.height);
+}
+
+TEST(page_avpag_bottom_scroll_glued_to_eof) {
+    // AvPag abajo: viewport pegado a EOF (top 30) y cursor en su borde. El
+    // scroll posterior no puede empujar el top ni el cursor mas alla de la
+    // ultima linea.
+    Editor ed;
+    editorOfLines(linesOf(50), 45, 0, ed); // EOF = 49
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 50 - 20;             // ya abajo, relativo 15
+    // cursor 45 ya esta en el viewport 30..49; scrollToCursor no debe cambiar nada
+    runLoopScroll(ed);
+    CHECK_EQ(ed.viewport_.top, 30);
+
+    press(ed, EventType::PageDown);         // no hay pagina que bajar
+    runLoopScroll(ed);
+
+    CHECK_EQ(ed.viewport_.top, 30);         // sigue pegado a EOF
+    CHECK_EQ(ed.cursor_.line, 45);
+    CHECK(ed.viewport_.top + ed.viewport_.height - 1 <= ed.document_.lineCount() - 1);
+    CHECK(ed.cursor_.line <= ed.document_.lineCount() - 1);
+    // El cursor queda visible dentro del viewport.
+    CHECK(ed.cursor_.line >= ed.viewport_.top);
+    CHECK(ed.cursor_.line < ed.viewport_.top + ed.viewport_.height);
+}
+
+TEST(page_repag_top_scroll_keeps_top_zero) {
+    // RePag al tope: top se clampa a 0 y el cursor conserva la posicion
+    // relativa (5). scrollToCursor() no puede retroceder mas (top >= 0).
+    Editor ed;
+    editorOfLines(linesOf(100), 15, 1, ed);
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 10;                  // relativo 5
+
+    press(ed, EventType::PageUp);
+    runLoopScroll(ed);
+
+    CHECK_EQ(ed.viewport_.top, 0);
+    CHECK_EQ(ed.cursor_.line, 5);
+    CHECK(ed.cursor_.line >= ed.viewport_.top);
+}
+
+TEST(page_multiple_avpag_at_bottom_stays_glued) {
+    // Varias AvPag seguidas una vez abajo: no se desplaza (idempotente) y
+    // tras cada scrollToCursor el viewport sigue pegado a EOF.
+    Editor ed;
+    editorOfLines(linesOf(200), 0, 0, ed);
+    ed.viewport_.height = 30;
+    ed.viewport_.top = 0;
+
+    for (int i = 0; i < 50; ++i) {
+        press(ed, EventType::PageDown);
+        runLoopScroll(ed);
+        CHECK(ed.viewport_.top >= 0);
+        CHECK(ed.viewport_.top + ed.viewport_.height - 1 <= ed.document_.lineCount() - 1);
+        CHECK(ed.cursor_.line <= ed.document_.lineCount() - 1);
+        // El cursor siempre dentro del viewport tras el scroll.
+        CHECK(ed.cursor_.line >= ed.viewport_.top);
+        CHECK(ed.cursor_.line < ed.viewport_.top + ed.viewport_.height);
+    }
+    // Llego al fondo y se quedo pegado a EOF.
+    CHECK_EQ(ed.viewport_.top, 200 - 30);
+}
+
+TEST(page_multiple_repag_at_top_stays_zero) {
+    // Varias RePag seguidas una vez arriba: top se queda en 0, cursor en la
+    // posicion relativa, y el scroll no retrocede.
+    Editor ed;
+    editorOfLines(linesOf(200), 199, 0, ed);
+    ed.viewport_.height = 30;
+    ed.viewport_.top = 200 - 30;            // abajo del todo
+
+    for (int i = 0; i < 50; ++i) {
+        press(ed, EventType::PageUp);
+        runLoopScroll(ed);
+        CHECK(ed.viewport_.top >= 0);
+        CHECK(ed.cursor_.line >= 0);
+        CHECK(ed.cursor_.line < ed.document_.lineCount());
+    }
+    // Arriba del todo, pegado al inicio.
+    CHECK_EQ(ed.viewport_.top, 0);
+}
+
+TEST(page_avpag_at_absolute_bottom_does_not_overshoot) {
+    // Caso limite del enunciado: archivo de 100 lineas (0..99), viewport de
+    // 20 ya abajo del todo (80..99) y cursor en 87. AvPag no puede crear una
+    // pagina que no exista: el viewport QUEDA pegado al EOF (80..99) y el
+    // cursor se mantiene en <= 99. Nunca cursor=107 ni viewport 81..100.
+    Editor ed;
+    editorOfLines(linesOf(100), 87, 0, ed); // 100 lineas, EOF (ultima) = 99
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 80;                   // ultima pagina valida: 80..99
+
+    press(ed, EventType::PageDown);
+    runLoopScroll(ed);
+
+    // El viewport sigue siendo la ultima pagina valida, sin linea fantasma.
+    CHECK_EQ(ed.viewport_.top, 80);
+    CHECK_EQ(ed.viewport_.top + ed.viewport_.height - 1, 99); // fondo pegado a EOF
+    // El cursor no supero el archivo y sigue dentro del viewport.
+    CHECK_EQ(ed.cursor_.line, 87);
+    CHECK(ed.cursor_.line <= 99);
+    CHECK(ed.cursor_.line >= ed.viewport_.top);
+    CHECK(ed.cursor_.line < ed.viewport_.top + ed.viewport_.height);
+}
+
 TEST(page_in_seleccion_extends_selection) {
     // s + AvPag: el anchor permanece y el cursor salta una pagina, como
     // una flecha hacia abajo.
@@ -1825,6 +2086,150 @@ TEST(page_blocked_during_select_all) {
     press(ed, EventType::PageDown);
     CHECK(ed.selectAllActive_);
     CHECK_EQ(ed.cursor_.line, 5);
+}
+
+// ---------------------------------------------------------------------------
+// Extensiones de RePag/AvPag: casos de vista respecto al archivo
+// ---------------------------------------------------------------------------
+TEST(page_file_equal_to_viewport) {
+    // Archivo con EXACTAMENTE el mismo numero de filas que el viewport:
+    // cabe entero en una pagina. AvPag -> final (linea count-1), RePag ->
+    // inicio, top siempre 0.
+    Editor ed;
+    editorOfLines(linesOf(20), 5, 0, ed);
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 0;
+
+    press(ed, EventType::PageDown);
+    CHECK_EQ(ed.viewport_.top, 0);
+    CHECK_EQ(ed.cursor_.line, 19); // ultima linea == height-1
+
+    press(ed, EventType::PageUp);
+    CHECK_EQ(ed.viewport_.top, 0);
+    CHECK_EQ(ed.cursor_.line, 0);
+}
+
+TEST(page_file_slightly_larger_than_viewport) {
+    // Archivo con UNA fila mas que el viewport (count == height+1): la
+    // segunda pagina tiene solo una fila util. AvPag desde el inicio baja
+    // una fila (top=1), no una pagina completa de 20.
+    Editor ed;
+    editorOfLines(linesOf(21), 0, 0, ed); // lineas 0..20, count 21
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 0;
+
+    press(ed, EventType::PageDown);
+
+    CHECK_EQ(ed.viewport_.top, 1);         // 21 - 20 = 1
+    CHECK_EQ(ed.cursor_.line, 1);          // rel 0 conservado
+    CHECK(ed.viewport_.top + ed.viewport_.height - 1 <= ed.document_.lineCount() - 1);
+}
+
+TEST(page_exact_multiple_of_viewport) {
+    // Archivo cuyas lineas son un MULTIPLO EXACTO del viewport
+    // (count = 3 * height): las paginas terminan de golpe en el EOF, sin
+    // filas fantasma al final.
+    Editor ed;
+    editorOfLines(linesOf(60), 0, 0, ed); // count 60, height 20
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 0;
+
+    // Pagina 1 -> top 20, cursor 20.
+    press(ed, EventType::PageDown);
+    CHECK_EQ(ed.viewport_.top, 20);
+    CHECK_EQ(ed.cursor_.line, 20);
+
+    // Pagina 2 -> top 40, cursor 40.
+    press(ed, EventType::PageDown);
+    CHECK_EQ(ed.viewport_.top, 40);
+    CHECK_EQ(ed.cursor_.line, 40);
+
+    // Pagina 3 -> top 60 (== count), ya no hay; se pega al EOF (maxTop 40).
+    press(ed, EventType::PageDown);
+    CHECK_EQ(ed.viewport_.top, 40); // maxTop = 60 - 20
+    CHECK_EQ(ed.cursor_.line, 40);
+    CHECK(ed.viewport_.top + ed.viewport_.height - 1 <= ed.document_.lineCount() - 1);
+}
+
+TEST(page_cursor_on_first_visible_line) {
+    // Cursor en la PRIMERA fila visible del viewport (rel == 0): la pagina
+    // desplaza viewport y cursor la misma cantidad, manteniendo rel en 0.
+    Editor ed;
+    editorOfLines(linesOf(100), 60, 2, ed); // cursor 60 == top
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 60;
+
+    press(ed, EventType::PageUp);
+
+    CHECK_EQ(ed.viewport_.top, 40);
+    CHECK_EQ(ed.cursor_.line, 40); // rel 0
+}
+
+TEST(page_cursor_on_last_visible_line) {
+    // Cursor en la ULTIMA fila visible del viewport (rel == height-1): la
+    // pagina conserva esa posicion relativa extrema.
+    Editor ed;
+    editorOfLines(linesOf(100), 79, 0, ed); // rel = 79 - 60 = 19
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 60;
+
+    press(ed, EventType::PageUp);
+
+    CHECK_EQ(ed.viewport_.top, 40);
+    CHECK_EQ(ed.cursor_.line, 59); // rel 19 conservado
+}
+
+TEST(page_pageup_then_pagedown_roundtrip) {
+    // RePag y AvPag encadenados devuelven viewport y cursor a su estado
+    // original (movimiento reversible, sin clamps en el medio).
+    Editor ed;
+    editorOfLines(linesOf(100), 47, 0, ed);
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 40; // rel 7
+
+    press(ed, EventType::PageUp);
+    CHECK_EQ(ed.viewport_.top, 20);
+    CHECK_EQ(ed.cursor_.line, 27);
+
+    press(ed, EventType::PageDown);
+    CHECK_EQ(ed.viewport_.top, 40); // vuelve al top original
+    CHECK_EQ(ed.cursor_.line, 47);
+}
+
+TEST(page_pagedown_then_pageup_roundtrip) {
+    // AvPag y luego RePag: simetrico al roundtrip anterior.
+    Editor ed;
+    editorOfLines(linesOf(100), 47, 0, ed);
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 40; // rel 7
+
+    press(ed, EventType::PageDown);
+    CHECK_EQ(ed.viewport_.top, 60);
+    CHECK_EQ(ed.cursor_.line, 67);
+
+    press(ed, EventType::PageUp);
+    CHECK_EQ(ed.viewport_.top, 40);
+    CHECK_EQ(ed.cursor_.line, 47);
+}
+
+TEST(page_pageup_in_seleccion_extends_upwards) {
+    // s + RePag: el anchor permanece y el cursor salta una pagina hacia
+    // arriba, extendiendo la seleccion (espejo de page_in_seleccion_extends).
+    Editor ed;
+    editorOfLines(linesOf(50), 30, 0, ed);
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 20;          // rel 10
+    enterSeleccion(ed);
+    CHECK(!ed.hasSelection());
+
+    press(ed, EventType::PageUp);
+
+    CHECK(ed.hasSelection());
+    CHECK_EQ(ed.selection_->anchor.line, 30); // anchor fijo
+    CHECK_EQ(ed.cursor_.line, 10);             // 30 - 20
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.line, 10);
+    CHECK_EQ(sel->end.line, 30);
 }
 
 // ---------------------------------------------------------------------------
@@ -1912,4 +2317,263 @@ TEST(selection_j_multiline_utf8) {
     CHECK_EQ(sel->start.col, 0);
     CHECK_EQ(sel->end.line, 1);
     CHECK_EQ(sel->end.col, 5);
+}
+
+TEST(navegacion_jk_skips_empty_lines) {
+    // j/k en Navegacion atraviesan varias lineas vacias: del cursor en
+    // "uno" cruzan el hueco hasta la siguiente palabra y viceversa.
+    Editor ed;
+    editorOfLines({"uno", "", "", "dos"}, 0, 0, ed);
+
+    ed.handleEvent(insert('k')); // fin de "uno" -> (0,3)
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 3);
+
+    ed.handleEvent(insert('k')); // cruza 2 vacias -> fin de "dos" (3,3)
+    CHECK_EQ(ed.cursor_.line, 3);
+    CHECK_EQ(ed.cursor_.col, 3);
+
+    ed.handleEvent(insert('j')); // -> inicio de "dos" (3,0)
+    CHECK_EQ(ed.cursor_.line, 3);
+    CHECK_EQ(ed.cursor_.col, 0);
+
+    ed.handleEvent(insert('j')); // cruza 2 vacias -> inicio de "uno" (0,0)
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 0);
+}
+
+TEST(navegacion_jk_at_bof_eof) {
+    // j/k en Navegacion en los extremos del archivo: sin bloque en la
+    // direccion pedida, el cursor se queda donde esta.
+    Editor ed;
+    editorOfLines({"sola"}, 0, 0, ed);
+
+    ed.handleEvent(insert('j')); // sin bloque anterior
+    CHECK_EQ(ed.cursor_.col, 0);
+
+    ed.handleEvent(insert('k')); // fin de "sola" -> (0,4)
+    CHECK_EQ(ed.cursor_.col, 4);
+
+    ed.handleEvent(insert('k')); // sin bloque posterior (EOF)
+    CHECK_EQ(ed.cursor_.col, 4);
+}
+
+// ---------------------------------------------------------------------------
+// Invariante central de Seleccion: el anchor JAMAS cambia
+// ---------------------------------------------------------------------------
+// En modo Seleccion TODOS los comandos que extienden (Left/Right/Up/Down/
+// PageUp/PageDown/j/k) deben: mover el cursor (el extremo movil) y dejar el
+// anchor exactamente donde se fijo al entrar. Un comando solo llama a
+// beginSelection() cuando no hay seleccion (anchor == cursor al empezar);
+// despues, updateSelectionPosition() toca unicamente la position. Si un
+// nuevo comando re-estableciera el anchor, se perderia el origen de la
+// seleccion. Esto se verifica con matrices de comandos.
+static std::vector<std::string> longDoc(int n) {
+    std::vector<std::string> v;
+    for (int i = 0; i < n; ++i) v.push_back("linea " + std::to_string(i));
+    return v;
+}
+
+TEST(selection_matrix_arrows_and_pages_never_change_anchor) {
+    // Para cada comando de movimiento: tras fijar el anchor con la primera
+    // pulsacion, la segunda debe mover solo el cursor y dejar el anchor
+    // intacto.
+    const std::vector<EventType> cmds = {
+        EventType::MoveLeft,  EventType::MoveRight,
+        EventType::MoveUp,    EventType::MoveDown,
+        EventType::PageUp,    EventType::PageDown,
+    };
+    for (EventType type : cmds) {
+        Editor ed;
+        editorOfLines(longDoc(80), 40, 5, ed); // cursor (40,5), medio documento
+        ed.viewport_.height = 10;
+        ed.viewport_.top = 35;                  // visible 35..44, cursor dentro
+        enterSeleccion(ed);
+        CHECK(!ed.hasSelection());
+
+        press(ed, type);                        // 1a vez: fija anchor = (40,5)
+        CHECK(ed.hasSelection());
+        const Position anchor = ed.selection_->anchor;
+        const Position posAfterFirst = ed.selection_->position;
+        CHECK(anchor != posAfterFirst);         // hubo movimiento real
+
+        press(ed, type);                        // 2a vez: extiende/reduce
+        CHECK(ed.selection_->anchor == anchor); // el anchor NO cambio
+        CHECK(ed.selection_->position != posAfterFirst); // el cursor si se movio
+    }
+}
+
+TEST(selection_matrix_jk_never_change_anchor) {
+    // j/k en modo Seleccion: el anchor queda fijo y solo se mueve el
+    // extremo movil (puede incluso reducirse hasta tocar el anchor).
+    Editor ed;
+    editorOfLines({"uno dos tres cuatro cinco"}, 0, 4, ed);
+    enterSeleccion(ed);
+    CHECK(!ed.hasSelection());
+
+    ed.handleEvent(insert('j'));   // fija anchor (0,4); cursor -> (0,0)
+    CHECK(ed.hasSelection());
+    const Position anchor = ed.selection_->anchor;
+    CHECK_EQ(anchor.line, 0);
+    CHECK_EQ(anchor.col, 4);
+
+    ed.handleEvent(insert('k'));   // siguiente bloque -> (0,3)
+    CHECK(ed.selection_->anchor == anchor);
+    CHECK(ed.selection_->position != anchor); // hay seleccion: extremo distinto
+
+    ed.handleEvent(insert('k'));   // -> (0,7), anchor intacto
+    CHECK(ed.selection_->anchor == anchor);
+
+    ed.handleEvent(insert('j'));   // -> (0,4): reduce hasta el anchor
+    CHECK(ed.selection_->anchor == anchor);
+    CHECK(ed.selection_->position == anchor); // sin seleccion al volver al anchor
+}
+
+TEST(selection_anchor_reverse_shrinks_keeps_anchor) {
+    // Crecer y luego encoger (cruzar el anchor hacia atras) mantiene el
+    // anchor original en todo momento.
+    Editor ed;
+    editorOfLines(longDoc(40), 20, 3, ed);
+    ed.viewport_.height = 10;
+    ed.viewport_.top = 15;
+    enterSeleccion(ed);
+
+    press(ed, EventType::MoveDown);  // fija anchor (20,3) -> (21,3)
+    const Position anchor = ed.selection_->anchor;
+    press(ed, EventType::MoveDown);  // (22,3)
+    press(ed, EventType::MoveUp);    // (21,3): encoge
+    press(ed, EventType::MoveUp);    // (20,3): de vuelta al anchor, sin seleccion
+    CHECK(ed.selection_->anchor == anchor);
+    CHECK(!ed.hasSelection());       // cursor == anchor: se redujo a nada
+}
+
+// ---------------------------------------------------------------------------
+// Combinaciones de comandos de movimiento (flujos reales del usuario)
+// ---------------------------------------------------------------------------
+// Verifican la composicion correcta entre modos y comandos. En particular
+// que los comandos de pagina y j/k se ensamblan sin perder el estado del
+// viewport ni el de la seleccion.
+
+// s -> a -> flecha: el prefijo 'a' redirige la flecha a los extremos.
+// (select_all_left/right/up/down ya cubren cada flecha por separado.)
+
+TEST(combo_s_then_pageup_extends_selection) {
+    // s -> RePag: extiende la seleccion una pagina hacia arriba.
+    Editor ed;
+    editorOfLines(linesOf(40), 15, 1, ed);
+    ed.viewport_.height = 10;
+    ed.viewport_.top = 10;          // rel 5
+    enterSeleccion(ed);
+    CHECK(!ed.hasSelection());
+
+    press(ed, EventType::PageUp);
+
+    CHECK(ed.hasSelection());
+    CHECK_EQ(ed.selection_->anchor.line, 15);
+    CHECK_EQ(ed.cursor_.line, 5);
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.line, 5);
+    CHECK_EQ(sel->end.line, 15);
+}
+
+TEST(combo_s_then_a_then_j_is_blocked) {
+    // s -> a -> j: durante el prefijo 'a' solo tienen efecto a/flechas/ESC;
+    // j/k se IGNORAN y no mueven el cursor.
+    Editor ed;
+    editorOfLines(linesOf(40), 5, 0, ed);
+    ed.viewport_.height = 10;
+    enterSelectAll(ed);
+    CHECK_EQ(ed.cursor_.line, 5);
+
+    ed.handleEvent(insert('j')); // deberia ignorarse
+
+    CHECK(ed.selectAllActive_);
+    CHECK(ed.hasSelection());
+    CHECK_EQ(ed.cursor_.line, 5); // sin moverse
+}
+
+TEST(combo_s_then_a_then_k_is_blocked) {
+    Editor ed;
+    editorOfLines(linesOf(40), 5, 0, ed);
+    ed.viewport_.height = 10;
+    enterSelectAll(ed);
+
+    ed.handleEvent(insert('k'));
+
+    CHECK(ed.selectAllActive_);
+    CHECK_EQ(ed.cursor_.line, 5);
+}
+
+// j/k (palabras) + paginas en Navegacion: encadenan sin corromper el
+// viewport. En Navegacion j/k ya no extienden seleccion; solo mueven.
+TEST(combo_j_then_pagedown) {
+    // Navegacion 'j' (bloque anterior) y luego AvPag: el cursor primero
+    // salta a un limite de palabra y despues baja una pagina.
+    Editor ed;
+    editorOfLines({"primera linea", "segunda linea"}, 1, 7, ed); // parte de "linea"
+    ed.viewport_.height = 10;
+    ed.viewport_.top = 0;
+
+    ed.handleEvent(insert('j')); // bloque anterior desde el espacio -> inicio "segunda"
+
+    // j/k en navegacion caen en limites de palabra; el cursor salta al
+    // inicio del bloque actual y el viewport no se toca.
+    CHECK_EQ(ed.cursor_.line, 1);
+    CHECK_EQ(ed.cursor_.col, 0); // inicio de "segunda"
+    CHECK_EQ(ed.viewport_.top, 0);
+
+    press(ed, EventType::PageDown);
+    // count(2) <= height(10): archivo cabe entero -> AvPag salta al final.
+    CHECK_EQ(ed.cursor_.line, 1);
+    CHECK_EQ(ed.viewport_.top, 0);
+}
+
+TEST(combo_pagedown_then_j) {
+    // AvPag y luego 'j' (bloque anterior): la pagina deja el cursor en la
+    // ultima linea y j se mueve a un limite de palabra desde alli.
+    Editor ed;
+    editorOfLines({"primera linea", "segunda linea"}, 0, 0, ed);
+    ed.viewport_.height = 10;
+    ed.viewport_.top = 0;
+
+    press(ed, EventType::PageDown);  // -> (1,0): final de la ultima linea
+
+    ed.handleEvent(insert('j'));     // bloque anterior
+
+    // j desde el inicio de "segunda" cruza al ultimo bloque de la linea
+    // anterior: "linea" de la linea 0, que empieza en el byte 8.
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 8);
+}
+
+TEST(combo_k_then_pageup) {
+    // Navegacion 'k' (siguiente bloque) y luego RePag.
+    Editor ed;
+    editorOfLines({"primera linea primera", "segunda"}, 1, 0, ed);
+    ed.viewport_.height = 10;
+    ed.viewport_.top = 0;
+
+    ed.handleEvent(insert('k')); // siguiente bloque desde (1,0)
+    CHECK_EQ(ed.cursor_.line, 1);
+    CHECK_EQ(ed.cursor_.col, 7); // fin de "segunda"
+
+    press(ed, EventType::PageUp);   // archivo cabe entero -> RePag al inicio
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.viewport_.top, 0);
+}
+
+TEST(combo_pageup_then_k) {
+    // RePag y luego 'k' (siguiente bloque).
+    Editor ed;
+    editorOfLines({"primera", "segunda linea"}, 1, 0, ed);
+    ed.viewport_.height = 10;
+    ed.viewport_.top = 0;
+
+    press(ed, EventType::PageUp);   // -> (0,0)
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 0);
+
+    ed.handleEvent(insert('k'));    // siguiente bloque -> fin de "primera"
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 7);
 }

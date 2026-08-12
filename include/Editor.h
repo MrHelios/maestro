@@ -63,7 +63,7 @@ public:
 
     // --- Consultas sobre la seleccion ---
     // true solo si hay un rango NO vacio seleccionado (anchor != position).
-    // No confundir con state_ == State::Select (modo activo), que puede ser
+    // No confundir con state_ == State::Seleccion (modo activo), que puede ser
     // true aunque no haya texto marcado todavia. "Seleccion activa" (modo)
     // y "texto seleccionado" (rango) son cosas distintas.
     bool hasSelection() const;

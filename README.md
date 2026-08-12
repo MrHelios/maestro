@@ -1,7 +1,8 @@
-# edit — editor de texto de terminal (v0.4)
+# edit — editor de texto de terminal (v0.6)
 
 Editor de texto minimalista en C++17, sin interfaz gráfica, pensado
-como base extensible.
+como base extensible. Usa un modelo *modal* (Navegación / Interacción /
+Selección) estilo editor clásico.
 
 ## Compilar
 
@@ -19,9 +20,9 @@ make test
 ```
 
 Compila y ejecuta la suite de tests en `tests/` (`Document`, `Cursor`,
-`Editor`, `Selection` e invariantes). El runner imprime cada caso y un
-resumen final (`N tests, M failure(s)`); sale con código 0 solo si no
-hay fallos.
+`Editor`, `Selection`, UTF-8, terminal e invariantes). El runner imprime
+cada caso y un resumen final (`N tests, M failure(s)`); sale con código 0
+solo si no hay fallos.
 
 ## Uso
 
@@ -31,89 +32,122 @@ hay fallos.
 
 Si el archivo no existe, se crea uno nuevo en memoria (se guarda con Ctrl+K, Ctrl+S).
 
+### Modos
+
+El editor es modal. En cada modo las teclas significan cosas distintas:
+
+- **Navegación** (por defecto): no se escribe. Las letras `i`, `s`, `a`,
+  `j`/`k`, `c`/`x`, `p` son comandos. Las flechas/Home/End/RePag/AvPag
+  mueven el cursor sin seleccionar.
+- **Interacción** (con `i`): edición libre; todo carácter se inserta.
+  `Esc` vuelve a Navegación.
+- **Selección** (con `s`): las flechas, `j`/`k` y RePag/AvPag extienden la
+  selección (el *anchor* se fija al entrar y nunca cambia). `Esc`, `c`
+  o `x` la terminan. `a` entra al prefijo de "selección total".
+
 ### Teclas
 
-| Tecla                | Acción                                        |
-|----------------------|-----------------------------------------------|
-| Flechas              | Mover el cursor                                |
-| Ctrl+S               | Entrar al modo selección                       |
-| Ctrl+S + flechas/Home/End | Extender la selección (v0.3: ya no hace falta Shift) |
-| Ctrl+K, Ctrl+S       | Guardar (funciona también dentro del modo selección) |
-| Ctrl+K, Ctrl+Q       | Salir                                          |
-| Ctrl+K, otra tecla   | Cancelar el prefijo y descartar la tecla       |
-| Ctrl+U / Ctrl+Y      | Deshacer / Rehacer                             |
-| Home / End           | Ir al inicio/fin de la línea                   |
-| Backspace            | Borrar carácter anterior                       |
-| Delete               | Borrar carácter siguiente                      |
-| Cualquier letra      | Insertar carácter                              |
-| Esc                  | Salir del modo selección                       |
+| Tecla                      | Acción                                        |
+|----------------------------|-----------------------------------------------|
+| `i` (en Naveg.)            | Entrar a Interacción (edición)                |
+| `s` (en Naveg.)            | Entrar a Selección                            |
+| Flechas / Home / End       | Mover el cursor                               |
+| RePag / AvPag              | Desplazar una página (cursor + viewport)      |
+| `j` / `k` (Naveg./Sel.)    | Mover por *bloques*: previo / siguiente palabra |
+| `a` (en Selección)         | Prefijo de selección total (todo el archivo)  |
+| `c` / `x` (en Selección)   | Copiar / cortar la selección                  |
+| `p` (en Naveg.)            | Pegar el contenido del buffer                 |
+| Ctrl+U / Ctrl+Y            | Deshacer / Rehacer                            |
+| Ctrl+K, Ctrl+S             | Guardar                                       |
+| Ctrl+K, Ctrl+Q             | Salir                                         |
+| Ctrl+K, otra tecla         | Cancelar el prefijo y descartar la tecla      |
+| Backspace / Delete         | Borrar carácter (en Interacción)              |
+| Esc                        | Salir de Interacción / cancelar selección     |
 
-### Barra de estado (v0.4)
+#### Prefijo `a` (selección total)
+
+`a` dentro de Selección es un comportamiento temporal (no un modo nuevo):
+selecciona el **archivo entero** sin mover el cursor. Mientras está
+activo:
+
+- `a` de nuevo → vuelve a la selección anterior (toggle).
+- Flecha `→`/`↓` → cursor al EOF; `←`/`↑` → cursor al BOF (termina el
+  prefijo y la selección).
+- `c` / `x` → copian / cortan todo el archivo.
+- Esc → cancela.
+- Cualquier otra tecla → no hace nada.
+
+### Barra de estado
 
 La barra de estado ocupa las dos últimas filas de la terminal:
 
 - **Fila 1 (fija)** en video inverso, a ancho completo: bloque izquierdo
-  `nombre - ruta - ESTADO` (`NORMAL` / `SELECCION` / `COMANDO`), con
-  `[modificado]` junto al nombre si hay cambios sin guardar, y la ruta
-  resuelta siempre a absoluta. Bloque derecho `Linea: N Col: M`, anclado
-  a la derecha y nunca truncado. Ante una terminal chica se sacrifica
-  primero la ruta (con `...` al inicio) y luego el nombre.
+  `nombre - ruta - ESTADO` (`NAVEGACION` / `INTERACCION` / `SELECCION` /
+  `COMANDO`), con `[modificado]` junto al nombre si hay cambios sin
+  guardar, y la ruta resuelta siempre a absoluta. Bloque derecho
+  `Linea: N Col: M`, anclado a la derecha y nunca truncado. Ante una
+  terminal chica se sacrifica primero la ruta (con `...` al inicio) y
+  luego el nombre.
 - **Fila 2 (mensajes)**: `statusMessage` (ayudas, avisos de undo/guardado…)
   sin inverso, truncada a su propio ancho, reservada aunque esté vacía.
 
 ### Modo selección
 
-Con `Ctrl+S` se activa el modo selección sin necesidad de mantener
-pulsado Shift. Dentro de él:
+Con `s` en Navegación se activa el modo selección. La selección es un
+rango `anchor` → `position` del que es dueño el Editor (ni `Document` ni
+`Cursor` la conocen). Dentro de Selección:
 
-- Las flechas / Home / End extienden la selección.
-- Un carácter, espacio o Enter reemplaza el texto seleccionado y sale
-  del modo.
-- Backspace / Delete borran la selección y salen del modo.
+- Flechas / Home / End, `j`/`k` y RePag/AvPag extienden o encogen la
+  selección; el **anchor permanece fijo** y solo se mueve el extremo.
+- `c` copia el rango al buffer y vuelve a Navegación.
+- `x` corta (copia y borra) y vuelve a Navegación.
+- `a` activa la selección total (ver arriba).
 - Esc sale del modo selección sin tocar el texto.
-- Ctrl+S se ignora (ya estás en selección).
-- Ctrl+K, Ctrl+S guarda el archivo sin salir del modo selección.
-- Ctrl+K, Ctrl+Q sale del programa.
+- El contenido se resalta en video inverso (soporta UTF-8).
 
 ## Arquitectura
 
 ```
 tests/
-  test_framework.h  -> micro-framework de tests (CHECK/CHECK_EQ, runner)
-  test_main.cpp      -> punto de entrada del runner
-  test_document.cpp  -> carga/guardado, insertar, newline, backspace, delete
-  test_cursor.cpp    -> movimiento horizontal/vertical, home/end, invariantes
-  test_event.cpp     -> Event transporte un solo EventType (sin campo shift)
-  test_editor.cpp    -> openFile, undo, redo, guardado y quit
-  test_selection.cpp -> seleccion de texto (Paso 1 de v0.2: anchor/position)
+  test_framework.h     -> micro-framework de tests (CHECK/CHECK_EQ, runner)
+  test_main.cpp         -> punto de entrada del runner
+  test_document.cpp     -> carga/guardado, insertar, newline, backspace, delete
+  test_cursor.cpp       -> movimiento horizontal/vertical, home/end, j/k, invariantes
+  test_event.cpp        -> Event transporte un solo EventType (sin campo shift)
+  test_editor.cpp       -> openFile, undo, redo, guardado y quit
+  test_terminal_event.cpp -> traducción de bytes/secuencias de escape a Event
+  test_selection.cpp    -> selección (anchor/position), c/x, prefijo 'a', j/k, páginas
+  test_modes.cpp        -> máquina de estados (Navegación/Interacción/Selección/Prefix)
+  test_invariants.cpp   -> invariantes de estado tras una secuencia determinista
+  test_utf8*.cpp        -> utilitarios UTF-8 (columnas, truncado, rango)
 
 src/
-  Document.cpp   -> el texto en sí (vector<string>), sin saber nada
+  Document.cpp    -> el texto en sí (vector<string>), sin saber nada
                      de cursor, colores, scroll ni selección
   Cursor.cpp      -> línea/columna + "columna preferida" al moverse
-                     verticalmente entre líneas de distinto largo
+                     verticalmente; salto por bloques (j/k) sin partir UTF-8
+  Cursor.h        -> declaraciones; el cursor trabaja en BYTES (utf-8)
   Selection.h     -> struct Position + Selection (anchor/position). La
                      selección ES del Editor: ni Document ni Cursor la
                      conocen
   Viewport.h      -> qué franja del documento es visible (scroll)
   Terminal.cpp    -> modo raw (termios), lee teclas y las traduce
-                     a Event (InsertChar, MoveLeft, Prefix, Select,
-                     Backspace, ...). Los modificadores (Shift/Ctrl/Alt)
-                     de las secuencias de escape se ignoran
-  Renderer.cpp    -> Documento -> Renderer -> Terminal. Dibuja,
-                     nunca modifica el documento. Resalta la selección
-                     con video inverso
+                     a Event (InsertChar, MoveLeft, PageUp, ...). Los
+                     modificadores (Shift/Ctrl/Alt) de las secuencias de
+                     escape se ignoran
+  Renderer.cpp    -> Documento -> Renderer -> Terminal. Dibuja, nunca
+                     modifica el documento. Resalta la selección con
+                     video inverso y posiciona el cursor por COLUMNA
+                     visual (no por byte)
   Editor.cpp      -> engine: conecta Document + Cursor + Viewport +
                      Terminal + Renderer, corre el loop principal. Es
                      el dueño de la selección (ni Document ni Cursor
-                     la conocen).
-                     Corre el loop principal:
+                     la conocen). Define los modos y el prefijo 'a'.
 
-                         mientras siga abierto:
-                             leer evento
-                             actualizar estado
-                             renderizar
-
+                     Loop principal:
+                         leer evento
+                         actualizar estado (applyPage, selección, ...)
+                         renderizar
   main.cpp        -> punto de entrada, abre el archivo pasado por argv
 ```
 
@@ -122,3 +156,8 @@ el `Editor` nunca sabe qué tecla se apretó, solo qué evento ocurrió.
 Esto deja la puerta abierta a alimentar el engine desde otro lado
 (tests automatizados, macros, otro tipo de input) sin tocar el resto
 del código.
+
+El cursor y la selección trabajan en **bytes** dentro de la línea
+(modelo UTF-8): los movimientos (`Left`/`Right`, `j`/`k`, páginas)
+nunca aterrizan en medio de un carácter multibyte; el renderer convierte
+a columnas visuales al dibujar.

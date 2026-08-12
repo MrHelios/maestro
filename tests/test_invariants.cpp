@@ -174,8 +174,8 @@ static void assertStateConsistent(Editor& ed) {
 }
 
 // Secuencia determinista de eventos que cubre todas las mutaciones,
-// incluido el modo seleccion: entrar (Ctrl+S) y extender con las flechas,
-// lo que arma y anula la seleccion (rango vacio <-> no vacio).
+// incluido el modo seleccion: entrar (con la letra 's') y extender con las
+// flechas, lo que arma y anula la seleccion (rango vacio <-> no vacio).
 // Tras cada evento el estado completo (Document, Cursor, undo/redo y
 // ahora la seleccion) debe seguir siendo consistente.
 TEST(state_consistent_after_random_events) {
@@ -302,7 +302,7 @@ TEST(state_modified_flag_tracks_changes) {
 // ---------------------------------------------------------------------------
 // Paso 16: stress determinista que mezcla todo tipo de operacion sobre un
 // documento multilinea, verificando las invariantes de estado tras CADA
-// evento. Combina edicion, modo seleccion Ctrl+S, movimiento, borrado y
+// evento. Combina edicion, modo seleccion (letra 's'), movimiento, borrado y
 // reemplazo de seleccion, y undo/redo (incluidas las operaciones sobre
 // seleccion del Paso 12).
 // ---------------------------------------------------------------------------
@@ -316,7 +316,7 @@ TEST(state_stress_mixed_operations_selection) {
     assertStateConsistent(ed);
 
     // Generador deterministico (LGC simple) para las posiciones de los
-    // movimientos con/sin seleccion (modo Select o Normal) y las letras.
+    // movimientos con/sin seleccion (modo Seleccion o Navegacion) y las letras.
     unsigned long seed = 12345;
     auto rnd = [&seed]() {
         seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
