@@ -156,3 +156,114 @@ TEST(terminal_escape_followed_by_char_ignored) {
     Event e = parse("\x1bx");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
 }
+
+// ---------------------------------------------------------------------------
+// Terminal -> UTF-8: traduccion de entrada multibyte
+// ---------------------------------------------------------------------------
+// readEvent() debe agrupar los bytes de continuacion de un caracter UTF-8
+// y emitirlos juntos en Event.text, nunca un byte suelto.
+// ---------------------------------------------------------------------------
+
+TEST(terminal_utf8_ascii_single_byte) {
+    Event e = parse("a");
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::InsertChar));
+    CHECK_EQ(e.text, "a");
+    CHECK_EQ(e.text.size(), size_t{1});
+}
+
+TEST(terminal_utf8_two_bytes) {
+    // "é" = 0xC3 0xA9.
+    Event e = parse("\xC3\xA9");
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::InsertChar));
+    CHECK_EQ(e.text, "\xC3\xA9");
+    CHECK_EQ(e.text.size(), size_t{2});
+}
+
+TEST(terminal_utf8_three_bytes) {
+    // "—" (em dash) = 0xE2 0x80 0x94.
+    Event e = parse("\xE2\x80\x94");
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::InsertChar));
+    CHECK_EQ(e.text, "\xE2\x80\x94");
+    CHECK_EQ(e.text.size(), size_t{3});
+}
+
+TEST(terminal_utf8_four_bytes) {
+    // "😀" = 0xF0 0x9F 0x98 0x80.
+    Event e = parse("\xF0\x9F\x98\x80");
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::InsertChar));
+    CHECK_EQ(e.text, "\xF0\x9F\x98\x80");
+    CHECK_EQ(e.text.size(), size_t{4});
+}
+
+TEST(terminal_utf8_consecutive_sequences) {
+    // Dos caracteres UTF-8 consecutivos producen dos eventos, cada uno
+    // con su caracter completo.
+    {
+        PipedStdin p;
+        p.feed(std::string("\xC3\xA9") + "\xE2\x80\x94"); // "é—"
+        Terminal t;
+        Event e1 = t.readEvent();
+        Event e2 = t.readEvent();
+        CHECK_EQ(e1.text, "\xC3\xA9");
+        CHECK_EQ(e2.text, "\xE2\x80\x94");
+        CHECK_EQ(static_cast<int>(e1.type), static_cast<int>(EventType::InsertChar));
+        CHECK_EQ(static_cast<int>(e2.type), static_cast<int>(EventType::InsertChar));
+    }
+}
+
+TEST(terminal_utf8_consecutive_same_char) {
+    // Tres emojis seguidos: cada readEvent() entrega uno completo.
+    {
+        PipedStdin p;
+        p.feed(std::string("\xF0\x9F\x98\x80") + "\xF0\x9F\x98\x80"); // "😀😀"
+        Terminal t;
+        Event e1 = t.readEvent();
+        Event e2 = t.readEvent();
+        CHECK_EQ(e1.text, "\xF0\x9F\x98\x80");
+        CHECK_EQ(e2.text, "\xF0\x9F\x98\x80");
+    }
+}
+
+TEST(terminal_utf8_mixed_with_escape_key) {
+    // UTF-8 seguido de una secuencia de escape: el UTF-8 sale entero y la
+    // flecha se traduce a su evento. El parser no mezcla bytes.
+    {
+        PipedStdin p;
+        p.feed(std::string("\xC3\xA9") + "\x1b[C"); // "é" + flecha derecha
+        Terminal t;
+        Event e1 = t.readEvent();
+        Event e2 = t.readEvent();
+        CHECK_EQ(e1.text, "\xC3\xA9");
+        CHECK_EQ(static_cast<int>(e2.type), static_cast<int>(EventType::MoveRight));
+    }
+}
+
+TEST(terminal_escape_key_then_utf8) {
+    // Secuencia de escape seguida de UTF-8: la flecha primero, el UTF-8
+    // despues, sin bytes residuales.
+    {
+        PipedStdin p;
+        p.feed(std::string("\x1b[C") + "\xE2\x80\x94"); // flecha + "—"
+        Terminal t;
+        Event e1 = t.readEvent();
+        Event e2 = t.readEvent();
+        CHECK_EQ(static_cast<int>(e1.type), static_cast<int>(EventType::MoveRight));
+        CHECK_EQ(e2.text, "\xE2\x80\x94");
+        CHECK_EQ(static_cast<int>(e2.type), static_cast<int>(EventType::InsertChar));
+    }
+}
+
+TEST(terminal_utf8_mixed_with_plain_keys) {
+    // ASCII entre caracteres UTF-8 y una flecha al final.
+    {
+        PipedStdin p;
+        p.feed(std::string("a\xC3\xA9") + "\x1b[D"); // "aé" + flecha izquierda
+        Terminal t;
+        Event a = t.readEvent();
+        Event e = t.readEvent();
+        Event arrow = t.readEvent();
+        CHECK_EQ(a.text, "a");
+        CHECK_EQ(e.text, "\xC3\xA9");
+        CHECK_EQ(static_cast<int>(arrow.type), static_cast<int>(EventType::MoveLeft));
+    }
+}

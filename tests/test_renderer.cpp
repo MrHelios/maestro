@@ -954,3 +954,184 @@ TEST(edge_all_utf8_only) {
     CHECK_EQ(renderRow(line, 99), line);      // mayor que el string
     CHECK(validUtf8(renderRow(line, 2)));
 }
+
+TEST(statusbar_state_label_all_states) {
+    // Los 4 estados producen su etiqueta, mapeando State -> text.
+    struct Case { State s; const char* label; };
+    Case cases[] = {
+        {State::Navegacion, "NAVEGACION"},
+        {State::Interaccion, "INTERACCION"},
+        {State::Seleccion, "SELECCION"},
+        {State::Prefix, "COMANDO"},
+    };
+    for (const auto& c : cases) {
+        std::string out = barFrame("/a.txt", false, "", c.s, 200);
+        CHECK(contains(out, " - " + std::string(c.label)));
+        std::string expected = " - " + std::string(c.label);
+        CHECK(contains(out, expected));
+    }
+}
+
+TEST(statusbar_state_label_persists_across_modified) {
+    // La etiqueta de estado no se pierde ni se convierte en otra cosa
+    // cuando hay [modificado]: ambos coexisten.
+    std::string out = barFrame("/a/b.txt", true, "", State::Interaccion, 200);
+    CHECK(contains(out, "[modificado]"));
+    CHECK(contains(out, "INTERACCION"));
+}
+
+TEST(statusbar_state_label_not_overwritten_by_message) {
+    // El mensaje de estado (fila de mensajes, sin inverso) no pisa la
+    // etiqueta de la barra fija: ambas filas coexisten.
+    std::string out = barFrame("/a/b.txt", false, "mensaje de estado",
+                               State::Seleccion, 200);
+    CHECK(contains(out, "SELECCION"));
+    CHECK(contains(out, "mensaje de estado"));
+}
+
+TEST(statusbar_state_label_survives_narrow_terminal) {
+    // Terminal angosta: la etiqueta de estado es de bajo sacrificio y,
+    // por encima de la cota minima del bloque Ln/Col (ancho 15), la barra
+    // nunca debe desbordar la terminal.
+    for (int width = 15; width <= 30; ++width) {
+        std::string out = barFrame("/a/archivo.txt", false, "",
+                                   State::Prefix, width);
+        int barW = barVisibleCols(out);
+        CHECK(barW <= width);
+    }
+}
+
+TEST(statusbar_state_label_with_long_filename) {
+    // Nombre de archivo largo: se trunca el nombre/ruta, no el estado.
+    const std::string nombre = "un_archivo_absurdamente_largo_para_la_barra_"
+                               "de_estado_del_editor_de_texto_en_cpp.txt";
+    std::string out = barFrame("/dir/" + nombre, false, "",
+                               State::Seleccion, 200);
+    CHECK(contains(out, "SELECCION"));
+}
+
+TEST(statusbar_state_and_modified_each_state) {
+    // Combinacion estado + modified: con cualquiera de los 4 estados la
+    // barra muestra [modificado] y la etiqueta correcta a la vez.
+    struct Case { State s; const char* label; };
+    Case cases[] = {
+        {State::Navegacion, "NAVEGACION"},
+        {State::Interaccion, "INTERACCION"},
+        {State::Seleccion, "SELECCION"},
+        {State::Prefix, "COMANDO"},
+    };
+    for (const auto& c : cases) {
+        std::string out = barFrame("/a/b.txt", true, "", c.s, 200);
+        CHECK(contains(out, "[modificado]"));
+        CHECK(contains(out, " - " + std::string(c.label)));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Renderer + seleccion + UTF-8 (integracion final)
+// ---------------------------------------------------------------------------
+// El renderer marca la seleccion con video inverso y el cursor con una
+// secuencia de posicionamiento. Con caracteres multibyte en el rango debe:
+//   - iniciar la inversion en la columna visual correcta (byte lead);
+//   - terminarla sin partir bytes de continuacion;
+//   - dejar el cursor en la columna visual correcta del byte final.
+// La seleccion usa OFFSET DE BYTES (modelo Document); el render aplica
+// columnas visuales.
+// ---------------------------------------------------------------------------
+
+// Monta un frame de una unica linea con cursor en `byteCol` y una
+// seleccion dada (ambos en ofset de bytes).
+std::string selCurFrame(const std::string& line, int byteCol,
+                        const std::optional<Selection>& sel) {
+    Document doc;
+    doc.restore({line});
+
+    Viewport viewport;
+    viewport.top = 0;
+    viewport.height = 1;
+    viewport.width = 200;
+
+    Cursor cursor;
+    cursor.line = 0;
+    cursor.col = byteCol;
+
+    Renderer r;
+    return r.buildScreen(doc, cursor, viewport, "test.txt", false, "",
+                         State::Navegacion, sel);
+}
+
+TEST(renderer_selection_utf8_cafe_accent) {
+    // "café" = c,a,f,é (bytes 3..5). Seleccionar solo [é] (3..5).
+    // Visualmente: "caf" sin invertir + "é" invertido; cursor tras "é"
+    // (byte 5) en la columna visual 4 -> col terminal 5.
+    std::string out = selCurFrame("caf\xc3\xa9", 5, selAt({0, 3}, {0, 5}));
+
+    // No corta bytes: el bloque es el "é" completo, no un byte suelto.
+    CHECK(contains(out, ANSI_INV "\xc3\xa9" ANSI_RESET));
+    // Empieza DESPUES de "caf" (que no esta invertido).
+    CHECK(contains(out, "caf" ANSI_INV));
+    CHECK(!contains(out, ANSI_INV "caf"));
+    // Columna final del cursor: tras é (visual 4) -> 1;5H.
+    CHECK_EQ(cursorVisibleCol(out), 5);
+}
+
+TEST(renderer_selection_utf8_cafe_accent_cursor_break_pos) {
+    // Cursor en el byte INTERMEDIO del é (byte 4) no debe "caer dentro"
+    // de la inversion: el render clampa a la columna visual del lead.
+    std::string out = selCurFrame("caf\xc3\xa9", 4, std::nullopt);
+    CHECK_EQ(cursorVisibleCol(out), 5);   // byte 4 == byte 5 visualmente
+}
+
+TEST(renderer_selection_utf8_mixed_em_dash_emoji) {
+    // "abc—😀def": a,b,c (0..3), — (3..6, 3 bytes), 😀 (6..10, 4 bytes),
+    // d,e,f (10..13). Seleccionar [3..10) = "—😀" completo.
+    // Columnas visuales: abcd=0,1,2,3 ; —=4 ; 😀=5 ; def=6,7,8.
+    const std::string line = "abc\xe2\x80\x94\xf0\x9f\x98\x80" "def";
+    // Cursor tras la seleccion (byte 10, inicio de 'd') -> visual 5 ->
+    // col terminal 6 (a0 b1 c2 —3 😀4 d5).
+    std::string out = selCurFrame(line, 10, selAt({0, 3}, {0, 10}));
+
+    // El bloque invertido es "—😀" (9 bytes, sin partir).
+    CHECK(contains(out, ANSI_INV "\xe2\x80\x94\xf0\x9f\x98\x80" ANSI_RESET));
+    // "abc" sin invertir delante y "def" sin invertir detras.
+    CHECK(contains(out, "abc" ANSI_INV));
+    CHECK(contains(out, ANSI_RESET "def"));
+    CHECK(!contains(out, ANSI_INV "abc"));
+    CHECK(!contains(out, ANSI_INV "def"));
+    // Cursor en la columna correcta (tras emoji, visual 5 -> 1;6H).
+    CHECK_EQ(cursorVisibleCol(out), 6);
+}
+
+TEST(renderer_selection_utf8_mixed_start_only) {
+    // Seleccionar solo el em dash [3..6): "—" invertido, emoji sin tocar.
+    const std::string line = "abc\xe2\x80\x94\xf0\x9f\x98\x80" "def";
+    std::string out = selCurFrame(line, 6, selAt({0, 3}, {0, 6}));
+
+    CHECK(contains(out, ANSI_INV "\xe2\x80\x94" ANSI_RESET));
+    CHECK(!contains(out, ANSI_INV "\xe2\x80\x94\xf0\x9f\x98\x80"));
+    CHECK(!contains(out, ANSI_INV "\xf0\x9f\x98\x80"));  // emoji no invertido
+    CHECK_EQ(cursorVisibleCol(out), 5);   // tras — (visual 4) -> 1;5H
+}
+
+TEST(renderer_selection_utf8_mixed_reverse_direction) {
+    // Misma seleccion "—😀" pero "hacia atras": visual identica.
+    const std::string line = "abc\xe2\x80\x94\xf0\x9f\x98\x80" "def";
+    std::string out = selCurFrame(line, 3, selAt({0, 10}, {0, 3}));
+
+    CHECK(contains(out, ANSI_INV "\xe2\x80\x94\xf0\x9f\x98\x80" ANSI_RESET));
+    CHECK(contains(out, "abc" ANSI_INV));
+    CHECK(contains(out, ANSI_RESET "def"));
+    CHECK_EQ(cursorVisibleCol(out), 4);   // cursor en el anchor (byte 3)
+}
+
+TEST(renderer_selection_utf8_cursor_after_each_char) {
+    // Cursor recorriendo el inicio de cada caracter de "abc—😀def":
+    // la columna terminal debe avanzar 1 por caracter visible.
+    const std::string line = "abc\xe2\x80\x94\xf0\x9f\x98\x80" "def";
+    struct Case { int byte; int termCol; };
+    Case cases[] = {{0, 1}, {2, 3}, {3, 4}, {6, 5}, {10, 6}, {12, 8}};
+    for (const auto& c : cases) {
+        std::string out = selCurFrame(line, c.byte, std::nullopt);
+        CHECK_EQ(cursorVisibleCol(out), c.termCol);
+    }
+}

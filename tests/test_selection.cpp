@@ -866,6 +866,178 @@ TEST(editor_selection_end_from_end) {
 }
 
 // ---------------------------------------------------------------------------
+// Matriz: cada movimiento (Left/Right/Up/Down/Home/End) dentro de
+// Seleccion debe: dejar el anchor fijo, mover el cursor, actualizar la
+// seleccion, y permitir crecer, reducirse y desaparecer al volver al anchor.
+// ---------------------------------------------------------------------------
+TEST(selection_right_grows_shrinks_disappears) {
+    Editor ed;
+    setupAbcde(ed);           // anchor (0,2)
+    const int anchor = ed.cursor_.col;
+
+    selectPress(ed, EventType::MoveRight); // (0,3)
+    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK_EQ(ed.selection_->anchor.col, anchor); // anchor fijo
+    CHECK(ed.hasSelection());
+
+    selectPress(ed, EventType::MoveRight); // (0,4): crece
+    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK_EQ(ed.selection_->position.col, 4);
+
+    selectPress(ed, EventType::MoveLeft);  // (0,3): se reduce
+    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK_EQ(ed.selection_->position.col, 3);
+    CHECK(ed.hasSelection());
+
+    selectPress(ed, EventType::MoveLeft);  // (0,2): de vuelta al anchor
+    CHECK_EQ(ed.cursor_.col, anchor);
+    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK(!ed.hasSelection());
+}
+
+TEST(selection_left_grows_shrinks_disappears) {
+    Editor ed;
+    setupAbcde(ed);           // anchor (0,2)
+    const int anchor = ed.cursor_.col;
+
+    selectPress(ed, EventType::MoveLeft); // (0,1): hacia atras
+    CHECK_EQ(ed.cursor_.col, 1);
+    CHECK_EQ(ed.selection_->anchor.col, anchor); // anchor fijo
+    CHECK(ed.hasSelection());
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.col, 1);
+    CHECK_EQ(sel->end.col, 2);
+
+    selectPress(ed, EventType::MoveLeft); // (0,0): crece
+    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    sel = ed.selection();
+    CHECK_EQ(sel->start.col, 0);
+    CHECK_EQ(sel->end.col, 2);
+
+    selectPress(ed, EventType::MoveRight); // (0,1): se reduce
+    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    sel = ed.selection();
+    CHECK_EQ(sel->start.col, 1);
+    CHECK_EQ(sel->end.col, 2);
+
+    selectPress(ed, EventType::MoveRight); // (0,2): de vuelta al anchor
+    CHECK_EQ(ed.cursor_.col, anchor);
+    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK(!ed.hasSelection());
+}
+
+TEST(selection_down_grows_shrinks_disappears) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 0, 1, ed); // anchor (0,1)
+    const int anchorLine = ed.cursor_.line;
+    const int anchorCol = ed.cursor_.col;
+
+    selectPress(ed, EventType::MoveDown); // (1,1)
+    CHECK_EQ(ed.cursor_.line, 1);
+    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
+    CHECK_EQ(ed.selection_->anchor.col, anchorCol);
+    CHECK(ed.hasSelection());
+
+    selectPress(ed, EventType::MoveDown); // (2,1): crece
+    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
+    CHECK_EQ(ed.selection_->position.line, 2);
+
+    selectPress(ed, EventType::MoveUp);   // (1,1): se reduce
+    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
+    CHECK_EQ(ed.selection_->position.line, 1);
+
+    selectPress(ed, EventType::MoveUp);   // (0,1): de vuelta al anchor
+    CHECK_EQ(ed.cursor_.line, anchorLine);
+    CHECK_EQ(ed.cursor_.col, anchorCol);
+    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
+    CHECK(!ed.hasSelection());
+}
+
+TEST(selection_up_grows_shrinks_disappears) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 2, 1, ed); // anchor (2,1)
+    const int anchorLine = ed.cursor_.line;
+    const int anchorCol = ed.cursor_.col;
+
+    selectPress(ed, EventType::MoveUp); // (1,1): hacia arriba
+    CHECK_EQ(ed.cursor_.line, 1);
+    CHECK_EQ(ed.selection_->anchor.line, anchorLine); // anchor fijo
+    CHECK(ed.hasSelection());
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.line, 1);
+    CHECK_EQ(sel->end.line, 2);
+
+    selectPress(ed, EventType::MoveUp); // (0,1): crece
+    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
+    sel = ed.selection();
+    CHECK_EQ(sel->start.line, 0);
+    CHECK_EQ(sel->end.line, 2);
+
+    selectPress(ed, EventType::MoveDown); // (1,1): se reduce
+    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
+    sel = ed.selection();
+    CHECK_EQ(sel->start.line, 1);
+    CHECK_EQ(sel->end.line, 2);
+
+    selectPress(ed, EventType::MoveDown); // (2,1): de vuelta al anchor
+    CHECK_EQ(ed.cursor_.line, anchorLine);
+    CHECK_EQ(ed.cursor_.col, anchorCol);
+    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
+    CHECK(!ed.hasSelection());
+}
+
+TEST(selection_home_grows_shrinks_disappears) {
+    Editor ed;
+    setupAbcde(ed);           // anchor (0,2)
+    const int anchor = ed.cursor_.col;
+
+    selectPress(ed, EventType::MoveHome); // (0,0): salta al inicio
+    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.selection_->anchor.col, anchor); // anchor fijo
+    CHECK(ed.hasSelection());
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.col, 0);
+    CHECK_EQ(sel->end.col, 2);
+
+    selectPress(ed, EventType::MoveRight); // (0,1): se reduce hacia el anchor
+    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    sel = ed.selection();
+    CHECK_EQ(sel->start.col, 1);
+    CHECK_EQ(sel->end.col, 2);
+
+    selectPress(ed, EventType::MoveRight); // (0,2): de vuelta al anchor
+    CHECK_EQ(ed.cursor_.col, anchor);
+    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK(!ed.hasSelection());
+}
+
+TEST(selection_end_grows_shrinks_disappears) {
+    Editor ed;
+    setupAbcde(ed);           // anchor (0,2)
+    const int anchor = ed.cursor_.col;
+
+    selectPress(ed, EventType::MoveEnd); // (0,5): salta al final
+    CHECK_EQ(ed.cursor_.col, 5);
+    CHECK_EQ(ed.selection_->anchor.col, anchor); // anchor fijo
+    CHECK(ed.hasSelection());
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.col, 2);
+    CHECK_EQ(sel->end.col, 5);
+
+    selectPress(ed, EventType::MoveLeft); // (0,4): se reduce hacia el anchor
+    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    sel = ed.selection();
+    CHECK_EQ(sel->start.col, 2);
+    CHECK_EQ(sel->end.col, 4);
+
+    selectPress(ed, EventType::MoveLeft);
+    selectPress(ed, EventType::MoveLeft); // (0,2): de vuelta al anchor
+    CHECK_EQ(ed.cursor_.col, anchor);
+    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK(!ed.hasSelection());
+}
+
+// ---------------------------------------------------------------------------
 // Paso 13: seleccionar NO modifica el documento (modified_)
 // ---------------------------------------------------------------------------
 // Seleccion es estado del editor, no una edicion al texto.
@@ -1020,4 +1192,303 @@ TEST(selection_other_char_ignored) {
     CHECK(ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     CHECK_EQ(ed.document_.lineAt(0), "abcde");
+}
+
+// ---------------------------------------------------------------------------
+// 'c' desde Seleccion: primera funcionalidad del buffer (copiar)
+// ---------------------------------------------------------------------------
+// Contrato tras copiar con seleccion: documento identico, cursor en el
+// mismo lugar, seleccion eliminada, estado Navegacion y clipboard con
+// exactamente el rango seleccionado.
+static void assertCopied(Editor& ed,
+                         const std::vector<std::string>& docBefore,
+                         int lineBefore, int colBefore,
+                         const std::vector<std::string>& expectedClipboard) {
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK(ed.document_.snapshot() == docBefore);     // documento identico
+    CHECK_EQ(ed.cursor_.line, lineBefore);            // cursor en el mismo lugar
+    CHECK_EQ(ed.cursor_.col, colBefore);
+    CHECK(ed.clipboard_ == expectedClipboard);        // buffer exacto
+}
+
+TEST(selection_c_without_selection_noop) {
+    // s -> c sin texto marcado (anchor == cursor): no copia nada y solo
+    // informa; no toca documento, historial, modified_ ni el buffer.
+    Editor ed;
+    type(ed, "hola");
+    markSaved(ed);
+    const std::vector<std::string> docBefore = ed.document_.snapshot();
+    const size_t undoBefore = ed.undoStack_.size();
+    const size_t redoBefore = ed.redoStack_.size();
+    ed.clipboard_ = std::vector<std::string>{"previo"}; // contenido previo
+    press(ed, EventType::MoveHome);
+    enterSeleccion(ed);                 // s
+    CHECK(!ed.hasSelection());
+
+    ed.handleEvent(insert('c'));
+
+    CHECK_EQ(ed.statusMessage_, "Nada seleccionado.");
+    CHECK(ed.document_.snapshot() == docBefore);       // no modifica documento
+    CHECK_EQ(ed.undoStack_.size(), undoBefore);        // no modifica undo
+    CHECK_EQ(ed.redoStack_.size(), redoBefore);        // no modifica redo
+    CHECK(!ed.modified_);                              // no modifica modified_
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK(ed.clipboard_ == std::vector<std::string>{"previo"}); // buffer intacto
+}
+
+TEST(selection_c_copies_single_char) {
+    Editor ed;
+    setupAbcde(ed);                    // "abcde", cursor (0,2)
+    const auto docBefore = ed.document_.snapshot();
+    selectPress(ed, EventType::MoveRight); // [c] -> cursor (0,3)
+    CHECK(ed.hasSelection());
+
+    ed.handleEvent(insert('c'));
+
+    assertCopied(ed, docBefore, 0, 3, {"c"});
+}
+
+TEST(selection_c_copies_multiple_chars) {
+    Editor ed;
+    setupAbcde(ed);                    // "abcde", cursor (0,2)
+    const auto docBefore = ed.document_.snapshot();
+    selectPress(ed, EventType::MoveRight); // (0,3)
+    selectPress(ed, EventType::MoveRight); // (0,4): [cd]
+    selectPress(ed, EventType::MoveRight); // (0,5): [cde]
+    CHECK(ed.hasSelection());
+
+    ed.handleEvent(insert('c'));
+
+    assertCopied(ed, docBefore, 0, 5, {"cde"});
+}
+
+TEST(selection_c_copies_reverse_selection) {
+    // Seleccion inversa (anchor en el final, cursor al inicio): el buffer
+    // se llena con el rango normalizado, no con "lo que quedo a la derecha".
+    Editor ed;
+    type(ed, "abcdef");
+    press(ed, EventType::MoveEnd);         // (0,6) -> anchor (0,6)
+    selectPress(ed, EventType::MoveLeft);  // (0,5)
+    selectPress(ed, EventType::MoveLeft);  // (0,4): [4..6)
+    CHECK(ed.hasSelection());
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.col, 4);
+    CHECK_EQ(sel->end.col, 6);
+    const auto docBefore = ed.document_.snapshot();
+
+    ed.handleEvent(insert('c'));
+
+    assertCopied(ed, docBefore, 0, 4, {"ef"});
+}
+
+TEST(selection_c_copies_multiline) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 0, 1, ed); // cursor (0,1) -> anchor
+    const auto docBefore = ed.document_.snapshot();
+    selectPress(ed, EventType::MoveDown); // (1,1)
+    selectPress(ed, EventType::MoveDown); // (2,1)
+    selectPress(ed, EventType::MoveEnd);  // (2,3)
+    CHECK(ed.hasSelection());
+
+    ed.handleEvent(insert('c'));
+
+    assertCopied(ed, docBefore, 2, 3, {"aa", "bbb", "ccc"});
+}
+
+TEST(selection_c_copies_entire_document) {
+    Editor ed;
+    editorOfLines({"linea1", "linea2", "linea3"}, 0, 0, ed); // cursor (0,0)
+    const auto docBefore = ed.document_.snapshot();
+    selectPress(ed, EventType::MoveDown); // (1,0)
+    selectPress(ed, EventType::MoveDown); // (2,0)
+    selectPress(ed, EventType::MoveHome);
+    selectPress(ed, EventType::MoveEnd);   // (2,6): todo el documento
+    CHECK(ed.hasSelection());
+
+    ed.handleEvent(insert('c'));
+
+    assertCopied(ed, docBefore, 2, 6, {"linea1", "linea2", "linea3"});
+}
+
+// ---------------------------------------------------------------------------
+// Seleccion en ambas direcciones: normalizacion de selection()
+// ---------------------------------------------------------------------------
+// Para cada movimiento se prueba el caso "hacia adelante" (anchor < cursor)
+// y el "hacia atras" (cursor < anchor), y en ambos el contrato:
+//   selection().start <= selection().end   (siempre normalizado)
+// Ademas se verifica que el rango real cubre exactamente los extremos.
+static void checkNormalized(const Editor& ed) {
+    auto sel = ed.selection();
+    if (!sel.has_value()) return; // sin seleccion no hay nada que normalizar
+    const Position& s = sel->start;
+    const Position& e = sel->end;
+    CHECK(!(e < s)); // end nunca antes que start
+    // Coherencia con el estado interno: los extremos son los del rango.
+    CHECK(s == ed.selection_->anchor || s == ed.selection_->position);
+    CHECK(e == ed.selection_->anchor || e == ed.selection_->position);
+}
+
+TEST(normalize_right_same_line_forward) {
+    Editor ed;
+    type(ed, "abcdef");
+    press(ed, EventType::MoveHome);
+    press(ed, EventType::MoveRight);
+    press(ed, EventType::MoveRight);       // cursor (0,2) -> anchor sera (0,2)
+
+    selectPress(ed, EventType::MoveRight); // (0,3): anchor(2) < cursor(3)
+    selectPress(ed, EventType::MoveRight); // (0,4)
+    CHECK(ed.hasSelection());
+    checkNormalized(ed);
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.col, 2);
+    CHECK_EQ(sel->end.col, 4);
+}
+
+TEST(normalize_left_same_line_backward) {
+    Editor ed;
+    type(ed, "abcdef");
+    press(ed, EventType::MoveEnd);         // cursor (0,6) -> anchor sera (0,6)
+
+    selectPress(ed, EventType::MoveLeft); // (0,5): cursor(5) < anchor(6)
+    selectPress(ed, EventType::MoveLeft); // (0,4)
+    CHECK(ed.hasSelection());
+    checkNormalized(ed);
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.col, 4);
+    CHECK_EQ(sel->end.col, 6);
+}
+
+TEST(normalize_same_line_both_directions) {
+    // Misma linea: crecer hacia adelante, reducir y luego ir hacia atras
+    // cruzando el anchor. selection() debe quedar normalizado en todo
+    // momento (start <= end).
+    Editor ed;
+    type(ed, "abcdef");
+    press(ed, EventType::MoveHome);
+    press(ed, EventType::MoveRight);
+    press(ed, EventType::MoveRight);       // cursor (0,2) -> anchor (0,2)
+
+    selectPress(ed, EventType::MoveRight); // (0,3): adelante [2..3)
+    selectPress(ed, EventType::MoveRight); // (0,4): adelante [2..4)
+    checkNormalized(ed);
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.col, 2);
+    CHECK_EQ(sel->end.col, 4);
+
+    selectPress(ed, EventType::MoveLeft);  // (0,3): reduce [2..3)
+    selectPress(ed, EventType::MoveLeft);  // (0,2): de vuelta al anchor
+    CHECK(!ed.hasSelection());
+
+    selectPress(ed, EventType::MoveLeft);  // (0,1): atras [1..2)
+    selectPress(ed, EventType::MoveLeft);  // (0,0): atras [0..2)
+    CHECK(ed.hasSelection());
+    checkNormalized(ed);
+    sel = ed.selection();
+    CHECK_EQ(sel->start.col, 0);
+    CHECK_EQ(sel->end.col, 2);
+}
+
+TEST(normalize_down_different_lines_forward) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 0, 1, ed); // cursor (0,1) -> anchor
+
+    selectPress(ed, EventType::MoveDown); // (1,1): anchor(0,1) < cursor(1,1)
+    selectPress(ed, EventType::MoveDown); // (2,1)
+    CHECK(ed.hasSelection());
+    checkNormalized(ed);
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.line, 0);
+    CHECK_EQ(sel->start.col, 1);
+    CHECK_EQ(sel->end.line, 2);
+    CHECK_EQ(sel->end.col, 1);
+}
+
+TEST(normalize_up_different_lines_backward) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 2, 1, ed); // cursor (2,1) -> anchor
+
+    selectPress(ed, EventType::MoveUp); // (1,1): cursor(1,1) < anchor(2,1)
+    selectPress(ed, EventType::MoveUp); // (0,1)
+    CHECK(ed.hasSelection());
+    checkNormalized(ed);
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.line, 0);
+    CHECK_EQ(sel->start.col, 1);
+    CHECK_EQ(sel->end.line, 2);
+    CHECK_EQ(sel->end.col, 1);
+}
+
+TEST(normalize_multiline_both_directions) {
+    // Distintas lineas: crecer hacia adelante (abajo) y luego hacia atras
+    // (arriba) cruzando el anchor.
+    Editor ed;
+    editorOfLines({"abc", "def", "ghi"}, 1, 0, ed); // cursor (1,0) -> anchor
+
+    selectPress(ed, EventType::MoveDown); // (2,0): adelante [1..2)
+    selectPress(ed, EventType::MoveEnd);  // (2,3): adelante [1,0)..(2,3)
+    CHECK(ed.hasSelection());
+    checkNormalized(ed);
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.line, 1);
+    CHECK_EQ(sel->start.col, 0);
+    CHECK_EQ(sel->end.line, 2);
+    CHECK_EQ(sel->end.col, 3);
+
+    // Resetea la columna preferida a 0 y vuelve al anchor (1,0).
+    selectPress(ed, EventType::MoveHome); // (2,0)
+    selectPress(ed, EventType::MoveUp);   // (1,0): de vuelta al anchor
+    CHECK(!ed.hasSelection());
+
+    selectPress(ed, EventType::MoveUp);   // (0,0): atras [0..1)
+    selectPress(ed, EventType::MoveRight);// (0,1): atras (0,1)..(1,0)
+    CHECK(ed.hasSelection());
+    checkNormalized(ed);
+    sel = ed.selection();
+    CHECK_EQ(sel->start.line, 0);
+    CHECK_EQ(sel->start.col, 1);
+    CHECK_EQ(sel->end.line, 1);
+    CHECK_EQ(sel->end.col, 0);
+}
+
+TEST(normalize_home_both_directions) {
+    // Home salta al inicio (atras respecto al anchor) y Right vuelve.
+    Editor ed;
+    type(ed, "abcdef");
+    press(ed, EventType::MoveHome);
+    press(ed, EventType::MoveRight);
+    press(ed, EventType::MoveRight);       // cursor (0,2) -> anchor (0,2)
+
+    selectPress(ed, EventType::MoveHome); // (0,0): cursor(0,0) < anchor(0,2)
+    CHECK(ed.hasSelection());
+    checkNormalized(ed);
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.col, 0);
+    CHECK_EQ(sel->end.col, 2);
+
+    selectPress(ed, EventType::MoveRight); // (0,1): reduce [1..2)
+    selectPress(ed, EventType::MoveRight); // (0,2): de vuelta al anchor
+    CHECK(!ed.hasSelection());
+}
+
+TEST(normalize_end_both_directions) {
+    // End salta al final (adelante respecto al anchor) y Left vuelve.
+    Editor ed;
+    type(ed, "abcdef");
+    press(ed, EventType::MoveHome);
+    press(ed, EventType::MoveRight);
+    press(ed, EventType::MoveRight);       // cursor (0,2) -> anchor (0,2)
+
+    selectPress(ed, EventType::MoveEnd); // (0,6): anchor(0,2) < cursor(0,6)
+    CHECK(ed.hasSelection());
+    checkNormalized(ed);
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.col, 2);
+    CHECK_EQ(sel->end.col, 6);
+
+    selectPress(ed, EventType::MoveLeft); // (0,5): reduce [2..5)
+    selectPress(ed, EventType::MoveLeft); // (0,4)
+    selectPress(ed, EventType::MoveLeft); // (0,3)
+    selectPress(ed, EventType::MoveLeft); // (0,2): de vuelta al anchor
+    CHECK(!ed.hasSelection());
 }

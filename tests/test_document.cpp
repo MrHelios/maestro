@@ -548,6 +548,413 @@ TEST(doc_delete_range_ordered_same_line_still_works) {
 }
 
 // ---------------------------------------------------------------------------
+// 14c. insertBlock: insertar un bloque de lineas en (line, col)
+// ---------------------------------------------------------------------------
+// Primitiva usada por pegar. Contrato:
+//   - bloque de una linea: insercion inline (no parte la linea).
+//   - bloque de varias lineas: parte la linea en col; la 1ra del bloque se
+//     pega a la izquierda, las intermedias son lineas completas y la ultima
+//     se une con la cola derecha.
+//   - devuelve la posicion donde queda el cursor: final de la ultima linea
+//     insertada del bloque.
+//   - bloque vacio o (line,col) invalido: no cambia nada y devuelve la
+//     posicion sin modificar.
+// ---------------------------------------------------------------------------
+TEST(doc_insert_block_single_line_at_start) {
+    // Bloque de una linea al comienzo de la linea.
+    Document d = makeDoc({"abc"});
+    Position p = d.insertBlock(0, 0, {"xyz"});
+    CHECK_EQ(d.lineCount(), 1);
+    CHECK_EQ(d.lineAt(0), "xyzabc");
+    CHECK_EQ(p.line, 0);
+    CHECK_EQ(p.col, 3);
+}
+
+TEST(doc_insert_block_single_line_in_middle) {
+    // Bloque de una linea en el medio de la linea.
+    Document d = makeDoc({"abcdef"});
+    Position p = d.insertBlock(0, 3, {"xyz"});
+    CHECK_EQ(d.lineCount(), 1);
+    CHECK_EQ(d.lineAt(0), "abcxyzdef");
+    CHECK_EQ(p.line, 0);
+    CHECK_EQ(p.col, 6);
+}
+
+TEST(doc_insert_block_single_line_at_end) {
+    // Bloque de una linea al final de la linea.
+    Document d = makeDoc({"abc"});
+    Position p = d.insertBlock(0, 3, {"xyz"});
+    CHECK_EQ(d.lineCount(), 1);
+    CHECK_EQ(d.lineAt(0), "abcxyz");
+    CHECK_EQ(p.line, 0);
+    CHECK_EQ(p.col, 6);
+}
+
+TEST(doc_insert_block_single_line_onto_empty_line) {
+    // Bloque de una linea sobre una linea vacia: queda como unica linea.
+    Document d = makeDoc({""});
+    Position p = d.insertBlock(0, 0, {"xyz"});
+    CHECK_EQ(d.lineCount(), 1);
+    CHECK_EQ(d.lineAt(0), "xyz");
+    CHECK_EQ(p.line, 0);
+    CHECK_EQ(p.col, 3);
+}
+
+TEST(doc_insert_block_empty_block_is_noop) {
+    // Bloque vacio: no cambia nada y devuelve (line,col) sin modificar.
+    Document d = makeDoc({"abc", "def"});
+    Position p = d.insertBlock(1, 1, {});
+    CHECK_EQ(d.lineCount(), 2);
+    CHECK_EQ(d.lineAt(0), "abc");
+    CHECK_EQ(d.lineAt(1), "def");
+    CHECK_EQ(p.line, 1);
+    CHECK_EQ(p.col, 1);
+}
+
+TEST(doc_insert_block_invalid_position_is_noop) {
+    // (line,col) fuera de rango: no cambia nada y devuelve la posicion.
+    Document d = makeDoc({"abc"});
+    Position p = d.insertBlock(5, 0, {"xyz"});   // linea inexistente
+    CHECK_EQ(d.lineCount(), 1);
+    CHECK_EQ(d.lineAt(0), "abc");
+    CHECK_EQ(p.line, 5);
+    CHECK_EQ(p.col, 0);
+}
+
+TEST(doc_insert_block_two_lines_at_start) {
+    // Bloque de dos lineas al comienzo de la linea.
+    Document d = makeDoc({"ghi"});
+    Position p = d.insertBlock(0, 0, {"abc", "def"});
+    CHECK_EQ(d.lineCount(), 2);
+    CHECK_EQ(d.lineAt(0), "abc");
+    CHECK_EQ(d.lineAt(1), "defghi");
+    CHECK_EQ(p.line, 1);
+    CHECK_EQ(p.col, 3);
+}
+
+TEST(doc_insert_block_two_lines_in_middle) {
+    // Bloque de dos lineas en el medio de la linea: la linea se parte en
+    // col; la cola derecha se une a la ultima linea del bloque.
+    Document d = makeDoc({"abcdef"});
+    Position p = d.insertBlock(0, 3, {"abc", "def"});
+    CHECK_EQ(d.lineCount(), 2);
+    CHECK_EQ(d.lineAt(0), "abcabc");
+    CHECK_EQ(d.lineAt(1), "defdef");
+    CHECK_EQ(p.line, 1);
+    CHECK_EQ(p.col, 3);
+}
+
+TEST(doc_insert_block_two_lines_at_end) {
+    // Bloque de dos lineas al final de la linea.
+    Document d = makeDoc({"abc"});
+    Position p = d.insertBlock(0, 3, {"abc", "def"});
+    CHECK_EQ(d.lineCount(), 2);
+    CHECK_EQ(d.lineAt(0), "abcabc");
+    CHECK_EQ(d.lineAt(1), "def");
+    CHECK_EQ(p.line, 1);
+    CHECK_EQ(p.col, 3);
+}
+
+TEST(doc_insert_block_splits_line_at_cursor) {
+    // Caso CENTRAL: partir una linea en el cursor con un bloque de varias
+    // lineas. "abcdef" con | = abc|def + bloque {X,Y,Z} debe dar:
+    //   abcX
+    //   Y
+    //   Zdef
+    // La parte izquierda queda al inicio, las intermedias son lineas
+    // completas y la cola derecha se une a la ultima linea del bloque.
+    // El Position retornado apunta EXACTAMENTE despues de "Z".
+    Document d = makeDoc({"abcdef"});
+    Position p = d.insertBlock(0, 3, {"X", "Y", "Z"});
+    CHECK_EQ(d.lineCount(), 3);
+    CHECK_EQ(d.lineAt(0), "abcX");   // izquierda + 1ra del bloque
+    CHECK_EQ(d.lineAt(1), "Y");      // linea intermedia completa
+    CHECK_EQ(d.lineAt(2), "Zdef");   // ultima del bloque + cola derecha
+    CHECK_EQ(p.line, 2);             // ultima linea insertada del bloque
+    CHECK_EQ(p.col, 1);              // inmediatamente despues de "Z"
+}
+
+TEST(doc_insert_block_many_lines) {
+    // Bloque de cuatro lineas insertado en la linea 1 del documento.
+    Document d = makeDoc({"cabecera", "fin"});
+    Position p = d.insertBlock(1, 0, {"uno", "dos", "tres", "cuatro"});
+    CHECK_EQ(d.lineCount(), 5);
+    CHECK_EQ(d.lineAt(0), "cabecera");
+    CHECK_EQ(d.lineAt(1), "uno");
+    CHECK_EQ(d.lineAt(2), "dos");
+    CHECK_EQ(d.lineAt(3), "tres");
+    CHECK_EQ(d.lineAt(4), "cuatrofin");
+    CHECK_EQ(p.line, 4);              // ultima linea insertada del bloque
+    CHECK_EQ(p.col, 6);               // largo de "cuatro"
+}
+
+TEST(doc_insert_block_many_lines_in_middle_preserves_edges) {
+    // Bloque de cuatro lineas en el medio de una linea existente: la parte
+    // izquierda queda al inicio, la derecha se funde con la ultima linea.
+    Document d = makeDoc({"XabY"});
+    Position p = d.insertBlock(0, 1, {"uno", "dos", "tres", "cuatro"});
+    CHECK_EQ(d.lineCount(), 4);
+    CHECK_EQ(d.lineAt(0), "Xuno");
+    CHECK_EQ(d.lineAt(1), "dos");
+    CHECK_EQ(d.lineAt(2), "tres");
+    CHECK_EQ(d.lineAt(3), "cuatroabY");
+    CHECK_EQ(p.line, 3);
+    CHECK_EQ(p.col, 6);
+}
+
+// ---------------------------------------------------------------------------
+// 14d. extractRange: extraer texto como bloque de lineas (solo lectura)
+// ---------------------------------------------------------------------------
+// Primitiva usada por copiar/cortar. Contrato:
+//   - una sola linea: vector de un elemento con el substring [sc, ec).
+//   - multilinea:     1er el. = cola de sl desde sc; intermedios = lineas
+//                      completas; ultimo el. = cabeza de el hasta ec.
+//   - rango invalido (fuera de linea, invertido) o vacio (sc == ec):
+//     vector vacio.
+//   - NO modifica el documento (es la hermana de solo lectura de
+//     deleteRange).
+// ---------------------------------------------------------------------------
+TEST(doc_extract_range_first_char) {
+    Document d = makeDoc({"abcdef"});
+    auto out = d.extractRange(0, 0, 0, 1);
+    CHECK_EQ(out.size(), size_t{1});
+    CHECK_EQ(out[0], "a");
+}
+
+TEST(doc_extract_range_last_char) {
+    Document d = makeDoc({"abcdef"});
+    auto out = d.extractRange(0, 5, 0, 6);
+    CHECK_EQ(out.size(), size_t{1});
+    CHECK_EQ(out[0], "f");
+}
+
+TEST(doc_extract_range_middle) {
+    Document d = makeDoc({"abcdef"});
+    auto out = d.extractRange(0, 1, 0, 4);
+    CHECK_EQ(out.size(), size_t{1});
+    CHECK_EQ(out[0], "bcd");
+}
+
+TEST(doc_extract_range_whole_line) {
+    Document d = makeDoc({"abcdef"});
+    auto out = d.extractRange(0, 0, 0, 6);
+    CHECK_EQ(out.size(), size_t{1});
+    CHECK_EQ(out[0], "abcdef");
+}
+
+TEST(doc_extract_range_empty_range_rejected) {
+    // Rango vacio (sc == ec en una sola linea): vector vacio.
+    Document d = makeDoc({"abcdef"});
+    auto out = d.extractRange(0, 2, 0, 2);
+    CHECK(out.empty());
+}
+
+TEST(doc_extract_range_reverse_single_line_rejected) {
+    // Rango invertido en una sola linea (sc > ec): vector vacio.
+    Document d = makeDoc({"abcdef"});
+    auto out = d.extractRange(0, 4, 0, 1);
+    CHECK(out.empty());
+}
+
+TEST(doc_extract_range_reverse_multiline_rejected) {
+    // Rango invertido entre lineas (el < sl): vector vacio.
+    Document d = makeDoc({"abc", "def", "ghi"});
+    auto out = d.extractRange(2, 0, 0, 0);
+    CHECK(out.empty());
+}
+
+TEST(doc_extract_range_out_of_bounds_rejected) {
+    // Columna fuera de linea: vector vacio.
+    Document d = makeDoc({"abc"});
+    auto out = d.extractRange(0, 0, 0, 9);
+    CHECK(out.empty());
+    auto out2 = d.extractRange(5, 0, 5, 1); // linea inexistente
+    CHECK(out2.empty());
+}
+
+TEST(doc_extract_range_half_to_half) {
+    // Multilinea: desde mitad de la primera hasta mitad de la segunda.
+    // Cola de sl desde sc + cabeza de el hasta ec.
+    Document d = makeDoc({"abc", "def", "ghi"});
+    auto out = d.extractRange(0, 1, 1, 2);
+    CHECK_EQ(out.size(), size_t{2});
+    CHECK_EQ(out[0], "bc");
+    CHECK_EQ(out[1], "de");
+}
+
+TEST(doc_extract_range_start_to_end) {
+    // Multilinea: desde el comienzo del doc hasta el final del doc.
+    Document d = makeDoc({"abc", "def", "ghi"});
+    auto out = d.extractRange(0, 0, 2, 3);
+    CHECK_EQ(out.size(), size_t{3});
+    CHECK_EQ(out[0], "abc");
+    CHECK_EQ(out[1], "def");
+    CHECK_EQ(out[2], "ghi");
+}
+
+TEST(doc_extract_range_whole_lines) {
+    // Multilinea: lineas completas del medio (col 0 a col len).
+    Document d = makeDoc({"abc", "def", "ghi"});
+    auto out = d.extractRange(1, 0, 2, 3);
+    CHECK_EQ(out.size(), size_t{2});
+    CHECK_EQ(out[0], "def");
+    CHECK_EQ(out[1], "ghi");
+}
+
+TEST(doc_extract_range_first_to_last_line) {
+    // Multilinea: desde el inicio de la primera hasta el fin de la ultima.
+    Document d = makeDoc({"abc", "def", "ghi"});
+    auto out = d.extractRange(0, 0, 1, 3);
+    CHECK_EQ(out.size(), size_t{2});
+    CHECK_EQ(out[0], "abc");
+    CHECK_EQ(out[1], "def");
+}
+
+TEST(doc_extract_range_utf8_single_char) {
+    // "é" (2 bytes UTF-8): el rango respeta el byte de inicio/fin.
+    Document d = makeDoc({std::string("\xC3\xA9")});
+    auto out = d.extractRange(0, 0, 0, 2);
+    CHECK_EQ(out.size(), size_t{1});
+    CHECK_EQ(out[0], std::string("\xC3\xA9"));
+}
+
+TEST(doc_extract_range_utf8_em_dash) {
+    // "—" (3 bytes UTF-8).
+    Document d = makeDoc({std::string("\xE2\x80\x94")});
+    auto out = d.extractRange(0, 0, 0, 3);
+    CHECK_EQ(out.size(), size_t{1});
+    CHECK_EQ(out[0], std::string("\xE2\x80\x94"));
+}
+
+TEST(doc_extract_range_utf8_emoji) {
+    // "😀" (4 bytes UTF-8).
+    Document d = makeDoc({std::string("\xF0\x9F\x98\x80")});
+    auto out = d.extractRange(0, 0, 0, 4);
+    CHECK_EQ(out.size(), size_t{1});
+    CHECK_EQ(out[0], std::string("\xF0\x9F\x98\x80"));
+}
+
+TEST(doc_extract_range_utf8_mixed) {
+    // Mezcla "é—😀" (2+3+4 bytes) y extraer subconjuntos por byte.
+    Document d = makeDoc({std::string("\xC3\xA9\xE2\x80\x94\xF0\x9F\x98\x80")});
+    auto e = d.extractRange(0, 0, 0, 2);       // "é"
+    CHECK_EQ(e.size(), size_t{1});
+    CHECK_EQ(e[0], std::string("\xC3\xA9"));
+    auto em = d.extractRange(0, 2, 0, 5);      // "—"
+    CHECK_EQ(em.size(), size_t{1});
+    CHECK_EQ(em[0], std::string("\xE2\x80\x94"));
+    auto emoji = d.extractRange(0, 5, 0, 9);   // "😀"
+    CHECK_EQ(emoji.size(), size_t{1});
+    CHECK_EQ(emoji[0], std::string("\xF0\x9F\x98\x80"));
+    auto two = d.extractRange(0, 0, 0, 5);     // "é—"
+    CHECK_EQ(two.size(), size_t{1});
+    CHECK_EQ(two[0], std::string("\xC3\xA9\xE2\x80\x94"));
+}
+
+TEST(doc_extract_range_does_not_modify_document) {
+    // Lo mas importante: extractRange es SOLO lectura. Snapshot antes y
+    // despues debe ser identico, para single-line, multilinea y UTF-8.
+    Document d = makeDoc({"abcdef", "ghijkl"});
+    const auto before = d.snapshot();
+    auto out = d.extractRange(0, 1, 1, 4);
+    CHECK_EQ(out.size(), size_t{2});
+    CHECK_EQ(out[0], "bcdef");
+    CHECK_EQ(out[1], "ghij");      // cabeza de el hasta ec (exclusivo)
+    CHECK(d.snapshot() == before); // el documento no cambio
+
+    Document du = makeDoc({std::string("a\xC3\xA9\xF0\x9F\x98\x80")});
+    const auto beforeU = du.snapshot();
+    auto outU = du.extractRange(0, 1, 0, 3);
+    CHECK_EQ(outU.size(), size_t{1});
+    CHECK_EQ(outU[0], std::string("\xC3\xA9"));
+    CHECK(du.snapshot() == beforeU); // ni con UTF-8
+}
+
+// ---------------------------------------------------------------------------
+// 14e. extractRange() + insertBlock(): round-trip de integracion
+// ---------------------------------------------------------------------------
+// El flujo completo "extraer un bloque y reinsertarlo en otra posicion"
+// debe reproducir el contenido extraido EXACTAMENTE (byte a byte). Aqui
+// se comprueba la invariante: lo que sale de extractRange() es lo que
+// insertBlock() vuelve a poner en el documento.
+// ---------------------------------------------------------------------------
+TEST(doc_roundtrip_ascii) {
+    // Extraer "mundo" de "hola mundo" y reinsertarlo al comienzo de una
+    // copia: el bloque aparece identico y el cursor apunta tras el.
+    Document src = makeDoc({"hola mundo"});
+    auto block = src.extractRange(0, 5, 0, 10);
+    CHECK(block == (Lines{"mundo"}));
+
+    Document dst = makeDoc({"hola mundo"});
+    Position p = dst.insertBlock(0, 0, block);
+    CHECK_EQ(dst.lineCount(), 1);
+    CHECK_EQ(dst.lineAt(0), "mundohola mundo");
+    CHECK_EQ(p.line, 0);
+    CHECK_EQ(p.col, 5); // final de "mundo"
+}
+
+TEST(doc_roundtrip_utf8) {
+    // Extraer "é — 😀" (bytes UTF-8 de 2/3/4 bytes) de un string mixto y
+    // reinsertarlo sobre una linea vacia: los bytes llegan intactos.
+    // "café é — 😀" = cafe(4B) + "é"(2B) + " "(1B) + "é"(2B) + " "(1B)
+    // + "—"(3B) + " "(1B) + "😀"(4B) => el bloque mixto empieza en la
+    // col 7 (4 + 2 + 1) y ocupa 11 bytes.
+    const std::string mixto = std::string("\xC3\xA9") + " " + "\xE2\x80\x94" + " " + "\xF0\x9F\x98\x80";
+    const std::string full = std::string("cafe\xC3\xA9") + " " + mixto;
+    Document src = makeDoc({full});
+
+    auto block = src.extractRange(0, 7, 0, static_cast<int>(full.size()));
+    CHECK(block.size() == size_t{1});
+    CHECK_EQ(block[0], mixto);
+
+    Document dst;
+    Position p = dst.insertBlock(0, 0, block);
+    CHECK_EQ(dst.lineCount(), 1);
+    CHECK_EQ(dst.lineAt(0), mixto);   // byte a byte identico
+    CHECK_EQ(p.line, 0);
+    CHECK_EQ(p.col, static_cast<int>(mixto.size()));
+}
+
+TEST(doc_roundtrip_multiline) {
+    // Extraer un bloque multilinea (con linea intermedia completa) y
+    // reinsertarlo en una linea vacia: las tres lineas salen exactas y el
+    // cursor queda al final de la ultima insertada.
+    Document src = makeDoc({"aaa", "bbb", "ccc", "ddd"});
+    auto block = src.extractRange(1, 0, 3, 3);
+    CHECK(block == (Lines{"bbb", "ccc", "ddd"}));
+
+    Document dst;
+    Position p = dst.insertBlock(0, 0, block);
+    CHECK_EQ(dst.lineCount(), 3);
+    CHECK_EQ(dst.lineAt(0), "bbb");
+    CHECK_EQ(dst.lineAt(1), "ccc");
+    CHECK_EQ(dst.lineAt(2), "ddd");
+    CHECK_EQ(p.line, 2);              // ultima linea insertada
+    CHECK_EQ(p.col, 3);               // final de "ddd"
+}
+
+TEST(doc_roundtrip_multiline_into_document) {
+    // Extraer un bloque multilinea y reinsertarlo dentro de un documento
+    // existente: cada linea del bloque aparece verbatim (la ultima con la
+    // cola derecha del documento, segun contrato de insertBlock).
+    // {"aaaa","bbbb","cccc"} desde (0,1) hasta (2,3):
+    //   cola de line0 desde 1 = "aaa"; linea 1 completa = "bbbb";
+    //   cabeza de line2 hasta 3 = "ccc".
+    Document src = makeDoc({"aaaa", "bbbb", "cccc"});
+    auto block = src.extractRange(0, 1, 2, 3);
+    CHECK(block == (Lines{"aaa", "bbbb", "ccc"}));
+
+    Document dst = makeDoc({"XabY"});
+    Position p = dst.insertBlock(0, 1, block);
+    CHECK_EQ(dst.lineCount(), 3);
+    CHECK_EQ(dst.lineAt(0), "Xaaa");
+    CHECK_EQ(dst.lineAt(1), "bbbb");
+    CHECK_EQ(dst.lineAt(2), "cccabY");
+    CHECK_EQ(p.line, 2);
+    CHECK_EQ(p.col, 3);
+}
+
+// ---------------------------------------------------------------------------
 // 15. Invariantes / contenido correcto
 // ---------------------------------------------------------------------------
 TEST(doc_invariants_after_ops) {

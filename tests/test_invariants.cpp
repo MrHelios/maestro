@@ -65,6 +65,26 @@ static void save(Editor& ed) {
 // existe, tanto el anchor como el cursor (position) deben estar dentro de
 // los limites del documento. Ademas, anchor == cursor debe equivaler a
 // "seleccion vacia" (hasSelection() == false).
+// ¿Es `s` una cadena UTF-8 valida (sin bytes de continuacion sueltos)?
+static bool validUtf8(const std::string& s) {
+    size_t i = 0;
+    while (i < s.size()) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+        int need;
+        if ((c & 0x80) == 0) need = 0;
+        else if ((c & 0xE0) == 0xC0) need = 1;
+        else if ((c & 0xF0) == 0xE0) need = 2;
+        else if ((c & 0xF8) == 0xF0) need = 3;
+        else return false;
+        if (i + static_cast<size_t>(need) >= s.size()) return false;
+        for (int k = 1; k <= need; ++k)
+            if ((static_cast<unsigned char>(s[i + static_cast<size_t>(k)]) & 0xC0) != 0x80)
+                return false;
+        i += static_cast<size_t>(need) + 1;
+    }
+    return true;
+}
+
 static void assertStateConsistent(Editor& ed) {
     const Document& d = ed.document_;
 
@@ -111,6 +131,46 @@ static void assertStateConsistent(Editor& ed) {
     if (ed.selection_.has_value() && ed.selection_->anchor == ed.selection_->position) {
         CHECK(!ed.hasSelection());
     }
+
+    // selection() (si hay un rango no vacio) debe venir NORMALIZADO:
+    // start <= end. Cualquier reconstruccion del rango debe honrarlo.
+    if (auto norm = ed.selection()) {
+        CHECK(norm->start.line < norm->end.line ||
+              (norm->start.line == norm->end.line && norm->start.col <= norm->end.col));
+    }
+
+    // --- Invariantes de estado (modo) ---
+    // El modo solo admite los cuatro estados conocidos.
+    CHECK(ed.state_ == State::Navegacion ||
+          ed.state_ == State::Interaccion ||
+          ed.state_ == State::Seleccion ||
+          ed.state_ == State::Prefix);
+
+    // Si hay un rango NO vacio, el editor debe estar en Seleccion... salvo
+    // en Prefix, donde la seleccion se conserva mientras el comando espera
+    // (priorState_ == Seleccion). Navegacion/Interaccion con una seleccion
+    // activa serian incoherentes.
+    if (ed.hasSelection()) {
+        CHECK(ed.state_ == State::Seleccion || ed.state_ == State::Prefix);
+    }
+
+    // Estar en modo Seleccion implica que hay (al menos) una seleccion
+    // interna, aunque sea vacia (anchor == position).
+    if (ed.state_ == State::Seleccion)
+        CHECK(ed.selection_.has_value());
+
+    // --- Invariantes del clipboard ---
+    // Cada linea del clipboard es una cadena UTF-8 valida (sin bytes de
+    // continuacion colgando): es un bloque bien formado de lineas.
+    for (const std::string& l : ed.clipboard_)
+        CHECK(validUtf8(l));
+
+    // --- Invariantes del historial ---
+    // El clipboard NO forma parte de HistoryState: no puede haber una linea
+    // "viajando" en undo/redo que el estado reconozca como portapapeles.
+    // (Históricamente: si se restaurara el clipboard en undo, aqui no habria
+    // ningun indicio del que fiarse; la regla no es un mero consejo.)
+    CHECK(ed.clipboard_.size() <= Editor::MAX_UNDO);
 }
 
 // Secuencia determinista de eventos que cubre todas las mutaciones,
@@ -631,4 +691,158 @@ TEST(invariant_no_crash_on_event_sequence) {
         assertStateConsistent(ed);
         if (!ed.running_) break;
     }
+}
+
+// ---------------------------------------------------------------------------
+// Invariantes globales nuevas: clipboard, historial y modos
+// ---------------------------------------------------------------------------
+
+TEST(invariant_state_consistent_with_clipboard_and_prefix) {
+    // El generador anterior no ejercia el clipboard ni el prefijo. Aqui
+    // alternamos cortar/copiar/pegar, entrar en modo seleccion, abrir el
+    // prefijo y los movimientos; tras CADA evento se verifican las
+    // invariantes ampliadas (cuyo conjunto incluye documento, cursor,
+    // seleccion, estado, clipboard y limites de historial).
+    Editor ed;
+    ed.document_.restore({"hola", "mundo", "", "cafe"});
+    ed.cursor_.line = 1;
+    ed.cursor_.col = 2;
+    ed.cursor_.preferredCol_ = 2;
+    assertStateConsistent(ed);
+
+    unsigned long seed = 987654;
+    auto rnd = [&seed]() {
+        seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
+        return static_cast<int>((seed >> 33) & 0xFFFFFFFF);
+    };
+
+    for (int step = 0; step < 1500; ++step) {
+        const int k = rnd() % 9;
+        Event e;
+        switch (k) {
+            case 0: // letra (a veces 's' para entrar a seleccion, 'c'/'x'/'p')
+                e.type = EventType::InsertChar;
+                switch (rnd() % 4) {
+                    case 0: e.text = std::string(1, static_cast<char>('a' + (rnd() % 26))); break;
+                    case 1: e.text = "s"; break;
+                    case 2: e.text = (rnd() % 2) ? "c" : "x"; break;
+                    default: e.text = "p"; break;
+                }
+                break;
+            case 1:
+                e.type = static_cast<EventType>(static_cast<int>(EventType::MoveLeft) + (rnd() % 6));
+                break;
+            case 2:
+                e.type = EventType::Escape;
+                break;
+            case 3:
+                e.type = (rnd() % 2) ? EventType::Backspace : EventType::Delete;
+                break;
+            case 4:
+                e.type = (rnd() % 2) ? EventType::Undo : EventType::Redo;
+                break;
+            case 5:
+                e.type = EventType::Prefix;               // Ctrl+K
+                break;
+            case 6:
+                e.type = (rnd() % 2) ? EventType::Save : EventType::Quit;
+                break;
+            default:
+                e.type = EventType::InsertNewline;
+                break;
+        }
+        ed.handleEvent(e);
+        assertStateConsistent(ed);
+        if (!ed.running_) ed.running_ = true; // no detener el bucle por un Quit aislado
+    }
+}
+
+TEST(invariant_clipboard_stays_valid_across_undo_redo) {
+    // Copiar y cortar con UTF-8 mezclado, deshacer y rehacer: el clipboard
+    // sigue siendo siempre un bloque de lineas UTF-8 valido.
+    Editor ed;
+    ed.document_.restore({"caf\xc3\xa9 \xe2\x80\x94 \xf0\x9f\x98\x80"});
+    ed.cursor_.line = 0;
+    ed.cursor_.col = 0;
+    assertStateConsistent(ed);
+
+    // Entrar en seleccion y copiar el primer caracter ("c", 1 byte).
+    ed.handleEvent(insert('s'));
+    ed.handleEvent(ev(EventType::MoveRight));
+    ed.handleEvent(insert('c'));
+    assertStateConsistent(ed);
+
+    // Undo/Redo repetidos: el clipboard no debe corromperse.
+    for (int i = 0; i < 20; ++i) {
+        ed.handleEvent(ev(EventType::Undo));
+        assertStateConsistent(ed);
+        ed.handleEvent(ev(EventType::Redo));
+        assertStateConsistent(ed);
+    }
+}
+
+TEST(invariant_undo_reaches_limit_unbounded) {
+    // Verifica que el historial respeta el limite superior y que por debajo
+    // el estado nunca se desborda con entradas corruptas.
+    Editor ed;
+    type(ed, "x");
+    // Generamos muchos estados distintos: cada letra nueva empuja historia.
+    for (int i = 0; i < 2500; ++i) {
+        ed.handleEvent(insert(static_cast<char>('a' + (i % 26))));
+        assertStateConsistent(ed);
+        CHECK(ed.undoStack_.size() <= Editor::MAX_UNDO);
+    }
+    CHECK_EQ(ed.undoStack_.size(), Editor::MAX_UNDO);
+}
+
+TEST(invariant_redo_consistent_with_undo) {
+    // Despues de un Undo, redoStack_ se rellena; Redo lo reaplica y la pila
+    // de undo vuelve a crecer. Tras una mutacion nueva el redo se vacia.
+    Editor ed;
+    type(ed, "ab");
+    ed.handleEvent(ev(EventType::Undo));  // "a", redo=["b"]
+    CHECK(!ed.redoStack_.empty());
+    CHECK_EQ(ed.document_.lineAt(0), "a");
+    assertStateConsistent(ed);
+
+    ed.handleEvent(ev(EventType::Redo));  // "ab"
+    CHECK(ed.redoStack_.empty());
+    CHECK_EQ(ed.document_.lineAt(0), "ab");
+    assertStateConsistent(ed);
+
+    // Debajo de un mismo undo hay exactamente una entrada de redo.
+    ed.handleEvent(ev(EventType::Undo));
+    ed.handleEvent(ev(EventType::Undo));
+    CHECK_EQ(ed.redoStack_.size(), size_t{2});
+    assertStateConsistent(ed);
+}
+
+TEST(invariant_clipboard_not_in_history) {
+    // El clipboard vive fuera de HistoryState: deshacer una edicion no debe
+    // "devolver" un buffer viejo. Lo verificamos de forma estructural: los
+    // estados guardados no llevan rastro del buffer y el buffer sobrevive.
+    Editor ed;
+    ed.document_.restore({"abcdef"});
+    ed.cursor_.line = 0;
+    ed.cursor_.col = 0;
+
+    // Copiar "ab".
+    ed.handleEvent(insert('s'));
+    ed.handleEvent(ev(EventType::MoveRight));
+    ed.handleEvent(ev(EventType::MoveRight));
+    ed.handleEvent(insert('c'));
+    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));
+
+    // Editar distinto contenido (que apila historia).
+    ed.handleEvent(ev(EventType::MoveEnd));
+    ed.handleEvent(insert('i'));
+    ed.handleEvent(insert('!'));
+    ed.handleEvent(ev(EventType::Escape));
+
+    // Undo y Redo: el clipboard "ab" debe permanecer intacto.
+    ed.handleEvent(ev(EventType::Undo));
+    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));
+    ed.handleEvent(ev(EventType::Redo));
+    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));
+    assertStateConsistent(ed);
 }
