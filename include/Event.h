@@ -16,6 +16,13 @@ enum class EventType {
     MoveDown,
     MoveHome,
     MoveEnd,
+    // RePag / AvPag (Page Up / Page Down): el viewport se desplaza una
+    // pagina y el cursor la misma cantidad, conservando su posicion
+    // relativa dentro del viewport. Trabajan en Navegacion, Interaccion
+    // (movimiento libre) y Seleccion (extienden la seleccion como una
+    // flecha). Se ignoran durante el prefijo 'a'.
+    PageUp,
+    PageDown,
     Backspace,
     Delete,
     Undo,

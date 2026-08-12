@@ -214,6 +214,8 @@ Event Terminal::readEvent() {
         if (final == '~') {
             switch (body[0]) {
                 case '3': e.type = EventType::Delete; return e; // Delete
+                case '5': e.type = EventType::PageUp; return e; // RePag
+                case '6': e.type = EventType::PageDown; return e; // AvPag
                 case '1': case '7': e.type = EventType::MoveHome; return e; // Home
                 case '4': case '8': e.type = EventType::MoveEnd; return e; // End
                 default: e.type = EventType::None; dumpUnrecognized(); return e;

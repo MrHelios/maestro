@@ -132,6 +132,13 @@ TEST(terminal_home_via_tilde) {
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveHome));
 }
 
+TEST(terminal_pageup_pagedown) {
+    Event up = parse("\x1b[5~");
+    CHECK_EQ(static_cast<int>(up.type), static_cast<int>(EventType::PageUp));
+    Event down = parse("\x1b[6~");
+    CHECK_EQ(static_cast<int>(down.type), static_cast<int>(EventType::PageDown));
+}
+
 TEST(terminal_ss3_with_params_unsupported) {
     // Prefijo SS3 (ESC O) con parametros no se soporta: None.
     Event e = parse("\x1bO1;2C");

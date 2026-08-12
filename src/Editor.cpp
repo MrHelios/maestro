@@ -1,5 +1,6 @@
 #include "Editor.h"
 
+#include <algorithm>
 #include <unistd.h>
 
 namespace {
@@ -157,6 +158,8 @@ void Editor::handleNavegacionEvent(const Event& event) {
         case EventType::MoveDown: cursor_.moveDown(document_); break;
         case EventType::MoveHome: cursor_.moveHome(); break;
         case EventType::MoveEnd: cursor_.moveEnd(document_); break;
+        case EventType::PageUp: applyPage(-1); break;
+        case EventType::PageDown: applyPage(+1); break;
 
         // InsertNewline/Backspace/Delete y Escape: no-op (no hay edicion
         // posible y ya estamos en navegacion, no hay a donde volver).
@@ -221,6 +224,8 @@ void Editor::handleInteraccionEvent(const Event& event) {
         case EventType::MoveDown: cursor_.moveDown(document_); break;
         case EventType::MoveHome: cursor_.moveHome(); break;
         case EventType::MoveEnd: cursor_.moveEnd(document_); break;
+        case EventType::PageUp: applyPage(-1); break;
+        case EventType::PageDown: applyPage(+1); break;
 
         default:
             break;
@@ -250,6 +255,12 @@ void Editor::handleSeleccionEvent(const Event& event) {
             beginSelection(); cursor_.moveHome(); updateSelectionPosition(); break;
         case EventType::MoveEnd:
             beginSelection(); cursor_.moveEnd(document_); updateSelectionPosition(); break;
+        // RePag/AvPag extienden la seleccion como una flecha (Up/Down):
+        // el anchor permanece y el cursor salta una pagina.
+        case EventType::PageUp:
+            beginSelection(); applyPage(-1); updateSelectionPosition(); break;
+        case EventType::PageDown:
+            beginSelection(); applyPage(+1); updateSelectionPosition(); break;
 
         // 'c' copia el rango al buffer y 'x' lo copia y lo borra; ambos
         // terminan la seleccion y vuelven a navegacion. Si la seleccion
@@ -457,6 +468,36 @@ void Editor::updateSelectionPosition() {
     if (selection_.has_value()) {
         selection_->position = {cursor_.line, cursor_.col};
     }
+}
+
+void Editor::applyPage(int dir) {
+    const int count = document_.lineCount(); // >= 1: siempre hay una linea
+    const int h = viewport_.height;
+
+    // Archivo pequeno: cabe entero en una pagina. RePag -> inicio, AvPag
+    // -> final, sin nunca quedar fuera del documento.
+    if (h >= count) {
+        viewport_.top = 0;
+        cursor_.line = (dir < 0) ? 0 : count - 1;
+        cursor_.clampToLine(document_);
+        return;
+    }
+
+    // Conservamos la posicion relativa del cursor dentro del viewport: el
+    // viewport y el cursor se desplazan la misma cantidad. En los bordes
+    // el viewport se clampa para que nunca muestre mas alla del documento:
+    //   - Arriba:  top >= 0 (la primera linea visible es la del archivo).
+    //   - Abajo:   top <= maxTop (la ultima fila visible llega a EOF).
+    const int rel = cursor_.line - viewport_.top; // posicion relativa (0..h-1)
+    const int maxTop = count - h;
+    if (dir < 0) {
+        viewport_.top = std::max(0, viewport_.top - h);
+    } else {
+        viewport_.top = std::min(maxTop, viewport_.top + h);
+    }
+    cursor_.line = viewport_.top + rel;
+    cursor_.line = std::min(std::max(cursor_.line, 0), count - 1);
+    cursor_.clampToLine(document_);
 }
 
 void Editor::clearSelection() {

@@ -1706,6 +1706,128 @@ TEST(select_all_not_active_cursor_and_selection_agree) {
 }
 
 // ---------------------------------------------------------------------------
+// RePag / AvPag: desplazamiento del viewport + cursor
+// ---------------------------------------------------------------------------
+// El viewport (viewport_.top) y el cursor se desplazan la misma cantidad
+// (viewport_.height), conservando la posicion relativa del cursor. Antes de
+// los bordes el viewport se clampa: nunca muestra mas alla del documento y
+// el cursor nunca queda fuera de [0, lineCount-1]. En Seleccion extienden la
+// seleccion como una flecha; durante el prefijo 'a' se ignoran.
+static std::vector<std::string> linesOf(int n) {
+    std::vector<std::string> v;
+    for (int i = 0; i < n; ++i) v.push_back("linea" + std::to_string(i));
+    return v;
+}
+
+TEST(pageup_moves_cursor_and_viewport_keeping_relative) {
+    Editor ed;
+    editorOfLines(linesOf(100), 67, 2, ed);
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 60;          // visible 60..79, cursor relativo 7
+
+    press(ed, EventType::PageUp);
+
+    CHECK_EQ(ed.viewport_.top, 40); // 60 - 20
+    CHECK_EQ(ed.cursor_.line, 47);  // 67 - 20; relativo 7 conservado
+    CHECK_EQ(ed.cursor_.col, 2);
+}
+
+TEST(pagedown_moves_cursor_and_viewport) {
+    Editor ed;
+    editorOfLines(linesOf(100), 47, 0, ed);
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 40;
+
+    press(ed, EventType::PageDown);
+
+    CHECK_EQ(ed.viewport_.top, 60); // 40 + 20
+    CHECK_EQ(ed.cursor_.line, 67);  // 47 + 20
+}
+
+TEST(pageup_top_clamp_keeps_relative) {
+    // viewport/archivo al inicio: el layout no puede retroceder una pagina
+    // completa; top se clampa a 0 y el cursor conserva su posicion relativa.
+    Editor ed;
+    editorOfLines(linesOf(100), 15, 1, ed);
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 10;          // relativo 15 - 10 = 5
+
+    press(ed, EventType::PageUp);
+
+    CHECK_EQ(ed.viewport_.top, 0);
+    CHECK_EQ(ed.cursor_.line, 5);   // posicion relativa equivalente (5)
+}
+
+TEST(pagedown_bottom_clamp_never_exceeds_eof) {
+    // Abajo: el viewport queda pegado al EOF; la ultima fila visible es la
+    // ultima linea del archivo y el cursor nunca la supera.
+    Editor ed;
+    editorOfLines(linesOf(50), 25, 0, ed); // lineas 0..49, EOF = 49
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 10;          // relativo 15
+
+    press(ed, EventType::PageDown);
+
+    CHECK_EQ(ed.viewport_.top, 30);      // maxTop = 50 - 20
+    CHECK_EQ(ed.cursor_.line, 45);       // 30 + 15
+    CHECK(ed.viewport_.top + ed.viewport_.height - 1 <= ed.document_.lineCount() - 1);
+    CHECK(ed.cursor_.line <= ed.document_.lineCount() - 1);
+}
+
+TEST(page_small_file_fits_in_viewport) {
+    // Archivo pequeno que cabe entero: RePag -> inicio, AvPag -> final.
+    Editor ed;
+    editorOfLines(linesOf(10), 5, 0, ed); // 10 lineas < viewport 20
+    ed.viewport_.height = 20;
+
+    press(ed, EventType::PageDown);
+    CHECK_EQ(ed.viewport_.top, 0);
+    CHECK_EQ(ed.cursor_.line, 9); // final del archivo
+
+    press(ed, EventType::PageUp);
+    CHECK_EQ(ed.viewport_.top, 0);
+    CHECK_EQ(ed.cursor_.line, 0); // inicio del archivo
+}
+
+TEST(page_in_seleccion_extends_selection) {
+    // s + AvPag: el anchor permanece y el cursor salta una pagina, como
+    // una flecha hacia abajo.
+    Editor ed;
+    editorOfLines(linesOf(50), 5, 0, ed);
+    ed.viewport_.height = 20;
+    ed.viewport_.top = 0;
+    enterSeleccion(ed);
+    CHECK(!ed.hasSelection());
+
+    press(ed, EventType::PageDown);
+
+    CHECK(ed.hasSelection());
+    CHECK_EQ(ed.selection_->anchor.line, 5);   // anchor fijo
+    CHECK_EQ(ed.cursor_.line, 25);             // 5 + 20
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.line, 5);
+    CHECK_EQ(sel->end.line, 25);
+}
+
+TEST(page_blocked_during_select_all) {
+    // s -> a -> PageUp/PageDown: se ignoran (regla de 'a': solo a/flechas/
+    // ESC tienen efecto mientras el prefijo esta activo).
+    Editor ed;
+    editorOfLines(linesOf(50), 5, 0, ed);
+    ed.viewport_.height = 20;
+    enterSelectAll(ed);
+
+    press(ed, EventType::PageUp);
+    CHECK(ed.selectAllActive_);
+    CHECK_EQ(ed.cursor_.line, 5);   // el cursor no se movio
+    CHECK(ed.hasSelection());
+
+    press(ed, EventType::PageDown);
+    CHECK(ed.selectAllActive_);
+    CHECK_EQ(ed.cursor_.line, 5);
+}
+
+// ---------------------------------------------------------------------------
 // j/k: movimiento por bloques dentro del modo Seleccion
 // ---------------------------------------------------------------------------
 // j/k se comportan EXACTAMENTE como una flecha en Seleccion: el anchor

@@ -148,6 +148,13 @@ private:
     void handleInteraccionEvent(const Event& event);
     void handleSeleccionEvent(const Event& event);
 
+    // RePag/AvPag: desplaza el viewport y el cursor la misma cantidad de
+    // paginas (viewport_.height lineas), conservando la posicion relativa
+    // del cursor dentro del viewport. `dir` = -1 retrocede (RePag) y +1
+    // avanza (AvPag). Antes de los bordes el cursor se clampa para que
+    // nunca quede fuera del documento ni el viewport mas alla del EOF.
+    void applyPage(int dir);
+
     struct HistoryState {
         std::vector<std::string> lines;
         int line = 0;
