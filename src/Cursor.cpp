@@ -6,6 +6,9 @@
 namespace {
 // true si el byte es de continuacion UTF-8 (patron 10xxxxxx).
 bool isContinuation(unsigned char c) { return (c & 0xC0) == 0x80; }
+
+// true si el byte es whitespace ASCII separador de palabras (' ' o '\t').
+bool isSeparator(char c) { return c == ' ' || c == '\t'; }
 } // namespace
 
 void Cursor::moveLeft(const Document& doc) {
@@ -63,6 +66,69 @@ void Cursor::moveHome() {
 
 void Cursor::moveEnd(const Document& doc) {
     col = doc.lineLength(line);
+    preferredCol_ = col;
+}
+
+// j: al FINAL del siguiente bloque (adelante), cruzando lineas.
+// De la posicion actual se salta el gap de separadores y se avanza hasta
+// el fin de la palabra que encuentre; si la linea no tiene mas palabra,
+// se continua con la primera de la siguiente. Si no hay un bloque mas
+// adelante en todo el documento, el cursor se queda donde esta.
+void Cursor::moveToNextWord(const Document& doc) {
+    int l = line;
+    int c = col;
+    const int n = doc.lineCount();
+    while (l < n) {
+        const std::string& ln = doc.lineAt(l);
+        const int len = static_cast<int>(ln.size());
+        while (c < len && isSeparator(ln[c])) c++;
+        if (c < len) {
+            while (c < len && !isSeparator(ln[c])) c++;
+            line = l; col = c;
+            preferredCol_ = c;
+            return;
+        }
+        // No hay mas palabra en esta linea desde c: pasar a la siguiente.
+        l++;
+        c = 0;
+    }
+    // No encontro ningun bloque posterior al cursor; dejamos el cursor como
+    // estaba (EOF).
+    preferredCol_ = col;
+}
+
+// k: al COMIENZO del bloque anterior (atras), cruzando lineas. Devuelve
+// el inicio de la corrida de no-separadores que termina justo antes de la
+// posicion actual; si no hay nada en esta linea, sube buscando la ultima
+// palabra de la linea anterior.
+void Cursor::moveToPreviousWord(const Document& doc) {
+    int l = line;
+    int c = col;
+    // Saltar el gap de separadores inmediatamente anterior al cursor.
+    while (c > 0 && isSeparator(doc.lineAt(l)[c - 1])) c--;
+    if (c > 0) {
+        // Hay una corrida de no-separadores terminando en c: ir a su inicio.
+        const std::string& ln = doc.lineAt(l);
+        while (c > 0 && !isSeparator(ln[c - 1])) c--;
+        line = l; col = c;
+        preferredCol_ = c;
+        return;
+    }
+    // Nada antes en esta linea: buscar la ultima palabra de la linea anterior.
+    l--;
+    while (l >= 0) {
+        const std::string& ln = doc.lineAt(l);
+        const int len = static_cast<int>(ln.size());
+        if (len > 0 && !isSeparator(ln[len - 1])) {
+            int cc = len;
+            while (cc > 0 && !isSeparator(ln[cc - 1])) cc--;
+            line = l; col = cc;
+            preferredCol_ = cc;
+            return;
+        }
+        l--;
+    }
+    // No hay ningun bloque anterior en el documento: el cursor se queda.
     preferredCol_ = col;
 }
 

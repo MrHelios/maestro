@@ -467,3 +467,158 @@ TEST(cursor_clamp_shorter_than_current_col) {
     CHECK_EQ(c.col, 2);
     assertCursorConsistent(c, d);
 }
+
+// ---------------------------------------------------------------------------
+// j/k: movimiento por bloques (palabras)
+// ---------------------------------------------------------------------------
+// Regla: una corrida maxima de caracteres no-separadores (' '/'\\t') es una
+// palabra. Todos los bytes multibyte son no-separadores, asi j/k nunca parten
+// un caracter utf-8: los cortes caen siempre sobre limites de caracter valido.
+TEST(cursor_j_to_next_word_end) {
+    Document d = docOf({"uno dos tres"});
+    Cursor c;
+    c.line = 0;
+    c.col = 0;              // inicio de "uno"
+    c.moveToNextWord(d);    // fin de "uno" -> col 3
+    CHECK_EQ(c.col, 3);
+    c.moveToNextWord(d);    // fin de "dos"
+    CHECK_EQ(c.col, 7);
+    c.moveToNextWord(d);    // fin de "tres"
+    CHECK_EQ(c.col, 12);
+    c.moveToNextWord(d);    // ya no hay mas: se queda en EOF
+    CHECK_EQ(c.col, 12);
+    assertCursorConsistent(c, d);
+}
+
+TEST(cursor_j_from_inside_word_to_its_end) {
+    Document d = docOf({"uno dos tres"});
+    Cursor c;
+    c.line = 0;
+    c.col = 2;              // dentro de "uno"
+    c.moveToNextWord(d);    // fin del bloque actual ("uno") -> 3
+    CHECK_EQ(c.col, 3);
+}
+
+TEST(cursor_j_from_separator_to_next_word_end) {
+    Document d = docOf({"uno dos tres"});
+    Cursor c;
+    c.line = 0;
+    c.col = 3;              // el espacio tras "uno"
+    c.moveToNextWord(d);    // fin de "dos" -> 7
+    CHECK_EQ(c.col, 7);
+}
+
+TEST(cursor_j_crosses_line_break) {
+    Document d = docOf({"uno dos", "tres cuatro"});
+    Cursor c;
+    c.line = 0;
+    c.col = 3;              // el espacio tras "uno"
+    c.moveToNextWord(d);    // fin de "dos" -> (0,7)
+    CHECK_EQ(c.line, 0);
+    CHECK_EQ(c.col, 7);
+    c.moveToNextWord(d);    // cruza el salto de linea -> fin de "tres" (1,4)
+    CHECK_EQ(c.line, 1);
+    CHECK_EQ(c.col, 4);
+    assertCursorConsistent(c, d);
+}
+
+TEST(cursor_j_empty_and_no_next_block) {
+    Document d = docOf({"abc"});
+    Cursor c;
+    c.line = 0;
+    c.col = 3;              // EOF
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, 3);
+    c.col = 2;              // dentro del unico bloque
+    c.moveToNextWord(d);    // fin de "abc" -> 3
+    CHECK_EQ(c.col, 3);
+}
+
+TEST(cursor_k_to_previous_word_start) {
+    Document d = docOf({"uno dos tres"});
+    Cursor c;
+    c.line = 0;
+    c.col = 11;             // EOF, tras "tres"
+    c.moveToPreviousWord(d); // inicio de "tres" -> col 8
+    CHECK_EQ(c.col, 8);
+    c.moveToPreviousWord(d); // inicio de "dos" -> col 4
+    CHECK_EQ(c.col, 4);
+    c.moveToPreviousWord(d); // inicio de "uno" -> col 0
+    CHECK_EQ(c.col, 0);
+    c.moveToPreviousWord(d); // no hay mas: se queda en 0
+    CHECK_EQ(c.col, 0);
+    assertCursorConsistent(c, d);
+}
+
+TEST(cursor_k_from_inside_word_to_its_start) {
+    Document d = docOf({"uno dos tres"});
+    Cursor c;
+    c.line = 0;
+    c.col = 6;              // dentro de "dos"
+    c.moveToPreviousWord(d); // inicio de "dos" -> col 4
+    CHECK_EQ(c.col, 4);
+}
+
+TEST(cursor_k_from_separator_to_previous_word_start) {
+    Document d = docOf({"uno dos tres"});
+    Cursor c;
+    c.line = 0;
+    c.col = 4;              // el espacio tras "uno"
+    c.moveToPreviousWord(d); // inicio de "uno" -> col 0
+    CHECK_EQ(c.col, 0);
+}
+
+TEST(cursor_k_crosses_line_break) {
+    Document d = docOf({"uno dos", "tres cuatro"});
+    Cursor c;
+    c.line = 1;
+    c.col = 0;              // inicio de linea 1, delante de "tres"
+    c.moveToPreviousWord(d); // inicio de "dos" en la linea 0 -> (0,4)
+    CHECK_EQ(c.line, 0);
+    CHECK_EQ(c.col, 4);
+    assertCursorConsistent(c, d);
+}
+
+TEST(cursor_k_empty_and_no_previous_block) {
+    Document d = docOf({"abc"});
+    Cursor c;
+    c.line = 0;
+    c.col = 0;
+    c.moveToPreviousWord(d);
+    CHECK_EQ(c.col, 0);     // sin bloque anterior: se queda
+}
+
+TEST(cursor_jk_utf8_no_split) {
+    // "hola café mundo": la 'é' es multibyte; j/k deben saltar bloques sin
+    // aterrizar en medio de un caracter.
+    Document d = docOf({"hola café mundo"});
+    Cursor c;
+    c.line = 0;
+    c.col = 0;
+    c.moveToNextWord(d);    // fin de "hola" -> col 4
+    CHECK_EQ(c.col, 4);
+    c.moveToNextWord(d);    // fin de "café" -> cae justo tras la é
+    CHECK_EQ(c.col, static_cast<int>(static_cast<std::string>("hola café").size()));
+    c.moveToNextWord(d);    // fin de "mundo" -> fin de linea
+    CHECK_EQ(c.col, static_cast<int>(static_cast<std::string>("hola café mundo").size()));
+
+    // k hacia atras desde el fin: cae en limites de caracter.
+    c.moveToPreviousWord(d); // inicio de "mundo" -> 11
+    CHECK_EQ(c.col, 11);
+    c.moveToPreviousWord(d); // inicio de "café" -> 5
+    CHECK_EQ(c.col, 5);
+    assertCursorConsistent(c, d);
+}
+
+TEST(cursor_jk_tab_is_separator) {
+    Document d = docOf({"uno\tdos"});
+    Cursor c;
+    c.line = 0;
+    c.col = 0;
+    c.moveToNextWord(d);    // fin de "uno" -> col 3 (antes del tab)
+    CHECK_EQ(c.col, 3);
+    c.moveToNextWord(d);    // fin de "dos" -> col 7
+    CHECK_EQ(c.col, 7);
+    c.moveToPreviousWord(d);// inicio de "dos" -> col 4
+    CHECK_EQ(c.col, 4);
+}

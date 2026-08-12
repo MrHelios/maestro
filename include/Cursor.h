@@ -19,6 +19,19 @@ public:
     void moveHome();
     void moveEnd(const Document& doc);
 
+    // Movimiento por BLOQUES (v0.6, teclas j/k). Un bloque o "palabra" es
+    // una corrida maxima de caracteres NO separadores (espacio ' ' o
+    // tabulador). Todo whitespace ASCII separa, incl. el final de linea.
+    //   j : posiciona el cursor al FINAL del siguiente bloque (hacia
+    //       adelante), cruzando lineas si hace falta, sin quedarse corto.
+    //   k : posiciona el cursor al COMIENZO del bloque anterior (hacia
+    //       atras), cruzando lineas si hace falta.
+    // Los multibyte (utf-8) NUNCA se parten: solo los separadores ascii
+    // ' '/'\t' detienen el escaneo, asi que los cortes caen siempre sobre
+    // un limite de caracter valido.
+    void moveToNextWord(const Document& doc);
+    void moveToPreviousWord(const Document& doc);
+
     // Ajusta col para que nunca quede fuera de los limites de la
     // linea actual (por ejemplo, tras borrar caracteres).
     void clampToLine(const Document& doc);

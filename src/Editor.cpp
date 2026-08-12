@@ -141,6 +141,11 @@ void Editor::handleNavegacionEvent(const Event& event) {
                     modified_ = true;
                     statusMessage_ = "Pegado.";
                 }
+            } else if (event.text == "j") {
+                // j/k: salto por bloques (palabras), solo mueven el cursor.
+                cursor_.moveToPreviousWord(document_);
+            } else if (event.text == "k") {
+                cursor_.moveToNextWord(document_);
             }
             break;
 
@@ -273,6 +278,14 @@ void Editor::handleSeleccionEvent(const Event& event) {
                 selection_ = selectAllSelection();
                 selectAllActive_ = true;
                 statusMessage_ = "SELECCION TOTAL (a togglea | flechas a extremos | c/x/ESC terminan)";
+            } else if (event.text == "j" || event.text == "k") {
+                // j/k extienden la seleccion igual que una flecha: el anchor
+                // permanece y solo se mueve el cursor. 'j' va a la izquierda
+                // (bloque anterior) y 'k' a la derecha (sig. bloque).
+                beginSelection();
+                if (event.text == "j") cursor_.moveToPreviousWord(document_);
+                else cursor_.moveToNextWord(document_);
+                updateSelectionPosition();
             } else if (event.text == "c" || event.text == "x") {
                 bool hadSelection = hasSelection();
                 if (hadSelection) {

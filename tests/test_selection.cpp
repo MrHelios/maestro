@@ -1704,3 +1704,90 @@ TEST(select_all_not_active_cursor_and_selection_agree) {
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
+
+// ---------------------------------------------------------------------------
+// j/k: movimiento por bloques dentro del modo Seleccion
+// ---------------------------------------------------------------------------
+// j/k se comportan EXACTAMENTE como una flecha en Seleccion: el anchor
+// permanece fijo y el cursor se mueve, extendiendo la seleccion. En
+// Navegacion solo mueven el cursor. Nota del usuario: 'k' va hacia la
+// DERECHA (siguiente bloque) y 'j' hacia la IZQUIERDA (bloque anterior).
+TEST(navegacion_j_moves_cursor) {
+    Editor ed;
+    editorOfLines({"uno dos tres"}, 0, 0, ed);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+
+    ed.handleEvent(insert('k'));
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 3); // fin de "uno"
+    CHECK(!ed.hasSelection());
+
+    ed.handleEvent(insert('j'));
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 0); // inicio de "uno"
+    CHECK(!ed.hasSelection());
+}
+
+TEST(selection_j_extends_keeping_anchor) {
+    Editor ed;
+    editorOfLines({"uno dos tres"}, 0, 0, ed); // cursor (0,0) -> anchor
+    enterSeleccion(ed);
+    CHECK(!ed.hasSelection());
+
+    ed.handleEvent(insert('k')); // fin de "uno" -> (0,3)
+    CHECK(ed.hasSelection());
+    CHECK_EQ(ed.selection_->anchor.col, 0);        // anchor fijo
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 3);
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.col, 0);
+    CHECK_EQ(sel->end.col, 3);
+
+    ed.handleEvent(insert('k')); // fin de "dos" -> (0,7)
+    CHECK(ed.hasSelection());
+    CHECK_EQ(ed.selection_->anchor.col, 0);        // anchor sigue fijo
+    CHECK_EQ(ed.cursor_.col, 7);
+    sel = ed.selection();
+    CHECK_EQ(sel->end.col, 7);
+}
+
+TEST(selection_k_extends_backwards) {
+    Editor ed;
+    editorOfLines({"uno dos tres"}, 0, 0, ed);
+    const int undoBefore = static_cast<int>(ed.undoStack_.size());
+    enterSeleccion(ed);
+
+    ed.handleEvent(insert('k')); // (0,3)
+    ed.handleEvent(insert('j')); // vuelve al inicio "uno" -> (0,0): se encoge
+    CHECK(!ed.hasSelection());   // anchor == cursor de vuelta en (0,0)
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 0);
+    // j/k en seleccion NO son ediciones: no tocan el historial.
+    CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore));
+}
+
+TEST(selection_j_multiline_utf8) {
+    // k cruza lineas sin partir caracteres multibyte y extiende la seleccion.
+    Editor ed;
+    editorOfLines({"hola café", "mundo adiós"}, 0, 0, ed);
+    enterSeleccion(ed);
+
+    ed.handleEvent(insert('k')); // fin de "hola" -> (0,4)
+    CHECK(ed.hasSelection());
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 4);
+
+    ed.handleEvent(insert('k')); // fin de "café" -> (0,10)
+    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.cursor_.col, 10);
+
+    ed.handleEvent(insert('k')); // fin de "mundo" -> (1,5)
+    CHECK(ed.hasSelection());
+    CHECK_EQ(ed.cursor_.line, 1);
+    CHECK_EQ(ed.cursor_.col, 5);
+    auto sel = ed.selection();
+    CHECK_EQ(sel->start.line, 0);
+    CHECK_EQ(sel->start.col, 0);
+    CHECK_EQ(sel->end.line, 1);
+    CHECK_EQ(sel->end.col, 5);
+}
