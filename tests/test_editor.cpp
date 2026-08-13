@@ -1,6 +1,8 @@
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <unistd.h>
 
 #include "test_framework.h"
 
@@ -131,6 +133,116 @@ TEST(editor_open_relative_resolves_absolute) {
     char cwd[4096];
     CHECK(getcwd(cwd, sizeof cwd) != nullptr);
     CHECK_EQ(ed.filename_, std::string(cwd) + "/archivo_rel_zz_no_existe.txt");
+}
+
+// Directorio temporal (mkdtemp) que se borra al salir, aunque un CHECK falle.
+struct TempDir {
+    std::string path;
+
+    TempDir() {
+        char tmpl[] = "/tmp/edit_test_dir_XXXXXX";
+        char* p = mkdtemp(tmpl);
+        path = p ? std::string(p) : std::string();
+    }
+
+    ~TempDir() {
+        if (!path.empty())
+            rmdir(path.c_str());
+    }
+
+    TempDir(const TempDir&) = delete;
+    TempDir& operator=(const TempDir&) = delete;
+};
+
+// ---------------------------------------------------------------------------
+// v0.6.2: abrir por ruta absoluta; las carpetas se rechazan
+// ---------------------------------------------------------------------------
+TEST(is_directory_true_for_folder) {
+    TempDir dir;
+    CHECK(!dir.path.empty());
+    CHECK(Editor::isDirectory(dir.path));
+    CHECK(Editor::isDirectory("."));
+}
+
+TEST(is_directory_false_for_file_and_missing) {
+    TempFile f;
+    f.write("x");
+    CHECK(!Editor::isDirectory(f.path));
+    CHECK(!Editor::isDirectory("/no/such/dir_or_file_xyz_edit"));
+}
+
+TEST(editor_open_absolute_existing_file) {
+    // ./edit /tmp/.../nota.txt : carga el contenido y deja filename_
+    // igual a la ruta absoluta (sin prefijar cwd).
+    TempFile f;
+    f.write("desde absoluta");
+    CHECK(f.path.front() == '/');
+
+    Editor ed;
+    CHECK(ed.openFile(f.path));
+    CHECK_EQ(ed.filename_, f.path);
+    CHECK_EQ(ed.document_.lineCount(), 1);
+    CHECK_EQ(ed.document_.lineAt(0), "desde absoluta");
+    CHECK(!ed.modified_);
+}
+
+TEST(editor_open_absolute_file_in_other_directory) {
+    // Un archivo que no esta en cwd se abre por su ruta absoluta.
+    TempDir dir;
+    CHECK(!dir.path.empty());
+    const std::string file = dir.path + "/nota.txt";
+    {
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        CHECK(out.good());
+        out << "hola desde otra carpeta";
+        CHECK(out.good());
+    }
+
+    Editor ed;
+    CHECK(ed.openFile(file));
+    CHECK_EQ(ed.filename_, file);
+    CHECK_EQ(ed.document_.lineAt(0), "hola desde otra carpeta");
+    CHECK(!ed.modified_);
+
+    std::remove(file.c_str());
+}
+
+TEST(editor_open_absolute_new_file) {
+    // Ruta absoluta que no existe: se trata como archivo nuevo.
+    TempFile f;
+    CHECK(f.path.front() == '/');
+
+    Editor ed;
+    CHECK(!ed.openFile(f.path));
+    CHECK_EQ(ed.filename_, f.path);
+    CHECK_EQ(ed.document_.lineCount(), 1);
+    CHECK_EQ(ed.document_.lineAt(0), "");
+    CHECK(!ed.modified_);
+}
+
+TEST(editor_open_directory_rejected) {
+    // Una carpeta no se abre ni se toma como archivo nuevo: el editor
+    // queda como estaba (filename_ vacio, documento de una linea).
+    TempDir dir;
+    CHECK(!dir.path.empty());
+
+    Editor ed;
+    const std::string before = ed.filename_;
+    CHECK(!ed.openFile(dir.path));
+    CHECK_EQ(ed.filename_, before);
+    CHECK_EQ(ed.document_.lineCount(), 1);
+    CHECK_EQ(ed.document_.lineAt(0), "");
+    CHECK(!ed.modified_);
+    CHECK_EQ(ed.statusMessage_, std::string("No se pueden abrir carpetas."));
+}
+
+TEST(editor_open_relative_directory_rejected) {
+    Editor ed;
+    const std::string before = ed.filename_;
+    CHECK(Editor::isDirectory("."));
+    CHECK(!ed.openFile("."));
+    CHECK_EQ(ed.filename_, before);
+    CHECK_EQ(ed.document_.lineCount(), 1);
 }
 
 // ---------------------------------------------------------------------------

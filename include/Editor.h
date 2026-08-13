@@ -51,7 +51,13 @@ class Editor {
 public:
     Editor();
 
-    // Abre (o crea) el archivo indicado.
+    // v0.6.2: true si `path` existe y es una carpeta (absoluta o relativa).
+    // Las carpetas no se pueden abrir todavia: solo archivos.
+    static bool isDirectory(const std::string& path);
+
+    // Abre (o crea) el archivo indicado. Acepta rutas relativas o
+    // absolutas (p.ej. /home/usuario/Docs/README.md). Si `path` es una
+    // carpeta, no abre nada, no cambia el estado y devuelve false.
     bool openFile(const std::string& path);
 
     // Corre el ciclo principal:

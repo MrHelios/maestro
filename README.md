@@ -1,4 +1,4 @@
-# edit — editor de texto de terminal (v0.6)
+# edit — editor de texto de terminal (v0.6.2)
 
 Editor de texto minimalista en C++17, sin interfaz gráfica, pensado
 como base extensible. Usa un modelo *modal* (Navegación / Interacción /
@@ -28,9 +28,12 @@ solo si no hay fallos.
 
 ```bash
 ./edit archivo.txt
+./edit /home/usuario/Docs/README.md
 ```
 
-Si el archivo no existe, se crea uno nuevo en memoria (se guarda con Ctrl+K, Ctrl+S).
+Acepta rutas relativas o absolutas. Si el archivo no existe, se crea
+uno nuevo en memoria (se guarda con Ctrl+K, Ctrl+S). Las carpetas no
+se pueden abrir todavía: el programa sale con error.
 
 ### Modos
 

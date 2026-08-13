@@ -1,6 +1,7 @@
 #include "Editor.h"
 
 #include <algorithm>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace {
@@ -22,7 +23,20 @@ Editor::Editor() {
     savedLines_ = document_.snapshot();
 }
 
+bool Editor::isDirectory(const std::string& path) {
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) return false;
+    return S_ISDIR(st.st_mode);
+}
+
 bool Editor::openFile(const std::string& path) {
+    // v0.6.2: solo archivos. Una carpeta no se trata como archivo
+    // nuevo: se rechaza y el editor queda como estaba.
+    if (isDirectory(path)) {
+        statusMessage_ = "No se pueden abrir carpetas.";
+        return false;
+    }
+
     // La barra de estado muestra siempre una ruta absoluta: si el
     // archivo se abrio con ruta relativa, la resolvemos contra cwd().
     filename_ = resolveAbsolutePath(path);
