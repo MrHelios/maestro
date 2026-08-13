@@ -1,5 +1,6 @@
 # Binarios compilados
 edit
+edit_tests
 *.out
 
 # Objetos

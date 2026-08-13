@@ -3,10 +3,7 @@
 #include <optional>
 #include <string>
 #include <vector>
-#include "Document.h"
-#include "Cursor.h"
-#include "Selection.h"
-#include "Viewport.h"
+#include "Buffer.h"
 #include "Renderer.h"
 #include "Terminal.h"
 #include "Event.h"
@@ -21,7 +18,16 @@
 //                extienden la seleccion; ESC o 'c'/'x' la terminan y
 //                vuelven a Navegacion. Un caracter ya NO la reemplaza.
 //   Prefix:      tras Ctrl+K; el siguiente evento decide (Ctrl+S guarda,
-//                Ctrl+Q sale, cualquier otra cosa lo cancela y se descarta).
+//                Ctrl+Q sale, Ctrl+K n/t/w operan sobre buffers, cualquier
+//                otra cosa lo cancela y se descarta).
+//   BufferSelector (v0.6.3): pantalla modal de listado de buffers tras
+//                Ctrl+K t (o tras cerrar con Ctrl+K w). Solo se aceptan
+//                ↑/↓, Enter y ESC; todo lo demas es no-op.
+//   SaveAs (v0.7): prompt "Guardar archivo:" tras Ctrl+K Ctrl+S sobre un
+//                buffer SIN NOMBRE (p.ej. creado con Ctrl+K n). El usuario
+//                escribe una ruta en la fila de mensajes; Enter guarda,
+//                ESC cancela. Modal: solo se aceptan caracteres, Backspace,
+//                Enter y ESC.
 //
 // IMPORTANTE: estas son DOS cosas distintas que NO hay que confundir.
 //   state_ == State::Seleccion  == "el modo seleccion esta ACTIVO" (modo).
@@ -40,13 +46,17 @@ enum class State {
     Interaccion,
     Seleccion,
     Prefix,
+    BufferSelector,
+    SaveAs,
 };
 
-// Editor es el "engine": conoce el Documento, el Cursor, el Viewport,
-// el modo, el archivo abierto y si hay cambios sin guardar. Traduce
-// Eventos en mutaciones sobre esas piezas. No sabe nada de teclas
-// crudas (eso es responsabilidad de Terminal) ni de como se dibuja
-// (eso es responsabilidad de Renderer).
+// Editor es el "engine": maneja una coleccion de buffers (v0.6.3), un
+// buffer activo, el modo, los mensajes y el portapapeles global. Todo lo
+// que le pertenece a un documento (Document, Cursor, Viewport, seleccion,
+// undo/redo, filename, modified) vive en el Buffer. Traduce Eventos en
+// mutaciones sobre el buffer activo. No sabe nada de teclas crudas (eso
+// es responsabilidad de Terminal) ni de como se dibuja (eso es
+// responsabilidad de Renderer).
 class Editor {
 public:
     Editor();
@@ -55,9 +65,10 @@ public:
     // Las carpetas no se pueden abrir todavia: solo archivos.
     static bool isDirectory(const std::string& path);
 
-    // Abre (o crea) el archivo indicado. Acepta rutas relativas o
-    // absolutas (p.ej. /home/usuario/Docs/README.md). Si `path` es una
-    // carpeta, no abre nada, no cambia el estado y devuelve false.
+    // Abre (o crea) el archivo indicado en el buffer ACTIVO. Acepta rutas
+    // relativas o absolutas (p.ej. /home/usuario/Docs/README.md). Si
+    // `path` es una carpeta, no abre nada, no cambia el estado y devuelve
+    // false.
     bool openFile(const std::string& path);
 
     // Corre el ciclo principal:
@@ -76,25 +87,59 @@ public:
     // Seleccion actual, si la hay (normalizada: start antes que end).
     std::optional<Normalized> selection() const;
 
+    static constexpr size_t MAX_UNDO = Buffer::MAX_UNDO;
+
 private:
-    Document document_;
-    Cursor cursor_;
-    Viewport viewport_;
+    // ---- Coleccion de buffers (v0.6.3) ----
+    // La lista de buffers y el indice del buffer activo. El estado por
+    // documento vive dentro de cada Buffer; aqui SOLO la coleccion.
+    std::vector<Buffer> buffers_;
+    int activeBuffer_ = 0;
+
+    Buffer& active();
+    const Buffer& active() const;
+
+    // Contador global de la sesion para los nombres de buffer sin nombre:
+    // "SinNombre", "SinNombre1", "SinNombre2", ... Nunca se reutiliza un
+    // nombre ya entregado, para evitar colisiones y hacer el orden
+    // predecible (aunque se cierre el buffer que lo llevaba).
+    int unnamedCounter_ = 0;
+    std::string nextUnnamedName();
+
+    // v0.6.3: Ctrl+K n -> crea un buffer nuevo SIN NOMBRE y lo activa
+    // inmediatamente. El buffer nuevo arranca en Navegacion, vacio.
+    void createBuffer();
+    // Dimensiones del viewport de un buffer, tomadas de la terminal en
+    // ese momento. run() las fija al arrancar para los buffers que ya
+    // existen, pero un buffer creado a mitad de sesion (Ctrl+K n) o
+    // reiniciado (Ctrl+K w sobre el ultimo) arranca con el Viewport por
+    // defecto (24x80) y no redibujaria toda la pantalla si la terminal
+    // es mas grande. Este helper le da sus dimensiones reales.
+    void syncViewportSize(Buffer& b);
+    // v0.6.3: Ctrl+K w -> cierra el buffer activo.
+    //   - modificado: NO cierra; muestra aviso (hay que guardar o restaurar).
+    //   - ultimo buffer: no se elimina; se convierte en vacio sin nombre.
+    //   - varios buffers: se elimina y se pasa al selector de buffers.
+    void closeActiveBuffer();
+    // v0.6.3: activa el buffer `idx` y reconcilia el modo con el estado
+    // de su seleccion (Seleccion si tiene rango no vacio, si no Navegacion).
+    void activateBuffer(int idx);
+    // Nombres visibles de todos los buffers, para el selector. Los buffers
+    // modificados se marcan con " *" al final.
+    std::vector<std::string> bufferNames() const;
+
+    // Maneja los eventos mientras state_ == State::BufferSelector.
+    void handleBufferSelectorEvent(const Event& event);
+
     Renderer renderer_;
     Terminal terminal_;
 
-// Estado de la maquina de estados (Navegacion/Interaccion/Seleccion/Prefix).
-// state_ == Seleccion significa SOLO "modo seleccion activo". No implica
-// que haya texto seleccionado: ver hasSelection() (rango no vacio).
-// Los dos se pueden mismatchear (Seleccion sin seleccion, p.ej. justo
-// despues de 's' sin mover el cursor).
     State state_ = State::Navegacion;
     // Estado previo, guardado al entrar en Prefix para volver a el si
     // el prefijo se cancela o ejecuta (p.ej. guardar sin salir de
-    // seleccion si el prefijo se abrio estando en Seleccion).
+    // seleccion si el prefijo se abrio estando en Seleccion). Tambien se
+    // usa para saber a que modo volver al cancelar el selector con ESC.
     State priorState_ = State::Navegacion;
-    std::string filename_;
-    bool modified_ = false;
     bool running_ = true;
     std::string statusMessage_;
 
@@ -104,26 +149,21 @@ private:
     // estado de la UI (que tiene el usuario "en la mano"), no del documento,
     // asi que deshacer una edicion NO debe deshacer el portapapeles. Si no
     // parece participar del historial no es un olvido: es la decision de
-    // diseno del punto 3 de v0.5.
+    // diseno del punto 3 de v0.5. Es GLOBAL al editor: compartido por
+    // todos los buffers (v0.6.3, invariante 11).
     std::vector<std::string> clipboard_;
 
-    // Seleccion de texto. Esta es SU casa: Document y Cursor no saben
-    // nada de seleccion. Vacio cuando no hay texto seleccionado.
-    // La seleccion pertenece al Editor.
-    std::optional<Selection> selection_;
+    // Indice seleccionado en la pantalla del selector de buffers.
+    int bufferSelectorIndex_ = 0;
+
+    // Ruta escrita por el usuario en el prompt "Guardar archivo:" (modo
+    // SaveAs). Relativa o absoluta; se resuelve contra cwd() al confirmar.
+    std::string saveAsPath_;
 
     // ---- Seleccion total ('a') ----
-    // 'a', dentro del modo Seleccion, es un prefijo TEMPORAL (no un State
-    // nuevo): selecciona el archivo entero sin mover el cursor. Mientras
-    // esta activo, selectAllActive_ es true y selection_ cubre [BOF, EOF]
-    // aunque cursor_ conserve su posicion anterior (el render muestra el
-    // resaltado completo y el cursor en su sitio). selectAllPrevious_
-    // guarda la seleccion vigente antes de 'a' para que un segundo 'a'
-    // (toggle) vuelva a ella. Flechas saltan a los extremos y terminan el
-    // modo; c/x operan sobre todo el archivo; ESC lo cancela; el resto de
-    // teclas se ignora.
-    bool selectAllActive_ = false;
-    std::optional<Selection> selectAllPrevious_;
+    // Nota: selectAllActive_/selectAllPrevious_ viven en el Buffer (cada
+    // buffer tiene su propio estado de seleccion total). Los helpers de
+    // seleccion operan sobre el buffer activo.
     // Seleccion que cubre el documento entero: [BOF, EOF].
     std::optional<Selection> selectAllSelection() const;
     // Maneja los eventos mientras selectAllActive_ es true.
@@ -137,17 +177,26 @@ private:
     void updateSelectionPosition();
     void clearSelection();
 
-    // Ultimo contenido persistido (o el estado inicial si nunca se guardo).
-    // modified_ = (contenido actual != savedLines_). Eso permite que undo
-    // "limpie" modified_ si vuelve al estado guardado.
-    std::vector<std::string> savedLines_;
-
     void handleEvent(const Event& event);
     void save();
     // Procesa el siguiente evento cuando el editor esta en modo Prefix
-    // (tras Ctrl+K). Ctrl+S/Guardar persiste, Ctrl+Q sale; cualquier
+    // (tras Ctrl+K). Ctrl+S/Guardar persiste, Ctrl+Q sale, Ctrl+K n crea
+    // buffer, Ctrl+K t abre el selector, Ctrl+K w cierra buffer; cualquier
     // otra tecla descarta el evento y cancela el prefijo.
     void handlePrefixKey(const Event& event);
+
+    // ---- Guardar como (v0.7) ----
+    // Ctrl+K Ctrl+S sobre un buffer sin nombre (p.ej. creado con Ctrl+K n)
+    // ya no falla con "Archivo sin nombre": en su lugar se abre el prompt
+    // "Guardar archivo:" en la fila de mensajes, donde se escribe la ruta
+    // destino. Enter confirma (commitSaveAs), ESC cancela.
+    void startSaveAs();
+    // Maneja los eventos mientras state_ == State::SaveAs.
+    void handleSaveAsEvent(const Event& event);
+    // Resuelve la ruta escrita (relativa -> absoluta contra cwd), rechaza
+    // carpetas y persiste el buffer con su nuevo nombre. Ante exito sale
+    // del prompt; ante error se queda para corregir la ruta.
+    void commitSaveAs();
 
     // --- Despacho por modo ---
     void handleNavegacionEvent(const Event& event);
@@ -155,29 +204,12 @@ private:
     void handleSeleccionEvent(const Event& event);
 
     // RePag/AvPag: desplaza el viewport y el cursor la misma cantidad de
-    // paginas (viewport_.height lineas), conservando la posicion relativa
+    // paginas (viewport.height lineas), conservando la posicion relativa
     // del cursor dentro del viewport. `dir` = -1 retrocede (RePag) y +1
     // avanza (AvPag). Antes de los bordes el cursor se clampa para que
     // nunca quede fuera del documento ni el viewport mas alla del EOF.
     void applyPage(int dir);
 
-    struct HistoryState {
-        std::vector<std::string> lines;
-        int line = 0;
-        int col = 0;
-        // Seleccion vigente en ese momento (si habia). Se restaura en
-        // undo/redo para que una seleccion borrada/reemplazada regrese
-        // a su estado original.
-        std::optional<Selection> selection;
-    };
-
-    static constexpr size_t MAX_UNDO = 1000;
-
-    std::vector<HistoryState> undoStack_;
-    std::vector<HistoryState> redoStack_;
-
-    void pushHistory();
     void undo();
     void redo();
-    void applyState(const HistoryState& state);
 };

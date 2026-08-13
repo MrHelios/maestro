@@ -61,6 +61,8 @@ std::string stateLabel(State state) {
         case State::Interaccion: return "INTERACCION";
         case State::Seleccion: return "SELECCION";
         case State::Prefix: return "COMANDO";
+        case State::BufferSelector: return "BUFFERS";
+        case State::SaveAs: return "GUARDAR";
     }
     return "";
 }
@@ -109,6 +111,10 @@ std::string buildLeftBlock(const std::string& filename, bool modified,
     const std::string modificado = " [modificado]";
 
     std::string path = filename.empty() ? "" : dirName(filename);
+    // v0.6.3: un buffer sin nombre se muestra con su nombre generico
+    // ("SinNombre", ...) que no tiene directorio; no tiene sentido
+    // mostrar "." como ruta.
+    if (path == ".") path = "";
 
     // Limites fijos (columnas visuales). El sufijo [modificado] se
     // RESERVA entero: se trunca el nombre (no el indicador) para que
@@ -136,6 +142,43 @@ std::string buildLeftBlock(const std::string& filename, bool modified,
     if (partsBudget < 0) return utf8::truncate(estado, budget);
     std::string izquierda = buildLeftParts(partsBudget, name, path);
     return izquierda + sep + estado;
+}
+
+// Barra de estado fija (fila en video inverso) + fila de mensajes, tal
+// cual las dibuja el editor normal. Se comparte entre buildScreen y el
+// selector de buffers para mantener SIEMPRE el mismo aspecto visual: el
+// bloque izquierdo (nombre - ruta - ESTADO), el bloque derecho anclado
+// a la derecha (Linea/Col), y abajo la fila de mensajes. Asume que el
+// cursor de la terminal esta al inicio de la fila de la barra.
+std::string buildChrome(const std::string& filename, bool modified,
+                        const std::string& estado,
+                        const std::string& statusMessage,
+                        int width, const Cursor& cursor) {
+    std::ostringstream out;
+    out << "\x1b[K";
+    out << "\x1b[7m"; // video inverso
+
+    std::string rightBlock = "Linea: " + std::to_string(cursor.line + 1) +
+                             " Col: " + std::to_string(cursor.col + 1);
+    int rightW = colCount(rightBlock);
+
+    int leftBudget = std::max(0, width - rightW - 1);
+    std::string leftBlock = buildLeftBlock(filename, modified, estado,
+                                           leftBudget);
+
+    out << leftBlock;
+    int fill = width - colCount(leftBlock) - rightW;
+    for (int i = 0; i < fill; ++i) out << ' ';
+    out << rightBlock;
+
+    out << "\x1b[0m"; // reset de estilo
+
+    // Fila de mensajes (sin inverso, fila propia).
+    out << "\r\n";
+    out << "\x1b[K";
+    out << utf8::truncate(statusMessage, width);
+
+    return out.str();
 }
 
 // Devuelve los bytes de `line` cuyas COLUMNAS VISUALES caen dentro de
@@ -232,33 +275,8 @@ std::string Renderer::buildScreen(const Document& doc,
         out << "\r\n";
     }
 
-// ---- Fila 1: barra de estado "fija" (video inverso), ancho total ----
-    //
-    // Bloque derecho: Ln/Col, siempre visible y anclado a la derecha,
-    // nunca se trunca. Bloque izquierdo: nombre - ruta - ESTADO, con los
-    // limites fijos y, ante terminal chica, sacrificando primero la ruta.
-    out << "\x1b[K";
-    out << "\x1b[7m"; // video inverso
-
-    std::string rightBlock = "Linea: " + std::to_string(cursor.line + 1) +
-                             " Col: " + std::to_string(cursor.col + 1);
-    int rightW = colCount(rightBlock);
-
-    int leftBudget = std::max(0, viewport.width - rightW - 1);
-    std::string leftBlock = buildLeftBlock(filename, modified,
-                                           stateLabel(state), leftBudget);
-
-    out << leftBlock;
-    int fill = viewport.width - colCount(leftBlock) - rightW;
-    for (int i = 0; i < fill; ++i) out << ' ';
-    out << rightBlock;
-
-    out << "\x1b[0m"; // reset de estilo
-
-    // ---- Fila 2: mensajes de estado (sin inverso, fila propia) ----
-    out << "\r\n";
-    out << "\x1b[K";
-    out << utf8::truncate(statusMessage, viewport.width);
+    out << buildChrome(filename, modified, stateLabel(state), statusMessage,
+                       viewport.width, cursor);
 
     // Posicionar el cursor real de la terminal donde corresponde.
     // OJO: cursor.col es un offset en BYTES dentro de la linea (asi
@@ -275,15 +293,80 @@ std::string Renderer::buildScreen(const Document& doc,
     return out.str();
 }
 
-void Renderer::render(const Document& doc,
-                       const Cursor& cursor,
-                       const Viewport& viewport,
-                       const std::string& filename,
-                       bool modified,
-                       const std::string& statusMessage,
-                       State state,
-                       const std::optional<Selection>& selection) {
+void Renderer::renderScreen(const Document& doc,
+                            const Cursor& cursor,
+                            const Viewport& viewport,
+                            const std::string& filename,
+                            bool modified,
+                            const std::string& statusMessage,
+                            State state,
+                            const std::optional<Selection>& selection) {
     std::string buffer = buildScreen(doc, cursor, viewport, filename,
                                      modified, statusMessage, state, selection);
+    write(STDOUT_FILENO, buffer.c_str(), buffer.size());
+}
+
+// v0.6.3: pantalla del selector de buffers. Mantiene el aspecto del editor
+// normal: el area principal (filas 1..height) muestra la lista de buffers
+// (seleccionado en video inverso) y las filas vacias su marcador "~". En la
+// fila de la barra de estado (height+1) se dibuja una barra en video inverso
+// que solo dice MULTIBUFFER, y la fila de mensajes (height+2) se limpia: en
+// el selector no se muestra ruta, ni Linea/Col, ni mensajes.
+std::string Renderer::buildBufferListScreen(const std::vector<std::string>& names,
+                                            int selected,
+                                            int width,
+                                            int height) {
+    std::ostringstream out;
+
+    out << "\x1b[?25l";   // ocultar cursor mientras dibujamos
+    out << "\x1b[H";      // mover a home
+    out << "\x1b[J";      // limpiar todo lo que quede debajo (incl. la
+                          // barra de estado y los mensajes de la pantalla
+                          // anterior)
+
+    int rows = 0;
+    for (size_t i = 0; i < names.size() && rows < height; ++i, ++rows) {
+        out << "\x1b[K";
+        std::string line = "  " + names[i];
+        if (static_cast<int>(i) == selected) {
+            out << "\x1b[7m" << utf8::truncate(line, width) << "\x1b[0m";
+        } else {
+            out << utf8::truncate(line, width);
+        }
+        out << "\r\n";
+    }
+    // Filas vacias: mismo marcador de linea fuera del documento que el editor.
+    for (int r = rows; r < height; ++r) {
+        out << "\x1b[K";
+        out << "~";
+        out << "\r\n";
+    }
+
+    // Fila de la barra de estado (height+1): solo el modo, en video inverso.
+    out << "\x1b[K";
+    out << "\x1b[7m";
+    const std::string label = "MULTIBUFFER";
+    out << label;
+    for (int i = static_cast<int>(label.size()); i < width; ++i) out << ' ';
+    out << "\x1b[0m";
+
+    // Fila de mensajes (height+2): en el selector no hay, se limpia.
+    out << "\r\n";
+    out << "\x1b[K";
+
+    // Cursor real de la terminal sobre la fila seleccionada de la lista.
+    // Se clampa a las filas ya dibujadas para no invadir la barra final.
+    int cursorRow = std::max(1, std::min(selected + 1, rows));
+    out << "\x1b[" << cursorRow << ";1H";
+
+    out << "\x1b[?25h"; // volver a mostrar el cursor
+    return out.str();
+}
+
+void Renderer::renderBufferList(const std::vector<std::string>& names,
+                                int selected,
+                                int width,
+                                int height) {
+    std::string buffer = buildBufferListScreen(names, selected, width, height);
     write(STDOUT_FILENO, buffer.c_str(), buffer.size());
 }

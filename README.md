@@ -1,4 +1,4 @@
-# edit — editor de texto de terminal (v0.6.2)
+# edit — editor de texto de terminal (v0.6.3)
 
 Editor de texto minimalista en C++17, sin interfaz gráfica, pensado
 como base extensible. Usa un modelo *modal* (Navegación / Interacción /
@@ -20,7 +20,8 @@ make test
 ```
 
 Compila y ejecuta la suite de tests en `tests/` (`Document`, `Cursor`,
-`Editor`, `Selection`, UTF-8, terminal e invariantes). El runner imprime
+`Editor`, `Selection`, multi-buffer, UTF-8, terminal e invariantes). El
+runner imprime
 cada caso y un resumen final (`N tests, M failure(s)`); sale con código 0
 solo si no hay fallos.
 
@@ -61,8 +62,11 @@ El editor es modal. En cada modo las teclas significan cosas distintas:
 | `c` / `x` (en Selección)   | Copiar / cortar la selección                  |
 | `p` (en Naveg.)            | Pegar el contenido del buffer                 |
 | Ctrl+U / Ctrl+Y            | Deshacer / Rehacer                            |
-| Ctrl+K, Ctrl+S             | Guardar                                       |
+| Ctrl+K, Ctrl+S             | Guardar. Si el buffer no tiene nombre, abre el prompt *Guardar archivo:* |
 | Ctrl+K, Ctrl+Q             | Salir                                         |
+| Ctrl+K, `n`                | Buffer nuevo sin nombre (y lo activa)         |
+| Ctrl+K, `t`                | Selector de buffers (↑/↓, Enter, Esc)         |
+| Ctrl+K, `w`                | Cerrar el buffer activo                       |
 | Ctrl+K, otra tecla         | Cancelar el prefijo y descartar la tecla      |
 | Backspace / Delete         | Borrar carácter (en Interacción)              |
 | Esc                        | Salir de Interacción / cancelar selección     |
@@ -86,8 +90,8 @@ La barra de estado ocupa las dos últimas filas de la terminal:
 
 - **Fila 1 (fija)** en video inverso, a ancho completo: bloque izquierdo
   `nombre - ruta - ESTADO` (`NAVEGACION` / `INTERACCION` / `SELECCION` /
-  `COMANDO`), con `[modificado]` junto al nombre si hay cambios sin
-  guardar, y la ruta resuelta siempre a absoluta. Bloque derecho
+  `COMANDO` / `BUFFERS` / `GUARDAR`), con `[modificado]` junto al nombre si hay cambios
+  sin guardar, y la ruta resuelta siempre a absoluta. Bloque derecho
   `Linea: N Col: M`, anclado a la derecha y nunca truncado. Ante una
   terminal chica se sacrifica primero la ruta (con `...` al inicio) y
   luego el nombre.
@@ -108,6 +112,32 @@ rango `anchor` → `position` del que es dueño el Editor (ni `Document` ni
 - Esc sale del modo selección sin tocar el texto.
 - El contenido se resalta en video inverso (soporta UTF-8).
 
+### Multi-buffer (Ctrl+K)
+
+El editor trabaja sobre una colección de buffers; exactamente uno está
+activo. Cada buffer tiene su propio `Document`, `Cursor` (incluida la
+columna preferida), `viewport`, selección, historial undo/redo, flag de
+modificado y nombre:
+
+- `Ctrl+K n`: crea un buffer sin nombre y lo activa inmediatamente. Los
+  nombres genéricos son `SinNombre`, `SinNombre1`, `SinNombre2`… con un
+  contador de sesión que no reutiliza nombres.
+- Guardar un buffer **sin nombre** (`Ctrl+K Ctrl+S`): en lugar de fallar,
+  se abre el prompt *Guardar archivo:* en la fila de mensajes. Se escribe
+  la ruta destino (relativa o absoluta), `Enter` guarda y `Esc` cancela.
+  Una vez guardado, el buffer conserva ese nombre y `Ctrl+K Ctrl+S` persiste
+  normal.
+- `Ctrl+K t`: abre el selector de buffers (lista en video inverso).
+  `↑`/`↓` navegan, `Enter` activa el buffer bajo el cursor, `Esc` vuelve
+  al buffer y modo anterior sin cambiar nada.
+- `Ctrl+K w`: cierra el buffer activo. Si está modificado, **se bloquea**
+  con un mensaje (`Buffer modificado: guarda con Ctrl+K s o restaura.`).
+  Al cerrar el último buffer, en lugar de eliminarse se reinicia a vacío
+  con un nombre nuevo.
+
+El portapapeles (`c`/`x`/`p`) es global a todos los buffers. El selector
+es de solo lectura: no modifica ningún buffer.
+
 ## Arquitectura
 
 ```
@@ -122,9 +152,13 @@ tests/
   test_selection.cpp    -> selección (anchor/position), c/x, prefijo 'a', j/k, páginas
   test_modes.cpp        -> máquina de estados (Navegación/Interacción/Selección/Prefix)
   test_invariants.cpp   -> invariantes de estado tras una secuencia determinista
+  test_buffers.cpp      -> multi-buffer: aislamiento, Ctrl+K n/t/w, selector, clipboard
   test_utf8*.cpp        -> utilitarios UTF-8 (columnas, truncado, rango)
 
 src/
+  Buffer.cpp      -> un buffer: Document + Cursor + viewport + selección +
+                     undo/redo + modificado + nombre. Cada buffer es 100%
+                     independiente de los demás
   Document.cpp    -> el texto en sí (vector<string>), sin saber nada
                      de cursor, colores, scroll ni selección
   Cursor.cpp      -> línea/columna + "columna preferida" al moverse
@@ -144,8 +178,11 @@ src/
                      visual (no por byte)
   Editor.cpp      -> engine: conecta Document + Cursor + Viewport +
                      Terminal + Renderer, corre el loop principal. Es
-                     el dueño de la selección (ni Document ni Cursor
-                     la conocen). Define los modos y el prefijo 'a'.
+                     el dueño de la selección y del portapapeles
+                     (global). Mantiene la colección de `Buffer` con un
+                     activo, el selector de buffers (Ctrl+K t) y los
+                     comandos Ctrl+K n/w. Define los modos y el prefijo
+                     'a'.
 
                      Loop principal:
                          leer evento

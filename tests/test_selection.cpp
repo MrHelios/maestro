@@ -99,18 +99,18 @@ TEST(selection_enter_select_mode_alone_is_empty) {
     type(ed, "abc");                 // cursor (0,3)
     press(ed, EventType::InsertNewline);
     type(ed, "def");                 // cursor (1,3), cursor lejos de (0,0)
-    const int undoBefore = static_cast<int>(ed.undoStack_.size());
-    const bool modified = ed.modified_;
+    const int undoBefore = static_cast<int>(ed.active().undoStack.size());
+    const bool modified = ed.active().modified;
 
     enterSeleccion(ed);              // 's': solo entra al modo
 
     CHECK(!ed.hasSelection());
     CHECK(!ed.selection().has_value());
     // No es una edicion ni mueve el cursor.
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 3);
-    CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore));
-    CHECK_EQ(ed.modified_, modified);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 3);
+    CHECK_EQ(ed.active().undoStack.size(), static_cast<size_t>(undoBefore));
+    CHECK_EQ(ed.active().modified, modified);
 }
 
 TEST(selection_move_stays_empty_if_no_movement) {
@@ -230,9 +230,9 @@ TEST(selection_cancelled_by_escape) {
     CHECK(ed.hasSelection());
     press(ed, EventType::Escape);
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.document_.lineAt(0), "abc");
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "abc");
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 1);
 }
 
 TEST(selection_cleared_by_undo_redo) {
@@ -245,7 +245,7 @@ TEST(selection_cleared_by_undo_redo) {
 
     press(ed, EventType::Undo);
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.document_.lineAt(0), "ab");
+    CHECK_EQ(ed.active().document.lineAt(0), "ab");
 }
 
 TEST(selection_undo_redo_empty_history_noop) {
@@ -255,7 +255,7 @@ TEST(selection_undo_redo_empty_history_noop) {
     selectPress(ed, EventType::MoveRight);
     press(ed, EventType::Redo);            // sin redo pendiente: no rompe nada
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.document_.lineAt(0), "abc");
+    CHECK_EQ(ed.active().document.lineAt(0), "abc");
 }
 
 TEST(selection_does_not_clear_redo) {
@@ -265,26 +265,26 @@ TEST(selection_does_not_clear_redo) {
     Editor ed;
     type(ed, "abc");               // undoStack: 'a','b','c'
     press(ed, EventType::Undo);    // -> "ab", el redo guarda "abc"
-    CHECK_EQ(ed.document_.lineAt(0), "ab");
-    CHECK(!ed.redoStack_.empty());
+    CHECK_EQ(ed.active().document.lineAt(0), "ab");
+    CHECK(!ed.active().redoStack.empty());
 
     press(ed, EventType::MoveLeft); // cursor a (0,1) para poder avanzar un paso
 
-    const size_t undoBefore = ed.undoStack_.size();
-    const size_t redoBefore = ed.redoStack_.size();
+    const size_t undoBefore = ed.active().undoStack.size();
+    const size_t redoBefore = ed.active().redoStack.size();
 
     enterSeleccion(ed);               // 's': solo entra al modo
     press(ed, EventType::MoveRight);  // extiende: selecciona "b"
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.document_.lineAt(0), "ab"); // sin edicion
+    CHECK_EQ(ed.active().document.lineAt(0), "ab"); // sin edicion
 
     // Seleccionar no agrega ni consume nada del historial.
-    CHECK_EQ(ed.undoStack_.size(), undoBefore);
-    CHECK_EQ(ed.redoStack_.size(), redoBefore);
+    CHECK_EQ(ed.active().undoStack.size(), undoBefore);
+    CHECK_EQ(ed.active().redoStack.size(), redoBefore);
 
     // El redo sigue vivo y reaplica el cambio.
     press(ed, EventType::Redo);
-    CHECK_EQ(ed.document_.lineAt(0), "abc");
+    CHECK_EQ(ed.active().document.lineAt(0), "abc");
 }
 
 TEST(selection_escape_does_not_alter_undo_redo) {
@@ -296,11 +296,11 @@ TEST(selection_escape_does_not_alter_undo_redo) {
     Editor ed;
     type(ed, "abc");               // undoStack: 'a','b','c'
     press(ed, EventType::Undo);    // -> "ab", el redo guarda "abc"
-    CHECK_EQ(ed.document_.lineAt(0), "ab");
-    CHECK(!ed.redoStack_.empty());
+    CHECK_EQ(ed.active().document.lineAt(0), "ab");
+    CHECK(!ed.active().redoStack.empty());
 
-    const size_t undoBefore = ed.undoStack_.size();
-    const size_t redoBefore = ed.redoStack_.size();
+    const size_t undoBefore = ed.active().undoStack.size();
+    const size_t redoBefore = ed.active().redoStack.size();
 
     enterSeleccion(ed);               // 's': entra al modo
     press(ed, EventType::MoveLeft);   // extiende (no edita)
@@ -308,15 +308,15 @@ TEST(selection_escape_does_not_alter_undo_redo) {
 
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK_EQ(ed.document_.lineAt(0), "ab");
+    CHECK_EQ(ed.active().document.lineAt(0), "ab");
 
     // ESC no crea undo ni consume redo.
-    CHECK_EQ(ed.undoStack_.size(), undoBefore);
-    CHECK_EQ(ed.redoStack_.size(), redoBefore);
+    CHECK_EQ(ed.active().undoStack.size(), undoBefore);
+    CHECK_EQ(ed.active().redoStack.size(), redoBefore);
 
     // El redo sigue vivo y reaplica el cambio.
     press(ed, EventType::Redo);
-    CHECK_EQ(ed.document_.lineAt(0), "abc");
+    CHECK_EQ(ed.active().document.lineAt(0), "abc");
 }
 
 TEST(selection_normalized_forward_equals_stored) {
@@ -328,11 +328,11 @@ TEST(selection_normalized_forward_equals_stored) {
     selectPress(ed, EventType::MoveRight);
     selectPress(ed, EventType::MoveRight);  // cursor (0,2)
 
-    CHECK(ed.selection_.has_value());
-    CHECK_EQ(ed.selection_->anchor.line, 0);
-    CHECK_EQ(ed.selection_->anchor.col, 0);
-    CHECK_EQ(ed.selection_->position.line, 0);
-    CHECK_EQ(ed.selection_->position.col, 2);
+    CHECK(ed.active().selection.has_value());
+    CHECK_EQ(ed.active().selection->anchor.line, 0);
+    CHECK_EQ(ed.active().selection->anchor.col, 0);
+    CHECK_EQ(ed.active().selection->position.line, 0);
+    CHECK_EQ(ed.active().selection->position.col, 2);
 }
 
 TEST(selection_normalized_backward_flips_stored) {
@@ -343,11 +343,11 @@ TEST(selection_normalized_backward_flips_stored) {
     press(ed, EventType::MoveEnd);         // (0,4)
     selectPress(ed, EventType::MoveLeft);   // (0,3)
 
-    CHECK(ed.selection_.has_value());
-    CHECK_EQ(ed.selection_->anchor.line, 0);
-    CHECK_EQ(ed.selection_->anchor.col, 4); // anchor: donde empezo (el final)
-    CHECK_EQ(ed.selection_->position.line, 0);
-    CHECK_EQ(ed.selection_->position.col, 3); // cursor: se movio para atras
+    CHECK(ed.active().selection.has_value());
+    CHECK_EQ(ed.active().selection->anchor.line, 0);
+    CHECK_EQ(ed.active().selection->anchor.col, 4); // anchor: donde empezo (el final)
+    CHECK_EQ(ed.active().selection->position.line, 0);
+    CHECK_EQ(ed.active().selection->position.col, 3); // cursor: se movio para atras
 
     auto sel = ed.selection();
     CHECK(sel.has_value());
@@ -374,60 +374,60 @@ static void setupAbcde(Editor& ed) {
 TEST(editor_selection_right) {
     Editor ed;
     setupAbcde(ed);   // cursor (0,2), anchor (0,2)
-    const std::string before = ed.document_.lineAt(0);
+    const std::string before = ed.active().document.lineAt(0);
 
     selectPress(ed, EventType::MoveRight); // -> (0,3)
 
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 3);
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.selection_->anchor.col, 2);  // anchor no cambia
+    CHECK_EQ(ed.active().selection->anchor.col, 2);  // anchor no cambia
     auto sel = ed.selection();
     CHECK_EQ(sel->start.col, 2);
     CHECK_EQ(sel->end.col, 3);
-    CHECK_EQ(ed.document_.lineAt(0), before); // Document intacto
-    CHECK_EQ(ed.document_.lineCount(), 1);
+    CHECK_EQ(ed.active().document.lineAt(0), before); // Document intacto
+    CHECK_EQ(ed.active().document.lineCount(), 1);
 }
 
 TEST(editor_selection_right_twice) {
     Editor ed;
     setupAbcde(ed);   // (0,2)
-    const std::string before = ed.document_.lineAt(0);
+    const std::string before = ed.active().document.lineAt(0);
 
     selectPress(ed, EventType::MoveRight); // -> (0,3)
     selectPress(ed, EventType::MoveRight); // -> (0,4): ab[cd]e
 
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 4);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 4);
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.selection_->anchor.col, 2);  // anchor intacto
+    CHECK_EQ(ed.active().selection->anchor.col, 2);  // anchor intacto
     auto sel = ed.selection();
     CHECK_EQ(sel->start.col, 2);
     CHECK_EQ(sel->end.col, 4);
-    CHECK_EQ(ed.document_.lineAt(0), before);
+    CHECK_EQ(ed.active().document.lineAt(0), before);
 }
 
 TEST(editor_selection_left) {
     Editor ed;
     setupAbcde(ed);   // (0,2)
-    const std::string before = ed.document_.lineAt(0);
+    const std::string before = ed.active().document.lineAt(0);
 
     selectPress(ed, EventType::MoveLeft); // -> (0,1)
 
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 1);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 1);
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.selection_->anchor.col, 2);  // anchor donde empezo
+    CHECK_EQ(ed.active().selection->anchor.col, 2);  // anchor donde empezo
     auto sel = ed.selection();
     CHECK_EQ(sel->start.col, 1);
     CHECK_EQ(sel->end.col, 2);
-    CHECK_EQ(ed.document_.lineAt(0), before);
+    CHECK_EQ(ed.active().document.lineAt(0), before);
 }
 
 TEST(editor_selection_back_to_anchor) {
     Editor ed;
     setupAbcde(ed);   // (0,2)
-    const std::string before = ed.document_.lineAt(0);
+    const std::string before = ed.active().document.lineAt(0);
 
     // Seleccionar dos veces hacia la derecha...
     selectPress(ed, EventType::MoveRight); // (0,3) ab[c]de
@@ -436,18 +436,18 @@ TEST(editor_selection_back_to_anchor) {
     selectPress(ed, EventType::MoveLeft);  // (0,3) ab[c]de
     selectPress(ed, EventType::MoveLeft);  // (0,2) cursor en el anchor
 
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 2);
     // cursor == anchor: no hay texto seleccionado.
     CHECK(!ed.hasSelection());
     CHECK(!ed.selection().has_value());
-    CHECK_EQ(ed.document_.lineAt(0), before);
+    CHECK_EQ(ed.active().document.lineAt(0), before);
 }
 
 TEST(editor_selection_reverses_direction) {
     Editor ed;
     setupAbcde(ed);   // (0,2)
-    const std::string before = ed.document_.lineAt(0);
+    const std::string before = ed.active().document.lineAt(0);
 
     // Ir a la derecha y luego cruzar el anchor hacia la izquierda.
     selectPress(ed, EventType::MoveRight); // (0,3)
@@ -456,15 +456,15 @@ TEST(editor_selection_reverses_direction) {
     selectPress(ed, EventType::MoveLeft);  // (0,2) == anchor, vacia
     selectPress(ed, EventType::MoveLeft);  // (0,1): cruza, seleccion hacia atras
 
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 1);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 1);
     CHECK(ed.hasSelection());
     // El anchor siguiُo fijo en 2; ahora la seleccion va de 1 a 2.
-    CHECK_EQ(ed.selection_->anchor.col, 2);
+    CHECK_EQ(ed.active().selection->anchor.col, 2);
     auto sel = ed.selection();
     CHECK_EQ(sel->start.col, 1);
     CHECK_EQ(sel->end.col, 2);
-    CHECK_EQ(ed.document_.lineAt(0), before);
+    CHECK_EQ(ed.active().document.lineAt(0), before);
 }
 
 // ---------------------------------------------------------------------------
@@ -483,23 +483,23 @@ TEST(editor_selection_arrow_right_clears) {
     selectPress(ed, EventType::MoveRight); // (0,5): [cde]
     CHECK(ed.hasSelection());
     // Anchor fijo en 2, cursor adelante en 5.
-    CHECK_EQ(ed.selection_->anchor.col, 2);
-    CHECK_EQ(ed.selection_->position.col, 5);
+    CHECK_EQ(ed.active().selection->anchor.col, 2);
+    CHECK_EQ(ed.active().selection->position.col, 5);
 
-    const std::string content = ed.document_.lineAt(0);
-    const int undoBefore = static_cast<int>(ed.undoStack_.size());
-    const bool modified = ed.modified_;
+    const std::string content = ed.active().document.lineAt(0);
+    const int undoBefore = static_cast<int>(ed.active().undoStack.size());
+    const bool modified = ed.active().modified;
 
     press(ed, EventType::Escape);         // cancelar seleccion (v0.5)
     CHECK(!ed.hasSelection());
     // ESC no mueve el cursor: queda en el extremo derecho.
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 5);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 5);
     // No es una edicion.
-    CHECK_EQ(ed.document_.lineAt(0), content);
-    CHECK_EQ(ed.document_.lineCount(), 1);
-    CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore));
-    CHECK_EQ(ed.modified_, modified);
+    CHECK_EQ(ed.active().document.lineAt(0), content);
+    CHECK_EQ(ed.active().document.lineCount(), 1);
+    CHECK_EQ(ed.active().undoStack.size(), static_cast<size_t>(undoBefore));
+    CHECK_EQ(ed.active().modified, modified);
 }
 
 TEST(editor_selection_arrow_left_clears) {
@@ -508,20 +508,20 @@ TEST(editor_selection_arrow_left_clears) {
     selectPress(ed, EventType::MoveLeft);  // (0,1): seleccion hacia atras
     selectPress(ed, EventType::MoveLeft);  // (0,0): [0..2)
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.selection_->anchor.col, 2);
+    CHECK_EQ(ed.active().selection->anchor.col, 2);
 
-    const std::string content = ed.document_.lineAt(0);
-    const int undoBefore = static_cast<int>(ed.undoStack_.size());
-    const bool modified = ed.modified_;
+    const std::string content = ed.active().document.lineAt(0);
+    const int undoBefore = static_cast<int>(ed.active().undoStack.size());
+    const bool modified = ed.active().modified;
 
     press(ed, EventType::Escape);         // cancelar seleccion (v0.5)
     CHECK(!ed.hasSelection());
     // ESC no mueve el cursor: queda en (0,0).
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
-    CHECK_EQ(ed.document_.lineAt(0), content);
-    CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore));
-    CHECK_EQ(ed.modified_, modified);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
+    CHECK_EQ(ed.active().document.lineAt(0), content);
+    CHECK_EQ(ed.active().undoStack.size(), static_cast<size_t>(undoBefore));
+    CHECK_EQ(ed.active().modified, modified);
 }
 
 TEST(editor_selection_arrow_up_clears) {
@@ -532,20 +532,20 @@ TEST(editor_selection_arrow_up_clears) {
     selectPress(ed, EventType::MoveDown);             // seleccion -> (1,0)
     CHECK(ed.hasSelection());
 
-    const std::string line0 = ed.document_.lineAt(0);
-    const std::string line1 = ed.document_.lineAt(1);
-    const int undoBefore = static_cast<int>(ed.undoStack_.size());
-    const bool modified = ed.modified_;
+    const std::string line0 = ed.active().document.lineAt(0);
+    const std::string line1 = ed.active().document.lineAt(1);
+    const int undoBefore = static_cast<int>(ed.active().undoStack.size());
+    const bool modified = ed.active().modified;
 
     press(ed, EventType::Escape);         // cancelar seleccion (v0.5)
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 0);
-    CHECK_EQ(ed.document_.lineAt(0), line0);
-    CHECK_EQ(ed.document_.lineAt(1), line1);
-    CHECK_EQ(ed.document_.lineCount(), 2);
-    CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore));
-    CHECK_EQ(ed.modified_, modified);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 0);
+    CHECK_EQ(ed.active().document.lineAt(0), line0);
+    CHECK_EQ(ed.active().document.lineAt(1), line1);
+    CHECK_EQ(ed.active().document.lineCount(), 2);
+    CHECK_EQ(ed.active().undoStack.size(), static_cast<size_t>(undoBefore));
+    CHECK_EQ(ed.active().modified, modified);
 }
 
 TEST(editor_selection_arrow_down_clears) {
@@ -558,20 +558,20 @@ TEST(editor_selection_arrow_down_clears) {
     selectPress(ed, EventType::MoveDown);              // seleccion -> (1,0)
     CHECK(ed.hasSelection());
 
-    const std::string line0 = ed.document_.lineAt(0);
-    const std::string line1 = ed.document_.lineAt(1);
-    const int undoBefore = static_cast<int>(ed.undoStack_.size());
-    const bool modified = ed.modified_;
+    const std::string line0 = ed.active().document.lineAt(0);
+    const std::string line1 = ed.active().document.lineAt(1);
+    const int undoBefore = static_cast<int>(ed.active().undoStack.size());
+    const bool modified = ed.active().modified;
 
     press(ed, EventType::Escape);                   // cancelar seleccion (v0.5)
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 1);                     // ESC no mueve el cursor
-    CHECK_EQ(ed.cursor_.col, 0);
-    CHECK_EQ(ed.document_.lineAt(0), line0);
-    CHECK_EQ(ed.document_.lineAt(1), line1);
-    CHECK_EQ(ed.document_.lineCount(), 2);
-    CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore));
-    CHECK_EQ(ed.modified_, modified);
+    CHECK_EQ(ed.active().cursor.line, 1);                     // ESC no mueve el cursor
+    CHECK_EQ(ed.active().cursor.col, 0);
+    CHECK_EQ(ed.active().document.lineAt(0), line0);
+    CHECK_EQ(ed.active().document.lineAt(1), line1);
+    CHECK_EQ(ed.active().document.lineCount(), 2);
+    CHECK_EQ(ed.active().undoStack.size(), static_cast<size_t>(undoBefore));
+    CHECK_EQ(ed.active().modified, modified);
 }
 
 // ---------------------------------------------------------------------------
@@ -581,10 +581,10 @@ TEST(editor_selection_arrow_down_clears) {
 // vertical, el cursor conserva la columna deseada y se clampa a lineas
 // mas cortas.
 static void editorOfLines(const std::vector<std::string>& lines, int line, int col, Editor& ed) {
-    ed.document_.restore(lines);
-    ed.cursor_.line = line;
-    ed.cursor_.col = col;
-    ed.cursor_.preferredCol_ = col;
+    ed.active().document.restore(lines);
+    ed.active().cursor.line = line;
+    ed.active().cursor.col = col;
+    ed.active().cursor.preferredCol_ = col;
 }
 
 // ---------------------------------------------------------------------------
@@ -603,11 +603,11 @@ TEST(selection_escape_then_right_moves_normally) {
     press(ed, EventType::Escape);   // cancela seleccion, -> Navegacion, cursor se queda
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK_EQ(ed.active().cursor.col, 3);
 
     press(ed, EventType::MoveRight); // movimiento normal
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.col, 4);
+    CHECK_EQ(ed.active().cursor.col, 4);
 }
 
 TEST(selection_escape_then_left_moves_normally) {
@@ -620,8 +620,8 @@ TEST(selection_escape_then_left_moves_normally) {
 
     press(ed, EventType::MoveLeft);  // normal: una posicion a la izquierda
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 2);
 }
 
 TEST(selection_escape_then_up_moves_normally) {
@@ -633,12 +633,12 @@ TEST(selection_escape_then_up_moves_normally) {
     press(ed, EventType::Escape);       // -> Navegacion, sin seleccion, cursor (2,1)
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK_EQ(ed.cursor_.line, 2);
+    CHECK_EQ(ed.active().cursor.line, 2);
 
     press(ed, EventType::MoveUp);       // normal: sube una linea
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 1);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 1);
 }
 
 TEST(selection_escape_then_down_moves_normally) {
@@ -650,12 +650,12 @@ TEST(selection_escape_then_down_moves_normally) {
     press(ed, EventType::Escape);       // -> Navegacion, sin seleccion, cursor (2,1)
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK_EQ(ed.cursor_.line, 2);
+    CHECK_EQ(ed.active().cursor.line, 2);
 
     press(ed, EventType::MoveDown);     // normal: una sola linea hacia abajo
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 3);
-    CHECK_EQ(ed.cursor_.col, 1);
+    CHECK_EQ(ed.active().cursor.line, 3);
+    CHECK_EQ(ed.active().cursor.col, 1);
 }
 
 TEST(editor_selection_down) {
@@ -664,11 +664,11 @@ TEST(editor_selection_down) {
     selectPress(ed, EventType::MoveDown);  // -> (1,2)
 
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 2);
     // Anchor fijo donde empezo (0,2).
-    CHECK_EQ(ed.selection_->anchor.line, 0);
-    CHECK_EQ(ed.selection_->anchor.col, 2);
+    CHECK_EQ(ed.active().selection->anchor.line, 0);
+    CHECK_EQ(ed.active().selection->anchor.col, 2);
     auto sel = ed.selection();
     CHECK_EQ(sel->start.line, 0);
     CHECK_EQ(sel->start.col, 2);
@@ -678,8 +678,8 @@ TEST(editor_selection_down) {
     // Otro Down en modo seleccion -> (2,2).
     selectPress(ed, EventType::MoveDown);
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 2);
-    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK_EQ(ed.active().cursor.line, 2);
+    CHECK_EQ(ed.active().cursor.col, 2);
     auto sel2 = ed.selection();
     CHECK_EQ(sel2->start.line, 0);
     CHECK_EQ(sel2->start.col, 2);
@@ -693,11 +693,11 @@ TEST(editor_selection_up) {
     selectPress(ed, EventType::MoveUp);   // -> (0,2)
 
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 2);
     // Anchor (donde empezo) en la linea 1.
-    CHECK_EQ(ed.selection_->anchor.line, 1);
-    CHECK_EQ(ed.selection_->anchor.col, 2);
+    CHECK_EQ(ed.active().selection->anchor.line, 1);
+    CHECK_EQ(ed.active().selection->anchor.col, 2);
     auto sel = ed.selection();
     CHECK_EQ(sel->start.line, 0);
     CHECK_EQ(sel->start.col, 2);
@@ -713,8 +713,8 @@ TEST(editor_selection_vertical_shorter_line) {
     selectPress(ed, EventType::MoveDown); // -> (1,2), preferredCol 5
 
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 2);
     auto sel = ed.selection();
     CHECK_EQ(sel->start.line, 0);
     CHECK_EQ(sel->start.col, 5);
@@ -730,8 +730,8 @@ TEST(editor_selection_vertical_longer_line) {
     selectPress(ed, EventType::MoveUp); // -> (0,2): preferred 3 clampa a len 2
 
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 2);
     auto sel = ed.selection();
     CHECK_EQ(sel->start.line, 0);
     CHECK_EQ(sel->start.col, 2);
@@ -747,8 +747,8 @@ TEST(editor_selection_multiline) {
     selectPress(ed, EventType::MoveDown); // (3,1)
 
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.selection_->anchor.line, 0);
-    CHECK_EQ(ed.selection_->anchor.col, 1);
+    CHECK_EQ(ed.active().selection->anchor.line, 0);
+    CHECK_EQ(ed.active().selection->anchor.col, 1);
     auto sel = ed.selection();
     CHECK_EQ(sel->start.line, 0);
     CHECK_EQ(sel->start.col, 1);
@@ -764,8 +764,8 @@ TEST(editor_selection_multiline_reverse) {
 
     CHECK(ed.hasSelection());
     // La seleccion es "hacia arriba": start = 0, end = 2.
-    CHECK_EQ(ed.selection_->anchor.line, 2);
-    CHECK_EQ(ed.selection_->anchor.col, 1);
+    CHECK_EQ(ed.active().selection->anchor.line, 2);
+    CHECK_EQ(ed.active().selection->anchor.col, 1);
     auto sel = ed.selection();
     CHECK_EQ(sel->start.line, 0);
     CHECK_EQ(sel->start.col, 1);
@@ -782,9 +782,9 @@ TEST(editor_selection_home) {
     selectPress(ed, EventType::MoveHome); // -> (0,0), anchor (0,2)
 
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
-    CHECK_EQ(ed.selection_->anchor.col, 2);   // anchor se mantiene
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
+    CHECK_EQ(ed.active().selection->anchor.col, 2);   // anchor se mantiene
     auto sel = ed.selection();
     CHECK_EQ(sel->start.line, 0);
     CHECK_EQ(sel->start.col, 0);
@@ -798,9 +798,9 @@ TEST(editor_selection_end) {
     selectPress(ed, EventType::MoveEnd); // -> (0,5), anchor (0,2)
 
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 5);          // lineLength("abcde") == 5
-    CHECK_EQ(ed.selection_->anchor.col, 2);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 5);          // lineLength("abcde") == 5
+    CHECK_EQ(ed.active().selection->anchor.col, 2);
     auto sel = ed.selection();
     CHECK_EQ(sel->start.col, 2);
     CHECK_EQ(sel->end.col, 5);
@@ -818,11 +818,11 @@ TEST(editor_selection_home_reduces_selection) {
     selectPress(ed, EventType::MoveHome);  // -> (0,0), cruza el anchor (2)
     CHECK(ed.hasSelection());
     // Se invierte: ahora va de 0 a 2.
-    CHECK_EQ(ed.selection_->anchor.col, 2);
+    CHECK_EQ(ed.active().selection->anchor.col, 2);
     auto sel = ed.selection();
     CHECK_EQ(sel->start.col, 0);
     CHECK_EQ(sel->end.col, 2);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
 }
 
 TEST(editor_selection_end_reduces_selection) {
@@ -834,12 +834,12 @@ TEST(editor_selection_end_reduces_selection) {
     press(ed, EventType::MoveEnd);        // (0,5)
     selectPress(ed, EventType::MoveHome);  // -> (0,0): [0..5), anchor 5
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.col, 0);
-    CHECK_EQ(ed.selection_->anchor.col, 5);
+    CHECK_EQ(ed.active().cursor.col, 0);
+    CHECK_EQ(ed.active().selection->anchor.col, 5);
 
     selectPress(ed, EventType::MoveEnd);   // -> (0,5) == anchor: se reduce a nada
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.col, 5);
+    CHECK_EQ(ed.active().cursor.col, 5);
 }
 
 TEST(editor_selection_home_from_start) {
@@ -850,8 +850,8 @@ TEST(editor_selection_home_from_start) {
 
     // anchor == position: no hay nada seleccionado.
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
 }
 
 TEST(editor_selection_end_from_end) {
@@ -861,8 +861,8 @@ TEST(editor_selection_end_from_end) {
     selectPress(ed, EventType::MoveEnd);   // ya esta al final
 
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 3);
 }
 
 // ---------------------------------------------------------------------------
@@ -873,167 +873,167 @@ TEST(editor_selection_end_from_end) {
 TEST(selection_right_grows_shrinks_disappears) {
     Editor ed;
     setupAbcde(ed);           // anchor (0,2)
-    const int anchor = ed.cursor_.col;
+    const int anchor = ed.active().cursor.col;
 
     selectPress(ed, EventType::MoveRight); // (0,3)
-    CHECK_EQ(ed.cursor_.col, 3);
-    CHECK_EQ(ed.selection_->anchor.col, anchor); // anchor fijo
+    CHECK_EQ(ed.active().cursor.col, 3);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor); // anchor fijo
     CHECK(ed.hasSelection());
 
     selectPress(ed, EventType::MoveRight); // (0,4): crece
-    CHECK_EQ(ed.selection_->anchor.col, anchor);
-    CHECK_EQ(ed.selection_->position.col, 4);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor);
+    CHECK_EQ(ed.active().selection->position.col, 4);
 
     selectPress(ed, EventType::MoveLeft);  // (0,3): se reduce
-    CHECK_EQ(ed.selection_->anchor.col, anchor);
-    CHECK_EQ(ed.selection_->position.col, 3);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor);
+    CHECK_EQ(ed.active().selection->position.col, 3);
     CHECK(ed.hasSelection());
 
     selectPress(ed, EventType::MoveLeft);  // (0,2): de vuelta al anchor
-    CHECK_EQ(ed.cursor_.col, anchor);
-    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK_EQ(ed.active().cursor.col, anchor);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor);
     CHECK(!ed.hasSelection());
 }
 
 TEST(selection_left_grows_shrinks_disappears) {
     Editor ed;
     setupAbcde(ed);           // anchor (0,2)
-    const int anchor = ed.cursor_.col;
+    const int anchor = ed.active().cursor.col;
 
     selectPress(ed, EventType::MoveLeft); // (0,1): hacia atras
-    CHECK_EQ(ed.cursor_.col, 1);
-    CHECK_EQ(ed.selection_->anchor.col, anchor); // anchor fijo
+    CHECK_EQ(ed.active().cursor.col, 1);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor); // anchor fijo
     CHECK(ed.hasSelection());
     auto sel = ed.selection();
     CHECK_EQ(sel->start.col, 1);
     CHECK_EQ(sel->end.col, 2);
 
     selectPress(ed, EventType::MoveLeft); // (0,0): crece
-    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor);
     sel = ed.selection();
     CHECK_EQ(sel->start.col, 0);
     CHECK_EQ(sel->end.col, 2);
 
     selectPress(ed, EventType::MoveRight); // (0,1): se reduce
-    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor);
     sel = ed.selection();
     CHECK_EQ(sel->start.col, 1);
     CHECK_EQ(sel->end.col, 2);
 
     selectPress(ed, EventType::MoveRight); // (0,2): de vuelta al anchor
-    CHECK_EQ(ed.cursor_.col, anchor);
-    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK_EQ(ed.active().cursor.col, anchor);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor);
     CHECK(!ed.hasSelection());
 }
 
 TEST(selection_down_grows_shrinks_disappears) {
     Editor ed;
     editorOfLines({"aaa", "bbb", "ccc"}, 0, 1, ed); // anchor (0,1)
-    const int anchorLine = ed.cursor_.line;
-    const int anchorCol = ed.cursor_.col;
+    const int anchorLine = ed.active().cursor.line;
+    const int anchorCol = ed.active().cursor.col;
 
     selectPress(ed, EventType::MoveDown); // (1,1)
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
-    CHECK_EQ(ed.selection_->anchor.col, anchorCol);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().selection->anchor.line, anchorLine);
+    CHECK_EQ(ed.active().selection->anchor.col, anchorCol);
     CHECK(ed.hasSelection());
 
     selectPress(ed, EventType::MoveDown); // (2,1): crece
-    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
-    CHECK_EQ(ed.selection_->position.line, 2);
+    CHECK_EQ(ed.active().selection->anchor.line, anchorLine);
+    CHECK_EQ(ed.active().selection->position.line, 2);
 
     selectPress(ed, EventType::MoveUp);   // (1,1): se reduce
-    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
-    CHECK_EQ(ed.selection_->position.line, 1);
+    CHECK_EQ(ed.active().selection->anchor.line, anchorLine);
+    CHECK_EQ(ed.active().selection->position.line, 1);
 
     selectPress(ed, EventType::MoveUp);   // (0,1): de vuelta al anchor
-    CHECK_EQ(ed.cursor_.line, anchorLine);
-    CHECK_EQ(ed.cursor_.col, anchorCol);
-    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
+    CHECK_EQ(ed.active().cursor.line, anchorLine);
+    CHECK_EQ(ed.active().cursor.col, anchorCol);
+    CHECK_EQ(ed.active().selection->anchor.line, anchorLine);
     CHECK(!ed.hasSelection());
 }
 
 TEST(selection_up_grows_shrinks_disappears) {
     Editor ed;
     editorOfLines({"aaa", "bbb", "ccc"}, 2, 1, ed); // anchor (2,1)
-    const int anchorLine = ed.cursor_.line;
-    const int anchorCol = ed.cursor_.col;
+    const int anchorLine = ed.active().cursor.line;
+    const int anchorCol = ed.active().cursor.col;
 
     selectPress(ed, EventType::MoveUp); // (1,1): hacia arriba
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.selection_->anchor.line, anchorLine); // anchor fijo
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().selection->anchor.line, anchorLine); // anchor fijo
     CHECK(ed.hasSelection());
     auto sel = ed.selection();
     CHECK_EQ(sel->start.line, 1);
     CHECK_EQ(sel->end.line, 2);
 
     selectPress(ed, EventType::MoveUp); // (0,1): crece
-    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
+    CHECK_EQ(ed.active().selection->anchor.line, anchorLine);
     sel = ed.selection();
     CHECK_EQ(sel->start.line, 0);
     CHECK_EQ(sel->end.line, 2);
 
     selectPress(ed, EventType::MoveDown); // (1,1): se reduce
-    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
+    CHECK_EQ(ed.active().selection->anchor.line, anchorLine);
     sel = ed.selection();
     CHECK_EQ(sel->start.line, 1);
     CHECK_EQ(sel->end.line, 2);
 
     selectPress(ed, EventType::MoveDown); // (2,1): de vuelta al anchor
-    CHECK_EQ(ed.cursor_.line, anchorLine);
-    CHECK_EQ(ed.cursor_.col, anchorCol);
-    CHECK_EQ(ed.selection_->anchor.line, anchorLine);
+    CHECK_EQ(ed.active().cursor.line, anchorLine);
+    CHECK_EQ(ed.active().cursor.col, anchorCol);
+    CHECK_EQ(ed.active().selection->anchor.line, anchorLine);
     CHECK(!ed.hasSelection());
 }
 
 TEST(selection_home_grows_shrinks_disappears) {
     Editor ed;
     setupAbcde(ed);           // anchor (0,2)
-    const int anchor = ed.cursor_.col;
+    const int anchor = ed.active().cursor.col;
 
     selectPress(ed, EventType::MoveHome); // (0,0): salta al inicio
-    CHECK_EQ(ed.cursor_.col, 0);
-    CHECK_EQ(ed.selection_->anchor.col, anchor); // anchor fijo
+    CHECK_EQ(ed.active().cursor.col, 0);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor); // anchor fijo
     CHECK(ed.hasSelection());
     auto sel = ed.selection();
     CHECK_EQ(sel->start.col, 0);
     CHECK_EQ(sel->end.col, 2);
 
     selectPress(ed, EventType::MoveRight); // (0,1): se reduce hacia el anchor
-    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor);
     sel = ed.selection();
     CHECK_EQ(sel->start.col, 1);
     CHECK_EQ(sel->end.col, 2);
 
     selectPress(ed, EventType::MoveRight); // (0,2): de vuelta al anchor
-    CHECK_EQ(ed.cursor_.col, anchor);
-    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK_EQ(ed.active().cursor.col, anchor);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor);
     CHECK(!ed.hasSelection());
 }
 
 TEST(selection_end_grows_shrinks_disappears) {
     Editor ed;
     setupAbcde(ed);           // anchor (0,2)
-    const int anchor = ed.cursor_.col;
+    const int anchor = ed.active().cursor.col;
 
     selectPress(ed, EventType::MoveEnd); // (0,5): salta al final
-    CHECK_EQ(ed.cursor_.col, 5);
-    CHECK_EQ(ed.selection_->anchor.col, anchor); // anchor fijo
+    CHECK_EQ(ed.active().cursor.col, 5);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor); // anchor fijo
     CHECK(ed.hasSelection());
     auto sel = ed.selection();
     CHECK_EQ(sel->start.col, 2);
     CHECK_EQ(sel->end.col, 5);
 
     selectPress(ed, EventType::MoveLeft); // (0,4): se reduce hacia el anchor
-    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor);
     sel = ed.selection();
     CHECK_EQ(sel->start.col, 2);
     CHECK_EQ(sel->end.col, 4);
 
     selectPress(ed, EventType::MoveLeft);
     selectPress(ed, EventType::MoveLeft); // (0,2): de vuelta al anchor
-    CHECK_EQ(ed.cursor_.col, anchor);
-    CHECK_EQ(ed.selection_->anchor.col, anchor);
+    CHECK_EQ(ed.active().cursor.col, anchor);
+    CHECK_EQ(ed.active().selection->anchor.col, anchor);
     CHECK(!ed.hasSelection());
 }
 
@@ -1043,8 +1043,8 @@ TEST(selection_end_grows_shrinks_disappears) {
 // Seleccion es estado del editor, no una edicion al texto.
 // Simulamos un "guardado" fijando savedLines_/modified_ directamente.
 static void markSaved(Editor& ed) {
-    ed.savedLines_ = ed.document_.snapshot();
-    ed.modified_ = false;
+    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().modified = false;
 }
 
 TEST(selection_does_not_set_modified) {
@@ -1057,7 +1057,7 @@ TEST(selection_does_not_set_modified) {
     selectPress(ed, EventType::MoveRight);
     selectPress(ed, EventType::MoveRight);
     CHECK(ed.hasSelection());
-    CHECK(!ed.modified_);
+    CHECK(!ed.active().modified);
 }
 
 TEST(selection_cancel_does_not_set_modified) {
@@ -1072,7 +1072,7 @@ TEST(selection_cancel_does_not_set_modified) {
     // Cancelar la seleccion con ESC tampoco modifica.
     press(ed, EventType::Escape);
     CHECK(!ed.hasSelection());
-    CHECK(!ed.modified_);
+    CHECK(!ed.active().modified);
 }
 
 // ---------------------------------------------------------------------------
@@ -1099,7 +1099,7 @@ TEST(editor_save_with_selection) {
 
     // El archivo guarda SOLO el documento, sin nada de seleccion.
     CHECK_EQ(selSavedContent(f.path), "hello");
-    CHECK(!ed.modified_);
+    CHECK(!ed.active().modified);
     CHECK(ed.hasSelection()); // la seleccion en pantalla sigue intacta
 }
 
@@ -1116,7 +1116,7 @@ TEST(editor_save_after_selection_cancel) {
     save(ed);   // Ctrl+K + Ctrl+S
 
     CHECK_EQ(selSavedContent(f.path), "hello");
-    CHECK(!ed.modified_);
+    CHECK(!ed.active().modified);
 }
 
 // ---------------------------------------------------------------------------
@@ -1133,9 +1133,9 @@ TEST(selection_empty_document) {
     selectPress(ed, EventType::MoveDown);
 
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
-    CHECK_EQ(ed.document_.lineAt(0), "");
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
+    CHECK_EQ(ed.active().document.lineAt(0), "");
 }
 
 TEST(selection_empty_line) {
@@ -1149,8 +1149,8 @@ TEST(selection_empty_line) {
     selectPress(ed, EventType::MoveRight); // linea vacia: no se mueve
 
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 0);
 }
 
 TEST(selection_entire_document) {
@@ -1178,7 +1178,7 @@ TEST(selection_c_exits_to_navegacion) {
     ed.handleEvent(insert('c'));
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK_EQ(ed.document_.lineAt(0), "abcde");
+    CHECK_EQ(ed.active().document.lineAt(0), "abcde");
 }
 
 TEST(selection_other_char_ignored) {
@@ -1191,7 +1191,7 @@ TEST(selection_other_char_ignored) {
     ed.handleEvent(insert('Z'));
     CHECK(ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
-    CHECK_EQ(ed.document_.lineAt(0), "abcde");
+    CHECK_EQ(ed.active().document.lineAt(0), "abcde");
 }
 
 // ---------------------------------------------------------------------------
@@ -1206,9 +1206,9 @@ static void assertCopied(Editor& ed,
                          const std::vector<std::string>& expectedClipboard) {
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK(ed.document_.snapshot() == docBefore);     // documento identico
-    CHECK_EQ(ed.cursor_.line, lineBefore);            // cursor en el mismo lugar
-    CHECK_EQ(ed.cursor_.col, colBefore);
+    CHECK(ed.active().document.snapshot() == docBefore);     // documento identico
+    CHECK_EQ(ed.active().cursor.line, lineBefore);            // cursor en el mismo lugar
+    CHECK_EQ(ed.active().cursor.col, colBefore);
     CHECK(ed.clipboard_ == expectedClipboard);        // buffer exacto
 }
 
@@ -1218,9 +1218,9 @@ TEST(selection_c_without_selection_noop) {
     Editor ed;
     type(ed, "hola");
     markSaved(ed);
-    const std::vector<std::string> docBefore = ed.document_.snapshot();
-    const size_t undoBefore = ed.undoStack_.size();
-    const size_t redoBefore = ed.redoStack_.size();
+    const std::vector<std::string> docBefore = ed.active().document.snapshot();
+    const size_t undoBefore = ed.active().undoStack.size();
+    const size_t redoBefore = ed.active().redoStack.size();
     ed.clipboard_ = std::vector<std::string>{"previo"}; // contenido previo
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);                 // s
@@ -1229,10 +1229,10 @@ TEST(selection_c_without_selection_noop) {
     ed.handleEvent(insert('c'));
 
     CHECK_EQ(ed.statusMessage_, "Nada seleccionado.");
-    CHECK(ed.document_.snapshot() == docBefore);       // no modifica documento
-    CHECK_EQ(ed.undoStack_.size(), undoBefore);        // no modifica undo
-    CHECK_EQ(ed.redoStack_.size(), redoBefore);        // no modifica redo
-    CHECK(!ed.modified_);                              // no modifica modified_
+    CHECK(ed.active().document.snapshot() == docBefore);       // no modifica documento
+    CHECK_EQ(ed.active().undoStack.size(), undoBefore);        // no modifica undo
+    CHECK_EQ(ed.active().redoStack.size(), redoBefore);        // no modifica redo
+    CHECK(!ed.active().modified);                              // no modifica modified_
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(ed.clipboard_ == std::vector<std::string>{"previo"}); // buffer intacto
 }
@@ -1240,7 +1240,7 @@ TEST(selection_c_without_selection_noop) {
 TEST(selection_c_copies_single_char) {
     Editor ed;
     setupAbcde(ed);                    // "abcde", cursor (0,2)
-    const auto docBefore = ed.document_.snapshot();
+    const auto docBefore = ed.active().document.snapshot();
     selectPress(ed, EventType::MoveRight); // [c] -> cursor (0,3)
     CHECK(ed.hasSelection());
 
@@ -1252,7 +1252,7 @@ TEST(selection_c_copies_single_char) {
 TEST(selection_c_copies_multiple_chars) {
     Editor ed;
     setupAbcde(ed);                    // "abcde", cursor (0,2)
-    const auto docBefore = ed.document_.snapshot();
+    const auto docBefore = ed.active().document.snapshot();
     selectPress(ed, EventType::MoveRight); // (0,3)
     selectPress(ed, EventType::MoveRight); // (0,4): [cd]
     selectPress(ed, EventType::MoveRight); // (0,5): [cde]
@@ -1275,7 +1275,7 @@ TEST(selection_c_copies_reverse_selection) {
     auto sel = ed.selection();
     CHECK_EQ(sel->start.col, 4);
     CHECK_EQ(sel->end.col, 6);
-    const auto docBefore = ed.document_.snapshot();
+    const auto docBefore = ed.active().document.snapshot();
 
     ed.handleEvent(insert('c'));
 
@@ -1285,7 +1285,7 @@ TEST(selection_c_copies_reverse_selection) {
 TEST(selection_c_copies_multiline) {
     Editor ed;
     editorOfLines({"aaa", "bbb", "ccc"}, 0, 1, ed); // cursor (0,1) -> anchor
-    const auto docBefore = ed.document_.snapshot();
+    const auto docBefore = ed.active().document.snapshot();
     selectPress(ed, EventType::MoveDown); // (1,1)
     selectPress(ed, EventType::MoveDown); // (2,1)
     selectPress(ed, EventType::MoveEnd);  // (2,3)
@@ -1299,7 +1299,7 @@ TEST(selection_c_copies_multiline) {
 TEST(selection_c_copies_entire_document) {
     Editor ed;
     editorOfLines({"linea1", "linea2", "linea3"}, 0, 0, ed); // cursor (0,0)
-    const auto docBefore = ed.document_.snapshot();
+    const auto docBefore = ed.active().document.snapshot();
     selectPress(ed, EventType::MoveDown); // (1,0)
     selectPress(ed, EventType::MoveDown); // (2,0)
     selectPress(ed, EventType::MoveHome);
@@ -1325,8 +1325,8 @@ static void checkNormalized(const Editor& ed) {
     const Position& e = sel->end;
     CHECK(!(e < s)); // end nunca antes que start
     // Coherencia con el estado interno: los extremos son los del rango.
-    CHECK(s == ed.selection_->anchor || s == ed.selection_->position);
-    CHECK(e == ed.selection_->anchor || e == ed.selection_->position);
+    CHECK(s == ed.active().selection->anchor || s == ed.active().selection->position);
+    CHECK(e == ed.active().selection->anchor || e == ed.active().selection->position);
 }
 
 TEST(normalize_right_same_line_forward) {
@@ -1509,7 +1509,7 @@ TEST(normalize_end_both_directions) {
 static void enterSelectAll(Editor& ed) {
     enterSeleccion(ed);
     ed.handleEvent(insert('a'));
-    CHECK(ed.selectAllActive_);
+    CHECK(ed.active().selectAllActive);
 }
 
 TEST(select_all_covers_whole_file_cursor_kept) {
@@ -1520,7 +1520,7 @@ TEST(select_all_covers_whole_file_cursor_kept) {
     ed.handleEvent(insert('a'));
 
     // El prefijo quedo activo y cubre el archivo entero [0,0]..[2,3).
-    CHECK(ed.selectAllActive_);
+    CHECK(ed.active().selectAllActive);
     auto sel = ed.selection();
     CHECK(sel.has_value());
     CHECK_EQ(sel->start.line, 0);
@@ -1528,10 +1528,10 @@ TEST(select_all_covers_whole_file_cursor_kept) {
     CHECK_EQ(sel->end.line, 2);
     CHECK_EQ(sel->end.col, 3);
     // El cursor NO se mueve al hacer 'a'.
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 1);
-    CHECK((ed.selection_->anchor == Position{0, 0}));
-    CHECK((ed.selection_->position == Position{2, 3}));
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 1);
+    CHECK((ed.active().selection->anchor == Position{0, 0}));
+    CHECK((ed.active().selection->position == Position{2, 3}));
 }
 
 TEST(select_all_toggle_returns_to_previous_selection) {
@@ -1544,10 +1544,10 @@ TEST(select_all_toggle_returns_to_previous_selection) {
     const auto before = ed.selection();
 
     ed.handleEvent(insert('a')); // seleccion total
-    CHECK(ed.selectAllActive_);
+    CHECK(ed.active().selectAllActive);
 
     ed.handleEvent(insert('a')); // toggle: vuelve a la seleccion previa
-    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.active().selectAllActive);
     auto sel = ed.selection();
     CHECK(sel.has_value());
     CHECK_EQ(sel->start.col, before->start.col);
@@ -1561,18 +1561,18 @@ TEST(select_all_toggle_from_empty_returns_empty) {
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);           // anchor == cursor, sin seleccion
     CHECK(!ed.hasSelection());
-    const int l = ed.cursor_.line, c = ed.cursor_.col;
+    const int l = ed.active().cursor.line, c = ed.active().cursor.col;
 
     ed.handleEvent(insert('a')); // seleccion total
     CHECK(ed.hasSelection());
     ed.handleEvent(insert('a')); // toggle -> vuelve a sin seleccion
 
-    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.active().selectAllActive);
     CHECK(!ed.hasSelection());
     CHECK(!ed.selection().has_value());
     // El cursor queda donde estaba antes de 'a'.
-    CHECK_EQ(ed.cursor_.line, l);
-    CHECK_EQ(ed.cursor_.col, c);
+    CHECK_EQ(ed.active().cursor.line, l);
+    CHECK_EQ(ed.active().cursor.col, c);
 }
 
 TEST(select_all_toggle_back_then_move_right) {
@@ -1582,23 +1582,23 @@ TEST(select_all_toggle_back_then_move_right) {
     Editor ed;
     setupAbcde(ed);           // "abcde", cursor (0,2) -> anchor sera (0,2)
     enterSeleccion(ed);
-    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK_EQ(ed.active().cursor.col, 2);
     CHECK(!ed.hasSelection());
 
     ed.handleEvent(insert('a')); // seleccion total, cursor intacto
-    CHECK(ed.selectAllActive_);
-    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK(ed.active().selectAllActive);
+    CHECK_EQ(ed.active().cursor.col, 2);
 
     ed.handleEvent(insert('a')); // toggle de vuelta, cursor intacto
-    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.active().selectAllActive);
     CHECK(!ed.hasSelection());
-    CHECK_EQ(ed.cursor_.col, 2); // NO se movio tras el toggle
+    CHECK_EQ(ed.active().cursor.col, 2); // NO se movio tras el toggle
 
     press(ed, EventType::MoveRight);      // extiende desde (0,2) -> (0,3)
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 3);
-    CHECK_EQ(ed.selection_->anchor.col, 2); // anchor = posicion original
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 3);
+    CHECK_EQ(ed.active().selection->anchor.col, 2); // anchor = posicion original
     auto sel = ed.selection();
     CHECK_EQ(sel->start.col, 2);
     CHECK_EQ(sel->end.col, 3);
@@ -1610,17 +1610,17 @@ TEST(select_all_right_moves_to_eof) {
     enterSelectAll(ed);
 
     press(ed, EventType::MoveRight);
-    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.active().selectAllActive);
     // cursor == anchor == EOF, sin seleccion activa.
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 3);
     CHECK(!ed.hasSelection());
     // La seleccion total NO quedo colgando: se colapso a {EOF, EOF} (sin
     // seleccion) en vez de conservar [BOF, EOF].
-    CHECK(ed.selection_.has_value());
-    CHECK(ed.selection_->anchor == ed.selection_->position);
-    CHECK((ed.selection_->anchor == Position{1, 3}));
-    CHECK(!ed.selectAllPrevious_.has_value()); // sin estado previo residual
+    CHECK(ed.active().selection.has_value());
+    CHECK(ed.active().selection->anchor == ed.active().selection->position);
+    CHECK((ed.active().selection->anchor == Position{1, 3}));
+    CHECK(!ed.active().selectAllPrevious.has_value()); // sin estado previo residual
 }
 
 TEST(select_all_down_moves_to_eof) {
@@ -1629,13 +1629,13 @@ TEST(select_all_down_moves_to_eof) {
     enterSelectAll(ed);
 
     press(ed, EventType::MoveDown);
-    CHECK(!ed.selectAllActive_);
-    CHECK_EQ(ed.cursor_.line, 2);
-    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK(!ed.active().selectAllActive);
+    CHECK_EQ(ed.active().cursor.line, 2);
+    CHECK_EQ(ed.active().cursor.col, 3);
     CHECK(!ed.hasSelection());
-    CHECK(ed.selection_.has_value());
-    CHECK(ed.selection_->anchor == ed.selection_->position);
-    CHECK(!ed.selectAllPrevious_.has_value());
+    CHECK(ed.active().selection.has_value());
+    CHECK(ed.active().selection->anchor == ed.active().selection->position);
+    CHECK(!ed.active().selectAllPrevious.has_value());
 }
 
 TEST(select_all_left_moves_to_bof) {
@@ -1644,14 +1644,14 @@ TEST(select_all_left_moves_to_bof) {
     enterSelectAll(ed);
 
     press(ed, EventType::MoveLeft);
-    CHECK(!ed.selectAllActive_);
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK(!ed.active().selectAllActive);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
     CHECK(!ed.hasSelection());
-    CHECK(ed.selection_.has_value());
-    CHECK(ed.selection_->anchor == ed.selection_->position);
-    CHECK((ed.selection_->anchor == Position{0, 0}));
-    CHECK(!ed.selectAllPrevious_.has_value());
+    CHECK(ed.active().selection.has_value());
+    CHECK(ed.active().selection->anchor == ed.active().selection->position);
+    CHECK((ed.active().selection->anchor == Position{0, 0}));
+    CHECK(!ed.active().selectAllPrevious.has_value());
 }
 
 TEST(select_all_up_moves_to_bof) {
@@ -1660,13 +1660,13 @@ TEST(select_all_up_moves_to_bof) {
     enterSelectAll(ed);
 
     press(ed, EventType::MoveUp);
-    CHECK(!ed.selectAllActive_);
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK(!ed.active().selectAllActive);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
     CHECK(!ed.hasSelection());
-    CHECK(ed.selection_.has_value());
-    CHECK(ed.selection_->anchor == ed.selection_->position);
-    CHECK(!ed.selectAllPrevious_.has_value());
+    CHECK(ed.active().selection.has_value());
+    CHECK(ed.active().selection->anchor == ed.active().selection->position);
+    CHECK(!ed.active().selectAllPrevious.has_value());
 }
 
 TEST(select_all_escape_cancels) {
@@ -1674,14 +1674,14 @@ TEST(select_all_escape_cancels) {
     editorOfLines({"aaa", "bbb", "ccc"}, 0, 0, ed);
     enterSelectAll(ed);
     CHECK(ed.hasSelection());
-    const int l = ed.cursor_.line, c = ed.cursor_.col;
+    const int l = ed.active().cursor.line, c = ed.active().cursor.col;
 
     press(ed, EventType::Escape);
-    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.active().selectAllActive);
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK_EQ(ed.cursor_.line, l);
-    CHECK_EQ(ed.cursor_.col, c);
+    CHECK_EQ(ed.active().cursor.line, l);
+    CHECK_EQ(ed.active().cursor.col, c);
 }
 
 TEST(select_all_unknown_key_is_noop) {
@@ -1690,7 +1690,7 @@ TEST(select_all_unknown_key_is_noop) {
     enterSelectAll(ed);
 
     ed.handleEvent(insert('Z')); // tecla desconocida: no pasa nada
-    CHECK(ed.selectAllActive_);
+    CHECK(ed.active().selectAllActive);
     CHECK(ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     auto sel = ed.selection();
@@ -1706,31 +1706,31 @@ TEST(select_all_c_copies_whole_file) {
     enterSelectAll(ed);
 
     ed.handleEvent(insert('c'));
-    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.active().selectAllActive);
     CHECK(ed.clipboard_ == (std::vector<std::string>{"linea1", "linea2"}));
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     // El documento no cambia al copiar.
-    CHECK(ed.document_.snapshot() == (std::vector<std::string>{"linea1", "linea2"}));
+    CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"linea1", "linea2"}));
 }
 
 TEST(select_all_x_cuts_whole_file) {
     Editor ed;
     editorOfLines({"linea1", "linea2"}, 1, 0, ed);
-    const size_t undoBefore = ed.undoStack_.size();
+    const size_t undoBefore = ed.active().undoStack.size();
     enterSelectAll(ed);
 
     ed.handleEvent(insert('x'));
-    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.active().selectAllActive);
     CHECK(ed.clipboard_ == (std::vector<std::string>{"linea1", "linea2"}));
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     // El archivo entero se borro -> queda una unica linea vacia.
-    CHECK_EQ(ed.document_.lineCount(), 1);
-    CHECK_EQ(ed.document_.lineAt(0), "");
-    CHECK(ed.modified_);
+    CHECK_EQ(ed.active().document.lineCount(), 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "");
+    CHECK(ed.active().modified);
     // Cortar es una edicion: agrega historial.
-    CHECK_EQ(ed.undoStack_.size(), undoBefore + 1);
+    CHECK_EQ(ed.active().undoStack.size(), undoBefore + 1);
 }
 
 TEST(select_all_not_active_cursor_and_selection_agree) {
@@ -1742,10 +1742,10 @@ TEST(select_all_not_active_cursor_and_selection_agree) {
     ed.handleEvent(insert('s'));
     ed.handleEvent(insert('a'));
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 1); // cursor intacto durante el prefijo
+    CHECK_EQ(ed.active().cursor.line, 1); // cursor intacto durante el prefijo
 
     press(ed, EventType::Escape); // cancelar
-    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.active().selectAllActive);
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
@@ -1758,35 +1758,35 @@ TEST(select_all_empty_file) {
     // cubre un rango degenerado [0,0]..[0,0]. El prefijo queda activo y el
     // cursor no se mueve.
     Editor ed;
-    ed.document_.restore({""});
+    ed.active().document.restore({""});
     enterSeleccion(ed);
     ed.handleEvent(insert('a'));
 
-    CHECK(ed.selectAllActive_);
-    CHECK(ed.selection_.has_value());
-    CHECK((ed.selection_->anchor == Position{0, 0}));
-    CHECK((ed.selection_->position == Position{0, 0}));
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK(ed.active().selectAllActive);
+    CHECK(ed.active().selection.has_value());
+    CHECK((ed.active().selection->anchor == Position{0, 0}));
+    CHECK((ed.active().selection->position == Position{0, 0}));
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
 }
 
 TEST(select_all_single_line) {
     // Archivo de una sola linea: el rango va de [0,0] hasta el final de la
     // unica linea, sin mover el cursor.
     Editor ed;
-    ed.document_.restore({"hola"});
+    ed.active().document.restore({"hola"});
     enterSeleccion(ed);
     ed.handleEvent(insert('a'));
 
-    CHECK(ed.selectAllActive_);
+    CHECK(ed.active().selectAllActive);
     auto sel = ed.selection();
     CHECK(sel.has_value());
     CHECK_EQ(sel->start.line, 0);
     CHECK_EQ(sel->start.col, 0);
     CHECK_EQ(sel->end.line, 0);
     CHECK_EQ(sel->end.col, 4);
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
 }
 
 TEST(select_all_toggle_then_copy_copies_previous) {
@@ -1798,10 +1798,10 @@ TEST(select_all_toggle_then_copy_copies_previous) {
     const auto before = ed.selection();
     CHECK(before.has_value());
     enterSelectAll(ed);          // 'a': seleccion total
-    CHECK(ed.selectAllActive_);
+    CHECK(ed.active().selectAllActive);
 
     ed.handleEvent(insert('a')); // toggle -> vuelve al rango previo [2,3)
-    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.active().selectAllActive);
     auto sel = ed.selection();
     CHECK(sel.has_value());
     CHECK_EQ(sel->start.col, before->start.col);
@@ -1820,18 +1820,18 @@ TEST(select_all_toggle_then_cut_cuts_previous) {
     setupAbcde(ed);              // "abcde", cursor (0,2) -> anchor (0,2)
     selectPress(ed, EventType::MoveRight); // [c] -> (0,3)
     enterSelectAll(ed);          // 'a': seleccion total
-    CHECK(ed.selectAllActive_);
+    CHECK(ed.active().selectAllActive);
 
     ed.handleEvent(insert('a')); // toggle -> vuelve a [2,3)
-    CHECK(!ed.selectAllActive_);
+    CHECK(!ed.active().selectAllActive);
 
     ed.handleEvent(insert('x')); // corta SOLO la 'c'
     CHECK(ed.clipboard_ == (std::vector<std::string>{"c"}));
-    CHECK_EQ(ed.document_.lineAt(0), "abde");
+    CHECK_EQ(ed.active().document.lineAt(0), "abde");
     // Cursor al inicio de lo cortado (0,2).
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 2);
-    CHECK(ed.modified_);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 2);
+    CHECK(ed.active().modified);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
@@ -1852,26 +1852,26 @@ static std::vector<std::string> linesOf(int n) {
 TEST(pageup_moves_cursor_and_viewport_keeping_relative) {
     Editor ed;
     editorOfLines(linesOf(100), 67, 2, ed);
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 60;          // visible 60..79, cursor relativo 7
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 60;          // visible 60..79, cursor relativo 7
 
     press(ed, EventType::PageUp);
 
-    CHECK_EQ(ed.viewport_.top, 40); // 60 - 20
-    CHECK_EQ(ed.cursor_.line, 47);  // 67 - 20; relativo 7 conservado
-    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK_EQ(ed.active().viewport.top, 40); // 60 - 20
+    CHECK_EQ(ed.active().cursor.line, 47);  // 67 - 20; relativo 7 conservado
+    CHECK_EQ(ed.active().cursor.col, 2);
 }
 
 TEST(pagedown_moves_cursor_and_viewport) {
     Editor ed;
     editorOfLines(linesOf(100), 47, 0, ed);
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 40;
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 40;
 
     press(ed, EventType::PageDown);
 
-    CHECK_EQ(ed.viewport_.top, 60); // 40 + 20
-    CHECK_EQ(ed.cursor_.line, 67);  // 47 + 20
+    CHECK_EQ(ed.active().viewport.top, 60); // 40 + 20
+    CHECK_EQ(ed.active().cursor.line, 67);  // 47 + 20
 }
 
 TEST(pageup_top_clamp_keeps_relative) {
@@ -1879,13 +1879,13 @@ TEST(pageup_top_clamp_keeps_relative) {
     // completa; top se clampa a 0 y el cursor conserva su posicion relativa.
     Editor ed;
     editorOfLines(linesOf(100), 15, 1, ed);
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 10;          // relativo 15 - 10 = 5
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 10;          // relativo 15 - 10 = 5
 
     press(ed, EventType::PageUp);
 
-    CHECK_EQ(ed.viewport_.top, 0);
-    CHECK_EQ(ed.cursor_.line, 5);   // posicion relativa equivalente (5)
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().cursor.line, 5);   // posicion relativa equivalente (5)
 }
 
 TEST(pagedown_bottom_clamp_never_exceeds_eof) {
@@ -1893,30 +1893,30 @@ TEST(pagedown_bottom_clamp_never_exceeds_eof) {
     // ultima linea del archivo y el cursor nunca la supera.
     Editor ed;
     editorOfLines(linesOf(50), 25, 0, ed); // lineas 0..49, EOF = 49
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 10;          // relativo 15
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 10;          // relativo 15
 
     press(ed, EventType::PageDown);
 
-    CHECK_EQ(ed.viewport_.top, 30);      // maxTop = 50 - 20
-    CHECK_EQ(ed.cursor_.line, 45);       // 30 + 15
-    CHECK(ed.viewport_.top + ed.viewport_.height - 1 <= ed.document_.lineCount() - 1);
-    CHECK(ed.cursor_.line <= ed.document_.lineCount() - 1);
+    CHECK_EQ(ed.active().viewport.top, 30);      // maxTop = 50 - 20
+    CHECK_EQ(ed.active().cursor.line, 45);       // 30 + 15
+    CHECK(ed.active().viewport.top + ed.active().viewport.height - 1 <= ed.active().document.lineCount() - 1);
+    CHECK(ed.active().cursor.line <= ed.active().document.lineCount() - 1);
 }
 
 TEST(page_small_file_fits_in_viewport) {
     // Archivo pequeno que cabe entero: RePag -> inicio, AvPag -> final.
     Editor ed;
     editorOfLines(linesOf(10), 5, 0, ed); // 10 lineas < viewport 20
-    ed.viewport_.height = 20;
+    ed.active().viewport.height = 20;
 
     press(ed, EventType::PageDown);
-    CHECK_EQ(ed.viewport_.top, 0);
-    CHECK_EQ(ed.cursor_.line, 9); // final del archivo
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().cursor.line, 9); // final del archivo
 
     press(ed, EventType::PageUp);
-    CHECK_EQ(ed.viewport_.top, 0);
-    CHECK_EQ(ed.cursor_.line, 0); // inicio del archivo
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().cursor.line, 0); // inicio del archivo
 }
 
 // ---------------------------------------------------------------------------
@@ -1926,7 +1926,7 @@ TEST(page_small_file_fits_in_viewport) {
 // scrollToCursor() debe ser un no-op que conserve el viewport y el cursor.
 // Simulamos ese paso del run loop llamando a scrollToCursor() tras el evento.
 static void runLoopScroll(Editor& ed) {
-    ed.viewport_.scrollToCursor(ed.cursor_);
+    ed.active().viewport.scrollToCursor(ed.active().cursor);
 }
 
 TEST(page_repag_json_example_with_scroll) {
@@ -1934,16 +1934,16 @@ TEST(page_repag_json_example_with_scroll) {
     // -> viewport 40..59, cursor 47. scrollToCursor() no debe mover nada.
     Editor ed;
     editorOfLines(linesOf(100), 67, 2, ed);
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 60;
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 60;
 
     press(ed, EventType::PageUp);
     runLoopScroll(ed);
 
-    CHECK_EQ(ed.viewport_.top, 40);
-    CHECK_EQ(ed.cursor_.line, 47);
-    CHECK(ed.cursor_.line >= ed.viewport_.top);
-    CHECK(ed.cursor_.line < ed.viewport_.top + ed.viewport_.height);
+    CHECK_EQ(ed.active().viewport.top, 40);
+    CHECK_EQ(ed.active().cursor.line, 47);
+    CHECK(ed.active().cursor.line >= ed.active().viewport.top);
+    CHECK(ed.active().cursor.line < ed.active().viewport.top + ed.active().viewport.height);
 }
 
 TEST(page_avpag_bottom_scroll_glued_to_eof) {
@@ -1952,22 +1952,22 @@ TEST(page_avpag_bottom_scroll_glued_to_eof) {
     // ultima linea.
     Editor ed;
     editorOfLines(linesOf(50), 45, 0, ed); // EOF = 49
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 50 - 20;             // ya abajo, relativo 15
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 50 - 20;             // ya abajo, relativo 15
     // cursor 45 ya esta en el viewport 30..49; scrollToCursor no debe cambiar nada
     runLoopScroll(ed);
-    CHECK_EQ(ed.viewport_.top, 30);
+    CHECK_EQ(ed.active().viewport.top, 30);
 
     press(ed, EventType::PageDown);         // no hay pagina que bajar
     runLoopScroll(ed);
 
-    CHECK_EQ(ed.viewport_.top, 30);         // sigue pegado a EOF
-    CHECK_EQ(ed.cursor_.line, 45);
-    CHECK(ed.viewport_.top + ed.viewport_.height - 1 <= ed.document_.lineCount() - 1);
-    CHECK(ed.cursor_.line <= ed.document_.lineCount() - 1);
+    CHECK_EQ(ed.active().viewport.top, 30);         // sigue pegado a EOF
+    CHECK_EQ(ed.active().cursor.line, 45);
+    CHECK(ed.active().viewport.top + ed.active().viewport.height - 1 <= ed.active().document.lineCount() - 1);
+    CHECK(ed.active().cursor.line <= ed.active().document.lineCount() - 1);
     // El cursor queda visible dentro del viewport.
-    CHECK(ed.cursor_.line >= ed.viewport_.top);
-    CHECK(ed.cursor_.line < ed.viewport_.top + ed.viewport_.height);
+    CHECK(ed.active().cursor.line >= ed.active().viewport.top);
+    CHECK(ed.active().cursor.line < ed.active().viewport.top + ed.active().viewport.height);
 }
 
 TEST(page_repag_top_scroll_keeps_top_zero) {
@@ -1975,15 +1975,15 @@ TEST(page_repag_top_scroll_keeps_top_zero) {
     // relativa (5). scrollToCursor() no puede retroceder mas (top >= 0).
     Editor ed;
     editorOfLines(linesOf(100), 15, 1, ed);
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 10;                  // relativo 5
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 10;                  // relativo 5
 
     press(ed, EventType::PageUp);
     runLoopScroll(ed);
 
-    CHECK_EQ(ed.viewport_.top, 0);
-    CHECK_EQ(ed.cursor_.line, 5);
-    CHECK(ed.cursor_.line >= ed.viewport_.top);
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().cursor.line, 5);
+    CHECK(ed.active().cursor.line >= ed.active().viewport.top);
 }
 
 TEST(page_multiple_avpag_at_bottom_stays_glued) {
@@ -1991,21 +1991,21 @@ TEST(page_multiple_avpag_at_bottom_stays_glued) {
     // tras cada scrollToCursor el viewport sigue pegado a EOF.
     Editor ed;
     editorOfLines(linesOf(200), 0, 0, ed);
-    ed.viewport_.height = 30;
-    ed.viewport_.top = 0;
+    ed.active().viewport.height = 30;
+    ed.active().viewport.top = 0;
 
     for (int i = 0; i < 50; ++i) {
         press(ed, EventType::PageDown);
         runLoopScroll(ed);
-        CHECK(ed.viewport_.top >= 0);
-        CHECK(ed.viewport_.top + ed.viewport_.height - 1 <= ed.document_.lineCount() - 1);
-        CHECK(ed.cursor_.line <= ed.document_.lineCount() - 1);
+        CHECK(ed.active().viewport.top >= 0);
+        CHECK(ed.active().viewport.top + ed.active().viewport.height - 1 <= ed.active().document.lineCount() - 1);
+        CHECK(ed.active().cursor.line <= ed.active().document.lineCount() - 1);
         // El cursor siempre dentro del viewport tras el scroll.
-        CHECK(ed.cursor_.line >= ed.viewport_.top);
-        CHECK(ed.cursor_.line < ed.viewport_.top + ed.viewport_.height);
+        CHECK(ed.active().cursor.line >= ed.active().viewport.top);
+        CHECK(ed.active().cursor.line < ed.active().viewport.top + ed.active().viewport.height);
     }
     // Llego al fondo y se quedo pegado a EOF.
-    CHECK_EQ(ed.viewport_.top, 200 - 30);
+    CHECK_EQ(ed.active().viewport.top, 200 - 30);
 }
 
 TEST(page_multiple_repag_at_top_stays_zero) {
@@ -2013,18 +2013,18 @@ TEST(page_multiple_repag_at_top_stays_zero) {
     // posicion relativa, y el scroll no retrocede.
     Editor ed;
     editorOfLines(linesOf(200), 199, 0, ed);
-    ed.viewport_.height = 30;
-    ed.viewport_.top = 200 - 30;            // abajo del todo
+    ed.active().viewport.height = 30;
+    ed.active().viewport.top = 200 - 30;            // abajo del todo
 
     for (int i = 0; i < 50; ++i) {
         press(ed, EventType::PageUp);
         runLoopScroll(ed);
-        CHECK(ed.viewport_.top >= 0);
-        CHECK(ed.cursor_.line >= 0);
-        CHECK(ed.cursor_.line < ed.document_.lineCount());
+        CHECK(ed.active().viewport.top >= 0);
+        CHECK(ed.active().cursor.line >= 0);
+        CHECK(ed.active().cursor.line < ed.active().document.lineCount());
     }
     // Arriba del todo, pegado al inicio.
-    CHECK_EQ(ed.viewport_.top, 0);
+    CHECK_EQ(ed.active().viewport.top, 0);
 }
 
 TEST(page_avpag_at_absolute_bottom_does_not_overshoot) {
@@ -2034,20 +2034,20 @@ TEST(page_avpag_at_absolute_bottom_does_not_overshoot) {
     // cursor se mantiene en <= 99. Nunca cursor=107 ni viewport 81..100.
     Editor ed;
     editorOfLines(linesOf(100), 87, 0, ed); // 100 lineas, EOF (ultima) = 99
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 80;                   // ultima pagina valida: 80..99
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 80;                   // ultima pagina valida: 80..99
 
     press(ed, EventType::PageDown);
     runLoopScroll(ed);
 
     // El viewport sigue siendo la ultima pagina valida, sin linea fantasma.
-    CHECK_EQ(ed.viewport_.top, 80);
-    CHECK_EQ(ed.viewport_.top + ed.viewport_.height - 1, 99); // fondo pegado a EOF
+    CHECK_EQ(ed.active().viewport.top, 80);
+    CHECK_EQ(ed.active().viewport.top + ed.active().viewport.height - 1, 99); // fondo pegado a EOF
     // El cursor no supero el archivo y sigue dentro del viewport.
-    CHECK_EQ(ed.cursor_.line, 87);
-    CHECK(ed.cursor_.line <= 99);
-    CHECK(ed.cursor_.line >= ed.viewport_.top);
-    CHECK(ed.cursor_.line < ed.viewport_.top + ed.viewport_.height);
+    CHECK_EQ(ed.active().cursor.line, 87);
+    CHECK(ed.active().cursor.line <= 99);
+    CHECK(ed.active().cursor.line >= ed.active().viewport.top);
+    CHECK(ed.active().cursor.line < ed.active().viewport.top + ed.active().viewport.height);
 }
 
 TEST(page_in_seleccion_extends_selection) {
@@ -2055,16 +2055,16 @@ TEST(page_in_seleccion_extends_selection) {
     // una flecha hacia abajo.
     Editor ed;
     editorOfLines(linesOf(50), 5, 0, ed);
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 0;
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 0;
     enterSeleccion(ed);
     CHECK(!ed.hasSelection());
 
     press(ed, EventType::PageDown);
 
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.selection_->anchor.line, 5);   // anchor fijo
-    CHECK_EQ(ed.cursor_.line, 25);             // 5 + 20
+    CHECK_EQ(ed.active().selection->anchor.line, 5);   // anchor fijo
+    CHECK_EQ(ed.active().cursor.line, 25);             // 5 + 20
     auto sel = ed.selection();
     CHECK_EQ(sel->start.line, 5);
     CHECK_EQ(sel->end.line, 25);
@@ -2075,17 +2075,17 @@ TEST(page_blocked_during_select_all) {
     // ESC tienen efecto mientras el prefijo esta activo).
     Editor ed;
     editorOfLines(linesOf(50), 5, 0, ed);
-    ed.viewport_.height = 20;
+    ed.active().viewport.height = 20;
     enterSelectAll(ed);
 
     press(ed, EventType::PageUp);
-    CHECK(ed.selectAllActive_);
-    CHECK_EQ(ed.cursor_.line, 5);   // el cursor no se movio
+    CHECK(ed.active().selectAllActive);
+    CHECK_EQ(ed.active().cursor.line, 5);   // el cursor no se movio
     CHECK(ed.hasSelection());
 
     press(ed, EventType::PageDown);
-    CHECK(ed.selectAllActive_);
-    CHECK_EQ(ed.cursor_.line, 5);
+    CHECK(ed.active().selectAllActive);
+    CHECK_EQ(ed.active().cursor.line, 5);
 }
 
 // ---------------------------------------------------------------------------
@@ -2097,16 +2097,16 @@ TEST(page_file_equal_to_viewport) {
     // inicio, top siempre 0.
     Editor ed;
     editorOfLines(linesOf(20), 5, 0, ed);
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 0;
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 0;
 
     press(ed, EventType::PageDown);
-    CHECK_EQ(ed.viewport_.top, 0);
-    CHECK_EQ(ed.cursor_.line, 19); // ultima linea == height-1
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().cursor.line, 19); // ultima linea == height-1
 
     press(ed, EventType::PageUp);
-    CHECK_EQ(ed.viewport_.top, 0);
-    CHECK_EQ(ed.cursor_.line, 0);
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().cursor.line, 0);
 }
 
 TEST(page_file_slightly_larger_than_viewport) {
@@ -2115,14 +2115,14 @@ TEST(page_file_slightly_larger_than_viewport) {
     // una fila (top=1), no una pagina completa de 20.
     Editor ed;
     editorOfLines(linesOf(21), 0, 0, ed); // lineas 0..20, count 21
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 0;
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 0;
 
     press(ed, EventType::PageDown);
 
-    CHECK_EQ(ed.viewport_.top, 1);         // 21 - 20 = 1
-    CHECK_EQ(ed.cursor_.line, 1);          // rel 0 conservado
-    CHECK(ed.viewport_.top + ed.viewport_.height - 1 <= ed.document_.lineCount() - 1);
+    CHECK_EQ(ed.active().viewport.top, 1);         // 21 - 20 = 1
+    CHECK_EQ(ed.active().cursor.line, 1);          // rel 0 conservado
+    CHECK(ed.active().viewport.top + ed.active().viewport.height - 1 <= ed.active().document.lineCount() - 1);
 }
 
 TEST(page_exact_multiple_of_viewport) {
@@ -2131,24 +2131,24 @@ TEST(page_exact_multiple_of_viewport) {
     // filas fantasma al final.
     Editor ed;
     editorOfLines(linesOf(60), 0, 0, ed); // count 60, height 20
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 0;
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 0;
 
     // Pagina 1 -> top 20, cursor 20.
     press(ed, EventType::PageDown);
-    CHECK_EQ(ed.viewport_.top, 20);
-    CHECK_EQ(ed.cursor_.line, 20);
+    CHECK_EQ(ed.active().viewport.top, 20);
+    CHECK_EQ(ed.active().cursor.line, 20);
 
     // Pagina 2 -> top 40, cursor 40.
     press(ed, EventType::PageDown);
-    CHECK_EQ(ed.viewport_.top, 40);
-    CHECK_EQ(ed.cursor_.line, 40);
+    CHECK_EQ(ed.active().viewport.top, 40);
+    CHECK_EQ(ed.active().cursor.line, 40);
 
     // Pagina 3 -> top 60 (== count), ya no hay; se pega al EOF (maxTop 40).
     press(ed, EventType::PageDown);
-    CHECK_EQ(ed.viewport_.top, 40); // maxTop = 60 - 20
-    CHECK_EQ(ed.cursor_.line, 40);
-    CHECK(ed.viewport_.top + ed.viewport_.height - 1 <= ed.document_.lineCount() - 1);
+    CHECK_EQ(ed.active().viewport.top, 40); // maxTop = 60 - 20
+    CHECK_EQ(ed.active().cursor.line, 40);
+    CHECK(ed.active().viewport.top + ed.active().viewport.height - 1 <= ed.active().document.lineCount() - 1);
 }
 
 TEST(page_cursor_on_first_visible_line) {
@@ -2156,13 +2156,13 @@ TEST(page_cursor_on_first_visible_line) {
     // desplaza viewport y cursor la misma cantidad, manteniendo rel en 0.
     Editor ed;
     editorOfLines(linesOf(100), 60, 2, ed); // cursor 60 == top
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 60;
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 60;
 
     press(ed, EventType::PageUp);
 
-    CHECK_EQ(ed.viewport_.top, 40);
-    CHECK_EQ(ed.cursor_.line, 40); // rel 0
+    CHECK_EQ(ed.active().viewport.top, 40);
+    CHECK_EQ(ed.active().cursor.line, 40); // rel 0
 }
 
 TEST(page_cursor_on_last_visible_line) {
@@ -2170,13 +2170,13 @@ TEST(page_cursor_on_last_visible_line) {
     // pagina conserva esa posicion relativa extrema.
     Editor ed;
     editorOfLines(linesOf(100), 79, 0, ed); // rel = 79 - 60 = 19
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 60;
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 60;
 
     press(ed, EventType::PageUp);
 
-    CHECK_EQ(ed.viewport_.top, 40);
-    CHECK_EQ(ed.cursor_.line, 59); // rel 19 conservado
+    CHECK_EQ(ed.active().viewport.top, 40);
+    CHECK_EQ(ed.active().cursor.line, 59); // rel 19 conservado
 }
 
 TEST(page_pageup_then_pagedown_roundtrip) {
@@ -2184,32 +2184,32 @@ TEST(page_pageup_then_pagedown_roundtrip) {
     // original (movimiento reversible, sin clamps en el medio).
     Editor ed;
     editorOfLines(linesOf(100), 47, 0, ed);
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 40; // rel 7
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 40; // rel 7
 
     press(ed, EventType::PageUp);
-    CHECK_EQ(ed.viewport_.top, 20);
-    CHECK_EQ(ed.cursor_.line, 27);
+    CHECK_EQ(ed.active().viewport.top, 20);
+    CHECK_EQ(ed.active().cursor.line, 27);
 
     press(ed, EventType::PageDown);
-    CHECK_EQ(ed.viewport_.top, 40); // vuelve al top original
-    CHECK_EQ(ed.cursor_.line, 47);
+    CHECK_EQ(ed.active().viewport.top, 40); // vuelve al top original
+    CHECK_EQ(ed.active().cursor.line, 47);
 }
 
 TEST(page_pagedown_then_pageup_roundtrip) {
     // AvPag y luego RePag: simetrico al roundtrip anterior.
     Editor ed;
     editorOfLines(linesOf(100), 47, 0, ed);
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 40; // rel 7
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 40; // rel 7
 
     press(ed, EventType::PageDown);
-    CHECK_EQ(ed.viewport_.top, 60);
-    CHECK_EQ(ed.cursor_.line, 67);
+    CHECK_EQ(ed.active().viewport.top, 60);
+    CHECK_EQ(ed.active().cursor.line, 67);
 
     press(ed, EventType::PageUp);
-    CHECK_EQ(ed.viewport_.top, 40);
-    CHECK_EQ(ed.cursor_.line, 47);
+    CHECK_EQ(ed.active().viewport.top, 40);
+    CHECK_EQ(ed.active().cursor.line, 47);
 }
 
 TEST(page_pageup_in_seleccion_extends_upwards) {
@@ -2217,16 +2217,16 @@ TEST(page_pageup_in_seleccion_extends_upwards) {
     // arriba, extendiendo la seleccion (espejo de page_in_seleccion_extends).
     Editor ed;
     editorOfLines(linesOf(50), 30, 0, ed);
-    ed.viewport_.height = 20;
-    ed.viewport_.top = 20;          // rel 10
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 20;          // rel 10
     enterSeleccion(ed);
     CHECK(!ed.hasSelection());
 
     press(ed, EventType::PageUp);
 
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.selection_->anchor.line, 30); // anchor fijo
-    CHECK_EQ(ed.cursor_.line, 10);             // 30 - 20
+    CHECK_EQ(ed.active().selection->anchor.line, 30); // anchor fijo
+    CHECK_EQ(ed.active().cursor.line, 10);             // 30 - 20
     auto sel = ed.selection();
     CHECK_EQ(sel->start.line, 10);
     CHECK_EQ(sel->end.line, 30);
@@ -2245,13 +2245,13 @@ TEST(navegacion_j_moves_cursor) {
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     ed.handleEvent(insert('k'));
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 3); // fin de "uno"
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 3); // fin de "uno"
     CHECK(!ed.hasSelection());
 
     ed.handleEvent(insert('j'));
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0); // inicio de "uno"
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0); // inicio de "uno"
     CHECK(!ed.hasSelection());
 }
 
@@ -2263,17 +2263,17 @@ TEST(selection_j_extends_keeping_anchor) {
 
     ed.handleEvent(insert('k')); // fin de "uno" -> (0,3)
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.selection_->anchor.col, 0);        // anchor fijo
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK_EQ(ed.active().selection->anchor.col, 0);        // anchor fijo
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 3);
     auto sel = ed.selection();
     CHECK_EQ(sel->start.col, 0);
     CHECK_EQ(sel->end.col, 3);
 
     ed.handleEvent(insert('k')); // fin de "dos" -> (0,7)
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.selection_->anchor.col, 0);        // anchor sigue fijo
-    CHECK_EQ(ed.cursor_.col, 7);
+    CHECK_EQ(ed.active().selection->anchor.col, 0);        // anchor sigue fijo
+    CHECK_EQ(ed.active().cursor.col, 7);
     sel = ed.selection();
     CHECK_EQ(sel->end.col, 7);
 }
@@ -2281,16 +2281,16 @@ TEST(selection_j_extends_keeping_anchor) {
 TEST(selection_k_extends_backwards) {
     Editor ed;
     editorOfLines({"uno dos tres"}, 0, 0, ed);
-    const int undoBefore = static_cast<int>(ed.undoStack_.size());
+    const int undoBefore = static_cast<int>(ed.active().undoStack.size());
     enterSeleccion(ed);
 
     ed.handleEvent(insert('k')); // (0,3)
     ed.handleEvent(insert('j')); // vuelve al inicio "uno" -> (0,0): se encoge
     CHECK(!ed.hasSelection());   // anchor == cursor de vuelta en (0,0)
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
     // j/k en seleccion NO son ediciones: no tocan el historial.
-    CHECK_EQ(ed.undoStack_.size(), static_cast<size_t>(undoBefore));
+    CHECK_EQ(ed.active().undoStack.size(), static_cast<size_t>(undoBefore));
 }
 
 TEST(selection_j_multiline_utf8) {
@@ -2301,17 +2301,17 @@ TEST(selection_j_multiline_utf8) {
 
     ed.handleEvent(insert('k')); // fin de "hola" -> (0,4)
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 4);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 4);
 
     ed.handleEvent(insert('k')); // fin de "café" -> (0,10)
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 10);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 10);
 
     ed.handleEvent(insert('k')); // fin de "mundo" -> (1,5)
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 5);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 5);
     auto sel = ed.selection();
     CHECK_EQ(sel->start.line, 0);
     CHECK_EQ(sel->start.col, 0);
@@ -2326,20 +2326,20 @@ TEST(navegacion_jk_skips_empty_lines) {
     editorOfLines({"uno", "", "", "dos"}, 0, 0, ed);
 
     ed.handleEvent(insert('k')); // fin de "uno" -> (0,3)
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 3);
 
     ed.handleEvent(insert('k')); // cruza 2 vacias -> fin de "dos" (3,3)
-    CHECK_EQ(ed.cursor_.line, 3);
-    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK_EQ(ed.active().cursor.line, 3);
+    CHECK_EQ(ed.active().cursor.col, 3);
 
     ed.handleEvent(insert('j')); // -> inicio de "dos" (3,0)
-    CHECK_EQ(ed.cursor_.line, 3);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.active().cursor.line, 3);
+    CHECK_EQ(ed.active().cursor.col, 0);
 
     ed.handleEvent(insert('j')); // cruza 2 vacias -> inicio de "uno" (0,0)
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
 }
 
 TEST(navegacion_jk_at_bof_eof) {
@@ -2349,13 +2349,13 @@ TEST(navegacion_jk_at_bof_eof) {
     editorOfLines({"sola"}, 0, 0, ed);
 
     ed.handleEvent(insert('j')); // sin bloque anterior
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
 
     ed.handleEvent(insert('k')); // fin de "sola" -> (0,4)
-    CHECK_EQ(ed.cursor_.col, 4);
+    CHECK_EQ(ed.active().cursor.col, 4);
 
     ed.handleEvent(insert('k')); // sin bloque posterior (EOF)
-    CHECK_EQ(ed.cursor_.col, 4);
+    CHECK_EQ(ed.active().cursor.col, 4);
 }
 
 // ---------------------------------------------------------------------------
@@ -2386,20 +2386,20 @@ TEST(selection_matrix_arrows_and_pages_never_change_anchor) {
     for (EventType type : cmds) {
         Editor ed;
         editorOfLines(longDoc(80), 40, 5, ed); // cursor (40,5), medio documento
-        ed.viewport_.height = 10;
-        ed.viewport_.top = 35;                  // visible 35..44, cursor dentro
+        ed.active().viewport.height = 10;
+        ed.active().viewport.top = 35;                  // visible 35..44, cursor dentro
         enterSeleccion(ed);
         CHECK(!ed.hasSelection());
 
         press(ed, type);                        // 1a vez: fija anchor = (40,5)
         CHECK(ed.hasSelection());
-        const Position anchor = ed.selection_->anchor;
-        const Position posAfterFirst = ed.selection_->position;
+        const Position anchor = ed.active().selection->anchor;
+        const Position posAfterFirst = ed.active().selection->position;
         CHECK(anchor != posAfterFirst);         // hubo movimiento real
 
         press(ed, type);                        // 2a vez: extiende/reduce
-        CHECK(ed.selection_->anchor == anchor); // el anchor NO cambio
-        CHECK(ed.selection_->position != posAfterFirst); // el cursor si se movio
+        CHECK(ed.active().selection->anchor == anchor); // el anchor NO cambio
+        CHECK(ed.active().selection->position != posAfterFirst); // el cursor si se movio
     }
 }
 
@@ -2413,20 +2413,20 @@ TEST(selection_matrix_jk_never_change_anchor) {
 
     ed.handleEvent(insert('j'));   // fija anchor (0,4); cursor -> (0,0)
     CHECK(ed.hasSelection());
-    const Position anchor = ed.selection_->anchor;
+    const Position anchor = ed.active().selection->anchor;
     CHECK_EQ(anchor.line, 0);
     CHECK_EQ(anchor.col, 4);
 
     ed.handleEvent(insert('k'));   // siguiente bloque -> (0,3)
-    CHECK(ed.selection_->anchor == anchor);
-    CHECK(ed.selection_->position != anchor); // hay seleccion: extremo distinto
+    CHECK(ed.active().selection->anchor == anchor);
+    CHECK(ed.active().selection->position != anchor); // hay seleccion: extremo distinto
 
     ed.handleEvent(insert('k'));   // -> (0,7), anchor intacto
-    CHECK(ed.selection_->anchor == anchor);
+    CHECK(ed.active().selection->anchor == anchor);
 
     ed.handleEvent(insert('j'));   // -> (0,4): reduce hasta el anchor
-    CHECK(ed.selection_->anchor == anchor);
-    CHECK(ed.selection_->position == anchor); // sin seleccion al volver al anchor
+    CHECK(ed.active().selection->anchor == anchor);
+    CHECK(ed.active().selection->position == anchor); // sin seleccion al volver al anchor
 }
 
 TEST(selection_anchor_reverse_shrinks_keeps_anchor) {
@@ -2434,16 +2434,16 @@ TEST(selection_anchor_reverse_shrinks_keeps_anchor) {
     // anchor original en todo momento.
     Editor ed;
     editorOfLines(longDoc(40), 20, 3, ed);
-    ed.viewport_.height = 10;
-    ed.viewport_.top = 15;
+    ed.active().viewport.height = 10;
+    ed.active().viewport.top = 15;
     enterSeleccion(ed);
 
     press(ed, EventType::MoveDown);  // fija anchor (20,3) -> (21,3)
-    const Position anchor = ed.selection_->anchor;
+    const Position anchor = ed.active().selection->anchor;
     press(ed, EventType::MoveDown);  // (22,3)
     press(ed, EventType::MoveUp);    // (21,3): encoge
     press(ed, EventType::MoveUp);    // (20,3): de vuelta al anchor, sin seleccion
-    CHECK(ed.selection_->anchor == anchor);
+    CHECK(ed.active().selection->anchor == anchor);
     CHECK(!ed.hasSelection());       // cursor == anchor: se redujo a nada
 }
 
@@ -2461,16 +2461,16 @@ TEST(combo_s_then_pageup_extends_selection) {
     // s -> RePag: extiende la seleccion una pagina hacia arriba.
     Editor ed;
     editorOfLines(linesOf(40), 15, 1, ed);
-    ed.viewport_.height = 10;
-    ed.viewport_.top = 10;          // rel 5
+    ed.active().viewport.height = 10;
+    ed.active().viewport.top = 10;          // rel 5
     enterSeleccion(ed);
     CHECK(!ed.hasSelection());
 
     press(ed, EventType::PageUp);
 
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.selection_->anchor.line, 15);
-    CHECK_EQ(ed.cursor_.line, 5);
+    CHECK_EQ(ed.active().selection->anchor.line, 15);
+    CHECK_EQ(ed.active().cursor.line, 5);
     auto sel = ed.selection();
     CHECK_EQ(sel->start.line, 5);
     CHECK_EQ(sel->end.line, 15);
@@ -2481,27 +2481,27 @@ TEST(combo_s_then_a_then_j_is_blocked) {
     // j/k se IGNORAN y no mueven el cursor.
     Editor ed;
     editorOfLines(linesOf(40), 5, 0, ed);
-    ed.viewport_.height = 10;
+    ed.active().viewport.height = 10;
     enterSelectAll(ed);
-    CHECK_EQ(ed.cursor_.line, 5);
+    CHECK_EQ(ed.active().cursor.line, 5);
 
     ed.handleEvent(insert('j')); // deberia ignorarse
 
-    CHECK(ed.selectAllActive_);
+    CHECK(ed.active().selectAllActive);
     CHECK(ed.hasSelection());
-    CHECK_EQ(ed.cursor_.line, 5); // sin moverse
+    CHECK_EQ(ed.active().cursor.line, 5); // sin moverse
 }
 
 TEST(combo_s_then_a_then_k_is_blocked) {
     Editor ed;
     editorOfLines(linesOf(40), 5, 0, ed);
-    ed.viewport_.height = 10;
+    ed.active().viewport.height = 10;
     enterSelectAll(ed);
 
     ed.handleEvent(insert('k'));
 
-    CHECK(ed.selectAllActive_);
-    CHECK_EQ(ed.cursor_.line, 5);
+    CHECK(ed.active().selectAllActive);
+    CHECK_EQ(ed.active().cursor.line, 5);
 }
 
 // j/k (palabras) + paginas en Navegacion: encadenan sin corromper el
@@ -2511,21 +2511,21 @@ TEST(combo_j_then_pagedown) {
     // salta a un limite de palabra y despues baja una pagina.
     Editor ed;
     editorOfLines({"primera linea", "segunda linea"}, 1, 7, ed); // parte de "linea"
-    ed.viewport_.height = 10;
-    ed.viewport_.top = 0;
+    ed.active().viewport.height = 10;
+    ed.active().viewport.top = 0;
 
     ed.handleEvent(insert('j')); // bloque anterior desde el espacio -> inicio "segunda"
 
     // j/k en navegacion caen en limites de palabra; el cursor salta al
     // inicio del bloque actual y el viewport no se toca.
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 0); // inicio de "segunda"
-    CHECK_EQ(ed.viewport_.top, 0);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 0); // inicio de "segunda"
+    CHECK_EQ(ed.active().viewport.top, 0);
 
     press(ed, EventType::PageDown);
     // count(2) <= height(10): archivo cabe entero -> AvPag salta al final.
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.viewport_.top, 0);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().viewport.top, 0);
 }
 
 TEST(combo_pagedown_then_j) {
@@ -2533,8 +2533,8 @@ TEST(combo_pagedown_then_j) {
     // ultima linea y j se mueve a un limite de palabra desde alli.
     Editor ed;
     editorOfLines({"primera linea", "segunda linea"}, 0, 0, ed);
-    ed.viewport_.height = 10;
-    ed.viewport_.top = 0;
+    ed.active().viewport.height = 10;
+    ed.active().viewport.top = 0;
 
     press(ed, EventType::PageDown);  // -> (1,0): final de la ultima linea
 
@@ -2542,38 +2542,38 @@ TEST(combo_pagedown_then_j) {
 
     // j desde el inicio de "segunda" cruza al ultimo bloque de la linea
     // anterior: "linea" de la linea 0, que empieza en el byte 8.
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 8);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 8);
 }
 
 TEST(combo_k_then_pageup) {
     // Navegacion 'k' (siguiente bloque) y luego RePag.
     Editor ed;
     editorOfLines({"primera linea primera", "segunda"}, 1, 0, ed);
-    ed.viewport_.height = 10;
-    ed.viewport_.top = 0;
+    ed.active().viewport.height = 10;
+    ed.active().viewport.top = 0;
 
     ed.handleEvent(insert('k')); // siguiente bloque desde (1,0)
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 7); // fin de "segunda"
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 7); // fin de "segunda"
 
     press(ed, EventType::PageUp);   // archivo cabe entero -> RePag al inicio
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.viewport_.top, 0);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().viewport.top, 0);
 }
 
 TEST(combo_pageup_then_k) {
     // RePag y luego 'k' (siguiente bloque).
     Editor ed;
     editorOfLines({"primera", "segunda linea"}, 1, 0, ed);
-    ed.viewport_.height = 10;
-    ed.viewport_.top = 0;
+    ed.active().viewport.height = 10;
+    ed.active().viewport.top = 0;
 
     press(ed, EventType::PageUp);   // -> (0,0)
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
 
     ed.handleEvent(insert('k'));    // siguiente bloque -> fin de "primera"
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 7);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 7);
 }

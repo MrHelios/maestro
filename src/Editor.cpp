@@ -4,6 +4,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "utf8.h"
+
 namespace {
 
 // Convierte una ruta posiblemente relativa en una absoluta (cwd() + "/"
@@ -19,14 +21,32 @@ std::string resolveAbsolutePath(const std::string& path) {
 } // namespace
 
 Editor::Editor() {
-    statusMessage_ = "NAVEGACION: i escribir | s seleccionar | c/x copiar/cortar | p pegar | Ctrl+K guardar/salir | Ctrl+U/Y deshacer/rehacer";
-    savedLines_ = document_.snapshot();
+    statusMessage_ = "NAVEGACION: i escribir | s seleccionar | c/x copiar/cortar | p pegar | Ctrl+K buffer/guardar/salir | Ctrl+U/Y deshacer/rehacer";
+    // Invariante 1 y 2 (v0.6.3): siempre existe al menos un buffer y hay
+    // exactamente uno activo. El constructor arranca con un unico buffer
+    // sin nombre y lo deja activo.
+    buffers_.emplace_back();
+    activeBuffer_ = 0;
+    unnamedCounter_ = 1; // el buffer inicial ya gasto "SinNombre"
 }
 
 bool Editor::isDirectory(const std::string& path) {
     struct stat st;
     if (stat(path.c_str(), &st) != 0) return false;
     return S_ISDIR(st.st_mode);
+}
+
+Buffer& Editor::active() {
+    return buffers_[static_cast<size_t>(activeBuffer_)];
+}
+
+const Buffer& Editor::active() const {
+    return buffers_[static_cast<size_t>(activeBuffer_)];
+}
+
+std::string Editor::nextUnnamedName() {
+    if (unnamedCounter_ == 0) return "SinNombre";
+    return "SinNombre" + std::to_string(unnamedCounter_);
 }
 
 bool Editor::openFile(const std::string& path) {
@@ -37,15 +57,18 @@ bool Editor::openFile(const std::string& path) {
         return false;
     }
 
+    Buffer& b = active();
     // La barra de estado muestra siempre una ruta absoluta: si el
     // archivo se abrio con ruta relativa, la resolvemos contra cwd().
-    filename_ = resolveAbsolutePath(path);
-    bool existed = document_.loadFromFile(path);
-    modified_ = false;
-    savedLines_ = document_.snapshot();
-    cursor_.line = 0;
-    cursor_.col = 0;
-    clearSelection();
+    b.filename = resolveAbsolutePath(path);
+    bool existed = b.document.loadFromFile(path);
+    b.modified = false;
+    b.savedLines = b.document.snapshot();
+    b.cursor.line = 0;
+    b.cursor.col = 0;
+    b.selection.reset();
+    b.selectAllActive = false;
+    b.selectAllPrevious.reset();
     state_ = State::Navegacion;
     statusMessage_ = "";
     if (!existed) {
@@ -54,13 +77,132 @@ bool Editor::openFile(const std::string& path) {
     return existed;
 }
 
-void Editor::run() {
+void Editor::syncViewportSize(Buffer& b) {
     int rows, cols;
     terminal_.getWindowSize(rows, cols);
+    b.viewport.height = rows > 2 ? rows - 2 : 1;
+    b.viewport.width = cols;
+}
+
+void Editor::createBuffer() {
+    Buffer nuevo;
+    nuevo.unnamedName = nextUnnamedName();
+    unnamedCounter_++;
+    // El viewport del buffer nuevo debe tener las dimensiones reales de
+    // la terminal (run() solo las fijo al arrancar para los buffers ya
+    // existentes). Sin esto, un buffer creado a mitad de sesion con el
+    // Viewport por defecto no redibuja toda la pantalla y queda resto
+    // del buffer anterior.
+    syncViewportSize(nuevo);
+    // El buffer nuevo se convierte inmediatamente en el buffer activo
+    // (v0.6.3, invariante 13).
+    buffers_.push_back(std::move(nuevo));
+    activeBuffer_ = static_cast<int>(buffers_.size()) - 1;
+    statusMessage_ = "Buffer nuevo: " + active().unnamedName;
+}
+
+void Editor::closeActiveBuffer() {
+    Buffer& b = active();
+
+    // Invariante 10 (v0.6.3): un buffer modificado no se puede cerrar.
+    // Hay que guardar los cambios (Ctrl+K s) o restaurarlo (undo hasta el
+    // ultimo estado guardado). No se ofrece confirmacion: se bloquea.
+    if (b.modified) {
+        statusMessage_ = "Buffer modificado: guarda con Ctrl+K s o restaura.";
+        state_ = priorState_;
+        return;
+    }
+
+    // Invariante 14 (v0.6.3): el ultimo buffer nunca se elimina. En lugar
+    // de dejarlo con buffers_.empty(), se convierte en un buffer vacio sin
+    // nombre (nuevo nombre generico, documento de una linea vacia,
+    // modified = false) y seguimos en el.
+    if (buffers_.size() == 1) {
+        b.document = Document();
+        b.cursor = Cursor();
+        syncViewportSize(b);
+        b.filename.clear();
+        b.unnamedName = nextUnnamedName();
+        unnamedCounter_++;
+        b.modified = false;
+        b.selection.reset();
+        b.selectAllActive = false;
+        b.selectAllPrevious.reset();
+        b.savedLines = b.document.snapshot();
+        b.undoStack.clear();
+        b.redoStack.clear();
+        statusMessage_ = "Buffer reiniciado: " + b.unnamedName;
+        state_ = State::Navegacion;
+        return;
+    }
+
+    // Varios buffers: se elimina el activo y se pasa al selector. No se
+    // selecciona automaticamente otro buffer: la lista decide. El indice
+    // deja de referenciar el buffer borrado (invariante 17).
+    buffers_.erase(buffers_.begin() + activeBuffer_);
+    activeBuffer_ = 0;
+    bufferSelectorIndex_ = 0;
+    priorState_ = State::Navegacion; // el contexto previo desaparecio
+    state_ = State::BufferSelector;
+    statusMessage_ = "Buffer cerrado. ↑/↓ y Enter para elegir.";
+}
+
+void Editor::activateBuffer(int idx) {
+    activeBuffer_ = idx;
+    // Reconciliar el modo global con el estado del buffer activado: un
+    // buffer con rango seleccionado deja el editor en Seleccion; sin
+    // rango, en Navegacion. (La seleccion y los demas estados son del
+    // buffer, no del Editor.)
+    const Buffer& b = active();
+    state_ = (b.selection.has_value() && b.selection->anchor != b.selection->position)
+           ? State::Seleccion
+           : State::Navegacion;
+    statusMessage_ = "";
+}
+
+std::vector<std::string> Editor::bufferNames() const {
+    std::vector<std::string> names;
+    names.reserve(buffers_.size());
+    for (const Buffer& b : buffers_) {
+        names.push_back(b.modified ? b.displayName() + " *"
+                                   : b.displayName());
+    }
+    return names;
+}
+
+void Editor::handleBufferSelectorEvent(const Event& event) {
+    switch (event.type) {
+        case EventType::MoveUp:
+            if (bufferSelectorIndex_ > 0) bufferSelectorIndex_--;
+            break;
+        case EventType::MoveDown:
+            if (bufferSelectorIndex_ + 1 < static_cast<int>(buffers_.size()))
+                bufferSelectorIndex_++;
+            break;
+        case EventType::InsertNewline: // Enter: abrir el buffer seleccionado
+            activateBuffer(bufferSelectorIndex_);
+            break;
+        case EventType::Escape:
+            // Se cancela el selector y se vuelve al buffer que estaba
+            // activo antes de entrar (no se cambio nada).
+            state_ = priorState_;
+            statusMessage_ = "";
+            break;
+        // Cualquier otra tecla (i, j, k, a, c, x, p, Ctrl+K, ...) es no-op:
+        // el selector es una pantalla modal y no deja filtrar nada.
+        default:
+            break;
+    }
+}
+
+void Editor::run() {
     // La barra de estado ocupa las ultimas DOS filas: la fila fija (en
     // video inverso) y la fila de mensajes. El viewport usa el resto.
-    viewport_.height = rows > 2 ? rows - 2 : 1;
-    viewport_.width = cols;
+    // v0.6.3: el viewport es POR BUFFER, pero las dimensiones las fija
+    // la terminal y valen para todos.
+    for (Buffer& b : buffers_) {
+        syncViewportSize(b);
+    }
 
     terminal_.enableRawMode();
 
@@ -70,8 +212,13 @@ void Editor::run() {
     write(STDOUT_FILENO, "\x1b[6 q", 5);
 
     // Primer render antes de esperar el primer evento.
-    viewport_.scrollToCursor(cursor_);
-    renderer_.render(document_, cursor_, viewport_, filename_, modified_, statusMessage_, state_, selection_);
+    {
+        Buffer& b = active();
+        b.viewport.scrollToCursor(b.cursor);
+        renderer_.renderScreen(b.document, b.cursor, b.viewport,
+                               b.displayName(), b.modified, statusMessage_,
+                               state_, b.selection);
+    }
 
     while (running_) {
         Event event = terminal_.readEvent();
@@ -79,8 +226,18 @@ void Editor::run() {
 
         if (!running_) break;
 
-        viewport_.scrollToCursor(cursor_);
-        renderer_.render(document_, cursor_, viewport_, filename_, modified_, statusMessage_, state_, selection_);
+        Buffer& b = active();
+        if (state_ == State::BufferSelector) {
+            // Pantalla del selector: se dibuja la lista de buffers con la
+            // barra MULTIBUFFER al final, manteniendo el aspecto del editor.
+            renderer_.renderBufferList(bufferNames(), bufferSelectorIndex_,
+                                       b.viewport.width, b.viewport.height);
+        } else {
+            b.viewport.scrollToCursor(b.cursor);
+            renderer_.renderScreen(b.document, b.cursor, b.viewport,
+                                   b.displayName(), b.modified, statusMessage_,
+                                   state_, b.selection);
+        }
     }
 
     terminal_.disableRawMode();
@@ -90,9 +247,23 @@ void Editor::run() {
 
 void Editor::handleEvent(const Event& event) {
     // En modo Prefix (tras Ctrl+K) todo pasa por handlePrefixKey: el
-    // siguiente evento decide guardar/salir/cancelar.
+    // siguiente evento decide guardar/salir/operaciones de buffer/cancelar.
     if (state_ == State::Prefix) {
         handlePrefixKey(event);
+        return;
+    }
+
+    // v0.6.3: en el selector de buffers solo se aceptan ↑/↓/Enter/ESC;
+    // nada (ni siquiera Ctrl+K) se filtra al modo anterior.
+    if (state_ == State::BufferSelector) {
+        handleBufferSelectorEvent(event);
+        return;
+    }
+
+    // v0.7: en el prompt "Guardar archivo:" solo se aceptan caracteres,
+    // Backspace, Enter y ESC; nada se filtra a la edicion ni a otros modos.
+    if (state_ == State::SaveAs) {
+        handleSaveAsEvent(event);
         return;
     }
 
@@ -106,7 +277,7 @@ void Editor::handleEvent(const Event& event) {
     if (event.type == EventType::Prefix) {
         priorState_ = state_;
         state_ = State::Prefix;
-        statusMessage_ = "Ctrl+K: Ctrl+S guardar | Ctrl+Q salir";
+        statusMessage_ = "Ctrl+K: s guardar | q salir | n nuevo | t buffers | w cerrar";
         return;
     }
 
@@ -130,6 +301,7 @@ void Editor::handleEvent(const Event& event) {
 }
 
 void Editor::handleNavegacionEvent(const Event& event) {
+    Buffer& b = active();
     switch (event.type) {
         case EventType::InsertChar:
             // En navegacion no se escribe: las letras solo pueden ser
@@ -147,31 +319,31 @@ void Editor::handleNavegacionEvent(const Event& event) {
                 if (clipboard_.empty()) {
                     statusMessage_ = "Nada para pegar.";
                 } else {
-                    pushHistory();
-                    Position end = document_.insertBlock(cursor_.line,
-                                                          cursor_.col,
+                    b.pushHistory();
+                    Position end = b.document.insertBlock(b.cursor.line,
+                                                          b.cursor.col,
                                                           clipboard_);
-                    cursor_.line = end.line;
-                    cursor_.col = end.col;
-                    modified_ = true;
+                    b.cursor.line = end.line;
+                    b.cursor.col = end.col;
+                    b.modified = true;
                     statusMessage_ = "Pegado.";
                 }
             } else if (event.text == "j") {
                 // j/k: salto por bloques (palabras), solo mueven el cursor.
-                cursor_.moveToPreviousWord(document_);
+                b.cursor.moveToPreviousWord(b.document);
             } else if (event.text == "k") {
-                cursor_.moveToNextWord(document_);
+                b.cursor.moveToNextWord(b.document);
             }
             break;
 
         // Movimientos libres, sin iniciar seleccion (a diferencia de
         // como Select extendia en v0.3-v0.4).
-        case EventType::MoveLeft: cursor_.moveLeft(document_); break;
-        case EventType::MoveRight: cursor_.moveRight(document_); break;
-        case EventType::MoveUp: cursor_.moveUp(document_); break;
-        case EventType::MoveDown: cursor_.moveDown(document_); break;
-        case EventType::MoveHome: cursor_.moveHome(); break;
-        case EventType::MoveEnd: cursor_.moveEnd(document_); break;
+        case EventType::MoveLeft: b.cursor.moveLeft(b.document); break;
+        case EventType::MoveRight: b.cursor.moveRight(b.document); break;
+        case EventType::MoveUp: b.cursor.moveUp(b.document); break;
+        case EventType::MoveDown: b.cursor.moveDown(b.document); break;
+        case EventType::MoveHome: b.cursor.moveHome(); break;
+        case EventType::MoveEnd: b.cursor.moveEnd(b.document); break;
         case EventType::PageUp: applyPage(-1); break;
         case EventType::PageDown: applyPage(+1); break;
 
@@ -183,46 +355,49 @@ void Editor::handleNavegacionEvent(const Event& event) {
 }
 
 void Editor::handleInteraccionEvent(const Event& event) {
+    Buffer& b = active();
     switch (event.type) {
         case EventType::InsertChar:
             // Edicion libre real: cualquier letra (incluida i/s/p/c/x)
             // se inserta como texto. Aqui no son comandos de modo.
-            pushHistory();
-            document_.insertText(cursor_.line, cursor_.col, event.text);
-            cursor_.col += static_cast<int>(event.text.size());
-            modified_ = true;
+            b.pushHistory();
+            b.document.insertText(b.cursor.line, b.cursor.col, event.text);
+            b.cursor.col += static_cast<int>(event.text.size());
+            b.modified = true;
             break;
 
         case EventType::InsertNewline:
-            pushHistory();
-            document_.insertNewline(cursor_.line, cursor_.col);
-            cursor_.line++;
-            cursor_.col = 0;
-            modified_ = true;
+            b.pushHistory();
+            b.document.insertNewline(b.cursor.line, b.cursor.col);
+            b.cursor.line++;
+            b.cursor.col = 0;
+            b.modified = true;
             break;
 
         case EventType::Backspace:
         case EventType::Delete: {
-            pushHistory();
+            b.pushHistory();
             if (event.type == EventType::Backspace) {
-                bool willMergeLines = (cursor_.col == 0 && cursor_.line > 0);
-                int prevLineLen = willMergeLines ? document_.lineLength(cursor_.line - 1) : 0;
+                bool willMergeLines = (b.cursor.col == 0 && b.cursor.line > 0);
+                int prevLineLen = willMergeLines
+                    ? b.document.lineLength(b.cursor.line - 1) : 0;
 
                 // deleteCharBefore devuelve cuantos bytes borro dentro de la
                 // linea (el largo del caracter UTF-8 completo), asi el cursor
                 // se reposiciona sin recalcular el limite del caracter aqui.
-                int deleted = document_.deleteCharBefore(cursor_.line, cursor_.col);
+                int deleted = b.document.deleteCharBefore(b.cursor.line,
+                                                          b.cursor.col);
                 if (deleted > 0 || willMergeLines) {
                     if (willMergeLines) {
-                        cursor_.line--;
-                        cursor_.col = prevLineLen;
+                        b.cursor.line--;
+                        b.cursor.col = prevLineLen;
                     } else {
-                        cursor_.col -= deleted;
+                        b.cursor.col -= deleted;
                     }
-                    modified_ = true;
+                    b.modified = true;
                 }
-            } else if (document_.deleteCharAt(cursor_.line, cursor_.col)) {
-                modified_ = true;
+            } else if (b.document.deleteCharAt(b.cursor.line, b.cursor.col)) {
+                b.modified = true;
             }
             break;
         }
@@ -232,12 +407,12 @@ void Editor::handleInteraccionEvent(const Event& event) {
             statusMessage_ = "NAVEGACION";
             break;
 
-        case EventType::MoveLeft: cursor_.moveLeft(document_); break;
-        case EventType::MoveRight: cursor_.moveRight(document_); break;
-        case EventType::MoveUp: cursor_.moveUp(document_); break;
-        case EventType::MoveDown: cursor_.moveDown(document_); break;
-        case EventType::MoveHome: cursor_.moveHome(); break;
-        case EventType::MoveEnd: cursor_.moveEnd(document_); break;
+        case EventType::MoveLeft: b.cursor.moveLeft(b.document); break;
+        case EventType::MoveRight: b.cursor.moveRight(b.document); break;
+        case EventType::MoveUp: b.cursor.moveUp(b.document); break;
+        case EventType::MoveDown: b.cursor.moveDown(b.document); break;
+        case EventType::MoveHome: b.cursor.moveHome(); break;
+        case EventType::MoveEnd: b.cursor.moveEnd(b.document); break;
         case EventType::PageUp: applyPage(-1); break;
         case EventType::PageDown: applyPage(+1); break;
 
@@ -247,10 +422,11 @@ void Editor::handleInteraccionEvent(const Event& event) {
 }
 
 void Editor::handleSeleccionEvent(const Event& event) {
+    Buffer& b = active();
     // Si el prefijo 'a' (seleccion total) esta activo, casi todos los
     // eventos se interpretan de forma especial, no como extension normal
     // de la seleccion.
-    if (selectAllActive_) {
+    if (b.selectAllActive) {
         handleSelectAllEvent(event);
         return;
     }
@@ -258,17 +434,17 @@ void Editor::handleSeleccionEvent(const Event& event) {
     switch (event.type) {
         // Los movimientos extienden la seleccion, igual que hacia v0.3-v0.4.
         case EventType::MoveLeft:
-            beginSelection(); cursor_.moveLeft(document_); updateSelectionPosition(); break;
+            beginSelection(); b.cursor.moveLeft(b.document); updateSelectionPosition(); break;
         case EventType::MoveRight:
-            beginSelection(); cursor_.moveRight(document_); updateSelectionPosition(); break;
+            beginSelection(); b.cursor.moveRight(b.document); updateSelectionPosition(); break;
         case EventType::MoveUp:
-            beginSelection(); cursor_.moveUp(document_); updateSelectionPosition(); break;
+            beginSelection(); b.cursor.moveUp(b.document); updateSelectionPosition(); break;
         case EventType::MoveDown:
-            beginSelection(); cursor_.moveDown(document_); updateSelectionPosition(); break;
+            beginSelection(); b.cursor.moveDown(b.document); updateSelectionPosition(); break;
         case EventType::MoveHome:
-            beginSelection(); cursor_.moveHome(); updateSelectionPosition(); break;
+            beginSelection(); b.cursor.moveHome(); updateSelectionPosition(); break;
         case EventType::MoveEnd:
-            beginSelection(); cursor_.moveEnd(document_); updateSelectionPosition(); break;
+            beginSelection(); b.cursor.moveEnd(b.document); updateSelectionPosition(); break;
         // RePag/AvPag extienden la seleccion como una flecha (Up/Down):
         // el anchor permanece y el cursor salta una pagina.
         case EventType::PageUp:
@@ -299,33 +475,33 @@ void Editor::handleSeleccionEvent(const Event& event) {
             // un rango vacio y, en 'x', empujaria un historial inutil que ademas
             // limpia el redo.
             if (event.text == "a") {
-                selectAllPrevious_ = selection_;
-                selection_ = selectAllSelection();
-                selectAllActive_ = true;
+                b.selectAllPrevious = b.selection;
+                b.selection = selectAllSelection();
+                b.selectAllActive = true;
                 statusMessage_ = "SELECCION TOTAL (a togglea | flechas a extremos | c/x/ESC terminan)";
             } else if (event.text == "j" || event.text == "k") {
                 // j/k extienden la seleccion igual que una flecha: el anchor
                 // permanece y solo se mueve el cursor. 'j' va a la izquierda
                 // (bloque anterior) y 'k' a la derecha (sig. bloque).
                 beginSelection();
-                if (event.text == "j") cursor_.moveToPreviousWord(document_);
-                else cursor_.moveToNextWord(document_);
+                if (event.text == "j") b.cursor.moveToPreviousWord(b.document);
+                else b.cursor.moveToNextWord(b.document);
                 updateSelectionPosition();
             } else if (event.text == "c" || event.text == "x") {
                 bool hadSelection = hasSelection();
                 if (hadSelection) {
                     auto sel = selection();
-                    clipboard_ = document_.extractRange(sel->start.line,
-                                                        sel->start.col,
-                                                        sel->end.line,
-                                                        sel->end.col);
+                    clipboard_ = b.document.extractRange(sel->start.line,
+                                                         sel->start.col,
+                                                         sel->end.line,
+                                                         sel->end.col);
                     if (event.text == "x") {
-                        pushHistory();
-                        document_.deleteRange(sel->start.line, sel->start.col,
-                                              sel->end.line, sel->end.col);
-                        cursor_.line = sel->start.line;
-                        cursor_.col = sel->start.col;
-                        modified_ = true;
+                        b.pushHistory();
+                        b.document.deleteRange(sel->start.line, sel->start.col,
+                                               sel->end.line, sel->end.col);
+                        b.cursor.line = sel->start.line;
+                        b.cursor.col = sel->start.col;
+                        b.modified = true;
                     }
                 }
                 clearSelection();
@@ -351,18 +527,19 @@ void Editor::handleSeleccionEvent(const Event& event) {
 }
 
 // Prefijo 'a' (seleccion total): interpreta los eventos mientras
-// selectAllActive_ es true. La seleccion entera ya esta puesta en
-// selection_ ([BOF, EOF]); aqu se decide que hace cada tecla con ella.
+// selectAllActive es true. La seleccion entera ya esta puesta en
+// selection ([BOF, EOF]); aqui se decide que hace cada tecla con ella.
 void Editor::handleSelectAllEvent(const Event& event) {
+    Buffer& b = active();
     switch (event.type) {
         // 'a' de nuevo: toggle -> volvemos a la seleccion previa (o, si la
         // previa era sin seleccion, a sin seleccion) y se desactiva el modo.
         case EventType::InsertChar:
             if (event.text == "a") {
-                selection_ = selectAllPrevious_;
-                selectAllPrevious_.reset();
-                if (!selection_.has_value()) clearSelection();
-                selectAllActive_ = false;
+                b.selection = b.selectAllPrevious;
+                b.selectAllPrevious.reset();
+                if (!b.selection.has_value()) clearSelection();
+                b.selectAllActive = false;
                 statusMessage_ = "SELECCION";
             } else if (event.text == "c" || event.text == "x") {
                 // c/x operan sobre el archivo entero (la seleccion total es
@@ -370,22 +547,22 @@ void Editor::handleSelectAllEvent(const Event& event) {
                 bool hadSelection = hasSelection();
                 if (hadSelection) {
                     auto sel = selection();
-                    clipboard_ = document_.extractRange(sel->start.line,
-                                                        sel->start.col,
-                                                        sel->end.line,
-                                                        sel->end.col);
+                    clipboard_ = b.document.extractRange(sel->start.line,
+                                                         sel->start.col,
+                                                         sel->end.line,
+                                                         sel->end.col);
                     if (event.text == "x") {
-                        pushHistory();
-                        document_.deleteRange(sel->start.line, sel->start.col,
-                                              sel->end.line, sel->end.col);
-                        cursor_.line = sel->start.line;
-                        cursor_.col = sel->start.col;
-                        modified_ = true;
+                        b.pushHistory();
+                        b.document.deleteRange(sel->start.line, sel->start.col,
+                                               sel->end.line, sel->end.col);
+                        b.cursor.line = sel->start.line;
+                        b.cursor.col = sel->start.col;
+                        b.modified = true;
                     }
                 }
                 clearSelection();
-                selectAllPrevious_.reset();
-                selectAllActive_ = false;
+                b.selectAllPrevious.reset();
+                b.selectAllActive = false;
                 state_ = State::Navegacion;
                 statusMessage_ = hadSelection ? (event.text == "x" ? "Cortado."
                                                                     : "Copiado.")
@@ -398,23 +575,23 @@ void Editor::handleSelectAllEvent(const Event& event) {
         // dejan el cursor en el extremo (anchor == cursor, sin seleccion).
         case EventType::MoveRight:
         case EventType::MoveDown: {
-            int last = document_.lineCount() - 1;
-            cursor_.line = last;
-            cursor_.col = document_.lineLength(last);
-            selection_ = Selection{{cursor_.line, cursor_.col},
-                                   {cursor_.line, cursor_.col}};
-            selectAllActive_ = false;
-            selectAllPrevious_.reset();
+            int last = b.document.lineCount() - 1;
+            b.cursor.line = last;
+            b.cursor.col = b.document.lineLength(last);
+            b.selection = Selection{{b.cursor.line, b.cursor.col},
+                                    {b.cursor.line, b.cursor.col}};
+            b.selectAllActive = false;
+            b.selectAllPrevious.reset();
             statusMessage_ = "SELECCION";
             break;
         }
         case EventType::MoveLeft:
         case EventType::MoveUp:
-            cursor_.line = 0;
-            cursor_.col = 0;
-            selection_ = Selection{{0, 0}, {0, 0}};
-            selectAllActive_ = false;
-            selectAllPrevious_.reset();
+            b.cursor.line = 0;
+            b.cursor.col = 0;
+            b.selection = Selection{{0, 0}, {0, 0}};
+            b.selectAllActive = false;
+            b.selectAllPrevious.reset();
             statusMessage_ = "SELECCION";
             break;
 
@@ -422,8 +599,8 @@ void Editor::handleSelectAllEvent(const Event& event) {
         // navegacion, igual que en el modo Seleccion normal.
         case EventType::Escape:
             clearSelection();
-            selectAllPrevious_.reset();
-            selectAllActive_ = false;
+            b.selectAllPrevious.reset();
+            b.selectAllActive = false;
             state_ = State::Navegacion;
             statusMessage_ = "Seleccion cancelada.";
             break;
@@ -435,20 +612,55 @@ void Editor::handleSelectAllEvent(const Event& event) {
 }
 
 std::optional<Selection> Editor::selectAllSelection() const {
-    int last = document_.lineCount() - 1;
-    Position end{last, document_.lineLength(last)};
+    const Buffer& b = active();
+    int last = b.document.lineCount() - 1;
+    Position end{last, b.document.lineLength(last)};
     return Selection{{0, 0}, end};
 }
 
 void Editor::handlePrefixKey(const Event& event) {
     switch (event.type) {
         case EventType::Save: // Ctrl+S tras Ctrl+K = guardar archivo
+            if (active().filename.empty()) {
+                // v0.7: un buffer sin nombre (p.ej. creado con Ctrl+K n)
+                // no se puede guardar tal cual: se abre el prompt "Guardar
+                // archivo:" para elegir la ruta de destino.
+                startSaveAs();
+                break;
+            }
             save();
             state_ = priorState_;
             break;
 
         case EventType::Quit:
             running_ = false;
+            break;
+
+        // v0.6.3: comandos de buffer dentro del prefijo.
+        case EventType::InsertChar:
+            if (event.text == "n") {           // Ctrl+K n: nuevo buffer
+                createBuffer();
+                state_ = State::Navegacion;
+                break;
+            }
+            if (event.text == "t") {           // Ctrl+K t: selector de buffers
+                if (buffers_.size() <= 1) {
+                    statusMessage_ = "Solo hay un buffer.";
+                    state_ = priorState_;
+                } else {
+                    bufferSelectorIndex_ = activeBuffer_;
+                    state_ = State::BufferSelector;
+                    statusMessage_ = "Buffers: ↑/↓ mover | Enter abrir | ESC cancelar";
+                }
+                break;
+            }
+            if (event.text == "w") {           // Ctrl+K w: cerrar buffer activo
+                closeActiveBuffer();
+                break;
+            }
+            // Cualquier otra letra: cae en el cancel del default.
+            state_ = priorState_;
+            statusMessage_ = "Comando cancelado.";
             break;
 
         default:
@@ -461,39 +673,105 @@ void Editor::handlePrefixKey(const Event& event) {
     }
 }
 
+void Editor::startSaveAs() {
+    // Ctrl+K Ctrl+S sobre un buffer sin nombre: en vez de fallar, se abre
+    // el prompt "Guardar archivo:". El usuario escribe la ruta en la fila
+    // de mensajes; Enter confirma, ESC cancela. priorState_ ya guarda el
+    // modo desde el que se abrio el prefijo (aqui no se toca).
+    saveAsPath_.clear();
+    state_ = State::SaveAs;
+    statusMessage_ = "Guardar archivo: ";
+}
+
+void Editor::handleSaveAsEvent(const Event& event) {
+    switch (event.type) {
+        case EventType::InsertChar:
+            saveAsPath_ += event.text;
+            statusMessage_ = "Guardar archivo: " + saveAsPath_;
+            break;
+        case EventType::Backspace:
+            if (!saveAsPath_.empty()) {
+                int cols = utf8::columnOf(saveAsPath_,
+                                          static_cast<int>(saveAsPath_.size()));
+                saveAsPath_ = utf8::truncate(saveAsPath_, cols - 1);
+            }
+            statusMessage_ = "Guardar archivo: " + saveAsPath_;
+            break;
+        case EventType::InsertNewline: // Enter: guardar en la ruta escrita
+            commitSaveAs();
+            break;
+        case EventType::Escape:
+            state_ = priorState_;
+            statusMessage_ = "Guardado cancelado.";
+            break;
+        default:
+            // Cualquier otra tecla es no-op: el prompt es una pantalla
+            // modal y no deja filtrar nada (ni Ctrl+K, ni flechas, ...).
+            break;
+    }
+}
+
+void Editor::commitSaveAs() {
+    Buffer& b = active();
+    const std::string path = resolveAbsolutePath(saveAsPath_);
+    if (path.empty()) {
+        // Sin ruta escrita: se sigue en el prompt, esperando un nombre.
+        statusMessage_ = "Guardar archivo: ";
+        return;
+    }
+    if (isDirectory(path)) {
+        statusMessage_ = "Es una carpeta: " + path;
+        return;
+    }
+    if (b.document.saveToFile(path)) {
+        b.filename = path;
+        b.modified = false;
+        b.savedLines = b.document.snapshot();
+        statusMessage_ = "Guardado: " + path;
+        state_ = priorState_;
+    } else {
+        statusMessage_ = "Error al guardar: " + path;
+    }
+}
+
 bool Editor::hasSelection() const {
-    return selection_.has_value() && selection_->anchor != selection_->position;
+    const Buffer& b = active();
+    return b.selection.has_value() && b.selection->anchor != b.selection->position;
 }
 
 std::optional<Normalized> Editor::selection() const {
-    if (!selection_.has_value()) return std::nullopt;
-    return normalize(*selection_);
+    const Buffer& b = active();
+    if (!b.selection.has_value()) return std::nullopt;
+    return normalize(*b.selection);
 }
 
 void Editor::beginSelection() {
-    if (!selection_.has_value()) {
-        selection_ = Selection{};
-        selection_->anchor = {cursor_.line, cursor_.col};
-        selection_->position = {cursor_.line, cursor_.col};
+    Buffer& b = active();
+    if (!b.selection.has_value()) {
+        b.selection = Selection{};
+        b.selection->anchor = {b.cursor.line, b.cursor.col};
+        b.selection->position = {b.cursor.line, b.cursor.col};
     }
 }
 
 void Editor::updateSelectionPosition() {
-    if (selection_.has_value()) {
-        selection_->position = {cursor_.line, cursor_.col};
+    Buffer& b = active();
+    if (b.selection.has_value()) {
+        b.selection->position = {b.cursor.line, b.cursor.col};
     }
 }
 
 void Editor::applyPage(int dir) {
-    const int count = document_.lineCount(); // >= 1: siempre hay una linea
-    const int h = viewport_.height;
+    Buffer& b = active();
+    const int count = b.document.lineCount(); // >= 1: siempre hay una linea
+    const int h = b.viewport.height;
 
     // Archivo pequeno: cabe entero en una pagina. RePag -> inicio, AvPag
     // -> final, sin nunca quedar fuera del documento.
     if (h >= count) {
-        viewport_.top = 0;
-        cursor_.line = (dir < 0) ? 0 : count - 1;
-        cursor_.clampToLine(document_);
+        b.viewport.top = 0;
+        b.cursor.line = (dir < 0) ? 0 : count - 1;
+        b.cursor.clampToLine(b.document);
         return;
     }
 
@@ -502,113 +780,86 @@ void Editor::applyPage(int dir) {
     // el viewport se clampa para que nunca muestre mas alla del documento:
     //   - Arriba:  top >= 0 (la primera linea visible es la del archivo).
     //   - Abajo:   top <= maxTop (la ultima fila visible llega a EOF).
-    const int rel = cursor_.line - viewport_.top; // posicion relativa (0..h-1)
+    const int rel = b.cursor.line - b.viewport.top; // posicion relativa (0..h-1)
     const int maxTop = count - h;
     if (dir < 0) {
-        viewport_.top = std::max(0, viewport_.top - h);
+        b.viewport.top = std::max(0, b.viewport.top - h);
     } else {
-        viewport_.top = std::min(maxTop, viewport_.top + h);
+        b.viewport.top = std::min(maxTop, b.viewport.top + h);
     }
-    cursor_.line = viewport_.top + rel;
-    cursor_.line = std::min(std::max(cursor_.line, 0), count - 1);
-    cursor_.clampToLine(document_);
+    b.cursor.line = b.viewport.top + rel;
+    b.cursor.line = std::min(std::max(b.cursor.line, 0), count - 1);
+    b.cursor.clampToLine(b.document);
 }
 
 void Editor::clearSelection() {
-    selection_.reset();
+    Buffer& b = active();
+    b.selection.reset();
 }
 
 void Editor::save() {
-    if (document_.saveToFile(filename_)) {
-        modified_ = false;
-        savedLines_ = document_.snapshot();
+    Buffer& b = active();
+    // v0.7: save() solo se invoca para buffers CON nombre (handlePrefixKey
+    // desvia los sin nombre al prompt SaveAs). El guard sigue aqui como
+    // invariante defensivo: un buffer sin nombre no tiene a donde guardar.
+    if (b.filename.empty()) {
+        statusMessage_ = "Archivo sin nombre: usa Ctrl+K Ctrl+S para elegir ruta.";
+        return;
+    }
+    if (b.document.saveToFile(b.filename)) {
+        b.modified = false;
+        b.savedLines = b.document.snapshot();
         statusMessage_ = "Guardado.";
     } else {
         statusMessage_ = "Error al guardar.";
     }
 }
 
-void Editor::pushHistory() {
-    HistoryState state;
-    state.lines = document_.snapshot();
-    state.line = cursor_.line;
-    state.col = cursor_.col;
-    state.selection = selection_;
-    undoStack_.push_back(state);
-    if (undoStack_.size() > MAX_UNDO) {
-        undoStack_.erase(undoStack_.begin());
-    }
-    redoStack_.clear();
-}
-
-void Editor::applyState(const HistoryState& state) {
-    document_.restore(state.lines);
-    cursor_.line = state.line;
-    cursor_.col = state.col;
-    cursor_.clampToLine(document_);
-    // Restauramos la seleccion del momento. Si quedo fuera de rango
-    // (p.ej. por undo de un documento distinto), la descartamos.
-selection_ = state.selection;
-    if (selection_.has_value()) {
-        auto n = normalize(*selection_);
-        if (!n.has_value() || n->start.line >= document_.lineCount() ||
-            n->end.line >= document_.lineCount() ||
-            n->start.col > document_.lineLength(n->start.line) ||
-            n->end.col > document_.lineLength(n->end.line)) {
-            clearSelection();
-        }
-}
-    // La seleccion restaurada vuelve a estar VIGENTE. Importante: el modo
-    // Seleccion solo debe activarse si el rango restaurado es realmente NO
-    // vacio. Usar `has_value()` como criterio dejaria el estado en Seleccion
-    // para una seleccion vacia (anchor == position), con la barra de estado
-    // mostrando "SELECCION" sin texto resaltado. Compartimos el criterio
-    // con hasSelection() (anchor != position). Nota: si el usuario estaba
-    // en Interaccion al momento del pushHistory (sin seleccion), el undo
-    // vuelve a Navegacion (el historial no distinguie Navegacion de
-    // Interaccion; solo sabe si hay o no seleccion). Es un criterio
-    // aceptado: undo es del documento, no de la UI.
-    state_ = (selection_.has_value() && selection_->anchor != selection_->position)
-           ? State::Seleccion
-           : State::Navegacion;
-    // modified_ = "¿el contenido difiere del ultimo guardado?"
-    modified_ = (document_.snapshot() != savedLines_);
-}
-
 void Editor::undo() {
-    if (undoStack_.empty()) {
+    Buffer& b = active();
+    if (b.undoStack.empty()) {
         statusMessage_ = "Nada que deshacer.";
         return;
     }
 
     // Guardamos el estado actual para poder rehacer.
     HistoryState current;
-    current.lines = document_.snapshot();
-    current.line = cursor_.line;
-    current.col = cursor_.col;
-    current.selection = selection_;
-    redoStack_.push_back(current);
+    current.lines = b.document.snapshot();
+    current.line = b.cursor.line;
+    current.col = b.cursor.col;
+    current.selection = b.selection;
+    b.redoStack.push_back(current);
 
-    applyState(undoStack_.back());
-    undoStack_.pop_back();
+    b.applyState(b.undoStack.back());
+    b.undoStack.pop_back();
+    // La seleccion restaurada vuelve a estar VIGENTE. Importante: el modo
+    // Seleccion solo debe activarse si el rango restaurado es realmente NO
+    // vacio. Compartimos el criterio con hasSelection() (anchor != position).
+    state_ = (b.selection.has_value() && b.selection->anchor != b.selection->position)
+           ? State::Seleccion
+           : State::Navegacion;
     statusMessage_ = "Deshecho.";
 }
 
 void Editor::redo() {
-    if (redoStack_.empty()) {
+    Buffer& b = active();
+    if (b.redoStack.empty()) {
         statusMessage_ = "Nada que rehacer.";
         return;
     }
 
     // Guardamos el estado actual en el historial de deshacer.
     HistoryState current;
-    current.lines = document_.snapshot();
-    current.line = cursor_.line;
-    current.col = cursor_.col;
-    current.selection = selection_;
-    undoStack_.push_back(current);
+    current.lines = b.document.snapshot();
+    current.line = b.cursor.line;
+    current.col = b.cursor.col;
+    current.selection = b.selection;
+    b.undoStack.push_back(current);
 
-    applyState(redoStack_.back());
-    redoStack_.pop_back();
+    b.applyState(b.redoStack.back());
+    b.redoStack.pop_back();
+    state_ = (b.selection.has_value() && b.selection->anchor != b.selection->position)
+           ? State::Seleccion
+           : State::Navegacion;
     statusMessage_ = "Rehecho.";
 }

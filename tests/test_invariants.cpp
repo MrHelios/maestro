@@ -86,33 +86,33 @@ static bool validUtf8(const std::string& s) {
 }
 
 static void assertStateConsistent(Editor& ed) {
-    const Document& d = ed.document_;
+    const Document& d = ed.active().document;
 
     CHECK(d.lineCount() >= 1);
     for (int i = 0; i < d.lineCount(); ++i)
         CHECK_EQ(d.lineAt(i).size(), static_cast<size_t>(d.lineLength(i)));
 
-    CHECK(ed.cursor_.line >= 0);
-    CHECK(ed.cursor_.col >= 0);
-    CHECK(ed.cursor_.line < d.lineCount());
-    CHECK(ed.cursor_.col <= d.lineLength(ed.cursor_.line));
+    CHECK(ed.active().cursor.line >= 0);
+    CHECK(ed.active().cursor.col >= 0);
+    CHECK(ed.active().cursor.line < d.lineCount());
+    CHECK(ed.active().cursor.col <= d.lineLength(ed.active().cursor.line));
 
-    CHECK(ed.undoStack_.size() <= Editor::MAX_UNDO);
-    CHECK(ed.redoStack_.size() <= Editor::MAX_UNDO);
+    CHECK(ed.active().undoStack.size() <= Editor::MAX_UNDO);
+    CHECK(ed.active().redoStack.size() <= Editor::MAX_UNDO);
 
     // --- Invariantes de la seleccion (Paso 8) ---
     // hasSelection() y selection_ deben estar en concordancia explicita.
     if (ed.hasSelection())
-        CHECK(ed.selection_.has_value());
+        CHECK(ed.active().selection.has_value());
 
-    if (!ed.selection_.has_value())
+    if (!ed.active().selection.has_value())
         CHECK(!ed.hasSelection());
 
     // Si el estado interno guarda una seleccion (incluso vacia), sus dos
     // coordenadas deben ser validas.
-    if (ed.selection_.has_value()) {
-        const Position& anchor = ed.selection_->anchor;
-        const Position& pos = ed.selection_->position;
+    if (ed.active().selection.has_value()) {
+        const Position& anchor = ed.active().selection->anchor;
+        const Position& pos = ed.active().selection->position;
 
         // anchor valido.
         CHECK(anchor.line >= 0);
@@ -128,7 +128,7 @@ static void assertStateConsistent(Editor& ed) {
     }
 
     // anchor == cursor debe equivaler a "no hay seleccion".
-    if (ed.selection_.has_value() && ed.selection_->anchor == ed.selection_->position) {
+    if (ed.active().selection.has_value() && ed.active().selection->anchor == ed.active().selection->position) {
         CHECK(!ed.hasSelection());
     }
 
@@ -140,24 +140,31 @@ static void assertStateConsistent(Editor& ed) {
     }
 
     // --- Invariantes de estado (modo) ---
-    // El modo solo admite los cuatro estados conocidos.
+    // El modo solo admite los estados conocidos. v0.6.3 anadio BufferSelector
+    // y v0.7 SaveAs (el prompt "Guardar archivo:" de un buffer sin nombre).
     CHECK(ed.state_ == State::Navegacion ||
           ed.state_ == State::Interaccion ||
           ed.state_ == State::Seleccion ||
-          ed.state_ == State::Prefix);
+          ed.state_ == State::Prefix ||
+          ed.state_ == State::BufferSelector ||
+          ed.state_ == State::SaveAs);
 
     // Si hay un rango NO vacio, el editor debe estar en Seleccion... salvo
     // en Prefix, donde la seleccion se conserva mientras el comando espera
-    // (priorState_ == Seleccion). Navegacion/Interaccion con una seleccion
-    // activa serian incoherentes.
+    // (priorState_ == Seleccion). Lo mismo vale dentro de BufferSelector y
+    // SaveAs, que se abren desde el prefijo y preservan el modo previo.
+    // Navegacion/Interaccion con una seleccion activa serian incoherentes.
     if (ed.hasSelection()) {
-        CHECK(ed.state_ == State::Seleccion || ed.state_ == State::Prefix);
+        CHECK(ed.state_ == State::Seleccion ||
+              ed.state_ == State::Prefix ||
+              ed.state_ == State::BufferSelector ||
+              ed.state_ == State::SaveAs);
     }
 
     // Estar en modo Seleccion implica que hay (al menos) una seleccion
     // interna, aunque sea vacia (anchor == position).
     if (ed.state_ == State::Seleccion)
-        CHECK(ed.selection_.has_value());
+        CHECK(ed.active().selection.has_value());
 
     // --- Invariantes del clipboard ---
     // Cada linea del clipboard es una cadena UTF-8 valida (sin bytes de
@@ -211,10 +218,10 @@ TEST(state_consistent_after_random_events) {
 // aunque el cursor vaya y vuelva cruzando el anchor.
 TEST(state_selection_consistent_after_shift_moves) {
     Editor ed;
-    ed.document_.restore({"abcde", "xy", "", "abcdefghij", "uv"});
-    ed.cursor_.line = 0;
-    ed.cursor_.col = 0;
-    ed.cursor_.preferredCol_ = 0;
+    ed.active().document.restore({"abcde", "xy", "", "abcdefghij", "uv"});
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 0;
+    ed.active().cursor.preferredCol_ = 0;
 
     const EventType moves[] = {
         EventType::MoveLeft, EventType::MoveRight,
@@ -243,60 +250,60 @@ TEST(state_selection_consistent_after_shift_moves) {
 // preferredCol_.
 TEST(state_selection_shift_cycle_preserves_preferred_col) {
     Editor ed;
-    ed.document_.restore({"abcdef", "xy", "abcdef"});
-    ed.cursor_.line = 0;
-    ed.cursor_.col = 5;
-    ed.cursor_.preferredCol_ = 5;
+    ed.active().document.restore({"abcdef", "xy", "abcdef"});
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 5;
+    ed.active().cursor.preferredCol_ = 5;
 
     // Entrar en modo seleccion (letra 's'): arma el anchor {0, 5}.
     ed.handleEvent(insert('s'));
-    CHECK(ed.selection_.has_value());
+    CHECK(ed.active().selection.has_value());
     const Position anchor{0, 5};
-    CHECK(ed.selection_->anchor == anchor);
+    CHECK(ed.active().selection->anchor == anchor);
 
     // Shift+Down -> linea "xy" (largo 2), el cursor se clampa a col 2.
     ed.handleEvent(ev(EventType::MoveDown));
     assertStateConsistent(ed);
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 2);
-    CHECK_EQ(ed.cursor_.preferredCol_, 5);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 2);
+    CHECK_EQ(ed.active().cursor.preferredCol_, 5);
 
     // Shift+Down -> "abcdef" (largo 6), recupera la col 5 preferida.
     ed.handleEvent(ev(EventType::MoveDown));
     assertStateConsistent(ed);
-    CHECK_EQ(ed.cursor_.line, 2);
-    CHECK_EQ(ed.cursor_.col, 5);
+    CHECK_EQ(ed.active().cursor.line, 2);
+    CHECK_EQ(ed.active().cursor.col, 5);
 
     // Shift+Up -> "xy" de nuevo, clamped a col 2.
     ed.handleEvent(ev(EventType::MoveUp));
     assertStateConsistent(ed);
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 2);
 
     // Shift+Up -> linea 0, recupera col 5 == anchor.
     ed.handleEvent(ev(EventType::MoveUp));
     assertStateConsistent(ed);
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 5);
-    CHECK_EQ(ed.cursor_.preferredCol_, 5);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 5);
+    CHECK_EQ(ed.active().cursor.preferredCol_, 5);
 
     // El ciclo completo devuelve el cursor exactamente al anchor; la
     // seleccion queda vacia (anchor == position) de forma consistente.
-    CHECK(ed.selection_->anchor == anchor);
-    CHECK(ed.selection_->position == anchor);
+    CHECK(ed.active().selection->anchor == anchor);
+    CHECK(ed.active().selection->position == anchor);
     CHECK(!ed.hasSelection());
 }
 
 TEST(state_modified_flag_tracks_changes) {
     Editor ed;
-    CHECK(!ed.modified_);
+    CHECK(!ed.active().modified);
     type(ed, "x");
-    CHECK(ed.modified_);
+    CHECK(ed.active().modified);
     // Undo vuelve al estado inicial (== al guardado): modified_ se limpia.
     ed.handleEvent(ev(EventType::Undo));
-    CHECK(!ed.modified_);
+    CHECK(!ed.active().modified);
     ed.handleEvent(ev(EventType::Redo));
-    CHECK(ed.modified_);
+    CHECK(ed.active().modified);
 }
 
 // ---------------------------------------------------------------------------
@@ -308,10 +315,10 @@ TEST(state_modified_flag_tracks_changes) {
 // ---------------------------------------------------------------------------
 TEST(state_stress_mixed_operations_selection) {
     Editor ed;
-    ed.document_.restore({"hola", "mundo", "", "chau"});
-    ed.cursor_.line = 1;
-    ed.cursor_.col = 2;
-    ed.cursor_.preferredCol_ = 2;
+    ed.active().document.restore({"hola", "mundo", "", "chau"});
+    ed.active().cursor.line = 1;
+    ed.active().cursor.col = 2;
+    ed.active().cursor.preferredCol_ = 2;
 
     assertStateConsistent(ed);
 
@@ -365,7 +372,7 @@ TEST(state_filename_unchanged_by_edits) {
     type(ed, "contenido");
     ed.handleEvent(ev(EventType::Undo));
     ed.handleEvent(ev(EventType::Redo));
-    CHECK_EQ(ed.filename_, f.path);
+    CHECK_EQ(ed.active().filename, f.path);
 }
 
 TEST(state_history_coherent_after_sequence) {
@@ -376,13 +383,13 @@ TEST(state_history_coherent_after_sequence) {
     ed.handleEvent(ev(EventType::Redo));  // -> "ab"
     ed.handleEvent(ev(EventType::Undo));  // -> "a"
     ed.handleEvent(ev(EventType::Redo));  // -> "ab"
-    CHECK_EQ(ed.document_.lineAt(0), "ab");
+    CHECK_EQ(ed.active().document.lineAt(0), "ab");
     // pushHistory guarda el snapshot ANTERIOR a cada mutacion, asi que tras
     // teclear "abc" el undoStack_ es [init, "a", "ab"]. La secuencia
     // undo/undo/redo/undo/redo deja undoStack_ == [init, "a"] (2) y
     // redoStack_ == ["abc"] (1).
-    CHECK_EQ(ed.undoStack_.size(), size_t(2));
-    CHECK_EQ(ed.redoStack_.size(), size_t(1));
+    CHECK_EQ(ed.active().undoStack.size(), size_t(2));
+    CHECK_EQ(ed.active().redoStack.size(), size_t(1));
 }
 
 // ---------------------------------------------------------------------------
@@ -394,7 +401,7 @@ TEST(sequence_open_insert_save_close) {
     ed.openFile(f.path);
     type(ed, "hola");
     save(ed);
-    CHECK(!ed.modified_);
+    CHECK(!ed.active().modified);
     // v0.3: Quit solo sale via prefijo (Ctrl+K -> Ctrl+Q).
     ed.handleEvent(ev(EventType::Prefix));
     ed.handleEvent(ev(EventType::Quit));
@@ -414,7 +421,7 @@ TEST(sequence_open_edit_undo_redo_save) {
     ed.handleEvent(ev(EventType::Undo));
     ed.handleEvent(ev(EventType::Redo));
     save(ed);
-    CHECK(!ed.modified_);
+    CHECK(!ed.active().modified);
 
     std::ifstream in(f.path, std::ios::binary);
     std::string content((std::istreambuf_iterator<char>(in)),
@@ -429,9 +436,9 @@ TEST(sequence_insert_enter_write_backspace_undo) {
     ed.handleEvent(ev(EventType::InsertNewline));  // linea1 "", linea2 ""
     type(ed, "cd");
     ed.handleEvent(ev(EventType::Backspace));  // borra 'd'
-    CHECK_EQ(ed.document_.lineAt(2), "c");
+    CHECK_EQ(ed.active().document.lineAt(2), "c");
     ed.handleEvent(ev(EventType::Undo));
-    CHECK_EQ(ed.document_.lineAt(2), "cd");
+    CHECK_EQ(ed.active().document.lineAt(2), "cd");
     assertStateConsistent(ed);
 }
 
@@ -442,8 +449,8 @@ TEST(sequence_move_insert_move_delete) {
     ed.handleEvent(insert('X'));              // "abXc", col 3
     ed.handleEvent(ev(EventType::MoveLeft));  // col 2
     ed.handleEvent(ev(EventType::Delete));    // elimina la 'X'
-    CHECK_EQ(ed.document_.lineAt(0), "abc");
-    CHECK_EQ(ed.cursor_.col, 2);
+    CHECK_EQ(ed.active().document.lineAt(0), "abc");
+    CHECK_EQ(ed.active().cursor.col, 2);
     assertStateConsistent(ed);
 }
 
@@ -457,8 +464,8 @@ TEST(sequence_mixed_edits_end_consistent) {
     ed.handleEvent(ev(EventType::MoveDown)); // linea 1, col 0 -> noop
     ed.handleEvent(ev(EventType::Undo));
     ed.handleEvent(ev(EventType::Redo));
-    CHECK_EQ(ed.document_.lineAt(0), "linea");
-    CHECK_EQ(ed.document_.lineAt(1), "do");
+    CHECK_EQ(ed.active().document.lineAt(0), "linea");
+    CHECK_EQ(ed.active().document.lineAt(1), "do");
     assertStateConsistent(ed);
 }
 
@@ -467,50 +474,50 @@ TEST(sequence_mixed_edits_end_consistent) {
 // ---------------------------------------------------------------------------
 TEST(edge_empty_document) {
     Editor ed;
-    CHECK_EQ(ed.document_.lineCount(), 1);
-    CHECK_EQ(ed.document_.lineAt(0), "");
+    CHECK_EQ(ed.active().document.lineCount(), 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "");
     ed.handleEvent(ev(EventType::Backspace));
     ed.handleEvent(ev(EventType::Delete));
-    CHECK_EQ(ed.document_.lineCount(), 1);
-    CHECK_EQ(ed.document_.lineAt(0), "");
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.active().document.lineCount(), 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "");
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
 }
 
 TEST(edge_single_empty_line) {
     Editor ed;
     enterInteraccion(ed);
     ed.handleEvent(ev(EventType::InsertNewline));  // "", ""
-    CHECK_EQ(ed.document_.lineCount(), 2);
-    CHECK_EQ(ed.document_.lineAt(0), "");
-    CHECK_EQ(ed.document_.lineAt(1), "");
+    CHECK_EQ(ed.active().document.lineCount(), 2);
+    CHECK_EQ(ed.active().document.lineAt(0), "");
+    CHECK_EQ(ed.active().document.lineAt(1), "");
     ed.handleEvent(ev(EventType::Backspace));
-    CHECK_EQ(ed.document_.lineCount(), 1);
-    CHECK_EQ(ed.document_.lineAt(0), "");
+    CHECK_EQ(ed.active().document.lineCount(), 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "");
 }
 
 TEST(edge_single_letter) {
     Editor ed;
     enterInteraccion(ed);
     ed.handleEvent(insert('a'));
-    CHECK_EQ(ed.document_.lineAt(0), "a");
-    CHECK_EQ(ed.cursor_.col, 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "a");
+    CHECK_EQ(ed.active().cursor.col, 1);
     ed.handleEvent(ev(EventType::Backspace));
-    CHECK_EQ(ed.document_.lineAt(0), "");
+    CHECK_EQ(ed.active().document.lineAt(0), "");
 }
 
 TEST(edge_long_line_million_chars) {
     Editor ed;
     const int n = 1000000;
-    ed.document_.restore({std::string(n, 'x')});
-    ed.cursor_.col = n;
-    CHECK_EQ(ed.document_.lineLength(0), n);
-    CHECK_EQ(ed.cursor_.col, n);
+    ed.active().document.restore({std::string(n, 'x')});
+    ed.active().cursor.col = n;
+    CHECK_EQ(ed.active().document.lineLength(0), n);
+    CHECK_EQ(ed.active().cursor.col, n);
     enterInteraccion(ed); // Backspace solo actua en Interaccion (v0.5)
     ed.handleEvent(ev(EventType::Backspace));
-    CHECK_EQ(ed.document_.lineLength(0), n - 1);
+    CHECK_EQ(ed.active().document.lineLength(0), n - 1);
     ed.handleEvent(ev(EventType::Undo));
-    CHECK_EQ(ed.document_.lineLength(0), n);
+    CHECK_EQ(ed.active().document.lineLength(0), n);
     assertStateConsistent(ed);
 }
 
@@ -520,12 +527,12 @@ TEST(edge_many_empty_lines) {
     enterInteraccion(ed);
     for (int i = 0; i < n; ++i)
         ed.handleEvent(ev(EventType::InsertNewline));
-    CHECK_EQ(ed.document_.lineCount(), n + 1);
+    CHECK_EQ(ed.active().document.lineCount(), n + 1);
     for (int i = 0; i < n + 1; ++i)
-        CHECK_EQ(ed.document_.lineAt(i), "");
-    CHECK_EQ(ed.cursor_.line, n);
+        CHECK_EQ(ed.active().document.lineAt(i), "");
+    CHECK_EQ(ed.active().cursor.line, n);
     ed.handleEvent(ev(EventType::MoveUp));  // la ultima linea esta vacia
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
     assertStateConsistent(ed);
 }
 
@@ -538,8 +545,8 @@ TEST(edge_cursor_at_absolute_start) {
     ed.handleEvent(ev(EventType::MoveHome));
     ed.handleEvent(ev(EventType::MoveUp));
     ed.handleEvent(ev(EventType::MoveLeft));
-    CHECK_EQ(ed.cursor_.line, 0);
-    CHECK_EQ(ed.cursor_.col, 0);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
 }
 
 TEST(edge_cursor_at_absolute_end) {
@@ -551,8 +558,8 @@ TEST(edge_cursor_at_absolute_end) {
     ed.handleEvent(ev(EventType::MoveEnd));
     ed.handleEvent(ev(EventType::MoveDown));
     ed.handleEvent(ev(EventType::MoveRight));
-    CHECK_EQ(ed.cursor_.line, 1);
-    CHECK_EQ(ed.cursor_.col, 3);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 3);
 }
 
 TEST(edge_millions_of_chars_roundtrip) {
@@ -560,15 +567,15 @@ TEST(edge_millions_of_chars_roundtrip) {
     Editor ed;
     ed.openFile(f.path);
     const int n = 1000000;
-    ed.document_.restore({std::string(n, 'y')});
+    ed.active().document.restore({std::string(n, 'y')});
     save(ed);
-    CHECK(!ed.modified_);
+    CHECK(!ed.active().modified);
 
     Editor ed2;
     CHECK(ed2.openFile(f.path));
-    CHECK_EQ(ed2.document_.lineLength(0), n);
+    CHECK_EQ(ed2.active().document.lineLength(0), n);
     for (int i = 0; i < n; i += 10000)
-        CHECK_EQ(ed2.document_.lineAt(0)[i], 'y');
+        CHECK_EQ(ed2.active().document.lineAt(0)[i], 'y');
 }
 
 // ---------------------------------------------------------------------------
@@ -578,11 +585,11 @@ TEST(edge_millions_of_chars_roundtrip) {
 static void assertRoundTrip(const std::string& path, const Editor& ed) {
     Editor reloaded;
     CHECK(reloaded.openFile(path));
-    CHECK_EQ(reloaded.document_.lineCount(), ed.document_.lineCount());
-    for (int i = 0; i < ed.document_.lineCount(); ++i)
-        CHECK_EQ(reloaded.document_.lineAt(i), ed.document_.lineAt(i));
-    CHECK_EQ(reloaded.cursor_.line, 0);
-    CHECK_EQ(reloaded.cursor_.col, 0);
+    CHECK_EQ(reloaded.active().document.lineCount(), ed.active().document.lineCount());
+    for (int i = 0; i < ed.active().document.lineCount(); ++i)
+        CHECK_EQ(reloaded.active().document.lineAt(i), ed.active().document.lineAt(i));
+    CHECK_EQ(reloaded.active().cursor.line, 0);
+    CHECK_EQ(reloaded.active().cursor.col, 0);
     assertStateConsistent(reloaded);
 }
 
@@ -606,16 +613,16 @@ TEST(invariant_save_does_not_change_document) {
     ed.openFile(f.path);
     type(ed, "abc");
 
-    const std::string before = ed.document_.lineAt(0);
-    const int line = ed.cursor_.line;
-    const int col = ed.cursor_.col;
+    const std::string before = ed.active().document.lineAt(0);
+    const int line = ed.active().cursor.line;
+    const int col = ed.active().cursor.col;
 
     save(ed);
 
-    CHECK_EQ(ed.document_.lineAt(0), before);
-    CHECK_EQ(ed.cursor_.line, line);
-    CHECK_EQ(ed.cursor_.col, col);
-    CHECK(!ed.modified_);
+    CHECK_EQ(ed.active().document.lineAt(0), before);
+    CHECK_EQ(ed.active().cursor.line, line);
+    CHECK_EQ(ed.active().cursor.col, col);
+    CHECK(!ed.active().modified);
 
     assertStateConsistent(ed);
 }
@@ -631,9 +638,9 @@ TEST(invariant_undo_redo_never_corrupts) {
     for (int round = 0; round < 50; ++round) {
         ed.handleEvent(ev(EventType::Undo));
         ed.handleEvent(ev(EventType::Redo));
-        CHECK_EQ(ed.document_.lineAt(0), "a");
-        CHECK_EQ(ed.document_.lineCount(), 2);
-        CHECK_EQ(ed.document_.lineAt(1), "b");
+        CHECK_EQ(ed.active().document.lineAt(0), "a");
+        CHECK_EQ(ed.active().document.lineCount(), 2);
+        CHECK_EQ(ed.active().document.lineAt(1), "b");
         assertStateConsistent(ed);
     }
 }
@@ -645,9 +652,9 @@ TEST(invariant_line_count_matches_content) {
     type(ed, "mundo");
 
     // lineCount() y lineAt(i) son coherentes entre si.
-    CHECK_EQ(ed.document_.lineCount(), 2);
-    CHECK_EQ(ed.document_.lineAt(0), "hola");
-    CHECK_EQ(ed.document_.lineAt(1), "mundo");
+    CHECK_EQ(ed.active().document.lineCount(), 2);
+    CHECK_EQ(ed.active().document.lineAt(0), "hola");
+    CHECK_EQ(ed.active().document.lineAt(1), "mundo");
 }
 
 // Serializacion: como se ve el contenido en el archivo al guardar.
@@ -670,10 +677,14 @@ TEST(invariant_serialize_joins_lines) {
 }
 
 TEST(invariant_no_crash_on_event_sequence) {
-    // Secuencia de eventos (incluye Save sin archivo abierto y Quit, que
-    // corta el loop). No busca cubrir cada tipo de forma uniforme, solo
-    // que ninguna secuencia arbitraria rompa el estado.
+    // Secuencia de eventos (incluye Save y Quit, que corta el loop). No
+    // busca cubrir cada tipo de forma uniforme, solo que ninguna secuencia
+    // arbitraria rompa el estado. v0.7: el buffer tiene nombre para que un
+    // Save aleatorio guarde en el TempFile y NO entre al prompt SaveAs
+    // (que, con un Enter aleatorio, escribira un archivo en el cwd).
+    TempFile f;
     Editor ed;
+    ed.openFile(f.path);
     // Todos los tipos de evento ante un editor recien creado.
     const std::vector<EventType> types = {
         EventType::InsertChar, EventType::InsertNewline, EventType::Backspace,
@@ -703,11 +714,13 @@ TEST(invariant_state_consistent_with_clipboard_and_prefix) {
     // prefijo y los movimientos; tras CADA evento se verifican las
     // invariantes ampliadas (cuyo conjunto incluye documento, cursor,
     // seleccion, estado, clipboard y limites de historial).
+    TempFile f;
     Editor ed;
-    ed.document_.restore({"hola", "mundo", "", "cafe"});
-    ed.cursor_.line = 1;
-    ed.cursor_.col = 2;
-    ed.cursor_.preferredCol_ = 2;
+    ed.openFile(f.path); // nombre real: un Save aleatorio no abre el prompt
+    ed.active().document.restore({"hola", "mundo", "", "cafe"});
+    ed.active().cursor.line = 1;
+    ed.active().cursor.col = 2;
+    ed.active().cursor.preferredCol_ = 2;
     assertStateConsistent(ed);
 
     unsigned long seed = 987654;
@@ -761,9 +774,9 @@ TEST(invariant_clipboard_stays_valid_across_undo_redo) {
     // Copiar y cortar con UTF-8 mezclado, deshacer y rehacer: el clipboard
     // sigue siendo siempre un bloque de lineas UTF-8 valido.
     Editor ed;
-    ed.document_.restore({"caf\xc3\xa9 \xe2\x80\x94 \xf0\x9f\x98\x80"});
-    ed.cursor_.line = 0;
-    ed.cursor_.col = 0;
+    ed.active().document.restore({"caf\xc3\xa9 \xe2\x80\x94 \xf0\x9f\x98\x80"});
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 0;
     assertStateConsistent(ed);
 
     // Entrar en seleccion y copiar el primer caracter ("c", 1 byte).
@@ -790,9 +803,9 @@ TEST(invariant_undo_reaches_limit_unbounded) {
     for (int i = 0; i < 2500; ++i) {
         ed.handleEvent(insert(static_cast<char>('a' + (i % 26))));
         assertStateConsistent(ed);
-        CHECK(ed.undoStack_.size() <= Editor::MAX_UNDO);
+        CHECK(ed.active().undoStack.size() <= Editor::MAX_UNDO);
     }
-    CHECK_EQ(ed.undoStack_.size(), Editor::MAX_UNDO);
+    CHECK_EQ(ed.active().undoStack.size(), Editor::MAX_UNDO);
 }
 
 TEST(invariant_redo_consistent_with_undo) {
@@ -801,19 +814,19 @@ TEST(invariant_redo_consistent_with_undo) {
     Editor ed;
     type(ed, "ab");
     ed.handleEvent(ev(EventType::Undo));  // "a", redo=["b"]
-    CHECK(!ed.redoStack_.empty());
-    CHECK_EQ(ed.document_.lineAt(0), "a");
+    CHECK(!ed.active().redoStack.empty());
+    CHECK_EQ(ed.active().document.lineAt(0), "a");
     assertStateConsistent(ed);
 
     ed.handleEvent(ev(EventType::Redo));  // "ab"
-    CHECK(ed.redoStack_.empty());
-    CHECK_EQ(ed.document_.lineAt(0), "ab");
+    CHECK(ed.active().redoStack.empty());
+    CHECK_EQ(ed.active().document.lineAt(0), "ab");
     assertStateConsistent(ed);
 
     // Debajo de un mismo undo hay exactamente una entrada de redo.
     ed.handleEvent(ev(EventType::Undo));
     ed.handleEvent(ev(EventType::Undo));
-    CHECK_EQ(ed.redoStack_.size(), size_t{2});
+    CHECK_EQ(ed.active().redoStack.size(), size_t{2});
     assertStateConsistent(ed);
 }
 
@@ -822,9 +835,9 @@ TEST(invariant_clipboard_not_in_history) {
     // "devolver" un buffer viejo. Lo verificamos de forma estructural: los
     // estados guardados no llevan rastro del buffer y el buffer sobrevive.
     Editor ed;
-    ed.document_.restore({"abcdef"});
-    ed.cursor_.line = 0;
-    ed.cursor_.col = 0;
+    ed.active().document.restore({"abcdef"});
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 0;
 
     // Copiar "ab".
     ed.handleEvent(insert('s'));
