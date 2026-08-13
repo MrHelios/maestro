@@ -63,6 +63,7 @@ std::string stateLabel(State state) {
         case State::Prefix: return "COMANDO";
         case State::BufferSelector: return "BUFFERS";
         case State::SaveAs: return "GUARDAR";
+        case State::FileBrowser: return "ABRIR";
     }
     return "";
 }
@@ -368,5 +369,81 @@ void Renderer::renderBufferList(const std::vector<std::string>& names,
                                 int width,
                                 int height) {
     std::string buffer = buildBufferListScreen(names, selected, width, height);
+    write(STDOUT_FILENO, buffer.c_str(), buffer.size());
+}
+
+// v0.6.4: pantalla del explorador de archivos. Mismo aspecto que el
+// selector de buffers (lista en video inverso + '~' en filas vacias), pero
+// la barra de estado muestra la ruta actual (`path`) con la etiqueta
+// ABRIR ARCHIVO a la derecha, y la fila de mensajes lleva la ayuda.
+std::string Renderer::buildFileListScreen(
+        const std::vector<std::string>& names,
+        int selected,
+        int scroll,
+        const std::string& path,
+        const std::string& statusMessage,
+        int width,
+        int height) {
+    std::ostringstream out;
+
+    out << "\x1b[?25l";   // ocultar cursor mientras dibujamos
+    out << "\x1b[H";      // mover a home
+    out << "\x1b[J";      // limpiar el resto
+
+    // Lista con ventana (scroll): cada fila es names[scroll + row].
+    int rows = 0;
+    for (int row = 0; row < height; ++row, ++rows) {
+        int idx = scroll + row;
+        out << "\x1b[K";
+        if (idx < static_cast<int>(names.size())) {
+            std::string line = "  " + names[static_cast<size_t>(idx)];
+            if (idx == selected) {
+                out << "\x1b[7m" << utf8::truncate(line, width) << "\x1b[0m";
+            } else {
+                out << utf8::truncate(line, width);
+            }
+        } else {
+            out << "~";
+        }
+        out << "\r\n";
+    }
+
+    // Barra de estado (fila height+1): ruta a la izquierda, modo a la derecha.
+    out << "\x1b[K";
+    out << "\x1b[7m";
+    const std::string right = "ABRIR ARCHIVO";
+    int rightW = colCount(right);
+    int leftBudget = std::max(0, width - rightW - 1);
+    std::string left = path.empty() ? "/" : path;
+    if (colCount(left) > leftBudget) left = utf8TruncateFront(left, leftBudget);
+    out << left;
+    int fill = width - colCount(left) - rightW;
+    for (int i = 0; i < fill; ++i) out << ' ';
+    out << right;
+    out << "\x1b[0m";
+
+    // Fila de mensajes (height+2).
+    out << "\r\n";
+    out << "\x1b[K";
+    out << utf8::truncate(statusMessage, width);
+
+    // Cursor real sobre la fila seleccionada de la lista, clampeado a las
+    // filas dibujadas para no invadir la barra de estado.
+    int cursorRow = std::max(1, std::min(selected - scroll + 1, rows));
+    out << "\x1b[" << cursorRow << ";1H";
+
+    out << "\x1b[?25h";
+    return out.str();
+}
+
+void Renderer::renderFileList(const std::vector<std::string>& names,
+                              int selected,
+                              int scroll,
+                              const std::string& path,
+                              const std::string& statusMessage,
+                              int width,
+                              int height) {
+    std::string buffer = buildFileListScreen(names, selected, scroll, path,
+                                             statusMessage, width, height);
     write(STDOUT_FILENO, buffer.c_str(), buffer.size());
 }

@@ -1,4 +1,4 @@
-# edit — editor de texto de terminal (v0.6.3)
+# edit — editor de texto de terminal (v0.6.4)
 
 Editor de texto minimalista en C++17, sin interfaz gráfica, pensado
 como base extensible. Usa un modelo *modal* (Navegación / Interacción /
@@ -65,6 +65,7 @@ El editor es modal. En cada modo las teclas significan cosas distintas:
 | Ctrl+K, Ctrl+S             | Guardar. Si el buffer no tiene nombre, abre el prompt *Guardar archivo:* |
 | Ctrl+K, Ctrl+Q             | Salir                                         |
 | Ctrl+K, `n`                | Buffer nuevo sin nombre (y lo activa)         |
+| Ctrl+K, `o`                | Explorador de archivos (↑/↓, Enter, Esc)      |
 | Ctrl+K, `t`                | Selector de buffers (↑/↓, Enter, Esc)         |
 | Ctrl+K, `w`                | Cerrar el buffer activo                       |
 | Ctrl+K, otra tecla         | Cancelar el prefijo y descartar la tecla      |
@@ -90,7 +91,7 @@ La barra de estado ocupa las dos últimas filas de la terminal:
 
 - **Fila 1 (fija)** en video inverso, a ancho completo: bloque izquierdo
   `nombre - ruta - ESTADO` (`NAVEGACION` / `INTERACCION` / `SELECCION` /
-  `COMANDO` / `BUFFERS` / `GUARDAR`), con `[modificado]` junto al nombre si hay cambios
+  `COMANDO` / `BUFFERS` / `GUARDAR` / `ABRIR`), con `[modificado]` junto al nombre si hay cambios
   sin guardar, y la ruta resuelta siempre a absoluta. Bloque derecho
   `Linea: N Col: M`, anclado a la derecha y nunca truncado. Ante una
   terminal chica se sacrifica primero la ruta (con `...` al inicio) y
@@ -138,6 +139,22 @@ modificado y nombre:
 El portapapeles (`c`/`x`/`p`) es global a todos los buffers. El selector
 es de solo lectura: no modifica ningún buffer.
 
+### Explorador de archivos (Ctrl+K `o`)
+
+`Ctrl+K o` abre un explorador modal que arranca en el directorio de
+trabajo actual (`getcwd()`). Se navega como en el selector de buffers:
+
+- `↑`/`↓` se mueven por la lista (con scroll si no cabe en pantalla).
+- `Enter` sobre una **carpeta** entra en ella; sobre `..` sube un nivel.
+- `Enter` sobre un **archivo** lo abre: agrega un buffer nuevo y, si el
+  archivo ya está abierto, activa el buffer existente (no duplica).
+- `Esc` (o `Ctrl+K`) cancela y vuelve al modo anterior sin tocar nada.
+
+Las carpetas se listan primero (con `/` al final) y luego los archivos,
+ambos en orden alfabético case-insensitive; se muestran también los
+ocultos. En la raíz (`/`) no aparece `..`. Como es modal, otras teclas
+dentro (incl. Ctrl+K) no filtran a los buffers.
+
 ## Arquitectura
 
 ```
@@ -153,6 +170,7 @@ tests/
   test_modes.cpp        -> máquina de estados (Navegación/Interacción/Selección/Prefix)
   test_invariants.cpp   -> invariantes de estado tras una secuencia determinista
   test_buffers.cpp      -> multi-buffer: aislamiento, Ctrl+K n/t/w, selector, clipboard
+  test_filebrowser.cpp  -> explorador Ctrl+K o: navegación, carpetas, open, raíz, scroll
   test_utf8*.cpp        -> utilitarios UTF-8 (columnas, truncado, rango)
 
 src/
@@ -180,9 +198,9 @@ src/
                      Terminal + Renderer, corre el loop principal. Es
                      el dueño de la selección y del portapapeles
                      (global). Mantiene la colección de `Buffer` con un
-                     activo, el selector de buffers (Ctrl+K t) y los
-                     comandos Ctrl+K n/w. Define los modos y el prefijo
-                     'a'.
+                     activo, el selector de buffers (Ctrl+K t), los
+                     comandos Ctrl+K n/w y el explorador de archivos
+                     (Ctrl+K o). Define los modos y el prefijo 'a'.
 
                      Loop principal:
                          leer evento

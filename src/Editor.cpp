@@ -1,6 +1,8 @@
 #include "Editor.h"
 
 #include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -34,6 +36,72 @@ bool Editor::isDirectory(const std::string& path) {
     struct stat st;
     if (stat(path.c_str(), &st) != 0) return false;
     return S_ISDIR(st.st_mode);
+}
+
+std::string Editor::getCwd() {
+    char buf[4096];
+    if (!getcwd(buf, sizeof buf)) return "";
+    return std::string(buf);
+}
+
+std::string Editor::parentPath(const std::string& path) {
+    if (path.empty() || path == "/") return "/";
+    const std::string parent = std::filesystem::path(path).parent_path().string();
+    // parent_path() devuelve vacio si `path` es relativo sin directorio:
+    // no hay a donde subir, se ancla a la raiz.
+    return parent.empty() ? "/" : parent;
+}
+
+// Compara dos nombres de forma case-insensitive para el orden alfabetico
+// de las entradas del explorador (v0.6.4, decision de diseno).
+static bool entryLess(const FileBrowserEntry& a, const FileBrowserEntry& b) {
+    std::string sa = a.name, sb = b.name;
+    std::transform(sa.begin(), sa.end(), sa.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    std::transform(sb.begin(), sb.end(), sb.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return sa < sb;
+}
+
+std::vector<FileBrowserEntry> Editor::listDirectory(const std::string& path,
+                                                     std::string& error) {
+    std::vector<FileBrowserEntry> dirs, files;
+    error.clear();
+
+    std::error_code ec;
+    std::filesystem::directory_iterator it(path, ec);
+    if (ec) {
+        // Sin permiso de lectura / no existe: la lista queda solo con ".."
+        // (si la hay) y el error se muestra en la fila de mensajes.
+        error = "No se pudo leer: " + path;
+    } else {
+        std::filesystem::directory_iterator end;
+        for (; it != end; it.increment(ec)) {
+            if (ec) { ec.clear(); continue; } // entrada no listable -> saltar
+            const std::filesystem::directory_entry& e = *it;
+            std::error_code sec;
+            std::filesystem::file_status st = e.status(sec);
+            if (sec) continue; // symlink roto etc. -> omitir
+            FileBrowserEntry entry;
+            entry.name = e.path().filename().string();
+            entry.fullPath = e.path().string();
+            entry.isDirectory = std::filesystem::is_directory(st);
+            if (entry.isDirectory) {
+                dirs.push_back(std::move(entry));
+            } else {
+                files.push_back(std::move(entry));
+            }
+        }
+    }
+
+    std::sort(dirs.begin(), dirs.end(), entryLess);
+    std::sort(files.begin(), files.end(), entryLess);
+
+    std::vector<FileBrowserEntry> out;
+    if (path != "/") out.push_back(FileBrowserEntry{"..", true, parentPath(path)});
+    out.insert(out.end(), dirs.begin(), dirs.end());
+    out.insert(out.end(), files.begin(), files.end());
+    return out;
 }
 
 Buffer& Editor::active() {
@@ -195,6 +263,116 @@ void Editor::handleBufferSelectorEvent(const Event& event) {
     }
 }
 
+void Editor::startFileBrowser() {
+    fileBrowserPath_ = getCwd();
+    fileBrowserIndex_ = 0;
+    fileBrowserScroll_ = 0;
+    loadFileBrowserEntries();
+    state_ = State::FileBrowser;
+}
+
+void Editor::loadFileBrowserEntries() {
+    std::string err;
+    fileBrowserEntries_ = listDirectory(fileBrowserPath_, err);
+    fileBrowserDisplayNames_.clear();
+    fileBrowserDisplayNames_.reserve(fileBrowserEntries_.size());
+    for (const FileBrowserEntry& e : fileBrowserEntries_) {
+        fileBrowserDisplayNames_.push_back(
+            e.isDirectory ? e.name + "/" : e.name);
+    }
+    if (!err.empty()) {
+        statusMessage_ = err;
+    } else {
+        statusMessage_ = "ABRIR: ↑/↓ mover | Enter abrir/entrar | ESC cancelar";
+    }
+}
+
+void Editor::handleFileBrowserEvent(const Event& event) {
+    switch (event.type) {
+        case EventType::MoveUp:
+            if (fileBrowserIndex_ > 0) fileBrowserIndex_--;
+            clampFileBrowserScroll();
+            break;
+        case EventType::MoveDown:
+            if (fileBrowserIndex_ + 1 < static_cast<int>(fileBrowserEntries_.size()))
+                fileBrowserIndex_++;
+            clampFileBrowserScroll();
+            break;
+        case EventType::InsertNewline: // Enter: abrir/entrar la seleccion
+            fileBrowserEnterSelected();
+            break;
+        case EventType::Escape:
+        case EventType::Prefix: // Ctrl+K dentro tambien cancela (modal puro)
+            state_ = priorState_;
+            statusMessage_ = "";
+            break;
+        // Cualquier otra tecla es no-op: pantalla modal, nada se filtra.
+        default:
+            break;
+    }
+}
+
+void Editor::fileBrowserEnterSelected() {
+    if (fileBrowserEntries_.empty()) return;
+    const FileBrowserEntry& e = fileBrowserEntries_[
+        static_cast<size_t>(fileBrowserIndex_)];
+
+    if (e.isDirectory) {
+        // Carpeta (o ".."): entrar, recargar y volver al inicio.
+        fileBrowserPath_ = e.fullPath;
+        fileBrowserIndex_ = 0;
+        fileBrowserScroll_ = 0;
+        loadFileBrowserEntries();
+        return;
+    }
+
+    // Archivo: abrirlo (o activarlo si ya estaba abierto) y salir.
+    openFileToBuffer(e.fullPath);
+}
+
+void Editor::openFileToBuffer(const std::string& path) {
+    // Si ya hay un buffer con esta ruta absoluta, se activa ese buffer
+    // en vez de crear otro (v0.6.4: no duplicar archivos abiertos).
+    for (size_t i = 0; i < buffers_.size(); ++i) {
+        if (buffers_[i].filename == path) {
+            activateBuffer(static_cast<int>(i));
+            state_ = priorState_; // se sale del explorador al modo previo
+            return;
+        }
+    }
+
+    // Buffer nuevo. NO pasa por createBuffer(): un archivo abierto no es un
+    // buffer anonimo, asi que no debe consumir un nombre "SinNombre" del
+    // contador (v0.6.4, invitado 2).
+    Buffer nuevo;
+    syncViewportSize(nuevo);
+    nuevo.filename = path;
+    bool existed = nuevo.document.loadFromFile(path);
+    nuevo.modified = false;
+    nuevo.savedLines = nuevo.document.snapshot();
+    nuevo.cursor.line = 0;
+    nuevo.cursor.col = 0;
+    nuevo.selection.reset();
+    nuevo.selectAllActive = false;
+    nuevo.selectAllPrevious.reset();
+    buffers_.push_back(std::move(nuevo));
+    activeBuffer_ = static_cast<int>(buffers_.size()) - 1;
+    state_ = priorState_; // se sale del explorador al modo previo
+    statusMessage_ = existed ? "" : "Archivo nuevo: " + path;
+}
+
+void Editor::clampFileBrowserScroll() {
+    const int page = std::max(0, active().viewport.height);
+    const int n = static_cast<int>(fileBrowserEntries_.size());
+    if (n == 0) { fileBrowserScroll_ = 0; return; }
+    if (fileBrowserIndex_ < fileBrowserScroll_)
+        fileBrowserScroll_ = fileBrowserIndex_;
+    if (fileBrowserScroll_ + page > n)
+        fileBrowserScroll_ = std::max(0, n - page);
+    if (fileBrowserIndex_ - fileBrowserScroll_ >= page)
+        fileBrowserScroll_ = fileBrowserIndex_ - page + 1;
+}
+
 void Editor::run() {
     // La barra de estado ocupa las ultimas DOS filas: la fila fija (en
     // video inverso) y la fila de mensajes. El viewport usa el resto.
@@ -232,6 +410,13 @@ void Editor::run() {
             // barra MULTIBUFFER al final, manteniendo el aspecto del editor.
             renderer_.renderBufferList(bufferNames(), bufferSelectorIndex_,
                                        b.viewport.width, b.viewport.height);
+        } else if (state_ == State::FileBrowser) {
+            // Pantalla del explorador de archivos: la lista con la ruta
+            // actual en la barra de estado y la ayuda en la fila de mensajes.
+            renderer_.renderFileList(fileBrowserDisplayNames_,
+                                     fileBrowserIndex_, fileBrowserScroll_,
+                                     fileBrowserPath_, statusMessage_,
+                                     b.viewport.width, b.viewport.height);
         } else {
             b.viewport.scrollToCursor(b.cursor);
             renderer_.renderScreen(b.document, b.cursor, b.viewport,
@@ -246,6 +431,13 @@ void Editor::run() {
 }
 
 void Editor::handleEvent(const Event& event) {
+    // v0.6.4: el explorador es modal y se despacha ANTES del prefijo: un
+    // Ctrl+K dentro no abre un nuevo prefijo sino que cancela el explorador.
+    if (state_ == State::FileBrowser) {
+        handleFileBrowserEvent(event);
+        return;
+    }
+
     // En modo Prefix (tras Ctrl+K) todo pasa por handlePrefixKey: el
     // siguiente evento decide guardar/salir/operaciones de buffer/cancelar.
     if (state_ == State::Prefix) {
@@ -277,7 +469,7 @@ void Editor::handleEvent(const Event& event) {
     if (event.type == EventType::Prefix) {
         priorState_ = state_;
         state_ = State::Prefix;
-        statusMessage_ = "Ctrl+K: s guardar | q salir | n nuevo | t buffers | w cerrar";
+        statusMessage_ = "Ctrl+K: s guardar | q salir | n nuevo | o abrir | t buffers | w cerrar";
         return;
     }
 
@@ -656,6 +848,10 @@ void Editor::handlePrefixKey(const Event& event) {
             }
             if (event.text == "w") {           // Ctrl+K w: cerrar buffer activo
                 closeActiveBuffer();
+                break;
+            }
+            if (event.text == "o") {           // Ctrl+K o: explorador de archivos
+                startFileBrowser();
                 break;
             }
             // Cualquier otra letra: cae en el cancel del default.

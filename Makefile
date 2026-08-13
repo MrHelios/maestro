@@ -20,7 +20,8 @@ $(TEST_DIR)/test_event.cpp \
              $(TEST_DIR)/test_truncate.cpp \
              $(TEST_DIR)/test_utf8range.cpp \
              $(TEST_DIR)/test_clipboard.cpp \
-             $(TEST_DIR)/test_buffers.cpp
+             $(TEST_DIR)/test_buffers.cpp \
+             $(TEST_DIR)/test_filebrowser.cpp
 TEST_BIN := edit_tests
 # Fuentes del programa que se enlazan en los tests (sin main.cpp)
 SRC_NO_MAIN := $(filter-out src/main.cpp,$(SRC))

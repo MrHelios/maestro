@@ -28,6 +28,11 @@
 //                escribe una ruta en la fila de mensajes; Enter guarda,
 //                ESC cancela. Modal: solo se aceptan caracteres, Backspace,
 //                Enter y ESC.
+//   FileBrowser (v0.6.4): explorador de archivos modal tras Ctrl+K o. Se
+//                navega desde el directorio de trabajo (cwd()). Solo se
+//                aceptan ↑/↓, Enter y ESC (Ctrl+K tambien cancela). Enter
+//                sobre una carpeta entra; sobre ".." sube un nivel; sobre un
+//                archivo lo abre (o activa el buffer existente) y sale.
 //
 // IMPORTANTE: estas son DOS cosas distintas que NO hay que confundir.
 //   state_ == State::Seleccion  == "el modo seleccion esta ACTIVO" (modo).
@@ -48,6 +53,16 @@ enum class State {
     Prefix,
     BufferSelector,
     SaveAs,
+    FileBrowser,
+};
+
+// v0.6.4: una entrada del explorador de archivos. `name` es lo que se
+// muestra ("..", una carpeta o un archivo), `isDirectory` true para
+// carpetas y para "..", y `fullPath` es la ruta absoluta que representa.
+struct FileBrowserEntry {
+    std::string name;
+    bool isDirectory = false;
+    std::string fullPath;
 };
 
 // Editor es el "engine": maneja una coleccion de buffers (v0.6.3), un
@@ -131,6 +146,36 @@ private:
     // Maneja los eventos mientras state_ == State::BufferSelector.
     void handleBufferSelectorEvent(const Event& event);
 
+    // ---- Explorador de archivos (v0.6.4) ----
+    // Ctrl+K o -> startFileBrowser(). Fija fileBrowserPath_ con cwd() y
+    // carga las entradas. Es un explorador MODAL: solo ↑/↓, Enter y ESC
+    // (Ctrl+K tambien cancela), igual de hermetico que el selector.
+    void startFileBrowser();
+    // Relista fileBrowserPath_ en fileBrowserEntries_ y en la lista de
+    // nombres para dibujar (carpetas con "/" final). Ante un error de
+    // lectura deja el mensaje en la fila de mensajes.
+    void loadFileBrowserEntries();
+    // Maneja los eventos mientras state_ == State::FileBrowser.
+    void handleFileBrowserEvent(const Event& event);
+    // Enter sobre la entrada seleccionada: entra a la carpeta (o "..")
+    // o abre el archivo.
+    void fileBrowserEnterSelected();
+    // Abre `path` (absoluta) en un buffer NUEVO, o activa el existente
+    // si ya hay uno con esa ruta. Sale del explorador a Navegacion.
+    void openFileToBuffer(const std::string& path);
+    // Ajusta fileBrowserScroll_ para que el indice seleccionado quede
+    // siempre dentro de la ventana visible.
+    void clampFileBrowserScroll();
+    // Directorio de trabajo actual (vacio si getcwd falla).
+    static std::string getCwd();
+    // Directorio padre de `path` (para la entrada ".."). Para "/" vuelve a "/".
+    static std::string parentPath(const std::string& path);
+    // Lista las entradas ordenadas: ".." (si no es raiz), caretas y luego
+    // archivos, ambos alfabeticos case-insensitive. `error` queda set si no
+    // se pudo leer el directorio. Los symlinks rotos se omiten.
+    static std::vector<FileBrowserEntry> listDirectory(const std::string& path,
+                                                       std::string& error);
+
     Renderer renderer_;
     Terminal terminal_;
 
@@ -155,6 +200,16 @@ private:
 
     // Indice seleccionado en la pantalla del selector de buffers.
     int bufferSelectorIndex_ = 0;
+
+    // ---- Explorador de archivos (v0.6.4) ----
+    // Ruta absoluta que se esta listando actualmente.
+    std::string fileBrowserPath_;
+    // Entradas visibles (para la logica) y sus nombres ya formateados
+    // (para dibujar): las carpetas llevan "/" al final y ".." es tal cual.
+    std::vector<FileBrowserEntry> fileBrowserEntries_;
+    std::vector<std::string> fileBrowserDisplayNames_;
+    int fileBrowserIndex_ = 0;   // indice de la entrada seleccionada
+    int fileBrowserScroll_ = 0;  // offset de la ventana visible
 
     // Ruta escrita por el usuario en el prompt "Guardar archivo:" (modo
     // SaveAs). Relativa o absoluta; se resuelve contra cwd() al confirmar.

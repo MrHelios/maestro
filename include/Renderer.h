@@ -63,4 +63,25 @@ public:
                           int selected,
                           int width,
                           int height);
+
+    // v0.6.4: pantalla del explorador de archivos. Igual que el selector
+    // de buffers pero lleva la ruta actual en la barra de estado y la
+    // ayuda de navegacion en la fila de mensajes. `names` son las
+    // entradas formateadas (carpetas con "/"), `selected` el indice y
+    // `scroll` el offset de ventana visible.
+    std::string buildFileListScreen(const std::vector<std::string>& names,
+                                    int selected,
+                                    int scroll,
+                                    const std::string& path,
+                                    const std::string& statusMessage,
+                                    int width,
+                                    int height);
+
+    void renderFileList(const std::vector<std::string>& names,
+                        int selected,
+                        int scroll,
+                        const std::string& path,
+                        const std::string& statusMessage,
+                        int width,
+                        int height);
 };
