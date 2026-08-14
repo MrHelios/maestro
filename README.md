@@ -354,3 +354,30 @@ Alternativa más limpia a futuro, si el proyecto crece: una declaración
 limitados. Mientras tanto se deja anotado, no se cambia: funciona y la
 API de producción no se contamina. Pendiente de resolver si el acceso
 directo a internos empieza a requerirse desde fuera de los tests.
+
+**Buffer: `modified` / `savedLines` (trabajo futuro).** Hoy `Buffer`
+tiene dos campos (`bool modified` y `std::vector<std::string> savedLines`)
+con `modified = snapshot() != savedLines`, y se recalcula en `applyState`
+(`Buffer.cpp`). Una alternativa aparentemente más elegante sería un par
+de revisiones (`revision_ != savedRevision_`, cada mutación `revision_++`,
+guardar `savedRevision_ = revision_`), evitando las dos fuentes de verdad.
+
+**Pero un RevisionId puro rompe undo/redo.** La comparación de contenido
+es la que detecta "volví exactamente al estado guardado", y eso ocurre en
+casos reales:
+
+```cpp
+// guardar "ab" (savedRevision = 2)
+// escribir "c", borrar "c", ... -> contenido "ab" de nuevo pero revision 6
+modified = revision_ != savedRevision_;  // true, INCORRECTO
+```
+
+Un contador monótono no sabe cuándo hubo un `savedRevision_ = revision_`
+intermedio; comparar `snapshot() != savedLines` sí captura "la última
+mutación (incluida una secuencia de undo/redo) me devolvió al guardado".
+Además el costo de la comparación se paga solo en `applyState` (undo/redo,
+poco frecuente), no por tecla: `modified` sigue siendo un `bool` de lectura
+barata en el render. Decisión: mantener `savedLines`; anotado para no
+reintroducir el bug. Pendiente de revisar si alguna vez el proyecto
+necesita comparar otros snapshots con `savedLines` (entonces sí
+convendría extraer una utilidad común). Dejar anotado, no implementado.
