@@ -17,6 +17,7 @@ std::string Buffer::displayName() const {
 void Buffer::pushHistory() {
     HistoryState state;
     state.lines = document.snapshot();
+    state.endsWithNewline = document.endsWithNewline();
     state.line = cursor.line;
     state.col = cursor.col;
     state.selection = selection;
@@ -29,6 +30,7 @@ void Buffer::pushHistory() {
 
 void Buffer::applyState(const HistoryState& state) {
     document.restore(state.lines);
+    document.setEndsWithNewline(state.endsWithNewline);
     cursor.line = state.line;
     cursor.col = state.col;
     cursor.clampToLine(document);

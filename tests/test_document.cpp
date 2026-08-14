@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <fstream>
 #include <random>
 #include <string>
@@ -38,7 +39,7 @@ TEST(doc_load_empty_file) {
     TempFile f;
     f.write("");
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "");
 }
@@ -47,7 +48,7 @@ TEST(doc_load_one_line) {
     TempFile f;
     f.write("hola");
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "hola");
 }
@@ -56,7 +57,7 @@ TEST(doc_load_multiple_lines) {
     TempFile f;
     f.write("uno\ndos\ntres");
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 3);
     CHECK_EQ(d.lineAt(0), "uno");
     CHECK_EQ(d.lineAt(1), "dos");
@@ -67,7 +68,7 @@ TEST(doc_load_trailing_newline) {
     TempFile f;
     f.write("a\nb\n");
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "a");
     CHECK_EQ(d.lineAt(1), "b");
@@ -77,7 +78,7 @@ TEST(doc_load_no_trailing_newline) {
     TempFile f;
     f.write("x\ny");
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(1), "y");
 }
@@ -86,7 +87,7 @@ TEST(doc_load_crlf) {
     TempFile f;
     f.write("a\r\nb\r\n");
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "a");
     CHECK_EQ(d.lineAt(1), "b");
@@ -100,7 +101,7 @@ TEST(doc_load_large_file) {
         big += "linea\n";
     f.write(big);
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 100000);
     CHECK_EQ(d.lineAt(0), "linea");
     CHECK_EQ(d.lineAt(99999), "linea");
@@ -111,7 +112,7 @@ TEST(doc_load_long_lines) {
     std::string line(100000, 'x');
     f.write(line + "\nfin");
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineLength(0), 100000);
     CHECK_EQ(d.lineAt(1), "fin");
@@ -122,7 +123,7 @@ TEST(doc_load_long_lines) {
 // ---------------------------------------------------------------------------
 TEST(doc_load_nonexistent) {
     Document d;
-    CHECK(!d.loadFromFile("/no/such/file/xyz_editor_never"));
+    CHECK_EQ(d.loadFromFile("/no/such/file/xyz_editor_never"), LoadResult::NotFound);
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "");
 }
@@ -134,6 +135,24 @@ TEST(doc_load_directory_no_crash) {
     d.loadFromFile("/tmp");
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "");
+}
+
+// Un archivo EXISTENTE sin permisos de lectura NO se trata como archivo nuevo:
+// loadFromFile devuelve PermissionDenied y NO toca el contenido del documento.
+// (Bajo root no se puede forzar el fallo de permisos, asi que esa parte se omite).
+TEST(doc_load_permission_denied_does_not_touch_document) {
+    if (::geteuid() == 0) return;
+
+    TempFile f;
+    f.write("contenido original\n");
+    std::filesystem::permissions(f.path, std::filesystem::perms::none);
+
+    Document d = makeDoc({"texto previo", "no debe borrarse"});
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::PermissionDenied);
+    // El documento queda intacto, listo para seguir editando/guardando.
+    CHECK_EQ(d.lineCount(), 2);
+    CHECK_EQ(d.lineAt(0), "texto previo");
+    CHECK_EQ(d.lineAt(1), "no debe borrarse");
 }
 
 // ---------------------------------------------------------------------------
@@ -416,7 +435,7 @@ TEST(doc_save_roundtrip) {
     Document d = makeDoc({"uno", "dos", "tres"});
     CHECK(d.saveToFile(f.path));
     Document d2;
-    CHECK(d2.loadFromFile(f.path));
+    CHECK_EQ(d2.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d2.lineCount(), 3);
     CHECK_EQ(d2.lineAt(0), "uno");
     CHECK_EQ(d2.lineAt(1), "dos");
@@ -436,7 +455,7 @@ TEST(doc_save_trailing_empty_line_collapses) {
     Document d = makeDoc({"a", "b", ""});
     CHECK(d.saveToFile(f.path));
     Document d2;
-    CHECK(d2.loadFromFile(f.path));
+    CHECK_EQ(d2.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d2.lineCount(), 2);
     CHECK_EQ(d2.lineAt(1), "b");
 }
@@ -446,7 +465,7 @@ TEST(doc_save_empty) {
     Document d;
     CHECK(d.saveToFile(f.path));
     Document d2;
-    CHECK(d2.loadFromFile(f.path));
+    CHECK_EQ(d2.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d2.lineCount(), 1);
     CHECK_EQ(d2.lineAt(0), "");
 }
@@ -458,7 +477,7 @@ TEST(doc_save_large) {
     d.restore(big);
     CHECK(d.saveToFile(f.path));
     Document d2;
-    CHECK(d2.loadFromFile(f.path));
+    CHECK_EQ(d2.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d2.lineCount(), 50000);
     CHECK_EQ(d2.lineAt(0), "linea grande de prueba");
     CHECK_EQ(d2.lineAt(49999), "linea grande de prueba");
@@ -478,7 +497,7 @@ TEST(doc_roundtrip_preserves_trailing_newline) {
     TempFile f;
     f.write("a\nb\n");
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "a");
     CHECK_EQ(d.lineAt(1), "b");
@@ -491,7 +510,7 @@ TEST(doc_roundtrip_preserves_no_trailing_newline) {
     TempFile f;
     f.write("a\nb");
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK(d.saveToFile(f.path));
     CHECK_EQ(fileContent(f.path), "a\nb");
 }
@@ -500,7 +519,7 @@ TEST(doc_open_save_single_line_without_newline) {
     TempFile f;
     f.write("hola");
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK(d.saveToFile(f.path));
     CHECK_EQ(fileContent(f.path), "hola");
 }
@@ -509,7 +528,7 @@ TEST(doc_open_save_single_line_with_newline) {
     TempFile f;
     f.write("hola\n");
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK(d.saveToFile(f.path));
     CHECK_EQ(fileContent(f.path), "hola\n");
 }
@@ -519,11 +538,59 @@ TEST(doc_roundtrip_trailing_newline_after_edit) {
     TempFile f;
     f.write("a\n");
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     d.insertChar(0, d.lineLength(0), 'b');
     CHECK_EQ(d.lineAt(0), "ab");
     CHECK(d.saveToFile(f.path));
     CHECK_EQ(fileContent(f.path), "ab\n");
+}
+
+TEST(doc_enter_at_end_of_newline_file_does_not_double) {
+    // REGRESION (bug real): abrir "a\n" y apretar Enter al final crea una
+    // linea vacia final ["a",""]. Antes el flag de '\n' final seguia en
+    // true y saveToFile escribia el separador MAS el '\n' del flag:
+    // "a\n\n" (el archivo ganaba una linea). El flag debe quedar en false
+    // porque la linea vacia final ya aporta el '\n'.
+    TempFile f;
+    f.write("a\n");
+    Document d;
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
+    CHECK(d.endsWithNewline());
+    d.insertNewline(0, 1); // Enter al final de "a"
+    CHECK_EQ(d.lineCount(), 2);
+    CHECK_EQ(d.lineAt(1), "");
+    CHECK(!d.endsWithNewline());
+    CHECK(d.saveToFile(f.path));
+    CHECK_EQ(fileContent(f.path), "a\n");
+}
+
+TEST(doc_fuse_trailing_empty_line_removes_newline) {
+    // La linea vacia final (que serializa el '\n') se puede fundir con
+    // Delete/Backspace, y eso QUITA el '\n' final de verdad. El flag se
+    // mantiene consistente con el nuevo ultimo byte.
+    Document d = makeDoc({"a", ""});
+    CHECK(!d.endsWithNewline()); // la linea vacia final ya aporta el '\n'
+    d.deleteCharAt(0, 1);        // fundir "a" con la linea vacia (devuelve 0)
+    CHECK_EQ(d.lineCount(), 1);
+    CHECK_EQ(d.lineAt(0), "a");
+    CHECK(!d.endsWithNewline());
+    TempFile f;
+    CHECK(d.saveToFile(f.path));
+    CHECK_EQ(fileContent(f.path), "a");
+}
+
+TEST(doc_insert_block_trailing_empty_keeps_flag_consistent) {
+    // insertBlock multilinea con ultima linea vacia: el flag no puede
+    // quedar en true junto con la linea vacia final (doble '\n' al guardar).
+    Document d = makeDoc({"a"});
+    d.insertBlock(0, 1, {"x", ""}); // col 1: queda "ax" + linea vacia
+    CHECK_EQ(d.lineCount(), 2);
+    CHECK_EQ(d.lineAt(0), "ax");
+    CHECK_EQ(d.lineAt(1), "");
+    CHECK(!d.endsWithNewline());
+    TempFile f;
+    CHECK(d.saveToFile(f.path));
+    CHECK_EQ(fileContent(f.path), "ax\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -1004,7 +1071,7 @@ TEST(doc_large_1MB_operations) {
     TempFile f;
     CHECK(d.saveToFile(f.path));
     Document d2;
-    CHECK(d2.loadFromFile(f.path));
+    CHECK_EQ(d2.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d2.lineCount(), 1);
     CHECK_EQ(d2.lineLength(0), target);
 }
@@ -1024,7 +1091,7 @@ TEST(doc_large_10mb_roundtrip) {
         CHECK(out.good());
     }
     Document d;
-    CHECK(d.loadFromFile(f.path));
+    CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 1);
     CHECK(d.lineLength(0) >= target - 65536);
     d.insertChar(0, 0, 'Q');

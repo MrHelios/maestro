@@ -1,5 +1,5 @@
 CXX := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -Iinclude
+CXXFLAGS := -std=c++17 -Wall -Wextra -Iinclude -MMD -MP
 SRC := $(wildcard src/*.cpp)
 BIN := edit
 
@@ -26,16 +26,29 @@ TEST_BIN := edit_tests
 # Fuentes del programa que se enlazan en los tests (sin main.cpp)
 SRC_NO_MAIN := $(filter-out src/main.cpp,$(SRC))
 
-$(BIN): $(SRC)
-	$(CXX) $(CXXFLAGS) $(SRC) -o $(BIN)
+# --- Compilacion por objetos con dependencias automaticas (-MMD -MP) ----
+# Cada .cpp se compila a su .o (regla %%.o) y se linkea aparte. Los .d
+# generados por -MMD guardan las deps de headers: tocar un header solo
+# recompila los .o que lo incluyen, y tocar un test solo recompila ese .o.
+OBJ := $(SRC:.cpp=.o)
+TEST_OBJ := $(TEST_SRC:.cpp=.o)
+OBJ_NO_MAIN := $(filter-out src/main.o,$(OBJ))
 
-$(TEST_BIN): $(TEST_SRC) $(SRC_NO_MAIN)
-	$(CXX) $(CXXFLAGS) $(TEST_INC) $(TEST_SRC) $(SRC_NO_MAIN) -o $(TEST_BIN)
+$(BIN): $(OBJ)
+	$(CXX) $(OBJ) -o $(BIN)
+
+$(TEST_BIN): $(TEST_OBJ) $(OBJ_NO_MAIN)
+	$(CXX) $(TEST_OBJ) $(OBJ_NO_MAIN) -o $(TEST_BIN)
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
+
+-include $(OBJ:.o=.d) $(TEST_OBJ:.o=.d)
 
 test: $(TEST_BIN)
 	./$(TEST_BIN)
 
 clean:
-	rm -f $(BIN) $(TEST_BIN)
+	rm -f $(BIN) $(TEST_BIN) src/*.o src/*.d tests/*.o tests/*.d
 
 .PHONY: test clean

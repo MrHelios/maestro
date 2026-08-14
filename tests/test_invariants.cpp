@@ -442,6 +442,30 @@ TEST(sequence_insert_enter_write_backspace_undo) {
     assertStateConsistent(ed);
 }
 
+TEST(sequence_undo_restores_trailing_newline_flag) {
+    // El flag del '\n' final debe viajar con el undo/redo. Abrir "a\n",
+    // Enter al final (el '\n' pasa a ser la linea vacia: flag false) y
+    // undo debe volver al estado ["a"] con flag true. Guardar tras el
+    // undo debe dar "a\n", no "a".
+    TempFile f;
+    f.write("a\n");
+    Editor ed;
+    ed.openFile(f.path);
+    CHECK(ed.active().document.endsWithNewline());
+    enterInteraccion(ed);
+    ed.handleEvent(ev(EventType::MoveEnd));            // cursor al final de "a"
+    ed.handleEvent(ev(EventType::InsertNewline));      // ["a",""] flag false
+    CHECK_EQ(ed.active().document.lineCount(), 2);
+    CHECK(!ed.active().document.endsWithNewline());
+    ed.handleEvent(ev(EventType::Undo));
+    CHECK_EQ(ed.active().document.lineCount(), 1);
+    CHECK(ed.active().document.endsWithNewline());
+    ed.handleEvent(ev(EventType::Redo));
+    CHECK_EQ(ed.active().document.lineCount(), 2);
+    CHECK(!ed.active().document.endsWithNewline());
+    assertStateConsistent(ed);
+}
+
 TEST(sequence_move_insert_move_delete) {
     Editor ed;
     type(ed, "abc");

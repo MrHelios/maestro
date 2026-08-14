@@ -25,96 +25,125 @@ std::string resolveAbsolutePath(const std::string& path) {
 Editor::Editor() {
     statusMessage_ = "NAVEGACION: i escribir | s seleccionar | c/x copiar/cortar | p pegar | Ctrl+K buffer/guardar/salir | Ctrl+U/Y deshacer/rehacer";
     // Invariante 1 y 2 (v0.6.3): siempre existe al menos un buffer y hay
-    // exactamente uno activo. El constructor arranca con un unico buffer
+    // exactamente uno activo. BufferManager arranca con un unico buffer
     // sin nombre y lo deja activo.
-    buffers_.emplace_back();
-    activeBuffer_ = 0;
-    unnamedCounter_ = 1; // el buffer inicial ya gasto "SinNombre"
+    registerCommands();
+}
+
+void Editor::registerCommands() {
+    // --- Navegacion ---
+    commands_.registerCommand("navegacion.interaccion", [this] {
+        state_ = State::Interaccion;
+        statusMessage_ = "INTERACCION (ESC vuelve a navegacion)";
+    });
+    commands_.registerCommand("navegacion.seleccion", [this] {
+        beginSelection();
+        state_ = State::Seleccion;
+        statusMessage_ = "SELECCION (ESC/c/x terminan)";
+    });
+    commands_.registerCommand("navegacion.pegar", [this] {
+        Buffer& b = active();
+        if (clipboard_.empty()) {
+            statusMessage_ = "Nada para pegar.";
+        } else {
+            b.pushHistory();
+            Position end = b.document.insertBlock(b.cursor.line, b.cursor.col,
+                                                  clipboard_);
+            b.cursor.line = end.line;
+            b.cursor.col = end.col;
+            b.modified = true;
+            statusMessage_ = "Pegado.";
+        }
+    });
+    commands_.registerCommand("navegacion.palabra.atras", [this] {
+        active().cursor.moveToPreviousWord(active().document);
+    });
+    commands_.registerCommand("navegacion.palabra.adelante", [this] {
+        active().cursor.moveToNextWord(active().document);
+    });
+
+    // --- Seleccion ---
+    commands_.registerCommand("seleccion.total", [this] {
+        Buffer& b = active();
+        b.selectAllPrevious = b.selection;
+        b.selection = selectAllSelection();
+        b.selectAllActive = true;
+        statusMessage_ = "SELECCION TOTAL (a togglea | flechas a extremos | c/x/ESC terminan)";
+    });
+    commands_.registerCommand("seleccion.j", [this] {
+        beginSelection();
+        active().cursor.moveToPreviousWord(active().document);
+        updateSelectionPosition();
+    });
+    commands_.registerCommand("seleccion.k", [this] {
+        beginSelection();
+        active().cursor.moveToNextWord(active().document);
+        updateSelectionPosition();
+    });
+    commands_.registerCommand("seleccion.copiar", [this] {
+        Buffer& b = active();
+        bool hadSelection = hasSelection();
+        if (hadSelection) {
+            auto sel = selection();
+            clipboard_ = b.document.extractRange(sel->start.line, sel->start.col,
+                                                 sel->end.line, sel->end.col);
+        }
+        clearSelection();
+        state_ = State::Navegacion;
+        statusMessage_ = hadSelection ? "Copiado." : "Nada seleccionado.";
+    });
+    commands_.registerCommand("seleccion.cortar", [this] {
+        Buffer& b = active();
+        bool hadSelection = hasSelection();
+        if (hadSelection) {
+            auto sel = selection();
+            clipboard_ = b.document.extractRange(sel->start.line, sel->start.col,
+                                                 sel->end.line, sel->end.col);
+            b.pushHistory();
+            b.document.deleteRange(sel->start.line, sel->start.col,
+                                   sel->end.line, sel->end.col);
+            b.cursor.line = sel->start.line;
+            b.cursor.col = sel->start.col;
+            b.modified = true;
+        }
+        clearSelection();
+        state_ = State::Navegacion;
+        statusMessage_ = hadSelection ? "Cortado." : "Nada seleccionado.";
+    });
+
+    // --- Prefijo (Ctrl+K) ---
+    commands_.registerCommand("buffer.nuevo", [this] {
+        createBuffer();
+        state_ = State::Navegacion;
+    });
+    commands_.registerCommand("buffer.selector", [this] {
+        if (buffers.count() <= 1) {
+            statusMessage_ = "Solo hay un buffer.";
+            state_ = priorState_;
+        } else {
+            bufferSelectorIndex_ = buffers.activeIndex();
+            state_ = State::BufferSelector;
+            statusMessage_ = "Buffers: ↑/↓ mover | Enter abrir | ESC cancelar";
+        }
+    });
+    commands_.registerCommand("buffer.cerrar", [this] {
+        closeActiveBuffer();
+    });
+    commands_.registerCommand("buffer.abrir", [this] {
+        startFileBrowser();
+    });
 }
 
 bool Editor::isDirectory(const std::string& path) {
-    struct stat st;
-    if (stat(path.c_str(), &st) != 0) return false;
-    return S_ISDIR(st.st_mode);
-}
-
-std::string Editor::getCwd() {
-    char buf[4096];
-    if (!getcwd(buf, sizeof buf)) return "";
-    return std::string(buf);
-}
-
-std::string Editor::parentPath(const std::string& path) {
-    if (path.empty() || path == "/") return "/";
-    const std::string parent = std::filesystem::path(path).parent_path().string();
-    // parent_path() devuelve vacio si `path` es relativo sin directorio:
-    // no hay a donde subir, se ancla a la raiz.
-    return parent.empty() ? "/" : parent;
-}
-
-// Compara dos nombres de forma case-insensitive para el orden alfabetico
-// de las entradas del explorador (v0.6.4, decision de diseno).
-static bool entryLess(const FileBrowserEntry& a, const FileBrowserEntry& b) {
-    std::string sa = a.name, sb = b.name;
-    std::transform(sa.begin(), sa.end(), sa.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    std::transform(sb.begin(), sb.end(), sb.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    return sa < sb;
-}
-
-std::vector<FileBrowserEntry> Editor::listDirectory(const std::string& path,
-                                                     std::string& error) {
-    std::vector<FileBrowserEntry> dirs, files;
-    error.clear();
-
-    std::error_code ec;
-    std::filesystem::directory_iterator it(path, ec);
-    if (ec) {
-        // Sin permiso de lectura / no existe: la lista queda solo con ".."
-        // (si la hay) y el error se muestra en la fila de mensajes.
-        error = "No se pudo leer: " + path;
-    } else {
-        std::filesystem::directory_iterator end;
-        for (; it != end; it.increment(ec)) {
-            if (ec) { ec.clear(); continue; } // entrada no listable -> saltar
-            const std::filesystem::directory_entry& e = *it;
-            std::error_code sec;
-            std::filesystem::file_status st = e.status(sec);
-            if (sec) continue; // symlink roto etc. -> omitir
-            FileBrowserEntry entry;
-            entry.name = e.path().filename().string();
-            entry.fullPath = e.path().string();
-            entry.isDirectory = std::filesystem::is_directory(st);
-            if (entry.isDirectory) {
-                dirs.push_back(std::move(entry));
-            } else {
-                files.push_back(std::move(entry));
-            }
-        }
-    }
-
-    std::sort(dirs.begin(), dirs.end(), entryLess);
-    std::sort(files.begin(), files.end(), entryLess);
-
-    std::vector<FileBrowserEntry> out;
-    if (path != "/") out.push_back(FileBrowserEntry{"..", true, parentPath(path)});
-    out.insert(out.end(), dirs.begin(), dirs.end());
-    out.insert(out.end(), files.begin(), files.end());
-    return out;
+    return FileBrowser::isDirectory(path);
 }
 
 Buffer& Editor::active() {
-    return buffers_[static_cast<size_t>(activeBuffer_)];
+    return buffers.active();
 }
 
 const Buffer& Editor::active() const {
-    return buffers_[static_cast<size_t>(activeBuffer_)];
-}
-
-std::string Editor::nextUnnamedName() {
-    if (unnamedCounter_ == 0) return "SinNombre";
-    return "SinNombre" + std::to_string(unnamedCounter_);
+    return buffers.active();
 }
 
 bool Editor::openFile(const std::string& path) {
@@ -128,8 +157,20 @@ bool Editor::openFile(const std::string& path) {
     Buffer& b = active();
     // La barra de estado muestra siempre una ruta absoluta: si el
     // archivo se abrio con ruta relativa, la resolvemos contra cwd().
+    const std::string oldFilename = b.filename;
     b.filename = resolveAbsolutePath(path);
-    bool existed = b.document.loadFromFile(path);
+    LoadResult result = b.document.loadFromFile(path);
+
+    if (result != LoadResult::Success && result != LoadResult::NotFound) {
+        // Error real (permisos, E/S): NO se trata como archivo nuevo y no se
+        // toca el documento, para no aparentar que un archivo existente sin
+        // permisos es nuevo (eso llevaria a sobrescribirlo desde cero).
+        b.filename = oldFilename;
+        statusMessage_ = (result == LoadResult::PermissionDenied)
+                             ? "Sin permisos de lectura: " + path
+                             : "No se pudo leer: " + path;
+        return false;
+    }
     b.modified = false;
     b.savedLines = b.document.snapshot();
     b.cursor.line = 0;
@@ -139,103 +180,58 @@ bool Editor::openFile(const std::string& path) {
     b.selectAllPrevious.reset();
     state_ = State::Navegacion;
     statusMessage_ = "";
-    if (!existed) {
+    if (result == LoadResult::NotFound) {
         statusMessage_ = "Archivo nuevo: " + path;
     }
-    return existed;
+    return result == LoadResult::Success;
 }
 
 void Editor::syncViewportSize(Buffer& b) {
     int rows, cols;
     terminal_.getWindowSize(rows, cols);
-    b.viewport.height = rows > 2 ? rows - 2 : 1;
-    b.viewport.width = cols;
+    BufferManager::fitViewport(b, rows, cols);
 }
 
 void Editor::createBuffer() {
-    Buffer nuevo;
-    nuevo.unnamedName = nextUnnamedName();
-    unnamedCounter_++;
-    // El viewport del buffer nuevo debe tener las dimensiones reales de
-    // la terminal (run() solo las fijo al arrancar para los buffers ya
-    // existentes). Sin esto, un buffer creado a mitad de sesion con el
-    // Viewport por defecto no redibuja toda la pantalla y queda resto
-    // del buffer anterior.
-    syncViewportSize(nuevo);
-    // El buffer nuevo se convierte inmediatamente en el buffer activo
-    // (v0.6.3, invariante 13).
-    buffers_.push_back(std::move(nuevo));
-    activeBuffer_ = static_cast<int>(buffers_.size()) - 1;
-    statusMessage_ = "Buffer nuevo: " + active().unnamedName;
+    int rows, cols;
+    terminal_.getWindowSize(rows, cols);
+    const int idx = buffers.createBuffer(rows, cols);
+    statusMessage_ = "Buffer nuevo: " + buffers.at(idx).unnamedName;
 }
 
 void Editor::closeActiveBuffer() {
-    Buffer& b = active();
-
-    // Invariante 10 (v0.6.3): un buffer modificado no se puede cerrar.
-    // Hay que guardar los cambios (Ctrl+K s) o restaurarlo (undo hasta el
-    // ultimo estado guardado). No se ofrece confirmacion: se bloquea.
-    if (b.modified) {
-        statusMessage_ = "Buffer modificado: guarda con Ctrl+K s o restaura.";
-        state_ = priorState_;
-        return;
+    int rows, cols;
+    terminal_.getWindowSize(rows, cols);
+    switch (buffers.closeActive(rows, cols)) {
+        case CloseResult::ModifiedBlocked:
+            statusMessage_ = "Buffer modificado: guarda con Ctrl+K s o restaura.";
+            state_ = priorState_;
+            break;
+        case CloseResult::ResetLast:
+            statusMessage_ = "Buffer reiniciado: " + active().unnamedName;
+            state_ = State::Navegacion;
+            break;
+        case CloseResult::Removed:
+            bufferSelectorIndex_ = 0;
+            priorState_ = State::Navegacion; // el contexto previo desaparecio
+            state_ = State::BufferSelector;
+            statusMessage_ = "Buffer cerrado. ↑/↓ y Enter para elegir.";
+            break;
     }
-
-    // Invariante 14 (v0.6.3): el ultimo buffer nunca se elimina. En lugar
-    // de dejarlo con buffers_.empty(), se convierte en un buffer vacio sin
-    // nombre (nuevo nombre generico, documento de una linea vacia,
-    // modified = false) y seguimos en el.
-    if (buffers_.size() == 1) {
-        b.document = Document();
-        b.cursor = Cursor();
-        syncViewportSize(b);
-        b.filename.clear();
-        b.unnamedName = nextUnnamedName();
-        unnamedCounter_++;
-        b.modified = false;
-        b.selection.reset();
-        b.selectAllActive = false;
-        b.selectAllPrevious.reset();
-        b.savedLines = b.document.snapshot();
-        b.undoStack.clear();
-        b.redoStack.clear();
-        statusMessage_ = "Buffer reiniciado: " + b.unnamedName;
-        state_ = State::Navegacion;
-        return;
-    }
-
-    // Varios buffers: se elimina el activo y se pasa al selector. No se
-    // selecciona automaticamente otro buffer: la lista decide. El indice
-    // deja de referenciar el buffer borrado (invariante 17).
-    buffers_.erase(buffers_.begin() + activeBuffer_);
-    activeBuffer_ = 0;
-    bufferSelectorIndex_ = 0;
-    priorState_ = State::Navegacion; // el contexto previo desaparecio
-    state_ = State::BufferSelector;
-    statusMessage_ = "Buffer cerrado. ↑/↓ y Enter para elegir.";
 }
 
 void Editor::activateBuffer(int idx) {
-    activeBuffer_ = idx;
+    const bool hasSelection = buffers.activate(idx);
     // Reconciliar el modo global con el estado del buffer activado: un
     // buffer con rango seleccionado deja el editor en Seleccion; sin
     // rango, en Navegacion. (La seleccion y los demas estados son del
     // buffer, no del Editor.)
-    const Buffer& b = active();
-    state_ = (b.selection.has_value() && b.selection->anchor != b.selection->position)
-           ? State::Seleccion
-           : State::Navegacion;
+    state_ = hasSelection ? State::Seleccion : State::Navegacion;
     statusMessage_ = "";
 }
 
 std::vector<std::string> Editor::bufferNames() const {
-    std::vector<std::string> names;
-    names.reserve(buffers_.size());
-    for (const Buffer& b : buffers_) {
-        names.push_back(b.modified ? b.displayName() + " *"
-                                   : b.displayName());
-    }
-    return names;
+    return buffers.names();
 }
 
 void Editor::handleBufferSelectorEvent(const Event& event) {
@@ -244,7 +240,7 @@ void Editor::handleBufferSelectorEvent(const Event& event) {
             if (bufferSelectorIndex_ > 0) bufferSelectorIndex_--;
             break;
         case EventType::MoveDown:
-            if (bufferSelectorIndex_ + 1 < static_cast<int>(buffers_.size()))
+            if (bufferSelectorIndex_ + 1 < buffers.count())
                 bufferSelectorIndex_++;
             break;
         case EventType::InsertNewline: // Enter: abrir el buffer seleccionado
@@ -264,39 +260,25 @@ void Editor::handleBufferSelectorEvent(const Event& event) {
 }
 
 void Editor::startFileBrowser() {
-    fileBrowserPath_ = getCwd();
-    fileBrowserIndex_ = 0;
-    fileBrowserScroll_ = 0;
-    loadFileBrowserEntries();
-    state_ = State::FileBrowser;
-}
-
-void Editor::loadFileBrowserEntries() {
-    std::string err;
-    fileBrowserEntries_ = listDirectory(fileBrowserPath_, err);
-    fileBrowserDisplayNames_.clear();
-    fileBrowserDisplayNames_.reserve(fileBrowserEntries_.size());
-    for (const FileBrowserEntry& e : fileBrowserEntries_) {
-        fileBrowserDisplayNames_.push_back(
-            e.isDirectory ? e.name + "/" : e.name);
-    }
+    fileBrowser.start();
+    const std::string err = fileBrowser.reload();
     if (!err.empty()) {
         statusMessage_ = err;
     } else {
         statusMessage_ = "ABRIR: ↑/↓ mover | Enter abrir/entrar | ESC cancelar";
     }
+    state_ = State::FileBrowser;
 }
 
 void Editor::handleFileBrowserEvent(const Event& event) {
     switch (event.type) {
         case EventType::MoveUp:
-            if (fileBrowserIndex_ > 0) fileBrowserIndex_--;
-            clampFileBrowserScroll();
+            fileBrowser.moveUp();
+            fileBrowser.clampScroll(active().viewport.height);
             break;
         case EventType::MoveDown:
-            if (fileBrowserIndex_ + 1 < static_cast<int>(fileBrowserEntries_.size()))
-                fileBrowserIndex_++;
-            clampFileBrowserScroll();
+            fileBrowser.moveDown();
+            fileBrowser.clampScroll(active().viewport.height);
             break;
         case EventType::InsertNewline: // Enter: abrir/entrar la seleccion
             fileBrowserEnterSelected();
@@ -313,29 +295,30 @@ void Editor::handleFileBrowserEvent(const Event& event) {
 }
 
 void Editor::fileBrowserEnterSelected() {
-    if (fileBrowserEntries_.empty()) return;
-    const FileBrowserEntry& e = fileBrowserEntries_[
-        static_cast<size_t>(fileBrowserIndex_)];
-
-    if (e.isDirectory) {
-        // Carpeta (o ".."): entrar, recargar y volver al inicio.
-        fileBrowserPath_ = e.fullPath;
-        fileBrowserIndex_ = 0;
-        fileBrowserScroll_ = 0;
-        loadFileBrowserEntries();
-        return;
+    switch (fileBrowser.enter()) {
+        case FileBrowser::EnterResult::None:
+            break;
+        case FileBrowser::EnterResult::EnteredDirectory: {
+            const std::string err = fileBrowser.reload();
+            if (!err.empty()) {
+                statusMessage_ = err;
+            } else {
+                statusMessage_ = "ABRIR: ↑/↓ mover | Enter abrir/entrar | ESC cancelar";
+            }
+            break;
+        }
+        case FileBrowser::EnterResult::OpenedFile:
+            openFileToBuffer(fileBrowser.pendingPath());
+            break;
     }
-
-    // Archivo: abrirlo (o activarlo si ya estaba abierto) y salir.
-    openFileToBuffer(e.fullPath);
 }
 
 void Editor::openFileToBuffer(const std::string& path) {
     // Si ya hay un buffer con esta ruta absoluta, se activa ese buffer
     // en vez de crear otro (v0.6.4: no duplicar archivos abiertos).
-    for (size_t i = 0; i < buffers_.size(); ++i) {
-        if (buffers_[i].filename == path) {
-            activateBuffer(static_cast<int>(i));
+    for (int i = 0; i < buffers.count(); ++i) {
+        if (buffers.at(i).filename == path) {
+            activateBuffer(i);
             state_ = priorState_; // se sale del explorador al modo previo
             return;
         }
@@ -347,7 +330,14 @@ void Editor::openFileToBuffer(const std::string& path) {
     Buffer nuevo;
     syncViewportSize(nuevo);
     nuevo.filename = path;
-    bool existed = nuevo.document.loadFromFile(path);
+    LoadResult result = nuevo.document.loadFromFile(path);
+    if (result != LoadResult::Success && result != LoadResult::NotFound) {
+        // Error real (permisos, E/S): no se crea ni se toca nada.
+        statusMessage_ = (result == LoadResult::PermissionDenied)
+                             ? "Sin permisos de lectura: " + path
+                             : "No se pudo leer: " + path;
+        return;
+    }
     nuevo.modified = false;
     nuevo.savedLines = nuevo.document.snapshot();
     nuevo.cursor.line = 0;
@@ -355,22 +345,9 @@ void Editor::openFileToBuffer(const std::string& path) {
     nuevo.selection.reset();
     nuevo.selectAllActive = false;
     nuevo.selectAllPrevious.reset();
-    buffers_.push_back(std::move(nuevo));
-    activeBuffer_ = static_cast<int>(buffers_.size()) - 1;
+    buffers.push(std::move(nuevo));
     state_ = priorState_; // se sale del explorador al modo previo
-    statusMessage_ = existed ? "" : "Archivo nuevo: " + path;
-}
-
-void Editor::clampFileBrowserScroll() {
-    const int page = std::max(0, active().viewport.height);
-    const int n = static_cast<int>(fileBrowserEntries_.size());
-    if (n == 0) { fileBrowserScroll_ = 0; return; }
-    if (fileBrowserIndex_ < fileBrowserScroll_)
-        fileBrowserScroll_ = fileBrowserIndex_;
-    if (fileBrowserScroll_ + page > n)
-        fileBrowserScroll_ = std::max(0, n - page);
-    if (fileBrowserIndex_ - fileBrowserScroll_ >= page)
-        fileBrowserScroll_ = fileBrowserIndex_ - page + 1;
+    statusMessage_ = result == LoadResult::Success ? "" : "Archivo nuevo: " + path;
 }
 
 void Editor::run() {
@@ -378,8 +355,8 @@ void Editor::run() {
     // video inverso) y la fila de mensajes. El viewport usa el resto.
     // v0.6.3: el viewport es POR BUFFER, pero las dimensiones las fija
     // la terminal y valen para todos.
-    for (Buffer& b : buffers_) {
-        syncViewportSize(b);
+    for (int i = 0; i < buffers.count(); ++i) {
+        syncViewportSize(buffers.at(i));
     }
 
     terminal_.enableRawMode();
@@ -413,9 +390,9 @@ void Editor::run() {
         } else if (state_ == State::FileBrowser) {
             // Pantalla del explorador de archivos: la lista con la ruta
             // actual en la barra de estado y la ayuda en la fila de mensajes.
-            renderer_.renderFileList(fileBrowserDisplayNames_,
-                                     fileBrowserIndex_, fileBrowserScroll_,
-                                     fileBrowserPath_, statusMessage_,
+            renderer_.renderFileList(fileBrowser.displayNames_,
+                                     fileBrowser.index_, fileBrowser.scroll_,
+                                     fileBrowser.path_, statusMessage_,
                                      b.viewport.width, b.viewport.height);
         } else {
             b.viewport.scrollToCursor(b.cursor);
@@ -499,32 +476,18 @@ void Editor::handleNavegacionEvent(const Event& event) {
             // En navegacion no se escribe: las letras solo pueden ser
             // comandos de modo. 'i' entra a edicion; 's' a seleccion;
             // 'p' pega el contenido del buffer (si hay). 'c'/'x' y
-            // cualquier otra letra son no-op aqui.
+            // cualquier otra letra son no-op aqui. El mapeo tecla ->
+            // comando -> handler vive en commands_.
             if (event.text == "i") {
-                state_ = State::Interaccion;
-                statusMessage_ = "INTERACCION (ESC vuelve a navegacion)";
+                commands_.execute("navegacion.interaccion");
             } else if (event.text == "s") {
-                beginSelection();
-                state_ = State::Seleccion;
-                statusMessage_ = "SELECCION (ESC/c/x terminan)";
+                commands_.execute("navegacion.seleccion");
             } else if (event.text == "p") {
-                if (clipboard_.empty()) {
-                    statusMessage_ = "Nada para pegar.";
-                } else {
-                    b.pushHistory();
-                    Position end = b.document.insertBlock(b.cursor.line,
-                                                          b.cursor.col,
-                                                          clipboard_);
-                    b.cursor.line = end.line;
-                    b.cursor.col = end.col;
-                    b.modified = true;
-                    statusMessage_ = "Pegado.";
-                }
+                commands_.execute("navegacion.pegar");
             } else if (event.text == "j") {
-                // j/k: salto por bloques (palabras), solo mueven el cursor.
-                b.cursor.moveToPreviousWord(b.document);
+                commands_.execute("navegacion.palabra.atras");
             } else if (event.text == "k") {
-                b.cursor.moveToNextWord(b.document);
+                commands_.execute("navegacion.palabra.adelante");
             }
             break;
 
@@ -655,54 +618,22 @@ void Editor::handleSeleccionEvent(const Event& event) {
         // limpia el redo.
         case EventType::InsertChar:
             // 'a' entra al prefijo de "seleccion total": cubre el archivo
-            // entero sin mover el cursor (guarda la seleccion previa para el
-            // toggle). 'c' copia el rango al buffer y 'x' lo copia y lo borra;
-            // ambos terminan la seleccion y vuelven a navegacion. Si la
-            // seleccion esta vacia, 'c'/'x' no tocan el buffer (solo se sale
-            // del modo).
-            // OJO: el gate es hasSelection() (anchor != position), NO
-            // selection().has_value() (que es true incluso para un objeto
-            // Selection vacio con anchor == position, ya que normalize solo
-            // ordena los puntos). Usar el segundo sobreescribiria el buffer con
-            // un rango vacio y, en 'x', empujaria un historial inutil que ademas
-            // limpia el redo.
+            // entero sin mover el cursor. 'c' copia el rango al buffer y 'x'
+            // lo copia y lo borra; ambos terminan la seleccion y vuelven a
+            // navegacion. 'j'/'k' extienden por bloques. Cualquier otra
+            // letra ya NO reemplaza la seleccion: se ignora. El despacho por
+            // comando vive en commands_.
             if (event.text == "a") {
-                b.selectAllPrevious = b.selection;
-                b.selection = selectAllSelection();
-                b.selectAllActive = true;
-                statusMessage_ = "SELECCION TOTAL (a togglea | flechas a extremos | c/x/ESC terminan)";
-            } else if (event.text == "j" || event.text == "k") {
-                // j/k extienden la seleccion igual que una flecha: el anchor
-                // permanece y solo se mueve el cursor. 'j' va a la izquierda
-                // (bloque anterior) y 'k' a la derecha (sig. bloque).
-                beginSelection();
-                if (event.text == "j") b.cursor.moveToPreviousWord(b.document);
-                else b.cursor.moveToNextWord(b.document);
-                updateSelectionPosition();
-            } else if (event.text == "c" || event.text == "x") {
-                bool hadSelection = hasSelection();
-                if (hadSelection) {
-                    auto sel = selection();
-                    clipboard_ = b.document.extractRange(sel->start.line,
-                                                         sel->start.col,
-                                                         sel->end.line,
-                                                         sel->end.col);
-                    if (event.text == "x") {
-                        b.pushHistory();
-                        b.document.deleteRange(sel->start.line, sel->start.col,
-                                               sel->end.line, sel->end.col);
-                        b.cursor.line = sel->start.line;
-                        b.cursor.col = sel->start.col;
-                        b.modified = true;
-                    }
-                }
-                clearSelection();
-                state_ = State::Navegacion;
-                statusMessage_ = hadSelection ? (event.text == "x" ? "Cortado."
-                                                                    : "Copiado.")
-                                              : "Nada seleccionado.";
+                commands_.execute("seleccion.total");
+            } else if (event.text == "j") {
+                commands_.execute("seleccion.j");
+            } else if (event.text == "k") {
+                commands_.execute("seleccion.k");
+            } else if (event.text == "c") {
+                commands_.execute("seleccion.copiar");
+            } else if (event.text == "x") {
+                commands_.execute("seleccion.cortar");
             }
-            // Cualquier otra letra ya NO reemplaza la seleccion: se ignora.
             break;
         case EventType::Escape:
             clearSelection();
@@ -828,30 +759,23 @@ void Editor::handlePrefixKey(const Event& event) {
             running_ = false;
             break;
 
-        // v0.6.3: comandos de buffer dentro del prefijo.
+        // v0.6.3: comandos de buffer dentro del prefijo. El mapeo tecla ->
+        // comando -> handler vive en commands_.
         case EventType::InsertChar:
             if (event.text == "n") {           // Ctrl+K n: nuevo buffer
-                createBuffer();
-                state_ = State::Navegacion;
+                commands_.execute("buffer.nuevo");
                 break;
             }
             if (event.text == "t") {           // Ctrl+K t: selector de buffers
-                if (buffers_.size() <= 1) {
-                    statusMessage_ = "Solo hay un buffer.";
-                    state_ = priorState_;
-                } else {
-                    bufferSelectorIndex_ = activeBuffer_;
-                    state_ = State::BufferSelector;
-                    statusMessage_ = "Buffers: ↑/↓ mover | Enter abrir | ESC cancelar";
-                }
+                commands_.execute("buffer.selector");
                 break;
             }
             if (event.text == "w") {           // Ctrl+K w: cerrar buffer activo
-                closeActiveBuffer();
+                commands_.execute("buffer.cerrar");
                 break;
             }
             if (event.text == "o") {           // Ctrl+K o: explorador de archivos
-                startFileBrowser();
+                commands_.execute("buffer.abrir");
                 break;
             }
             // Cualquier otra letra: cae en el cancel del default.

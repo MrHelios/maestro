@@ -77,8 +77,8 @@ static void closeBuffer(Editor& ed) {
 // ---------------------------------------------------------------------------
 TEST(buffers_start_with_one_unnamed_buffer) {
     Editor ed;
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
-    CHECK_EQ(ed.activeBuffer_, 0);
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK_EQ(ed.active().unnamedName, "SinNombre");
     CHECK(ed.active().filename.empty());
     CHECK(!ed.active().modified);
@@ -107,25 +107,25 @@ TEST(buffers_isolate_undo_history) {
     newBuffer(ed);             // B1 activo
     type(ed, "mundo");         // B1: 5 entradas
     press(ed, EventType::Escape);
-    CHECK_EQ(ed.buffers_[0].undoStack.size(), size_t(4));
-    CHECK_EQ(ed.buffers_[1].undoStack.size(), size_t(5));
+    CHECK_EQ(ed.buffers.buffers_[0].undoStack.size(), size_t(4));
+    CHECK_EQ(ed.buffers.buffers_[1].undoStack.size(), size_t(5));
 
     // Undo en B1 no toca el historial de B0.
     ed.activateBuffer(1);
     press(ed, EventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "mund");
-    CHECK_EQ(ed.buffers_[1].undoStack.size(), size_t(4));
+    CHECK_EQ(ed.buffers.buffers_[1].undoStack.size(), size_t(4));
 
     ed.activateBuffer(0);
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
-    CHECK_EQ(ed.buffers_[0].undoStack.size(), size_t(4));
+    CHECK_EQ(ed.buffers.buffers_[0].undoStack.size(), size_t(4));
     press(ed, EventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "hol");
 
     // Volver a B1: sigue en "mund" con su propia pila.
     ed.activateBuffer(1);
     CHECK_EQ(ed.active().document.lineAt(0), "mund");
-    CHECK_EQ(ed.buffers_[1].undoStack.size(), size_t(4));
+    CHECK_EQ(ed.buffers.buffers_[1].undoStack.size(), size_t(4));
 }
 
 TEST(buffers_isolate_redo_history) {
@@ -139,17 +139,17 @@ TEST(buffers_isolate_redo_history) {
     ed.activateBuffer(1);
     press(ed, EventType::Undo);
     press(ed, EventType::Undo);
-    CHECK(!ed.buffers_[1].redoStack.empty());
+    CHECK(!ed.buffers.buffers_[1].redoStack.empty());
 
     ed.activateBuffer(0);
-    CHECK(ed.buffers_[0].redoStack.empty());  // B0 no tiene redo propio
+    CHECK(ed.buffers.buffers_[0].redoStack.empty());  // B0 no tiene redo propio
     press(ed, EventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "hola"); // no-op en B0
 
     ed.activateBuffer(1);
     press(ed, EventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "mund");
-    CHECK_EQ(ed.buffers_[0].document.lineAt(0), "hola");
+    CHECK_EQ(ed.buffers.buffers_[0].document.lineAt(0), "hola");
 }
 
 TEST(buffers_isolate_cursor_and_preferred_col) {
@@ -175,10 +175,10 @@ TEST(buffers_isolate_cursor_and_preferred_col) {
     CHECK_EQ(ed.active().cursor.col, col0);
 
     // preferredCol_ tambien viaja con el buffer.
-    const int pref1 = ed.buffers_[1].cursor.preferredCol_;  // valor real de B1
-    ed.buffers_[0].cursor.preferredCol_ = 7;
+    const int pref1 = ed.buffers.buffers_[1].cursor.preferredCol_;  // valor real de B1
+    ed.buffers.buffers_[0].cursor.preferredCol_ = 7;
     ed.activateBuffer(1);
-    CHECK_EQ(ed.buffers_[1].cursor.preferredCol_, pref1);
+    CHECK_EQ(ed.buffers.buffers_[1].cursor.preferredCol_, pref1);
     ed.activateBuffer(0);
     CHECK_EQ(ed.active().cursor.preferredCol_, 7);
 }
@@ -191,7 +191,7 @@ TEST(buffers_isolate_selection) {
     pressEvent(ed, insert('s'));            // modo seleccion
     press(ed, EventType::MoveRight);   // selecciona "a"
     CHECK(ed.hasSelection());
-    CHECK(ed.buffers_[0].selection.has_value());
+    CHECK(ed.buffers.buffers_[0].selection.has_value());
 
     newBuffer(ed);                       // B1 sin seleccion
     ed.activateBuffer(1);
@@ -210,26 +210,26 @@ TEST(buffers_isolate_select_all) {
     press(ed, EventType::MoveHome);
     pressEvent(ed, insert('s'));
     pressEvent(ed, insert('a'));            // seleccion total en B0
-    CHECK(ed.buffers_[0].selectAllActive);
+    CHECK(ed.buffers.buffers_[0].selectAllActive);
     CHECK(ed.hasSelection());
 
     newBuffer(ed);                       // B1 sin seleccion
     ed.activateBuffer(1);
-    CHECK(!ed.buffers_[1].selectAllActive);
+    CHECK(!ed.buffers.buffers_[1].selectAllActive);
     CHECK(!ed.hasSelection());
-    CHECK(!ed.buffers_[1].selection.has_value());
+    CHECK(!ed.buffers.buffers_[1].selection.has_value());
 
     ed.activateBuffer(0);
-    CHECK(ed.buffers_[0].selectAllActive);
+    CHECK(ed.buffers.buffers_[0].selectAllActive);
     CHECK(ed.hasSelection());
 }
 
 TEST(buffers_isolate_modified) {
     Editor ed;
     type(ed, "a");                     // B0 modificado
-    CHECK(ed.buffers_[0].modified);
+    CHECK(ed.buffers.buffers_[0].modified);
     newBuffer(ed);
-    CHECK(!ed.buffers_[1].modified);
+    CHECK(!ed.buffers.buffers_[1].modified);
     ed.activateBuffer(0);
     CHECK(ed.active().modified);
     ed.activateBuffer(1);
@@ -238,10 +238,10 @@ TEST(buffers_isolate_modified) {
 
 TEST(buffers_isolate_viewport) {
     Editor ed;
-    ed.buffers_[0].viewport.top = 500;
+    ed.buffers.buffers_[0].viewport.top = 500;
     newBuffer(ed);
-    CHECK_EQ(ed.buffers_[1].viewport.top, 0);
-    ed.buffers_[1].viewport.top = 20;
+    CHECK_EQ(ed.buffers.buffers_[1].viewport.top, 0);
+    ed.buffers.buffers_[1].viewport.top = 20;
     ed.activateBuffer(0);
     CHECK_EQ(ed.active().viewport.top, 500);
     ed.activateBuffer(1);
@@ -293,10 +293,10 @@ TEST(clipboard_global_across_buffers) {
 // ---------------------------------------------------------------------------
 TEST(ctrl_k_n_creates_and_activates_immediately) {
     Editor ed;
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     newBuffer(ed);
-    CHECK_EQ(ed.buffers_.size(), size_t(2));
-    CHECK_EQ(ed.activeBuffer_, 1);
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK_EQ(ed.active().unnamedName, "SinNombre1");
     CHECK(ed.active().document.lineAt(0).empty());
     CHECK(!ed.active().modified);
@@ -333,7 +333,7 @@ TEST(ctrl_k_w_last_buffer_reset_keeps_terminal_viewport) {
     int vpWidth = cols;
 
     closeBuffer(ed);                         // unico buffer: se reinicia
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK_EQ(ed.active().viewport.height, vpHeight);
     CHECK_EQ(ed.active().viewport.width, vpWidth);
 }
@@ -351,9 +351,9 @@ TEST(ctrl_k_n_names_are_session_global) {
     press(ed, EventType::MoveUp);
     press(ed, EventType::MoveUp);          // index 0
     press(ed, EventType::InsertNewline);   // activar SinNombre
-    CHECK_EQ(ed.activeBuffer_, 0);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
     closeBuffer(ed);                       // cerrar SinNombre (sin modificar)
-    CHECK_EQ(ed.buffers_.size(), size_t(2));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
     press(ed, EventType::Escape);          // salir del selector
 
     // El contador NO reutiliza nombres: el siguiente es SinNombre3.
@@ -371,7 +371,7 @@ TEST(ctrl_k_t_opens_selector_on_active) {
     openSelector(ed);
     CHECK(ed.state_ == State::BufferSelector);
     CHECK_EQ(ed.bufferSelectorIndex_, 2);
-    CHECK_EQ(ed.activeBuffer_, 2);         // el activo no cambia al abrir
+    CHECK_EQ(ed.buffers.activeBuffer_, 2);         // el activo no cambia al abrir
 
     press(ed, EventType::MoveUp);
     CHECK_EQ(ed.bufferSelectorIndex_, 1);
@@ -394,7 +394,7 @@ TEST(ctrl_k_t_enter_switches_buffer) {
     press(ed, EventType::MoveUp);          // seleccionar B0
     press(ed, EventType::InsertNewline);   // Enter
     CHECK(ed.state_ == State::Navegacion);
-    CHECK_EQ(ed.activeBuffer_, 0);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
 }
 
@@ -408,7 +408,7 @@ TEST(ctrl_k_t_escape_returns_to_previous_buffer_and_mode) {
     CHECK(ed.state_ == State::BufferSelector);
     press(ed, EventType::Escape);
     CHECK(ed.state_ == State::Interaccion); // vuelve al modo previo
-    CHECK_EQ(ed.activeBuffer_, 1);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK_EQ(ed.active().document.lineAt(0), "mundo");
 }
 
@@ -429,8 +429,8 @@ TEST(ctrl_k_t_other_keys_are_noop) {
     press(ed, EventType::Redo);
     CHECK(ed.state_ == State::BufferSelector);
     CHECK_EQ(ed.bufferSelectorIndex_, 2);
-    CHECK_EQ(ed.buffers_.size(), size_t(3));
-    CHECK_EQ(ed.activeBuffer_, 2);
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(3));
+    CHECK_EQ(ed.buffers.activeBuffer_, 2);
 }
 
 TEST(ctrl_k_t_already_in_selector_is_noop) {
@@ -459,16 +459,16 @@ TEST(ctrl_k_w_closes_active_and_shows_selector) {
     newBuffer(ed);                         // B1 activo
     newBuffer(ed);                         // B2 activo
     closeBuffer(ed);                       // cierra B2 (SinNombre2)
-    CHECK_EQ(ed.buffers_.size(), size_t(2));
-    CHECK_EQ(ed.buffers_[0].unnamedName, "SinNombre");
-    CHECK_EQ(ed.buffers_[1].unnamedName, "SinNombre1");
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
+    CHECK_EQ(ed.buffers.buffers_[0].unnamedName, "SinNombre");
+    CHECK_EQ(ed.buffers.buffers_[1].unnamedName, "SinNombre1");
     CHECK(ed.state_ == State::BufferSelector);
-    CHECK_EQ(ed.activeBuffer_, 0);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK_EQ(ed.bufferSelectorIndex_, 0);
 
     press(ed, EventType::Escape);
     CHECK(ed.state_ == State::Navegacion);
-    CHECK_EQ(ed.activeBuffer_, 0);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
 }
 
 TEST(ctrl_k_w_close_middle_buffer_preserves_others) {
@@ -484,12 +484,12 @@ TEST(ctrl_k_w_close_middle_buffer_preserves_others) {
 
     // activar el buffer del medio (B1)
     ed.activateBuffer(1);
-    ed.buffers_[1].modified = false;                       // limpio para cerrar
-    ed.buffers_[1].savedLines = ed.buffers_[1].document.snapshot();
+    ed.buffers.buffers_[1].modified = false;                       // limpio para cerrar
+    ed.buffers.buffers_[1].savedLines = ed.buffers.buffers_[1].document.snapshot();
     closeBuffer(ed);
-    CHECK_EQ(ed.buffers_.size(), size_t(2));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
-    CHECK_EQ(ed.buffers_[1].document.lineAt(0), "CCC");
+    CHECK_EQ(ed.buffers.buffers_[1].document.lineAt(0), "CCC");
     CHECK(ed.state_ == State::BufferSelector);
 }
 
@@ -500,8 +500,8 @@ TEST(ctrl_k_w_last_buffer_resets_not_removes) {
     ed.active().modified = false;                          // limpio para cerrar
     ed.active().savedLines = ed.active().document.snapshot();
     closeBuffer(ed);
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
-    CHECK_EQ(ed.activeBuffer_, 0);
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK(ed.active().filename.empty());
@@ -516,7 +516,7 @@ TEST(ctrl_k_w_modified_buffer_blocked) {
     type(ed, "x");                         // modificado
     CHECK(ed.active().modified);
     closeBuffer(ed);
-    CHECK_EQ(ed.buffers_.size(), size_t(1)); // no se cerro
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1)); // no se cerro
     CHECK(ed.active().modified);
     CHECK_EQ(ed.active().document.lineAt(0), "x");
     CHECK(ed.state_ == State::Interaccion);  // vuelve al modo previo
@@ -531,7 +531,7 @@ TEST(ctrl_k_w_modified_blocked_until_save) {
     type(ed, "x");
     press(ed, EventType::Escape);
     closeBuffer(ed);                       // bloqueado
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK(ed.active().modified);
 
     press(ed, EventType::Prefix);          // guardar
@@ -539,7 +539,7 @@ TEST(ctrl_k_w_modified_blocked_until_save) {
     CHECK(!ed.active().modified);
 
     closeBuffer(ed);                       // ahora si (ultimo buffer -> reset)
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK(ed.state_ == State::Navegacion);
 }
@@ -549,13 +549,13 @@ TEST(ctrl_k_w_modified_multi_buffer_blocked) {
     type(ed, "x");                         // B0 modificado
     newBuffer(ed);                         // B1 activo, sin modificar
     closeBuffer(ed);                       // cierra B1 -> selector
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK(ed.state_ == State::BufferSelector);
     press(ed, EventType::Escape);
-    CHECK_EQ(ed.activeBuffer_, 0);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
 
     closeBuffer(ed);                       // B0 modificado -> bloqueado
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK(ed.active().modified);
     CHECK_EQ(ed.active().document.lineAt(0), "x");
     CHECK(ed.state_ == State::Navegacion);
@@ -729,13 +729,13 @@ TEST(save_as_resolves_relative_path_against_cwd) {
 // ---------------------------------------------------------------------------
 static void assertBuffersConsistent(Editor& ed) {
     // 1. Siempre existe al menos un buffer.
-    CHECK(ed.buffers_.size() >= 1);
+    CHECK(ed.buffers.buffers_.size() >= 1);
     // 2. Existe exactamente un buffer activo y es valido.
-    CHECK(ed.activeBuffer_ >= 0);
-    CHECK(ed.activeBuffer_ < static_cast<int>(ed.buffers_.size()));
+    CHECK(ed.buffers.activeBuffer_ >= 0);
+    CHECK(ed.buffers.activeBuffer_ < static_cast<int>(ed.buffers.buffers_.size()));
 
     // 3-9. Cada buffer mantiene su propio estado coherente.
-    for (const Buffer& b : ed.buffers_) {
+    for (const Buffer& b : ed.buffers.buffers_) {
         CHECK(b.document.lineCount() >= 1);
         CHECK(b.cursor.line >= 0);
         CHECK(b.cursor.line < b.document.lineCount());
@@ -766,7 +766,7 @@ TEST(invariants_always_at_least_one_buffer) {
     closeBuffer(ed);
     press(ed, EventType::Escape);
     closeBuffer(ed);
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     assertBuffersConsistent(ed);
     // El editor sigue operable tras "cerrar todo".
     type(ed, "sigo vivo");

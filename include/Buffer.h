@@ -15,6 +15,10 @@ struct HistoryState {
     std::vector<std::string> lines;
     int line = 0;
     int col = 0;
+    // Estado del '\n' final en ese momento. El flag no se puede deducir
+    // del vector de lineas (restore no lo sabe), asi que se guarda junto
+    // con el contenido para que undo/redo no lo desincronice.
+    bool endsWithNewline = false;
     // Seleccion vigente en ese momento (si habia). Se restaura en
     // undo/redo para que una seleccion borrada/reemplazada regrese
     // a su estado original.

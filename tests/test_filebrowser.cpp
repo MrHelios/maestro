@@ -121,11 +121,11 @@ TEST(ctrl_k_o_opens_browser_at_cwd) {
     Editor ed;
     openFileBrowser(ed);
     CHECK(ed.state_ == State::FileBrowser);
-    CHECK_EQ(ed.fileBrowserPath_, t.path);
-    CHECK(ed.fileBrowserEntries_.size() >= 1);
-    CHECK(ed.fileBrowserEntries_[0].name == ".."); // la entrada ".." va primera
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
-    CHECK_EQ(ed.fileBrowserScroll_, 0);
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
+    CHECK(ed.fileBrowser.entries_.size() >= 1);
+    CHECK(ed.fileBrowser.entries_[0].name == ".."); // la entrada ".." va primera
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.scroll_, 0);
 }
 
 TEST(browser_escape_cancels_to_navegacion) {
@@ -136,7 +136,7 @@ TEST(browser_escape_cancels_to_navegacion) {
     openFileBrowser(ed);
     press(ed, EventType::Escape);
     CHECK(ed.state_ == State::Navegacion);
-    CHECK_EQ(ed.buffers_.size(), size_t(1)); // nada se modifico
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1)); // nada se modifico
     CHECK(ed.active().filename.empty());
     CHECK(ed.active().document.lineAt(0).empty());
 }
@@ -256,7 +256,7 @@ TEST(browser_escape_touches_nothing) {
     CHECK(ed.active().document.snapshot() == docBefore);
     CHECK(ed.clipboard_ == clipBefore);
     CHECK_EQ(ed.active().undoStack.size(), size_t(undoSize));
-    CHECK_EQ(ed.buffers_.size(), size_t(1));    // no se abrio ni cerro nada
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));    // no se abrio ni cerro nada
     CHECK(ed.active().filename.empty());
     CHECK(!ed.hasSelection());
 }
@@ -273,18 +273,18 @@ TEST(browser_reopen_resets_index_and_path) {
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);             // -> sub
     press(ed, EventType::InsertNewline);        // entrar en sub
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/sub");
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/sub");
     press(ed, EventType::MoveDown);             // -> inner.txt
-    CHECK_EQ(ed.fileBrowserIndex_, 1);
+    CHECK_EQ(ed.fileBrowser.index_, 1);
     press(ed, EventType::Escape);
 
     // Reapertura: cwd, indice 0, scroll 0, sin residuos.
     openFileBrowser(ed);
     CHECK(ed.state_ == State::FileBrowser);
-    CHECK_EQ(ed.fileBrowserPath_, t.path);
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
-    CHECK_EQ(ed.fileBrowserScroll_, 0);
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(2)); // .. , sub/
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.scroll_, 0);
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(2)); // .. , sub/
 }
 
 TEST(browser_after_escape_editor_responds_normally) {
@@ -334,7 +334,7 @@ TEST(browser_ctrl_k_inside_cancels) {
     openFileBrowser(ed);
     press(ed, EventType::Prefix);
     CHECK(ed.state_ == State::Navegacion);
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
 }
 
 TEST(browser_other_keys_are_noop) {
@@ -353,7 +353,7 @@ TEST(browser_other_keys_are_noop) {
     press(ed, EventType::Undo);
     press(ed, EventType::Redo);
     CHECK(ed.state_ == State::FileBrowser);
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -367,14 +367,14 @@ TEST(browser_down_up_inc_dec_index) {
     for (int i = 0; i < 5; ++i) t.file("f" + std::to_string(i) + ".txt");
     Editor ed;
     openFileBrowser(ed);
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
     press(ed, EventType::MoveDown);
-    CHECK_EQ(ed.fileBrowserIndex_, 1);
+    CHECK_EQ(ed.fileBrowser.index_, 1);
     press(ed, EventType::MoveDown);
     press(ed, EventType::MoveDown);
-    CHECK_EQ(ed.fileBrowserIndex_, 3);
+    CHECK_EQ(ed.fileBrowser.index_, 3);
     press(ed, EventType::MoveUp);
-    CHECK_EQ(ed.fileBrowserIndex_, 2);
+    CHECK_EQ(ed.fileBrowser.index_, 2);
 }
 
 TEST(browser_index_never_out_of_range) {
@@ -385,14 +385,14 @@ TEST(browser_index_never_out_of_range) {
     for (int i = 0; i < 5; ++i) t.file("f" + std::to_string(i) + ".txt");
     Editor ed;
     openFileBrowser(ed);
-    const int n = static_cast<int>(ed.fileBrowserEntries_.size());
+    const int n = static_cast<int>(ed.fileBrowser.entries_.size());
     CHECK_EQ(n, 6); // .. + 5 archivos
 
     for (int i = 0; i < 50; ++i) press(ed, EventType::MoveDown);
-    CHECK_EQ(ed.fileBrowserIndex_, n - 1);
+    CHECK_EQ(ed.fileBrowser.index_, n - 1);
 
     for (int i = 0; i < 50; ++i) press(ed, EventType::MoveUp);
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
 }
 
 TEST(browser_jk_are_noop) {
@@ -405,13 +405,13 @@ TEST(browser_jk_are_noop) {
     Editor ed;
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);              // index 1
-    CHECK_EQ(ed.fileBrowserIndex_, 1);
+    CHECK_EQ(ed.fileBrowser.index_, 1);
     pressEvent(ed, insert('j'));                 // no-op
     pressEvent(ed, insert('k'));                 // no-op
-    CHECK_EQ(ed.fileBrowserIndex_, 1);
+    CHECK_EQ(ed.fileBrowser.index_, 1);
     pressEvent(ed, insert('J'));
     pressEvent(ed, insert('K'));
-    CHECK_EQ(ed.fileBrowserIndex_, 1);
+    CHECK_EQ(ed.fileBrowser.index_, 1);
     CHECK(ed.state_ == State::FileBrowser);
 }
 
@@ -426,7 +426,7 @@ TEST(browser_page_keys_are_noop) {
     press(ed, EventType::MoveDown);              // index 1
     press(ed, EventType::PageUp);
     press(ed, EventType::PageDown);
-    CHECK_EQ(ed.fileBrowserIndex_, 1);           // sin cambio
+    CHECK_EQ(ed.fileBrowser.index_, 1);           // sin cambio
     CHECK(ed.state_ == State::FileBrowser);
 }
 
@@ -441,7 +441,7 @@ TEST(browser_unrecognized_keys_ignored) {
     Editor ed;
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);              // index 1 como punto de partida
-    CHECK_EQ(ed.fileBrowserIndex_, 1);
+    CHECK_EQ(ed.fileBrowser.index_, 1);
 
     press(ed, EventType::Save);
     press(ed, EventType::Quit);
@@ -452,8 +452,8 @@ TEST(browser_unrecognized_keys_ignored) {
     press(ed, EventType::Backspace);
     press(ed, EventType::Delete);
     CHECK(ed.state_ == State::FileBrowser);      // el estado NO cambio
-    CHECK_EQ(ed.fileBrowserIndex_, 1);           // el indice NO cambio
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(4)); // nada se abrio
+    CHECK_EQ(ed.fileBrowser.index_, 1);           // el indice NO cambio
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(4)); // nada se abrio
     CHECK(ed.running_);                          // no salio con Quit
 }
 
@@ -467,23 +467,23 @@ TEST(browser_navigation_clamps) {
     for (int i = 0; i < 3; ++i) t.file("f" + std::to_string(i) + ".txt");
     Editor ed;
     openFileBrowser(ed);
-    const int n = static_cast<int>(ed.fileBrowserEntries_.size());
+    const int n = static_cast<int>(ed.fileBrowser.entries_.size());
     CHECK_EQ(n, 4); // .. + 3 archivos
 
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
     press(ed, EventType::MoveUp);   // clamp arriba
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
 
     press(ed, EventType::MoveDown);
     press(ed, EventType::MoveDown);
-    CHECK_EQ(ed.fileBrowserIndex_, 2);
+    CHECK_EQ(ed.fileBrowser.index_, 2);
     press(ed, EventType::MoveDown);
-    CHECK_EQ(ed.fileBrowserIndex_, 3);
+    CHECK_EQ(ed.fileBrowser.index_, 3);
     press(ed, EventType::MoveDown); // clamp abajo
-    CHECK_EQ(ed.fileBrowserIndex_, 3);
+    CHECK_EQ(ed.fileBrowser.index_, 3);
 
     press(ed, EventType::MoveUp);
-    CHECK_EQ(ed.fileBrowserIndex_, 2);
+    CHECK_EQ(ed.fileBrowser.index_, 2);
 }
 
 TEST(browser_scroll_follows_selection) {
@@ -494,21 +494,21 @@ TEST(browser_scroll_follows_selection) {
     g.enter(t.path);
     for (int i = 0; i < 10; ++i) t.file("f" + std::to_string(i) + ".txt");
     Editor ed;
-    ed.buffers_[0].viewport.height = 2; // ventana de solo 2 filas
+    ed.buffers.buffers_[0].viewport.height = 2; // ventana de solo 2 filas
     openFileBrowser(ed);                // entries: .. + 10 archivos = 11
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(11));
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(11));
 
     for (int i = 0; i < 6; ++i) press(ed, EventType::MoveDown);
-    CHECK_EQ(ed.fileBrowserIndex_, 6);
-    CHECK_EQ(ed.fileBrowserScroll_, 5); // 6 - 2 + 1 -> seleccion en la ultima fila
+    CHECK_EQ(ed.fileBrowser.index_, 6);
+    CHECK_EQ(ed.fileBrowser.scroll_, 5); // 6 - 2 + 1 -> seleccion en la ultima fila
 
     press(ed, EventType::MoveUp);
-    CHECK_EQ(ed.fileBrowserIndex_, 5);
-    CHECK_EQ(ed.fileBrowserScroll_, 5); // aun visible en la fila superior
+    CHECK_EQ(ed.fileBrowser.index_, 5);
+    CHECK_EQ(ed.fileBrowser.scroll_, 5); // aun visible en la fila superior
 
     press(ed, EventType::MoveUp);
-    CHECK_EQ(ed.fileBrowserIndex_, 4);
-    CHECK_EQ(ed.fileBrowserScroll_, 4); // la ventana retrocede
+    CHECK_EQ(ed.fileBrowser.index_, 4);
+    CHECK_EQ(ed.fileBrowser.scroll_, 4); // la ventana retrocede
 }
 
 // ---------------------------------------------------------------------------
@@ -521,11 +521,11 @@ TEST(browser_init_path_equals_getcwd) {
     CwdGuard g;
     g.enter(t.path);
     Editor ed;
-    CHECK_EQ(Editor::getCwd(), t.path);
+    CHECK_EQ(FileBrowser::getCwd(), t.path);
     openFileBrowser(ed);
-    CHECK_EQ(ed.fileBrowserPath_, Editor::getCwd());
-    CHECK(!ed.fileBrowserEntries_.empty());
-    CHECK_EQ(ed.fileBrowserEntries_[0].name, "..");
+    CHECK_EQ(ed.fileBrowser.path_, FileBrowser::getCwd());
+    CHECK(!ed.fileBrowser.entries_.empty());
+    CHECK_EQ(ed.fileBrowser.entries_[0].name, "..");
 }
 
 TEST(browser_init_index_starts_at_zero) {
@@ -539,9 +539,9 @@ TEST(browser_init_index_starts_at_zero) {
     g.enter(t.path);
     Editor ed;
     openFileBrowser(ed);
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
-    CHECK_EQ(ed.fileBrowserScroll_, 0);
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(5)); // .. 2 carpetas 2 archivos
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.scroll_, 0);
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(5)); // .. 2 carpetas 2 archivos
 }
 
 TEST(browser_parent_entry_is_directory) {
@@ -551,8 +551,8 @@ TEST(browser_parent_entry_is_directory) {
     g.enter(t.path);
     Editor ed;
     openFileBrowser(ed);
-    CHECK_EQ(ed.fileBrowserEntries_[0].name, "..");
-    CHECK(ed.fileBrowserEntries_[0].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[0].name, "..");
+    CHECK(ed.fileBrowser.entries_[0].isDirectory);
 }
 
 TEST(browser_entries_sorted_case_insensitive) {
@@ -568,19 +568,19 @@ TEST(browser_entries_sorted_case_insensitive) {
     g.enter(t.path);
     Editor ed;
     openFileBrowser(ed);
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(6));
-    CHECK_EQ(ed.fileBrowserEntries_[0].name, "..");
-    CHECK(ed.fileBrowserEntries_[0].isDirectory);
-    CHECK_EQ(ed.fileBrowserEntries_[1].name, "alpha"); // a < z
-    CHECK(ed.fileBrowserEntries_[1].isDirectory);
-    CHECK_EQ(ed.fileBrowserEntries_[2].name, "Zeta");  // a < z
-    CHECK(ed.fileBrowserEntries_[2].isDirectory);
-    CHECK_EQ(ed.fileBrowserEntries_[3].name, "A.txt"); // a < b < c
-    CHECK(!ed.fileBrowserEntries_[3].isDirectory);
-    CHECK_EQ(ed.fileBrowserEntries_[4].name, "b.txt");
-    CHECK(!ed.fileBrowserEntries_[4].isDirectory);
-    CHECK_EQ(ed.fileBrowserEntries_[5].name, "c.txt");
-    CHECK(!ed.fileBrowserEntries_[5].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(6));
+    CHECK_EQ(ed.fileBrowser.entries_[0].name, "..");
+    CHECK(ed.fileBrowser.entries_[0].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[1].name, "alpha"); // a < z
+    CHECK(ed.fileBrowser.entries_[1].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[2].name, "Zeta");  // a < z
+    CHECK(ed.fileBrowser.entries_[2].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[3].name, "A.txt"); // a < b < c
+    CHECK(!ed.fileBrowser.entries_[3].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[4].name, "b.txt");
+    CHECK(!ed.fileBrowser.entries_[4].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[5].name, "c.txt");
+    CHECK(!ed.fileBrowser.entries_[5].isDirectory);
 }
 
 TEST(browser_folders_listed_before_files) {
@@ -594,18 +594,18 @@ TEST(browser_folders_listed_before_files) {
     Editor ed;
     openFileBrowser(ed);
     // Orden: "..", carpetas alfabeticas, luego archivos alfabeticos.
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(5));
-    CHECK_EQ(ed.fileBrowserEntries_[0].name, "..");
-    CHECK_EQ(ed.fileBrowserEntries_[1].name, "alfa");
-    CHECK(ed.fileBrowserEntries_[1].isDirectory);
-    CHECK_EQ(ed.fileBrowserEntries_[2].name, "zeta");
-    CHECK(ed.fileBrowserEntries_[2].isDirectory);
-    CHECK_EQ(ed.fileBrowserEntries_[3].name, "a.txt");
-    CHECK(!ed.fileBrowserEntries_[3].isDirectory);
-    CHECK_EQ(ed.fileBrowserEntries_[4].name, "b.txt");
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(5));
+    CHECK_EQ(ed.fileBrowser.entries_[0].name, "..");
+    CHECK_EQ(ed.fileBrowser.entries_[1].name, "alfa");
+    CHECK(ed.fileBrowser.entries_[1].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[2].name, "zeta");
+    CHECK(ed.fileBrowser.entries_[2].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[3].name, "a.txt");
+    CHECK(!ed.fileBrowser.entries_[3].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[4].name, "b.txt");
     // Los nombres para dibujar marcan las carpetas con "/".
-    CHECK_EQ(ed.fileBrowserDisplayNames_[1], "alfa/");
-    CHECK_EQ(ed.fileBrowserDisplayNames_[3], "a.txt");
+    CHECK_EQ(ed.fileBrowser.displayNames_[1], "alfa/");
+    CHECK_EQ(ed.fileBrowser.displayNames_[3], "a.txt");
 }
 
 // ---------------------------------------------------------------------------
@@ -621,23 +621,23 @@ TEST(browser_multiple_levels_up) {
     g.enter(t.path);
     Editor ed;
     openFileBrowser(ed);
-    CHECK_EQ(ed.fileBrowserPath_, t.path);
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
 
     press(ed, EventType::MoveDown);   // -> a
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/a");
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/a");
     press(ed, EventType::MoveDown);   // -> b
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/a/b");
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/a/b");
 
     press(ed, EventType::InsertNewline);   // Enter sobre ".." -> sube a
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/a");
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/a");
     press(ed, EventType::InsertNewline);   // -> cwd
-    CHECK_EQ(ed.fileBrowserPath_, t.path);
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
     press(ed, EventType::InsertNewline);   // -> /tmp (padre de cwd)
-    CHECK_EQ(ed.fileBrowserPath_, "/tmp");
+    CHECK_EQ(ed.fileBrowser.path_, "/tmp");
     press(ed, EventType::InsertNewline);   // -> /
-    CHECK_EQ(ed.fileBrowserPath_, "/");
+    CHECK_EQ(ed.fileBrowser.path_, "/");
     CHECK(ed.state_ == State::FileBrowser); // sin crashear
 }
 
@@ -653,28 +653,28 @@ TEST(browser_reaching_root_hides_parent) {
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);   // -> sub
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/sub");
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/sub");
     press(ed, EventType::MoveDown);   // -> inner
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/sub/inner");
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/sub/inner");
 
     // Subir con ".." cuanto haga falta hasta quedar en la raiz. Dividido
     // en trozos para no asumir el prefijo exacto de los directorios tmp.
     press(ed, EventType::InsertNewline);   // cwd/sub/inner -> cwd/sub
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/sub");
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/sub");
     press(ed, EventType::InsertNewline);   // -> cwd
-    CHECK_EQ(ed.fileBrowserPath_, t.path);
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
     press(ed, EventType::InsertNewline);   // -> /tmp (padre de cwd)
-    CHECK_EQ(ed.fileBrowserPath_, "/tmp");
+    CHECK_EQ(ed.fileBrowser.path_, "/tmp");
     press(ed, EventType::InsertNewline);   // -> /
-    CHECK_EQ(ed.fileBrowserPath_, "/");
+    CHECK_EQ(ed.fileBrowser.path_, "/");
 
     // En "/" ya no hay ".." (salir a la raiz no borra las carpetas reales:
     // la entrada 0 sigue siendo una carpeta valida; no la tocamos).
     CHECK(ed.state_ == State::FileBrowser);
-    for (const FileBrowserEntry& e : ed.fileBrowserEntries_)
+    for (const FileBrowserEntry& e : ed.fileBrowser.entries_)
         CHECK(e.name != "..");
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
     press(ed, EventType::Escape);          // se sale limpio
     CHECK(ed.state_ == State::Navegacion);
 }
@@ -689,29 +689,29 @@ TEST(browser_down_up_repeatedly_stays_consistent) {
     g.enter(t.path);
     Editor ed;
     openFileBrowser(ed);
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(3)); // .., d1/, d2/
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(3)); // .., d1/, d2/
 
     press(ed, EventType::MoveDown);   // d1
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/d1");
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/d1");
     CHECK(ed.state_ == State::FileBrowser);
 
     press(ed, EventType::InsertNewline);   // subir
-    CHECK_EQ(ed.fileBrowserPath_, t.path);
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(3));
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(3));
 
     press(ed, EventType::MoveDown);   // d1
     press(ed, EventType::MoveDown);   // d2
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/d2");
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(1)); // solo ".." (d2 vacio)
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/d2");
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(1)); // solo ".." (d2 vacio)
 
     press(ed, EventType::InsertNewline);   // subir de nuevo
-    CHECK_EQ(ed.fileBrowserPath_, t.path);
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(3));
-    CHECK_EQ(ed.buffers_.size(), size_t(1)); // jamas se abrio un buffer
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(3));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1)); // jamas se abrio un buffer
     CHECK(ed.state_ == State::FileBrowser);
 }
 
@@ -724,21 +724,21 @@ TEST(browser_enter_folder_and_go_back) {
     Editor ed;
     openFileBrowser(ed);
     // entries: .. , sub/
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(2));
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(2));
     press(ed, EventType::MoveDown);   // -> sub
     press(ed, EventType::InsertNewline);
 
     CHECK(ed.state_ == State::FileBrowser);
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/sub");
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(2)); // .. , inner.txt
-    CHECK_EQ(ed.fileBrowserEntries_[1].name, "inner.txt");
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/sub");
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(2)); // .. , inner.txt
+    CHECK_EQ(ed.fileBrowser.entries_[1].name, "inner.txt");
 
     press(ed, EventType::InsertNewline);  // Enter sobre ".."
-    CHECK_EQ(ed.fileBrowserPath_, t.path);
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(2));
-    CHECK_EQ(ed.buffers_.size(), size_t(1)); // nunca se abrio nada
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(2));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1)); // nunca se abrio nada
 }
 
 // ---------------------------------------------------------------------------
@@ -754,8 +754,8 @@ TEST(browser_open_new_file_adds_buffer) {
     press(ed, EventType::MoveDown);   // -> a.txt
     press(ed, EventType::InsertNewline);
     CHECK(ed.state_ == State::Navegacion);
-    CHECK_EQ(ed.buffers_.size(), size_t(2));
-    CHECK_EQ(ed.activeBuffer_, 1);
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK_EQ(ed.active().filename, t.path + "/a.txt");
     CHECK_EQ(ed.active().document.lineAt(0), "a.txt");
     CHECK(!ed.active().modified);
@@ -774,7 +774,7 @@ TEST(browser_opened_file_name_is_basename) {
     press(ed, EventType::InsertNewline);
     CHECK_EQ(ed.active().filename, t.path + "/notas.txt");
     CHECK_EQ(ed.active().displayName(), "notas.txt");
-    CHECK_EQ(ed.buffers_[0].unnamedName, "SinNombre"); // el previo sigue intacto
+    CHECK_EQ(ed.buffers.buffers_[0].unnamedName, "SinNombre"); // el previo sigue intacto
 }
 
 TEST(browser_open_restores_prior_state) {
@@ -826,14 +826,14 @@ TEST(browser_open_does_not_touch_other_buffers) {
     newBuffer(ed);
     type(ed, "contenido B1");
     press(ed, EventType::Escape);
-    CHECK_EQ(ed.buffers_.size(), size_t(2));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
 
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);   // -> nuevo.txt
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.buffers_.size(), size_t(3));
-    CHECK_EQ(ed.buffers_[0].document.lineAt(0), "contenido B0");
-    CHECK_EQ(ed.buffers_[1].document.lineAt(0), "contenido B1");
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(3));
+    CHECK_EQ(ed.buffers.buffers_[0].document.lineAt(0), "contenido B0");
+    CHECK_EQ(ed.buffers.buffers_[1].document.lineAt(0), "contenido B1");
     CHECK_EQ(ed.active().document.lineAt(0), "nuevo.txt");
 }
 
@@ -860,15 +860,15 @@ TEST(browser_reopen_file_activates_existing) {
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.buffers_.size(), size_t(2));
-    CHECK_EQ(ed.activeBuffer_, 1);
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
 
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);
     press(ed, EventType::InsertNewline);
     CHECK(ed.state_ == State::Navegacion);
-    CHECK_EQ(ed.buffers_.size(), size_t(2));   // NO se abrio una copia
-    CHECK_EQ(ed.activeBuffer_, 1);
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));   // NO se abrio una copia
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK_EQ(ed.active().filename, t.path + "/a.txt");
 }
 
@@ -882,13 +882,13 @@ TEST(browser_reopen_matches_absolute_path) {
     Editor ed;
     CHECK(ed.openFile("a.txt"));               // ruta RELATIVA al abrir
     CHECK_EQ(ed.active().filename, t.path + "/a.txt"); // pero queda absoluta
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
 
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);            // -> a.txt (ruta absoluta)
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.buffers_.size(), size_t(1));   // NO se duplico
-    CHECK_EQ(ed.activeBuffer_, 0);             // se activo el existente
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));   // NO se duplico
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);             // se activo el existente
     CHECK_EQ(ed.active().filename, t.path + "/a.txt");
     CHECK(ed.state_ == State::Navegacion);     // y se salio del explorador
 }
@@ -904,7 +904,7 @@ TEST(browser_folder_not_opened_as_buffer) {
     press(ed, EventType::InsertNewline);
     // Sigue en el explorador (ahora dentro de sub), no se agrego buffer.
     CHECK(ed.state_ == State::FileBrowser);
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK(ed.active().filename.empty());
 }
 
@@ -921,10 +921,10 @@ TEST(browser_folder_enter_never_creates_buffer) {
     press(ed, EventType::MoveDown);   // -> a (carpeta)
     press(ed, EventType::InsertNewline);
     CHECK(ed.state_ == State::FileBrowser);        // sigue en el explorador
-    CHECK_EQ(ed.buffers_.size(), size_t(1));       // no se creo buffer
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));       // no se creo buffer
     CHECK(ed.active().filename.empty());           // tampoco se cargo nada
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/a");  // solo cambio el directorio
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(2)); // .., f.txt
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/a");  // solo cambio el directorio
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(2)); // .., f.txt
     CHECK(ed.active().document.lineAt(0).empty()); // y el documento sigue igual
 }
 
@@ -942,12 +942,12 @@ TEST(open_file_rejects_directory) {
     // ruta RELATIVA
     CHECK(!ed.openFile("carpeta"));
     CHECK(ed.active().filename.empty());
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK_EQ(ed.statusMessage_, "No se pueden abrir carpetas.");
     // ruta ABSOLUTA
     CHECK(!ed.openFile(t.path + "/carpeta"));
     CHECK(ed.active().filename.empty());
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK_EQ(ed.statusMessage_, "No se pueden abrir carpetas.");
 }
 
@@ -961,13 +961,13 @@ TEST(browser_open_empty_list_enters_and_returns) {
     press(ed, EventType::MoveDown);   // -> empty
     press(ed, EventType::InsertNewline);
     CHECK(ed.state_ == State::FileBrowser);
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/empty");
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/empty");
     // Solo la entrada ".." (el directorio esta vacio).
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(1));
-    CHECK_EQ(ed.fileBrowserEntries_[0].name, "..");
-    CHECK_EQ(ed.fileBrowserIndex_, 0);
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(1));
+    CHECK_EQ(ed.fileBrowser.entries_[0].name, "..");
+    CHECK_EQ(ed.fileBrowser.index_, 0);
     press(ed, EventType::InsertNewline); // volver
-    CHECK_EQ(ed.fileBrowserPath_, t.path);
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
 }
 
 // ---------------------------------------------------------------------------
@@ -979,8 +979,8 @@ TEST(browser_at_root_has_no_parent) {
     Editor ed;
     openFileBrowser(ed);
     CHECK(ed.state_ == State::FileBrowser);
-    CHECK_EQ(ed.fileBrowserPath_, "/");
-    for (const FileBrowserEntry& e : ed.fileBrowserEntries_) {
+    CHECK_EQ(ed.fileBrowser.path_, "/");
+    for (const FileBrowserEntry& e : ed.fileBrowser.entries_) {
         CHECK(e.name != ".."); // no hay a donde subir
     }
     press(ed, EventType::Escape);
@@ -991,19 +991,19 @@ TEST(browser_at_root_has_no_parent) {
 // Helpers de ruta
 // ---------------------------------------------------------------------------
 TEST(browser_parent_path_computation) {
-    CHECK_EQ(Editor::parentPath("/a/b/c"), "/a/b"); // sube un solo nivel
-    CHECK_EQ(Editor::parentPath("/a/b"), "/a");
-    CHECK_EQ(Editor::parentPath("/a"), "/");
-    CHECK_EQ(Editor::parentPath("/"), "/");
-    CHECK_EQ(Editor::parentPath(""), "/");
+    CHECK_EQ(FileBrowser::parentPath("/a/b/c"), "/a/b"); // sube un solo nivel
+    CHECK_EQ(FileBrowser::parentPath("/a/b"), "/a");
+    CHECK_EQ(FileBrowser::parentPath("/a"), "/");
+    CHECK_EQ(FileBrowser::parentPath("/"), "/");
+    CHECK_EQ(FileBrowser::parentPath(""), "/");
     // Relativa sin directorio: sin a donde subir, se ancla a la raiz.
-    CHECK_EQ(Editor::parentPath("algo"), "/");
+    CHECK_EQ(FileBrowser::parentPath("algo"), "/");
 }
 
 TEST(browser_list_directory_unreadable_reports_error) {
     std::string err;
     std::vector<FileBrowserEntry> entries =
-        Editor::listDirectory("/nonexistent_xyz_123", err);
+        FileBrowser::listDirectory("/nonexistent_xyz_123", err);
     CHECK(!err.empty());
     // Aunque no se pueda leer, siempre queda ".." para poder subir.
     CHECK_EQ(entries.size(), size_t(1));
@@ -1028,11 +1028,11 @@ TEST(browser_unreadable_directory_shows_error) {
     press(ed, EventType::MoveDown);   // -> locked
     press(ed, EventType::InsertNewline);
     CHECK(ed.state_ == State::FileBrowser);              // sigue en el explorador
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/locked");   // el directorio cambio
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/locked");   // el directorio cambio
     if (::geteuid() != 0) {
         // Sin permiso: no se lista (queda "..") y hay mensaje de error.
-        CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(1));
-        CHECK_EQ(ed.fileBrowserEntries_[0].name, "..");
+        CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(1));
+        CHECK_EQ(ed.fileBrowser.entries_[0].name, "..");
         CHECK(!ed.statusMessage_.empty());
         CHECK(ed.statusMessage_.find("No se pudo leer") != std::string::npos);
     }
@@ -1051,14 +1051,14 @@ TEST(browser_empty_directory_lists_only_parent) {
     press(ed, EventType::MoveDown);   // -> vacio
     press(ed, EventType::InsertNewline);
     CHECK(ed.state_ == State::FileBrowser);
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/vacio");
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(1));
-    CHECK_EQ(ed.fileBrowserEntries_[0].name, "..");
-    CHECK(ed.fileBrowserEntries_[0].isDirectory);
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/vacio");
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(1));
+    CHECK_EQ(ed.fileBrowser.entries_[0].name, "..");
+    CHECK(ed.fileBrowser.entries_[0].isDirectory);
     // Las carpetas vacias NO se muestran como archivo (nada que abrir).
     press(ed, EventType::InsertNewline);   // volver al padre
-    CHECK_EQ(ed.fileBrowserPath_, t.path);
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
 }
 
 TEST(browser_handles_utf8_and_special_names) {
@@ -1071,9 +1071,9 @@ TEST(browser_handles_utf8_and_special_names) {
     g.enter(t.path);
     Editor ed;
     openFileBrowser(ed);
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(4)); // .. + 3
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(4)); // .. + 3
     auto hasName = [&](const std::string& n) {
-        for (const FileBrowserEntry& e : ed.fileBrowserEntries_)
+        for (const FileBrowserEntry& e : ed.fileBrowser.entries_)
             if (e.name == n) return true;
         return false;
     };
@@ -1083,8 +1083,8 @@ TEST(browser_handles_utf8_and_special_names) {
     // Navegacion completa sobre la lista sin romper nada y se sale limpio.
     for (int i = 0; i < 10; ++i) press(ed, EventType::MoveDown);
     CHECK(ed.state_ == State::FileBrowser);
-    CHECK_EQ(ed.fileBrowserIndex_,
-             static_cast<int>(ed.fileBrowserEntries_.size()) - 1);
+    CHECK_EQ(ed.fileBrowser.index_,
+             static_cast<int>(ed.fileBrowser.entries_.size()) - 1);
     // Abrir el archivo UTF-8: el buffer conserva el nombre exacto.
     for (int i = 0; i < 10; ++i) press(ed, EventType::MoveUp);
     press(ed, EventType::MoveDown);   // naño.txt (a b y 100% van antes)
@@ -1102,14 +1102,14 @@ TEST(browser_cwd_failure_does_not_crash) {
         g.enter(t.path);
         std::filesystem::remove_all(t.path);   // borramos la cwd actual
         Editor ed;
-        CHECK_EQ(Editor::getCwd(), "");        // getcwd falla
+        CHECK_EQ(FileBrowser::getCwd(), "");        // getcwd falla
 
         openFileBrowser(ed);
         CHECK(ed.state_ == State::FileBrowser);          // no crashea
-        CHECK_EQ(ed.fileBrowserPath_, "");
-        CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(1));
-        CHECK_EQ(ed.fileBrowserEntries_[0].name, "..");  // sube a raiz
-        CHECK_EQ(ed.fileBrowserEntries_[0].fullPath, "/");
+        CHECK_EQ(ed.fileBrowser.path_, "");
+        CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(1));
+        CHECK_EQ(ed.fileBrowser.entries_[0].name, "..");  // sube a raiz
+        CHECK_EQ(ed.fileBrowser.entries_[0].fullPath, "/");
         CHECK(!ed.statusMessage_.empty());
         CHECK(ed.statusMessage_.find("No se pudo leer") != std::string::npos);
 
@@ -1132,7 +1132,7 @@ TEST(browser_multiple_opens_increase_buffer_count) {
     CwdGuard g;
     g.enter(t.path);
     Editor ed;
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
 
     openFileBrowser(ed);  press(ed, EventType::MoveDown);  press(ed, EventType::InsertNewline); // a.txt
     openFileBrowser(ed);  press(ed, EventType::MoveDown);  press(ed, EventType::MoveDown);
@@ -1140,8 +1140,8 @@ TEST(browser_multiple_opens_increase_buffer_count) {
     openFileBrowser(ed);  press(ed, EventType::MoveDown);  press(ed, EventType::MoveDown);
                           press(ed, EventType::MoveDown);  press(ed, EventType::InsertNewline); // c.txt
 
-    CHECK_EQ(ed.buffers_.size(), size_t(4));      // SinNombre + a + b + c
-    CHECK_EQ(ed.activeBuffer_, 3);
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(4));      // SinNombre + a + b + c
+    CHECK_EQ(ed.buffers.activeBuffer_, 3);
     CHECK_EQ(ed.active().filename, t.path + "/c.txt");
     CHECK_EQ(ed.active().document.lineAt(0), "c.txt");
 }
@@ -1176,13 +1176,13 @@ TEST(browser_open_switch_reopen_open) {
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);   // -> a.txt
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.activeBuffer_, 1);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
 
     // cambiar al buffer sin nombre (indice 0) via selector
     openSelector(ed);
     press(ed, EventType::MoveUp);     // indice 1 -> 0
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.activeBuffer_, 0);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK(ed.active().filename.empty());
 
     // reabrir el explorador y abrir b.txt
@@ -1190,14 +1190,14 @@ TEST(browser_open_switch_reopen_open) {
     press(ed, EventType::MoveDown);   // a.txt
     press(ed, EventType::MoveDown);   // b.txt
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.activeBuffer_, 2);
+    CHECK_EQ(ed.buffers.activeBuffer_, 2);
     CHECK_EQ(ed.active().filename, t.path + "/b.txt");
 
     // volver a a.txt por selector
     openSelector(ed);
     press(ed, EventType::MoveUp);     // indice 2 -> 1 (a.txt)
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.activeBuffer_, 1);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK_EQ(ed.active().filename, t.path + "/a.txt");
     CHECK_EQ(ed.active().document.lineAt(0), "a.txt");
 }
@@ -1212,10 +1212,10 @@ TEST(browser_close_opened_buffer) {
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);
     press(ed, EventType::InsertNewline);          // abre a.txt (indice 1)
-    CHECK_EQ(ed.buffers_.size(), size_t(2));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
 
     closeBuffer(ed);                              // cierra a.txt (sin modificar)
-    CHECK_EQ(ed.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK(ed.active().filename.empty());          // queda el buffer sin nombre
     CHECK(ed.state_ == State::BufferSelector);    // se pasa al selector
     press(ed, EventType::Escape);
@@ -1232,17 +1232,17 @@ TEST(browser_open_does_not_consume_unnamed_count) {
     CwdGuard g;
     g.enter(t.path);
     Editor ed;
-    CHECK_EQ(ed.unnamedCounter_, 1);
+    CHECK_EQ(ed.buffers.unnamedCounter_, 1);
 
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);
     press(ed, EventType::InsertNewline);          // abre a.txt
-    CHECK_EQ(ed.buffers_.size(), size_t(2));
-    CHECK_EQ(ed.unnamedCounter_, 1);              // NO crecio
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
+    CHECK_EQ(ed.buffers.unnamedCounter_, 1);              // NO crecio
 
     newBuffer(ed);                                // Ctrl+K n
     CHECK_EQ(ed.active().unnamedName, "SinNombre1");
-    CHECK_EQ(ed.activeBuffer_, 2);
+    CHECK_EQ(ed.buffers.activeBuffer_, 2);
     CHECK(ed.active().filename.empty());
 }
 
@@ -1257,15 +1257,15 @@ TEST(browser_reopen_reads_directory_freshly) {
     g.enter(t.path);
     Editor ed;
     openFileBrowser(ed);
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(2)); // .., a.txt
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(2)); // .., a.txt
 
     press(ed, EventType::Escape);
     t.file("later.txt");                    // se crea MIENTRAS el editor vive
 
     openFileBrowser(ed);                    // se vuelve a leer el directorio
-    CHECK_EQ(ed.fileBrowserEntries_.size(), size_t(3)); // .., a.txt, later.txt
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(3)); // .., a.txt, later.txt
     bool found = false;
-    for (const FileBrowserEntry& e : ed.fileBrowserEntries_)
+    for (const FileBrowserEntry& e : ed.fileBrowser.entries_)
         if (e.name == "later.txt") found = true;
     CHECK(found);
 }
@@ -1283,15 +1283,15 @@ TEST(browser_escape_after_navigation_no_side_effects) {
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);   // -> x
     press(ed, EventType::InsertNewline);   // entrar en x
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/x");
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/x");
     press(ed, EventType::MoveDown);   // -> y.txt
     press(ed, EventType::MoveDown);   // clamp al final de la lista
-    CHECK_EQ(ed.fileBrowserIndex_,
-             static_cast<int>(ed.fileBrowserEntries_.size()) - 1);
+    CHECK_EQ(ed.fileBrowser.index_,
+             static_cast<int>(ed.fileBrowser.entries_.size()) - 1);
     press(ed, EventType::Escape);     // cancelar SIN abrir nada
 
     CHECK(ed.state_ == State::Navegacion);
-    CHECK_EQ(ed.buffers_.size(), size_t(1));       // no se creo buffer
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));       // no se creo buffer
     CHECK(ed.active().filename.empty());           // no se cargo archivo
     CHECK(ed.active().document.lineAt(0).empty()); // documento intacto
     CHECK(ed.statusMessage_.empty());              // mensaje limpio
@@ -1314,7 +1314,7 @@ TEST(browser_prior_state_after_deep_navigation) {
         press(ed, EventType::InsertNewline);
         press(ed, EventType::MoveDown);   // inner
         press(ed, EventType::InsertNewline);
-        CHECK_EQ(ed.fileBrowserPath_, t.path + "/x/inner");
+        CHECK_EQ(ed.fileBrowser.path_, t.path + "/x/inner");
         press(ed, EventType::Escape);
         CHECK(ed.state_ == State::Interaccion);
         CHECK_EQ(ed.active().document.lineAt(0), "hola");
@@ -1352,8 +1352,8 @@ TEST(browser_status_label_is_abrir_archivo) {
 
     Renderer r;
     const std::string out = r.buildFileListScreen(
-        ed.fileBrowserDisplayNames_, ed.fileBrowserIndex_, ed.fileBrowserScroll_,
-        ed.fileBrowserPath_, ed.statusMessage_, 80, 10);
+        ed.fileBrowser.displayNames_, ed.fileBrowser.index_, ed.fileBrowser.scroll_,
+        ed.fileBrowser.path_, ed.statusMessage_, 80, 10);
     CHECK(contains(out, "ABRIR ARCHIVO"));
 }
 
@@ -1367,12 +1367,12 @@ TEST(browser_status_path_matches_current_dir) {
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);   // -> x
     press(ed, EventType::InsertNewline);
-    CHECK_EQ(ed.fileBrowserPath_, t.path + "/x");
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/x");
 
     Renderer r;
     const std::string out = r.buildFileListScreen(
-        ed.fileBrowserDisplayNames_, ed.fileBrowserIndex_, ed.fileBrowserScroll_,
-        ed.fileBrowserPath_, ed.statusMessage_, 80, 10);
+        ed.fileBrowser.displayNames_, ed.fileBrowser.index_, ed.fileBrowser.scroll_,
+        ed.fileBrowser.path_, ed.statusMessage_, 80, 10);
     CHECK(contains(out, t.path + "/x"));
 }
 

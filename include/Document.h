@@ -1,9 +1,33 @@
 #pragma once
 
+#include <ostream>
 #include <string>
 #include <vector>
 
 #include "Position.h"
+
+// Resultado de loadFromFile. Diferencia entre un archivo que genuinamente
+// no existe (caso legitimo: se abre como documento nuevo) de un error real
+// (sin permisos, fallo de E/S) que NO debe tratarse como archivo nuevo por
+// que podria hacer perder contenido de un archivo existente.
+enum class LoadResult {
+    Success,
+    // El archivo no existe: el documento queda como uno vacio nuevo, listo
+    // para guardarce. No es un error.
+    NotFound,
+    PermissionDenied,
+    IoError,
+};
+
+inline std::ostream& operator<<(std::ostream& os, LoadResult r) {
+    switch (r) {
+        case LoadResult::Success:         return os << "Success";
+        case LoadResult::NotFound:        return os << "NotFound";
+        case LoadResult::PermissionDenied:return os << "PermissionDenied";
+        case LoadResult::IoError:         return os << "IoError";
+    }
+    return os << "?";
+}
 
 // Document representa UNICAMENTE el contenido de texto.
 // No sabe nada de cursor, colores, scroll ni seleccion.
@@ -12,9 +36,11 @@ class Document {
 public:
     Document();
 
-    // Carga el archivo indicado. Si no existe, arranca con un documento
-    // vacio (una linea vacia) y recuerda el path para poder guardarlo despues.
-    bool loadFromFile(const std::string& path);
+    // Carga el archivo indicado. Si no existe (NotFound) arranca con un
+    // documento vacio (una linea vacia) y recuerda el path para poder
+    // guardarlo despues. Ante un error (PermissionDenied / IoError) NO toca
+    // el contenido del documento: deja las lineas como estaban.
+    LoadResult loadFromFile(const std::string& path);
 
     // Guarda el contenido actual en el path indicado.
     bool saveToFile(const std::string& path) const;
@@ -29,6 +55,16 @@ public:
 
     // Reemplaza todo el contenido por las lineas dadas.
     void restore(const std::vector<std::string>& lines);
+
+    // true si el contenido actual termina en '\n'. Se mantiene sincronizado
+    // en CADA mutacion (ver Document.cpp): un '\n' final se representa O
+    // como una ultima linea vacia en lines_ O como este flag, nunca ambos.
+    bool endsWithNewline() const;
+
+    // Fija el estado del '\n' final. Lo usa Buffer al restaurar undo/redo:
+    // restore() no puede deducir el flag del vector de lineas, asi que el
+    // historial guarda el flag junto con las lineas.
+    void setEndsWithNewline(bool ends);
 
     // --- Mutaciones ---
     // Inserta el caracter c en (line, col). col puede ser igual a
@@ -89,10 +125,16 @@ public:
 private:
     std::vector<std::string> lines_;
 
-    // true si el archivo original terminaba en salto de linea ('\n'). El
+    // true si el contenido actual termina en salto de linea ('\n'). El
     // modelo de lineas no representa esa nueva linea final (una "linea
     // vacia" al final equivale a no tenerla), asi que sin este flag la
     // guardar y abrir un archivo bien formado perderia su '\n' final.
     // Se respeta al escribir para que abrir+guardar no altere el archivo.
-    bool trailingNewline_ = false;
+    bool endsWithNewline_ = false;
+
+    // Mantiene el flag sincronizado tras una mutacion: si lines_ termina
+    // en una linea vacia, ESA linea ya aporta el '\n' al serializar, asi
+    // que el flag debe quedar en false (si no, saveToFile escribiria dos
+    // '\n' seguidos). Se llama al final de toda mutacion estructural.
+    void normalizeEndsWithNewline();
 };

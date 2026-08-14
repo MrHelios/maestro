@@ -1,5 +1,7 @@
 #include "Document.h"
 
+#include <cerrno>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
@@ -10,15 +12,25 @@ Document::Document() {
     lines_.push_back("");
 }
 
-bool Document::loadFromFile(const std::string& path) {
+LoadResult Document::loadFromFile(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
-        // Archivo nuevo: dejamos el documento con una linea vacia y sin
-        // newline final (aun no hay archivo original que preservar).
-        lines_.clear();
-        lines_.push_back("");
-        trailingNewline_ = false;
-        return false;
+        // Distinguir el archivo "nuevo" (no existe) de un error real. Solo en
+        // el primer caso se resetea el documento a uno vacio; ante permisos
+        // o E/S falla no se toca (p.ej. no aparentar que un archivo existente
+        // sin permisos es un archivo nuevo, que es exactamente lo que llevaria
+        // a sobrescribirlo desde cero).
+        std::error_code ec;
+        if (!std::filesystem::exists(path, ec)) {
+            lines_.clear();
+            lines_.push_back("");
+            endsWithNewline_ = false;
+            return LoadResult::NotFound;
+        }
+        if (errno == EACCES) {
+            return LoadResult::PermissionDenied;
+        }
+        return LoadResult::IoError;
     }
 
     // Leemos todo el contenido para poder detectar si el archivo
@@ -27,7 +39,7 @@ bool Document::loadFromFile(const std::string& path) {
     std::ostringstream ss;
     ss << file.rdbuf();
     std::string content = ss.str();
-    trailingNewline_ = !content.empty() && content.back() == '\n';
+    endsWithNewline_ = !content.empty() && content.back() == '\n';
 
     lines_.clear();
     std::string line;
@@ -45,7 +57,7 @@ bool Document::loadFromFile(const std::string& path) {
         lines_.push_back("");
     }
 
-    return true;
+    return LoadResult::Success;
 }
 
 bool Document::saveToFile(const std::string& path) const {
@@ -64,11 +76,31 @@ bool Document::saveToFile(const std::string& path) const {
     // Respetar el salto de linea final del archivo original: sin esto,
     // abrir y guardar un archivo que terminaba en '\n' lo dejaria sin
     // su nueva linea final (perdida silenciosa del '\n').
-    if (!lines_.empty() && trailingNewline_) {
+    if (!lines_.empty() && endsWithNewline_) {
         file << '\n';
     }
 
     return true;
+}
+
+bool Document::endsWithNewline() const {
+    return endsWithNewline_;
+}
+
+void Document::setEndsWithNewline(bool ends) {
+    endsWithNewline_ = ends;
+    normalizeEndsWithNewline();
+}
+
+void Document::normalizeEndsWithNewline() {
+    // Invariante: un '\n' final se representa UNA vez. Si lines_ termina
+    // en una linea vacia, esa linea ya serializa el '\n' (separa la ultima
+    // linea de la nada), asi que el flag debe ser false. Si quedara true,
+    // saveToFile escribira el '\n' del separador MAS el '\n' del flag:
+    // el archivo ganaria una linea vacia al guardar.
+    if (lines_.size() > 1 && lines_.back().empty()) {
+        endsWithNewline_ = false;
+    }
 }
 
 int Document::lineCount() const {
@@ -95,6 +127,7 @@ void Document::restore(const std::vector<std::string>& lines) {
     if (lines_.empty()) {
         lines_.push_back("");
     }
+    normalizeEndsWithNewline();
 }
 
 void Document::insertChar(int line, int col, char c) {
@@ -103,6 +136,7 @@ void Document::insertChar(int line, int col, char c) {
     if (col < 0) col = 0;
     if (col > static_cast<int>(target.size())) col = static_cast<int>(target.size());
     target.insert(target.begin() + col, c);
+    normalizeEndsWithNewline();
 }
 
 void Document::insertText(int line, int col, const std::string& text) {
@@ -111,6 +145,7 @@ void Document::insertText(int line, int col, const std::string& text) {
     if (col < 0) col = 0;
     if (col > static_cast<int>(target.size())) col = static_cast<int>(target.size());
     target.insert(col, text);
+    normalizeEndsWithNewline();
 }
 
 void Document::insertNewline(int line, int col) {
@@ -122,6 +157,7 @@ void Document::insertNewline(int line, int col) {
     std::string rest = target.substr(col);
     target.erase(col);
     lines_.insert(lines_.begin() + line + 1, rest);
+    normalizeEndsWithNewline();
 }
 
 int Document::deleteCharBefore(int line, int col) {
@@ -153,6 +189,7 @@ int Document::deleteCharBefore(int line, int col) {
     std::string current = lines_[line];
     lines_.erase(lines_.begin() + line);
     lines_[line - 1] += current;
+    normalizeEndsWithNewline();
     return 0;
 }
 
@@ -183,6 +220,7 @@ int Document::deleteCharAt(int line, int col) {
     std::string next = lines_[line + 1];
     lines_.erase(lines_.begin() + line + 1);
     lines_[line] += next;
+    normalizeEndsWithNewline();
     return 0;
 }
 
@@ -204,6 +242,7 @@ bool Document::deleteRange(int sl, int sc, int el, int ec) {
 
     if (sl == el) {
         lines_[sl].erase(sc, ec - sc);
+        normalizeEndsWithNewline();
         return true;
     }
 
@@ -213,6 +252,7 @@ bool Document::deleteRange(int sl, int sc, int el, int ec) {
     lines_[sl].erase(sc);
     lines_[sl] += tail;
     lines_.erase(lines_.begin() + sl + 1, lines_.begin() + el + 1);
+    normalizeEndsWithNewline();
     return true;
 }
 
@@ -253,6 +293,7 @@ Position Document::insertBlock(int line, int col, const std::vector<std::string>
         // Una sola linea: insertar el string completo dentro de la linea
         // existente, sin partirla.
         target.insert(col, block[0]);
+        normalizeEndsWithNewline();
         return {line, col + static_cast<int>(block[0].size())};
     }
 
@@ -272,6 +313,7 @@ Position Document::insertBlock(int line, int col, const std::vector<std::string>
 
     lines_.erase(lines_.begin() + line);
     lines_.insert(lines_.begin() + line, newLines.begin(), newLines.end());
+    normalizeEndsWithNewline();
 
     // Cursor al final de la ultima linea insertada del bloque.
     return {line + static_cast<int>(block.size()) - 1,
