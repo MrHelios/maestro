@@ -1,4 +1,5 @@
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -153,6 +154,38 @@ struct TempDir {
     TempDir(const TempDir&) = delete;
     TempDir& operator=(const TempDir&) = delete;
 };
+
+TEST(editor_open_normalizes_dotdot) {
+    // Abrir "dir/sub/../a.txt" (con "..") debe guardar el filename
+    // NORMALIZADO "dir/a.txt", no la cadena cruda con "..". Asi dos rutas
+    // que escriben el mismo archivo de forma distinta quedan iguales para
+    // el chequeo de duplicados de buffers.
+    TempDir dir;
+    CHECK(!dir.path.empty());
+    std::filesystem::create_directory(dir.path + "/sub");
+    {
+        std::ofstream(dir.path + "/a.txt", std::ios::binary) << "x";
+    }
+
+    Editor ed;
+    // El OS resuelve "sub/.." para abrir el archivo real dir/a.txt.
+    CHECK(ed.openFile(dir.path + "/sub/../a.txt"));
+    CHECK_EQ(ed.active().filename, dir.path + "/a.txt");
+}
+
+TEST(editor_open_normalizes_dot) {
+    // Un "." dentro de la ruta tambien se reduce.
+    TempFile f;
+    f.write("x");
+    std::filesystem::path fp(f.path);
+    const std::string parent = fp.parent_path().string(); // /tmp
+    const std::string name = fp.filename().string();
+    const std::string withDot = parent + "/./" + name;
+
+    Editor ed;
+    CHECK(ed.openFile(withDot));
+    CHECK_EQ(ed.active().filename, parent + "/" + name);
+}
 
 // ---------------------------------------------------------------------------
 // v0.6.2: abrir por ruta absoluta; las carpetas se rechazan

@@ -10,14 +10,18 @@
 
 namespace {
 
-// Convierte una ruta posiblemente relativa en una absoluta (cwd() + "/"
-// + ruta) para mostrarla en la barra de estado. Las rutas ya absolutas
-// o vacias se devuelven tal cual.
+// Convierte una ruta a su forma CANONICA-LEXICA: absoluta contra cwd() y
+// con "." / ".." reducidos ("foo/../bar" -> "bar"). Unifica rutas que
+// apuntan al mismo archivo pero se escriben distinto, de modo que el
+// chequeo de duplicados de buffers funcione ("a/../b" == "b").
+//
+// NO resuelve symlinks: eso requiere filesystem::canonical(), que exige
+// que el archivo EXISTA y falla sobre archivos nuevos (que el editor
+// tambien abre). Resolver symlinks queda como limitacion documentada.
 std::string resolveAbsolutePath(const std::string& path) {
-    if (path.empty() || path.front() == '/') return path;
-    char buf[4096];
-    if (!getcwd(buf, sizeof buf)) return path;
-    return std::string(buf) + "/" + path;
+    if (path.empty()) return path;
+    std::error_code ec;
+    return std::filesystem::absolute(path, ec).lexically_normal().string();
 }
 
 } // namespace
@@ -211,12 +215,15 @@ void Editor::closeActiveBuffer() {
             statusMessage_ = "Buffer reiniciado: " + active().unnamedName;
             state_ = State::Navegacion;
             break;
-        case CloseResult::Removed:
-            bufferSelectorIndex_ = 0;
-            priorState_ = State::Navegacion; // el contexto previo desaparecio
-            state_ = State::BufferSelector;
-            statusMessage_ = "Buffer cerrado. ↑/↓ y Enter para elegir.";
+        case CloseResult::Removed: {
+            // UX (v0.8): cerrar NO abre el selector. El buffer que heredo
+            // la ranura (misma posicion, clamp al final) queda activo de
+            // inmediato. Para elegir deliberadamente existe Ctrl+K t.
+            const bool hasSelection = buffers.activate(buffers.activeIndex());
+            state_ = hasSelection ? State::Seleccion : State::Navegacion;
+            statusMessage_ = "Buffer cerrado. Activo: " + active().displayName();
             break;
+        }
     }
 }
 
@@ -314,10 +321,15 @@ void Editor::fileBrowserEnterSelected() {
 }
 
 void Editor::openFileToBuffer(const std::string& path) {
-    // Si ya hay un buffer con esta ruta absoluta, se activa ese buffer
-    // en vez de crear otro (v0.6.4: no duplicar archivos abiertos).
+    // Normalizar la ruta ANTES de comparar y guardar, para que el chequeo
+    // de duplicados funcione aunque dos rutas escriban el mismo archivo de
+    // forma distinta ("foo/../bar" == "bar", "." y "..", etc).
+    const std::string filePath = resolveAbsolutePath(path);
+
+    // Si ya hay un buffer con esta ruta, se activa ese buffer en vez de
+    // crear otro (v0.6.4: no duplicar archivos abiertos).
     for (int i = 0; i < buffers.count(); ++i) {
-        if (buffers.at(i).filename == path) {
+        if (buffers.at(i).filename == filePath) {
             activateBuffer(i);
             state_ = priorState_; // se sale del explorador al modo previo
             return;
@@ -329,13 +341,13 @@ void Editor::openFileToBuffer(const std::string& path) {
     // contador (v0.6.4, invitado 2).
     Buffer nuevo;
     syncViewportSize(nuevo);
-    nuevo.filename = path;
-    LoadResult result = nuevo.document.loadFromFile(path);
+    nuevo.filename = filePath;
+    LoadResult result = nuevo.document.loadFromFile(filePath);
     if (result != LoadResult::Success && result != LoadResult::NotFound) {
         // Error real (permisos, E/S): no se crea ni se toca nada.
         statusMessage_ = (result == LoadResult::PermissionDenied)
-                             ? "Sin permisos de lectura: " + path
-                             : "No se pudo leer: " + path;
+                             ? "Sin permisos de lectura: " + filePath
+                             : "No se pudo leer: " + filePath;
         return;
     }
     nuevo.modified = false;

@@ -1,9 +1,5 @@
 #include "Renderer.h"
 
-// Estado de la maquina de estados (Editor.h). Renderer solo lo usa como
-// etiqueta visual, nunca lo modifica.
-#include "Editor.h"
-
 #include <unistd.h>
 #include <sstream>
 #include <algorithm>

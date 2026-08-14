@@ -3,24 +3,26 @@
 #include <algorithm>
 #include <string>
 
-namespace {
-// true si el byte es de continuacion UTF-8 (patron 10xxxxxx).
-bool isContinuation(unsigned char c) { return (c & 0xC0) == 0x80; }
+#include "utf8.h"
 
+namespace {
 // true si el byte es whitespace ASCII separador de palabras (' ' o '\t').
 bool isSeparator(char c) { return c == ' ' || c == '\t'; }
 } // namespace
 
 void Cursor::moveLeft(const Document& doc) {
     if (col > 0) {
-        // Retrocede un caracter COMPLETO: el cursor siempre apunta al BYTE
-        // de inicio de un caracter, asi que saltamos los bytes de
-        // continuacion del caracter anterior para caer en su lead byte.
+        // Retrocede una celda COMPLETA: el cursor siempre apunta al INICIO
+        // de una celda, asi que saltamos los bytes de la celda anterior
+        // (continuaciones que pertenecen a su lead) para caer en su inicio.
+        // Con utf8::isCellStart, una continuacion huerfana es su propia
+        // celda (modelo byte-safe): nunca se "pega" a un vecino invalido.
         const std::string& ln = doc.lineAt(line);
-        col--;
-        while (col > 0 && isContinuation(static_cast<unsigned char>(ln[col]))) {
-            col--;
+        int i = col - 1;
+        while (i > 0 && !utf8::isCellStart(ln, i)) {
+            i--;
         }
+        col = i;
     } else if (line > 0) {
         line--;
         col = doc.lineLength(line);
@@ -31,15 +33,15 @@ void Cursor::moveLeft(const Document& doc) {
 void Cursor::moveRight(const Document& doc) {
     const int len = doc.lineLength(line);
     if (col < len) {
-        // Avanza un caracter COMPLETO: col apunta al lead byte del actual;
-        // lo cruzamos y seguimos salteando bytes de continuacion hasta el
-        // lead byte del siguiente caracter (asi no caemos dentro de un
-        // caracter multibyte).
+        // Avanza una celda COMPLETA: col apunta al inicio de la celda
+        // actual; la cruzamos y seguimos saltando bytes hasta el inicio
+        // de la siguiente celda (asi no caemos dentro de una celda).
         const std::string& ln = doc.lineAt(line);
-        col++;
-        while (col < len && isContinuation(static_cast<unsigned char>(ln[col]))) {
-            col++;
+        int i = col + 1;
+        while (i < len && !utf8::isCellStart(ln, i)) {
+            i++;
         }
+        col = i;
     } else if (line + 1 < doc.lineCount()) {
         line++;
         col = 0;

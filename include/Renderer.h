@@ -7,10 +7,7 @@
 #include "Cursor.h"
 #include "Selection.h"
 #include "Viewport.h"
-
-// Hacia adelante para el estado de la maquina de estados (definido en
-// Editor.h). Solo se usa como etiqueta visual en la barra de estado.
-enum class State;
+#include "EditorState.h"
 
 // El Renderer sabe DIBUJAR, pero nunca modifica el Document, el
 // Cursor ni el Viewport (salvo scrollToCursor, que es responsabilidad

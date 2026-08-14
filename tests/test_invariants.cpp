@@ -854,6 +854,179 @@ TEST(invariant_redo_consistent_with_undo) {
     assertStateConsistent(ed);
 }
 
+// ---------------------------------------------------------------------------
+// Property/stateful testing: roundtrip undo -> redo
+// ---------------------------------------------------------------------------
+// Un snapshot del estado DOCUMENTAL completo de un buffer (el que undo/redo
+// son capaces de restaurar): lineas, cursor, seleccion y flag de '\n' final.
+// modified NO entra porque undo/redo no lo restauran directamente (se
+// recalcula contra savedLines), asi que no se compara.
+struct BufferState {
+    std::vector<std::string> lines;
+    Position cursor;
+    std::optional<Selection> selection;
+    bool endsWithNewline;
+};
+
+static BufferState capture(Buffer& b) {
+    BufferState s;
+    s.lines = b.document.snapshot();
+    s.cursor = {b.cursor.line, b.cursor.col};
+    s.selection = b.selection;
+    s.endsWithNewline = b.document.endsWithNewline();
+    return s;
+}
+
+// == (estructural) entre dos snapshots, para reportar diferencias.
+// Selection no define operator==, asi que sus coordenadas se comparan
+// explicitamente (un optional sin valor usa un flag auxiliar).
+static bool selEqual(const std::optional<Selection>& a,
+                     const std::optional<Selection>& b) {
+    if (a.has_value() != b.has_value()) return false;
+    if (!a.has_value()) return true;
+    return a->anchor.line == b->anchor.line && a->anchor.col == b->anchor.col &&
+           a->position.line == b->position.line && a->position.col == b->position.col;
+}
+
+static bool stateEqual(const BufferState& a, const BufferState& b) {
+    return a.lines == b.lines &&
+           a.cursor.line == b.cursor.line && a.cursor.col == b.cursor.col &&
+           selEqual(a.selection, b.selection) &&
+           a.endsWithNewline == b.endsWithNewline;
+}
+
+// Propiedad central del historial: deshacer TODO y rehacer TODO debe
+// reconstruir el documento EXACTAMENTE igual. Es la propiedad mas fuerte
+// que puede pedirse de undo/redo (fuerte reversibilidad), y solo se
+// comprueba contra un generador aleatorio de secuencias.
+static void assertUndoRedoRoundtrip(Editor& ed) {
+    // Captura el estado tras la secuencia aleatoria.
+    const BufferState finalState = capture(ed.active());
+
+    // Deshacer todo hasta agotar la pila.
+    size_t undone = 0;
+    while (!ed.active().undoStack.empty()) {
+        ed.handleEvent(ev(EventType::Undo));
+        assertStateConsistent(ed);
+        ++undone;
+    }
+    CHECK(undone > 0); // la pasada aleatoria debio dejar historia
+    assertStateConsistent(ed);
+    ed.handleEvent(ev(EventType::Undo)); // no-op, no debe romper nada
+    assertStateConsistent(ed);
+
+    // Rehacer todo hasta agotar la pila de redo y volver al estado final.
+    size_t redone = 0;
+    while (!ed.active().redoStack.empty()) {
+        ed.handleEvent(ev(EventType::Redo));
+        assertStateConsistent(ed);
+        ++redone;
+    }
+    CHECK_EQ(redone, undone); // cada undo tiene exactamente un redo
+
+    // El documento debe quedar EXACTAMENTE como antes del roundtrip.
+    const BufferState restored = capture(ed.active());
+    CHECK(stateEqual(restored, finalState));
+    if (!stateEqual(restored, finalState)) {
+        std::cout << "    roundtrip undo->redo no devolvio el estado exacto\n";
+        std::cout << "    lineas finales: " << finalState.lines.size()
+                  << ", restauradas: " << restored.lines.size() << "\n";
+        for (size_t i = 0; i < finalState.lines.size() && i < restored.lines.size(); ++i)
+            if (finalState.lines[i] != restored.lines[i])
+                std::cout << "    diff linea " << i
+                          << ": '" << finalState.lines[i]
+                          << "' vs '" << restored.lines[i] << "'\n";
+    }
+    CHECK(!ed.active().modified || undone > 0); // coherente
+    assertStateConsistent(ed);
+}
+
+TEST(property_undo_redo_roundtrip_random_mixed) {
+    Editor ed;
+    ed.active().document.restore({"hola", "mundo", "", "chau", "fin"});
+    ed.active().cursor.line = 1;
+    ed.active().cursor.col = 2;
+    ed.active().cursor.preferredCol_ = 2;
+
+    unsigned long seed = 424242;
+    auto rnd = [&seed]() {
+        seed = seed * 6364136223846793005ULL + 1442695040888963407ULL;
+        return static_cast<int>((seed >> 33) & 0xFFFFFFFF);
+    };
+
+    // Pasada aleatoria larga mezclando edicion, seleccion, borrado, corte,
+    // nuevo/borrado de linea y undo/redo sueltos. Tras CADA paso se
+    // verifican las invariantes; al finalio, el roundtrip undo->redo exacto.
+    for (int step = 0; step < 2500; ++step) {
+        Event e;
+        switch (rnd() % 10) {
+            case 0:
+                e.type = EventType::InsertChar;
+                e.text = std::string(1, static_cast<char>('a' + (rnd() % 26)));
+                break;
+            case 1:
+                e.type = EventType::InsertChar;
+                e.text = "s";            // entrar a seleccion
+                break;
+            case 2:
+                e.type = static_cast<EventType>(
+                    static_cast<int>(EventType::MoveLeft) + (rnd() % 6));
+                break;
+            case 3:
+                e.type = EventType::Escape;
+                break;
+            case 4:
+                e.type = (rnd() % 2) ? EventType::Backspace : EventType::Delete;
+                break;
+            case 5:
+                e.type = (rnd() % 2) ? EventType::Undo : EventType::Redo;
+                break;
+            case 6:
+                e.type = (rnd() % 2) ? EventType::InsertNewline : EventType::MoveEnd;
+                break;
+            case 7:
+                e.type = EventType::InsertChar;
+                e.text = (rnd() % 2) ? "c" : "x"; // copiar/cortar
+                break;
+            case 8:
+                e.type = EventType::InsertChar;
+                e.text = (rnd() % 2) ? "j" : "k"; // bloques
+                break;
+            default:
+                e.type = (rnd() % 2) ? EventType::MoveHome : EventType::MoveDown;
+                break;
+        }
+        ed.handleEvent(e);
+        assertStateConsistent(ed);
+    }
+
+    // Propiedad fuerte: undo todo -> redo todo == estado exacto.
+    assertUndoRedoRoundtrip(ed);
+}
+
+TEST(property_undo_redo_roundtrip_empty_document) {
+    // Sobre un documento vacio la propiedad tambien debe mantenerse.
+    Editor ed;
+    const BufferState initial = capture(ed.active());
+
+    // Algunas inserciones y deshaceres intermedios.
+    insert('a'); // no-op; solo comprobar invariante tras cada paso
+    // Secuencia real: editar, deshacer todo, rehacer todo.
+    for (int i = 0; i < 200; ++i) {
+        Event e;
+        e.type = EventType::InsertChar;
+        e.text = std::string(1, static_cast<char>('a' + (i % 3)));
+        ed.handleEvent(e);
+    }
+    // Deshacer todo debe volver al estado inicial vacio.
+    while (!ed.active().undoStack.empty())
+        ed.handleEvent(ev(EventType::Undo));
+    CHECK(stateEqual(capture(ed.active()), initial));
+    CHECK_EQ(ed.active().document.lineCount(), 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "");
+    assertStateConsistent(ed);
+}
+
 TEST(invariant_clipboard_not_in_history) {
     // El clipboard vive fuera de HistoryState: deshacer una edicion no debe
     // "devolver" un buffer viejo. Lo verificamos de forma estructural: los

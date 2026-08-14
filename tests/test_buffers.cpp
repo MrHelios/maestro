@@ -454,21 +454,19 @@ TEST(ctrl_k_t_single_buffer_message) {
 // ---------------------------------------------------------------------------
 // Ctrl+K w : cerrar buffer
 // ---------------------------------------------------------------------------
-TEST(ctrl_k_w_closes_active_and_shows_selector) {
+TEST(ctrl_k_w_closes_active_and_activates_neighbor) {
     Editor ed;
     newBuffer(ed);                         // B1 activo
     newBuffer(ed);                         // B2 activo
-    closeBuffer(ed);                       // cierra B2 (SinNombre2)
+    closeBuffer(ed);                       // cierra B2 (SinNombre2, el ultimo)
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
     CHECK_EQ(ed.buffers.buffers_[0].unnamedName, "SinNombre");
     CHECK_EQ(ed.buffers.buffers_[1].unnamedName, "SinNombre1");
-    CHECK(ed.state_ == State::BufferSelector);
-    CHECK_EQ(ed.buffers.activeBuffer_, 0);
-    CHECK_EQ(ed.bufferSelectorIndex_, 0);
-
-    press(ed, EventType::Escape);
+    // No abre el selector: activa el vecino que hereda la ranura (clamp
+    // al final, aqui indice 1).
     CHECK(ed.state_ == State::Navegacion);
-    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.active().unnamedName, "SinNombre1");
 }
 
 TEST(ctrl_k_w_close_middle_buffer_preserves_others) {
@@ -488,9 +486,9 @@ TEST(ctrl_k_w_close_middle_buffer_preserves_others) {
     ed.buffers.buffers_[1].savedLines = ed.buffers.buffers_[1].document.snapshot();
     closeBuffer(ed);
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
-    CHECK_EQ(ed.active().document.lineAt(0), "AAA");
-    CHECK_EQ(ed.buffers.buffers_[1].document.lineAt(0), "CCC");
-    CHECK(ed.state_ == State::BufferSelector);
+    CHECK_EQ(ed.active().document.lineAt(0), "CCC"); // hereda la ranura 1
+    CHECK_EQ(ed.buffers.buffers_[0].document.lineAt(0), "AAA");
+    CHECK(ed.state_ == State::Navegacion);
 }
 
 TEST(ctrl_k_w_last_buffer_resets_not_removes) {
@@ -548,11 +546,11 @@ TEST(ctrl_k_w_modified_multi_buffer_blocked) {
     Editor ed;
     type(ed, "x");                         // B0 modificado
     newBuffer(ed);                         // B1 activo, sin modificar
-    closeBuffer(ed);                       // cierra B1 -> selector
+    closeBuffer(ed);                       // cierra B1 -> B0 hereda la ranura
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
-    CHECK(ed.state_ == State::BufferSelector);
-    press(ed, EventType::Escape);
+    CHECK(ed.state_ == State::Navegacion); // sin modal al cerrar
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK(ed.active().modified);
 
     closeBuffer(ed);                       // B0 modificado -> bloqueado
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));

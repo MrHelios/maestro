@@ -5,6 +5,8 @@
 #include <fstream>
 #include <sstream>
 
+#include "utf8.h"
+
 Document::Document() {
     // Un documento nunca esta "vacio del todo": siempre tiene al menos
     // una linea (posiblemente vacia). Esto simplifica muchisimo el
@@ -25,6 +27,7 @@ LoadResult Document::loadFromFile(const std::string& path) {
             lines_.clear();
             lines_.push_back("");
             endsWithNewline_ = false;
+            lineEnding_ = LineEnding::LF; // un archivo nuevo empieza en LF
             return LoadResult::NotFound;
         }
         if (errno == EACCES) {
@@ -40,6 +43,13 @@ LoadResult Document::loadFromFile(const std::string& path) {
     ss << file.rdbuf();
     std::string content = ss.str();
     endsWithNewline_ = !content.empty() && content.back() == '\n';
+
+    // Conservar el formato de nueva linea para no alterarlo al guardar:
+    // si el archivo usa \r\n (Windows) en cualquier linea, se guardara
+    // como CRLF; si no, como LF.
+    lineEnding_ = (content.find("\r\n") != std::string::npos)
+                      ? LineEnding::CRLF
+                      : LineEnding::LF;
 
     lines_.clear();
     std::string line;
@@ -66,21 +76,37 @@ bool Document::saveToFile(const std::string& path) const {
         return false;
     }
 
+    // Terminador segun el formato detectado (y conservado) al cargar.
+    const char* term;
+    switch (lineEnding_) {
+        case LineEnding::CRLF: term = "\r\n"; break;
+        case LineEnding::CR:   term = "\r";   break;
+        default:               term = "\n";   break;
+    }
+
     for (size_t i = 0; i < lines_.size(); ++i) {
         file << lines_[i];
         if (i + 1 < lines_.size()) {
-            file << '\n';
+            file << term;
         }
     }
 
     // Respetar el salto de linea final del archivo original: sin esto,
     // abrir y guardar un archivo que terminaba en '\n' lo dejaria sin
-    // su nueva linea final (perdida silenciosa del '\n').
+    // su nueva linea final (perdida silenciosa del terminador).
     if (!lines_.empty() && endsWithNewline_) {
-        file << '\n';
+        file << term;
     }
 
     return true;
+}
+
+Document::LineEnding Document::lineEnding() const {
+    return lineEnding_;
+}
+
+void Document::setLineEnding(LineEnding e) {
+    lineEnding_ = e;
 }
 
 bool Document::endsWithNewline() const {
@@ -170,12 +196,12 @@ int Document::deleteCharBefore(int line, int col) {
 
     if (col > 0) {
         std::string& target = lines_[line];
-        // Borra el caracter COMPLETO que precede a (line, col): retrocede
-        // desde col-1 hasta el byte de inicio (saltando continuaciones),
-        // para no dejar un byte suelto si era un caracter multibyte.
+        // Borra la celda COMPLETA que precede a (line, col): retrocede
+        // desde col-1 hasta el inicio de esa celda, para no dejar un byte
+        // suelto si era una secuencia UTF-8 valida. Con utf8::isCellStart,
+        // una continuacion huerfana es su propia celda (modelo byte-safe).
         int start = col - 1;
-        while (start > 0 &&
-               (static_cast<unsigned char>(target[start]) & 0xC0) == 0x80) {
+        while (start > 0 && !utf8::isCellStart(target, start)) {
             start--;
         }
         int bytes = col - start;
@@ -202,16 +228,17 @@ int Document::deleteCharAt(int line, int col) {
     int len = lineLength(line);
     if (col < len) {
         std::string& target = lines_[line];
-        // Borra el caracter COMPLETO que comienza en (line, col): si es un
-        // lead byte UTF-8, borra todos sus bytes (nunca un continuacion suelto).
-        unsigned char lead = static_cast<unsigned char>(target[col]);
-        int n = 1;
-        if ((lead & 0xE0) == 0xC0) n = 2;
-        else if ((lead & 0xF0) == 0xE0) n = 3;
-        else if ((lead & 0xF8) == 0xF0) n = 4;
-        if (col + n > len) n = 1; // malformado al final: borra 1 byte
-        target.erase(col, static_cast<size_t>(n));
-        return n;
+        // Borra la celda COMPLETA que comienza en (line, col): si es una
+        // secuencia UTF-8 valida borra todos sus bytes; si es un byte
+        // suelto (lead invalido o continuacion huerfana), borra solo ese
+        // byte (modelo byte-safe: no se traga bytes que no le pertenecen).
+        int end = col + 1;
+        while (end < len && !utf8::isCellStart(target, end)) {
+            end++;
+        }
+        int bytes = end - col;
+        target.erase(col, static_cast<size_t>(bytes));
+        return bytes;
     }
 
     // col == len: fundir con la siguiente linea, si existe.

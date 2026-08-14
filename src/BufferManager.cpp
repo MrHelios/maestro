@@ -1,5 +1,7 @@
 #include "BufferManager.h"
 
+#include <algorithm>
+
 BufferManager::BufferManager() {
     // Invariante 1 y 2 (v0.6.3): siempre existe al menos un buffer y hay
     // exactamente uno activo. El constructor arranca con un unico buffer
@@ -90,11 +92,13 @@ CloseResult BufferManager::closeActive(int rows, int cols) {
         return CloseResult::ResetLast;
     }
 
-    // Varios buffers: se elimina el activo y se pasa al selector. No se
-    // selecciona automaticamente otro buffer: la lista decide. El indice
-    // deja de referenciar el buffer borrado (invariante 17).
+    // Varios buffers: se elimina el activo y el buffer que HEREDA la ranura
+    // queda activo: el que ahora ocupa la misma posicion, o el ultimo si se
+    // cerro el ultimo (misma ranura, clamp al final). No se abre el selector
+    // al cerrar (eso es Ctrl+K t, browse explicito): cerrar es un acto
+    // rapido, no un dialogo. Invariante 17.
     buffers_.erase(buffers_.begin() + activeBuffer_);
-    activeBuffer_ = 0;
+    activeBuffer_ = std::min(activeBuffer_, static_cast<int>(buffers_.size()) - 1);
     return CloseResult::Removed;
 }
 

@@ -25,6 +25,12 @@ runner imprime
 cada caso y un resumen final (`N tests, M failure(s)`); sale con código 0
 solo si no hay fallos.
 
+> **AVISO:** `make sanitize` / `make test-sanitize` (build con
+> `-fsanitize=address,undefined`) compila la suite **entera** con cada
+> objeto sanitizado, lo que tarda muchísimo (varios minutos). Solo correrlo
+> si lo pide explícitamente el usuario o lo exige el CI; en el día a día
+> basta `make test`.
+
 ## Uso
 
 ```bash
@@ -133,8 +139,10 @@ modificado y nombre:
   al buffer y modo anterior sin cambiar nada.
 - `Ctrl+K w`: cierra el buffer activo. Si está modificado, **se bloquea**
   con un mensaje (`Buffer modificado: guarda con Ctrl+K s o restaura.`).
-  Al cerrar el último buffer, en lugar de eliminarse se reinicia a vacío
-  con un nombre nuevo.
+  Con varios buffers, el buffer que **hereda la ranura** (misma posición,
+  clamp al final si se cerró el último) queda activo de inmediato — cerrar
+  no abre el selector. Al cerrar el último buffer, en lugar de eliminarse
+  se reinicia a vacío con un nombre nuevo.
 
 El portapapeles (`c`/`x`/`p`) es global a todos los buffers. El selector
 es de solo lectura: no modifica ningún buffer.
@@ -216,6 +224,129 @@ Esto deja la puerta abierta a alimentar el engine desde otro lado
 del código.
 
 El cursor y la selección trabajan en **bytes** dentro de la línea
-(modelo UTF-8): los movimientos (`Left`/`Right`, `j`/`k`, páginas)
-nunca aterrizan en medio de un carácter multibyte; el renderer convierte
-a columnas visuales al dibujar.
+(modelo byte-safe): los movimientos (`Left`/`Right`, `j`/`k`, páginas)
+nunca aterrizan en medio de una celda; el renderer convierte a columnas
+visuales al dibujar.
+
+**Limitación de UTF-8 (ámbitos fuera de alcance).** Decisión de modelo:
+Maestro es un editor **binariamente seguro** — `Document` guarda *bytes*
+crudos y abrir/guardar hace round-trip exacto sin validar ni re-encodecar,
+así que archivos Latin-1, parcialmente corruptos o mezclados se pueden
+abrir sin destruir bytes. El UTF-8 es solo una capa de *presentación* (y
+de input): navegar, borrar y contar columnas opera sobre **celdas**
+byte-safe — una secuencia UTF-8 válida es una celda; un byte inválido
+suelto (continuación huérfana, lead inválido) es su propia celda de 1
+byte. Sobre esa base se asume que cada celda ocupa **una** columna de
+terminal. Eso es correcto para texto occidental (acentos, «—», «€»…),
+pero una celda no equivale a una columna en general, y hay dos ejes que
+quedan sin soportar:
+
+- **Ancho de celda**: caracteres que la terminal pinta en 2 columnas —
+  CJK (`中`) y emojis (`🙂`) — se cuentan como 1, así que se renderizan
+  apiñados y no alinean contra el margen derecho. La solución correcta
+  (tabla de ancho al estilo `wcwidth`) arrastraría al modelo de columna
+  de Cursor/Viewport/selección de todo el editor.
+- **Cluster de grafemas**: una unidad visual puede ser varias celdas
+  que se combinan — `a` + acento combinante (`á`), secuencias ZWJ
+  (`👩👩👧`), variation selectors (`e`+`U+FE0F`). Aquí cada celda se
+  cuenta como una columna y un salto de cursor; lo correcto sería
+  segmentar por grafemas (UAX #29).
+
+**Persistencia: guardado no atómico (trabajo futuro).** Hoy `saveToFile`
+abre el archivo con `std::ofstream(path, std::ios::trunc)` y escribe en
+su lugar. Un fallo a mitad de escritura (`SIGKILL`, `abort`, corte de
+energía) puede dejar el archivo **truncado a medias** y destruir el
+contenido original. Para considerarlo un editor de uso serio conviene el
+patrón de guardado atómico:
+
+```
+archivo.txt.tmp   <- escribir el contenido nuevo aqui
+fsync(archivo.txt.tmp)   <- asegurar que llegó a disco
+rename(archivo.txt.tmp → archivo.txt)   <- swap atómico dentro del mismo filesystem
+```
+
+`rename` en el mismo filesystem es atómico (o falla si está en otro
+montaje, caso a resolver). Pendiente de implementar; solo anotado.
+
+**Rutas: normalización y symlinks (trabajo futuro).** Las rutas se guardan
+normalizadas contra `cwd()` y con `.`/`..` resueltos (`foo/../bar` →
+`bar`; `filesystem::absolute().lexically_normal()`), para que el chequeo
+de duplicados de buffers trate igual rutas que escriben el mismo archivo.
+Los **symlinks** NO se resuelven: `lexically_normal()` no los deshace y
+`filesystem::canonical()` (que sí) exige que el archivo exista (y también
+se abren archivos nuevos). Consecuencia: abrir un archivo por su ruta
+real y luego por un symlink (o viceversa) crea dos buffers.
+
+Decisión recomendada para el futuro: **no** reemplazar el `filename` por
+`canonical`. En su lugar, separar la *clave de duplicación* de la ruta
+mostrada/guardada: seguir almacenando para mostrar/guardar la forma
+lexical (`absolute().lexically_normal()`), y usar
+`canonical(path)` con fallback (`canonical si existe, sino lexical`) solo
+para comparar duplicados. Así `tmp/link` y `/real/path` comparten clave
+(un solo buffer) y los archivos nuevos siguen pudiendo abrirse. Tema:
+guardar la clave junto a cada buffer o recalcularla al comparar.
+
+**Estado global del editor vs estado por buffer (trabajo futuro).** Hoy el
+*modo* (`Editor::state_`) es global, pero parte del estado del modo vive en
+cada buffer (`Buffer::selection`, `Buffer::selectAllActive`). Por eso
+conmutar de buffer exige reconciliar:
+
+```cpp
+activateBuffer() { state_ = buffer.selection ? Seleccion : Navegacion; }
+```
+
+Funciona, pero significa que el estado del `Editor` no es independiente del
+buffer: si el buffer activo tenía selección, el editor "aparece en modo
+Selección", aunque el usuario no haya elegido ese modo.
+
+Diseño más limpio para el futuro: que cada buffer guarde **solo estado
+documental** (`Document`, `Cursor`, `Selection`, `Viewport`, history,
+`filename`, `modified`) y que el `Editor` guarde **estado de UI global**
+(modo actual, prompt/modal activo), de modo que cambiar de buffer NO
+reescriba automáticamente el modo global. Es una decisión de diseño real
+(¿conviene que el modo persista al cambiar de buffer, o que cada buffer
+"recuerde" su propio modo?); la semántica actual es correcta, así que solo
+se marca para resolver antes de multiplicar los modos.
+
+**Buffer: encapsulación de campos (trabajo futuro).** Hoy `Buffer` expone
+casi todo públicamente (`document`, `cursor`, `viewport`, `filename`,
+`modified`, las pilas de undo/redo, ...). Para un proyecto pequeño es muy
+práctico, pero cualquier parte puede escribir:
+
+```cpp
+buffer.cursor.col = -500;
+buffer.modified = false;
+```
+
+sin pasar por ninguna regla, y el `Editor` tiene que mantener las
+invariantes manualmente.
+
+Diseño a considerar más adelante: pasar los campos a `private` y exponer
+solo métodos que garanticen invariantes. NO hacerlo prematuramente: una
+refactorización sencilla se convertiría en cientos de cambios por todos
+los sitios que hoy tocan los campos directamente. Dejar anotado, no
+implementado. Pendiente de resolver cuando el editor crezca lo suficiente
+como para que el acceso directo empiece a costar.
+
+**Tests: `#define private public` (trabajo futuro).** Varios tests
+(`test_editor`, `test_selection`, `test_modes`, `test_invariants`,
+`test_buffers`, `test_filebrowser`, `test_clipboard`) comienzan con:
+
+```cpp
+#define private public
+#include "Editor.h"
+#undef private
+```
+
+Esto convierte los campos `private` en públicos durante la compilación,
+dejando acceder a los internos dentro del test. No es elegante desde el
+punto de vista académico (abusa del preprocesador y rompe el encapsulado
+en la unidad de traducción del test), pero para un proyecto pequeño es
+muy práctico: permite testar invariantes reales sin meter getters
+artificiales en la API solo por los tests.
+
+Alternativa más limpia a futuro, si el proyecto crece: una declaración
+`friend` de una clase o suite de test, o mantener getters `internal`
+limitados. Mientras tanto se deja anotado, no se cambia: funciona y la
+API de producción no se contamina. Pendiente de resolver si el acceso
+directo a internos empieza a requerirse desde fuera de los tests.

@@ -1217,9 +1217,8 @@ TEST(browser_close_opened_buffer) {
     closeBuffer(ed);                              // cierra a.txt (sin modificar)
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK(ed.active().filename.empty());          // queda el buffer sin nombre
-    CHECK(ed.state_ == State::BufferSelector);    // se pasa al selector
-    press(ed, EventType::Escape);
-    CHECK(ed.state_ == State::Navegacion);
+    CHECK(ed.state_ == State::Navegacion);        // cerrar no abre el selector
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);        // el unnamed hereda la ranura
     CHECK(ed.active().document.lineAt(0).empty());
 }
 

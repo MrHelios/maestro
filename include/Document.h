@@ -32,9 +32,49 @@ inline std::ostream& operator<<(std::ostream& os, LoadResult r) {
 // Document representa UNICAMENTE el contenido de texto.
 // No sabe nada de cursor, colores, scroll ni seleccion.
 // Solo conoce lineas de texto y como mutarlas.
+//
+// DECISION: Maestro es un editor de texto BINARIAMENTE SEGURO (modelo B).
+// El documento guarda BYTES crudos (vector<string>): loadFromFile lee
+// verbatim y saveToFile escribe verbatim, sin validar ni re-encodecar
+// nada. Eso permite abrir archivos Latin-1, parcialmente corruptos o
+// mezclados SIN destruir bytes. El UTF-8 es solo una capa de
+// PRESENTACION (utf8.h) y de input (Terminal): las unicas rutinas que
+// interpretan bytes son las que navegan/borran/cuentan columnas, y lo
+// hacen por CELDAS byte-safe (utf8::isCellStart): una secuencia UTF-8
+// valida es una celda; un byte invalido suelto (continuacion huerfana,
+// lead invalido) es su propia celda de 1 byte. Ver README (Limitacion de
+// UTF-8) y utf8.h.
 class Document {
 public:
+    // Terminador de linea detectado al CARGAR un archivo y usado al GUARDAR.
+    // Se conserva para que abrir+guardar NO cambie silenciosamente el
+    // formato del archivo: un archivo Windows (CRLF) sigue siendo CRLF al
+    // guardar, no se traduce a LF (importante para Git, scripts y proyectos
+    // multiplataforma).
+    //    LF   -> '\n'      (Unix/Linux/macOS)
+    //    CRLF -> "\r\n"    (Windows/DOS)
+    //    CR   -> '\r'      (legacy Mac OS; NO se auto-detecta en load,
+    //                       solo se conserva si se fija con setLineEnding).
+    // Un documento nuevo (o un buffer sin nombre) arranca en LF.
+    enum class LineEnding { LF, CRLF, CR };
+
     Document();
+
+    // Terminador de linea actual del documento.
+    LineEnding lineEnding() const;
+    // Fija el terminador a usar al guardar (p.ej. si el usuario elige
+    // convertir a LF/CRLF). loadFromFile lo setea segun lo detectado.
+    void setLineEnding(LineEnding e);
+
+    // Nombres para depurar/testear (CHECK_EQ lo usa para imprimir).
+    static const char* lineEndingName(LineEnding e) {
+        switch (e) {
+            case LineEnding::LF:   return "LF";
+            case LineEnding::CRLF: return "CRLF";
+            case LineEnding::CR:   return "CR";
+        }
+        return "?";
+    }
 
     // Carga el archivo indicado. Si no existe (NotFound) arranca con un
     // documento vacio (una linea vacia) y recuerda el path para poder
@@ -125,6 +165,10 @@ public:
 private:
     std::vector<std::string> lines_;
 
+    // Terminador de linea usado al guardar. Se detecta en loadFromFile
+    // (LF vs CRLF) y se conserva hasta el siguiente guardado.
+    LineEnding lineEnding_ = LineEnding::LF;
+
     // true si el contenido actual termina en salto de linea ('\n'). El
     // modelo de lineas no representa esa nueva linea final (una "linea
     // vacia" al final equivale a no tenerla), asi que sin este flag la
@@ -138,3 +182,8 @@ private:
     // '\n' seguidos). Se llama al final de toda mutacion estructural.
     void normalizeEndsWithNewline();
 };
+
+// Permite CHECK_EQ(d.lineEnding(), ...) y depurar con ostream.
+inline std::ostream& operator<<(std::ostream& os, Document::LineEnding e) {
+    return os << Document::lineEndingName(e);
+}

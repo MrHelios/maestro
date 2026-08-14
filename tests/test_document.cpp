@@ -1194,3 +1194,83 @@ TEST(doc_stress_random_operations) {
             CHECK_EQ(d.lineLength(i), static_cast<int>(d.lineAt(i).size()));
     }
 }
+
+// ---------------------------------------------------------------------------
+// 23. Terminadores de linea (CRLF) se conservan al abrir+guardar
+// ---------------------------------------------------------------------------
+TEST(doc_crlf_round_trip_preserved) {
+    // Un archivo Windows se detecta como CRLF, carga bien (sin '\r' en las
+    // lineas) y al guardar vuelve a escribirse con CRLF: no se traduce a LF.
+    TempFile src;
+    src.write("a\r\nb\r\n");
+    TempFile dst;
+
+    Document d;
+    CHECK_EQ(d.loadFromFile(src.path), LoadResult::Success);
+    CHECK_EQ(d.lineEnding(), Document::LineEnding::CRLF);
+    CHECK_EQ(d.lineAt(0), "a"); // el '\r' se quito de la linea interna
+    CHECK_EQ(d.lineAt(1), "b");
+    CHECK(d.endsWithNewline());
+
+    CHECK(d.saveToFile(dst.path));
+    CHECK_EQ(fileContent(dst.path), "a\r\nb\r\n");
+}
+
+TEST(doc_crlf_no_trailing_newline_preserved) {
+    // CRLF sin una nueva linea final: el ultimo '\r\n' no es trailing.
+    TempFile src;
+    src.write("x\r\n"); // solo una linea con salto final
+    TempFile dst;
+
+    Document d;
+    CHECK_EQ(d.loadFromFile(src.path), LoadResult::Success);
+    CHECK_EQ(d.lineEnding(), Document::LineEnding::CRLF);
+    CHECK(d.saveToFile(dst.path));
+    CHECK_EQ(fileContent(dst.path), "x\r\n");
+}
+
+TEST(doc_lf_stays_lf) {
+    // Un archivo Unix queda en LF; no se afecta por la logica de CRLF.
+    TempFile src;
+    src.write("a\nb");
+    TempFile dst;
+
+    Document d;
+    CHECK_EQ(d.loadFromFile(src.path), LoadResult::Success);
+    CHECK_EQ(d.lineEnding(), Document::LineEnding::LF);
+    CHECK(!d.endsWithNewline()); // 'x\ny' no termina en salto
+    CHECK(d.saveToFile(dst.path));
+    CHECK_EQ(fileContent(dst.path), "a\nb");
+}
+
+TEST(doc_empty_file_is_lf) {
+    TempFile src;
+    src.write(""); // crear el archivo, aunque este vacio
+    TempFile dst;
+
+    Document d;
+    CHECK_EQ(d.loadFromFile(src.path), LoadResult::Success);
+    CHECK_EQ(d.lineEnding(), Document::LineEnding::LF);
+    CHECK(d.saveToFile(dst.path));
+    CHECK_EQ(fileContent(dst.path), "");
+}
+
+TEST(doc_new_document_defaults_lf) {
+    Document d;
+    CHECK_EQ(d.lineEnding(), Document::LineEnding::LF);
+    d.setLineEnding(Document::LineEnding::CRLF);
+    CHECK_EQ(d.lineEnding(), Document::LineEnding::CRLF);
+}
+
+TEST(doc_crlf_edit_then_save_preserves) {
+    // Editar un archivo CRLF (agregar texto) y guardar: sigue CRLF.
+    TempFile src;
+    src.write("a\r\nb\r\n");
+    TempFile dst;
+
+    Document d;
+    CHECK_EQ(d.loadFromFile(src.path), LoadResult::Success);
+    d.insertChar(0, 1, 'Z'); // "aZ"
+    CHECK(d.saveToFile(dst.path));
+    CHECK_EQ(fileContent(dst.path), "aZ\r\nb\r\n");
+}
