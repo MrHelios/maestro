@@ -1,10 +1,17 @@
 #pragma once
 
 #include "Event.h"
+#include "Keymap.h"
 
 // Encapsula todo lo especifico de la terminal (POSIX/Linux/macOS):
 // activar/desactivar el modo "raw", leer teclas crudas, y consultar
 // el tamano de la ventana. Nada de esto sabe de Document/Cursor/etc.
+//
+// Terminal es quien LEE y ENSAMBLA los bytes crudos (distingue un ESC
+// suelto de una secuencia, acumula parametros con timeout, arma el
+// caracter UTF-8 multibyte), pero NO decide el significado de cada tecla:
+// eso vive en el Keymap (remapeable), que Terminal consulta para traducir
+// lo leido a un Evento.
 class Terminal {
 public:
     Terminal();
@@ -24,6 +31,11 @@ public:
     // Tamano actual de la terminal.
     void getWindowSize(int& rows, int& cols);
 
+    // Tabla tecla -> Evento que readEvent() consulta. El usuario puede
+    // rebindear las teclas en tiempo de ejecucion (keymap().bindSequence(...)
+    // / keymap().bindControl(...)) sin tocar la logica del Editor.
+    Keymap& keymap() { return keymap_; }
+
 private:
     bool rawModeEnabled_ = false;
     // true si EDIT_DEBUG_KEYS esta definida: vuelca a stderr los bytes
@@ -31,6 +43,10 @@ private:
     // emite la terminal las secuencias, p.ej. Shift+Flecha).
     bool debugKeys_ = false;
     void* origTermios_; // puntero opaco a struct termios (evita incluir <termios.h> aqui)
+
+    // Significado de cada tecla/secuencia. Se consulta en readEvent();
+    // remapeable en tiempo de ejecucion via keymap().
+    Keymap keymap_;
 
     // Terminal es un recurso unico ligado a la terminal fisica del
     // proceso (modo raw, tamano de la ventana, el mismo STDIN_FILENO).

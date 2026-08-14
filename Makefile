@@ -12,6 +12,7 @@ TEST_SRC := $(TEST_DIR)/test_main.cpp \
 $(TEST_DIR)/test_event.cpp \
              $(TEST_DIR)/test_terminal_event.cpp \
              $(TEST_DIR)/test_editor.cpp \
+             $(TEST_DIR)/test_keymap.cpp \
              $(TEST_DIR)/test_selection.cpp \
              $(TEST_DIR)/test_renderer.cpp \
              $(TEST_DIR)/test_modes.cpp \

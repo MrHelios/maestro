@@ -2,12 +2,87 @@
 
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <unistd.h>
 #include <termios.h>
 #include <poll.h>
+#include <signal.h>
 #include <errno.h>
 #include <sys/ioctl.h>
+
+// ---------------------------------------------------------------------------
+// Restauracion de la terminal ante senales (SIGSEGV, SIGTERM, abort, ...).
+//
+// Un destructor (RAII) cubre las salidas normales y las excepciones, pero NO
+// se ejecuta ante senales fatales. Si el proceso muere por un SIGSEGV o lo
+// matan con SIGTERM mientras esta en raw mode, la terminal quedaria sin echo
+// y sin modo canonico: rota para el usuario. Para evitarlo se instala, solo
+// mientras el raw mode esta activo, un handler minimo que restaura el termios
+// original y relanza la senal con su accion por defecto (para conservar el
+// codigo de salida y el core dump).
+//
+// Nota: tcsetattr() no es async-signal-safe segun POSIX, pero es la practica
+// habitual en editores de terminal (el propio proceso es el unico que usa
+// stdin y el riesgo real es despreciable frente a dejar la terminal inutil).
+//
+// El handler es una funcion libre y no puede tocar el objeto Terminal, asi
+// que el estado minimo (el termios original y si el raw mode esta activo) se
+// guarda en globales. Se asume una UNICA Terminal viva a la vez (el Editor
+// tiene una sola).
+// ---------------------------------------------------------------------------
+namespace {
+
+const int kFatalSignals[] = { SIGINT, SIGTERM, SIGQUIT, SIGHUP,
+                              SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL };
+constexpr int kFatalSignalCount = static_cast<int>(sizeof(kFatalSignals) / sizeof(kFatalSignals[0]));
+
+termios* g_origTermios = nullptr;
+volatile sig_atomic_t g_rawActive = 0;
+
+struct SavedAction {
+    int sig = 0;
+    struct sigaction old;
+};
+SavedAction g_savedActions[kFatalSignalCount];
+
+void fatalSignalHandler(int sig) {
+    // Restaurar la terminal antes de morir.
+    if (g_rawActive && g_origTermios) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, g_origTermios);
+    }
+    // Volver a la accion por defecto y relanzar la senal, para morir de
+    // verdad con el codigo de salida adecuado. La senal actual esta bloqueda
+    // durante este handler, asi que el relanzamiento se entrega al volver.
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+// Captura las senales fatales. Guarda como estaban antes, para restaurarlas
+// luego (no borrar un handler previo del proceso).
+void installFatalSignalHandlers() {
+    struct sigaction sa;
+    std::memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = fatalSignalHandler;
+    sigemptyset(&sa.sa_mask);
+    for (int i = 0; i < kFatalSignalCount; ++i) {
+        if (sigaction(kFatalSignals[i], &sa, &g_savedActions[i].old) == 0) {
+            g_savedActions[i].sig = kFatalSignals[i];
+        }
+    }
+}
+
+// Restaura los handlers previos (llamada al apagar el raw mode).
+void restoreFatalSignalHandlers() {
+    for (int i = 0; i < kFatalSignalCount; ++i) {
+        if (g_savedActions[i].sig != 0) {
+            sigaction(g_savedActions[i].sig, &g_savedActions[i].old, nullptr);
+            g_savedActions[i].sig = 0;
+        }
+    }
+}
+
+} // namespace
 
 Terminal::Terminal() {
     origTermios_ = new termios();
@@ -23,7 +98,14 @@ Terminal::~Terminal() {
 
 void Terminal::enableRawMode() {
     termios* orig = static_cast<termios*>(origTermios_);
-    tcgetattr(STDIN_FILENO, orig);
+
+    // Leer el estado actual. Falla con ENOTTY si stdin no es un TTY, o si
+    // ocurre cualquier otro error: en ese caso NO debe dejarse el modo raw
+    // "activo" sobre un estado que nunca se leyo.
+    if (tcgetattr(STDIN_FILENO, orig) == -1) {
+        rawModeEnabled_ = false;
+        return;
+    }
 
     termios raw = *orig;
     // Sin eco, sin modo canonico (linea por linea), sin señales
@@ -34,14 +116,31 @@ void Terminal::enableRawMode() {
     raw.c_cc[VMIN] = 1;  // read() devuelve apenas haya 1 byte
     raw.c_cc[VTIME] = 0;
 
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
+    // Aplicar el raw mode. Si falla, no marcarlo como activo.
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
+        rawModeEnabled_ = false;
+        return;
+    }
     rawModeEnabled_ = true;
+
+    // Raw mode activo: instalar el handler de restauracion de senales.
+    g_origTermios = orig;
+    g_rawActive = 1;
+    installFatalSignalHandlers();
 }
 
 void Terminal::disableRawMode() {
+    // Apagar los handlers ANTES de restaurar: una senal que caiga sobre una
+    // terminal que ya no esta en raw mode no debe intentar restaurarla.
+    restoreFatalSignalHandlers();
+
     termios* orig = static_cast<termios*>(origTermios_);
+    // Restaurar el estado original. Aunque falle (poco probable), dejamos de
+    // considerarnos en raw mode: no hay nada mas que hacer aqui.
     tcsetattr(STDIN_FILENO, TCSAFLUSH, orig);
     rawModeEnabled_ = false;
+    g_rawActive = 0;
+    g_origTermios = nullptr;
 }
 
 void Terminal::getWindowSize(int& rows, int& cols) {
@@ -104,6 +203,21 @@ static bool readByteWithTimeout(char* out, int timeoutMs) {
     return r == 1;
 }
 
+// Forma "simple" de una secuencia de escape: sin los parametros de
+// modificador. Desde v0.5 los modificadores (Shift/Ctrl/Alt) NO tienen
+// significado: la seleccion se activa con la letra 's', no con Shift.
+// Asi "[1;2A" (flecha arriba con modificador) se reduce a "[A" y se
+// resuelve con el mismo enlace. Las secuencias de tecla con '~'
+// ("[3~" Delete, "[5~" RePag, ...) NO se tocan: ahi el parametro es la
+// propia tecla, no un modificador.
+static std::string simpleEscapeForm(const std::string& contents) {
+    if (contents.size() < 3) return contents;
+    const char prefix = contents[0];
+    const char final = contents[contents.size() - 1];
+    if (final == '~') return contents; // el parametro es la tecla
+    return std::string(1, prefix) + final; // "[1;2A" -> "[A"
+}
+
 Event Terminal::readEvent() {
     char c = readRawByte();
 
@@ -120,118 +234,54 @@ Event Terminal::readEvent() {
         std::fprintf(stderr, " (%s)\n", raw.c_str());
     };
 
-    // Teclas de control basicas. Todas son bytes UNICOS (no secuencias
-    // de escape), asi que funcionan igual en cualquier emulador.
-    if (c == 17) { // Ctrl+Q -> salir
-        e.type = EventType::Quit;
-        return e;
-    }
-    if (c == 19) { // Ctrl+S -> guardar (solo efectivo tras el prefijo Ctrl+K)
-        e.type = EventType::Save;
-        return e;
-    }
-    if (c == 11) { // Ctrl+K -> prefijo de comando (Ctrl+S guarda, Ctrl+Q sale)
-        e.type = EventType::Prefix;
-        return e;
-    }
-    if (c == 21) { // Ctrl+U -> deshacer
-        e.type = EventType::Undo;
-        return e;
-    }
-    if (c == 25) { // Ctrl+Y -> rehacer
-        e.type = EventType::Redo;
-        return e;
-    }
-    if (c == 127 || c == 8) { // Backspace (DEL o BS segun terminal)
-        e.type = EventType::Backspace;
-        return e;
-    }
-    if (c == 13 || c == 10) {
-        // Enter: parte la linea actual en dos.
-        e.type = EventType::InsertNewline;
+    // Teclas de control de UN byte (Ctrl+Q, Ctrl+S, Ctrl+K, Ctrl+U,
+    // Ctrl+Y, Backspace, Enter). El significado vive en el Keymap
+    // (remapeable); aqui solo se hace la busqueda.
+    if (auto type = keymap_.control(static_cast<unsigned char>(c)); type) {
+        e.type = *type;
         return e;
     }
 
-    // Secuencias de escape: flechas, Home, End, Delete.
+    // Secuencias de escape: flechas, Home, End, Delete, RePag, AvPag.
     //
-    // DESDE v0.5, la seleccion ya NO depende de estas secuencias: el modo
-    // seleccion se activa con la letra 's' (un byte unico y fiable) en
-    // modo Navegacion, no con Shift+Flecha. Los modificadores (Shift/Ctrl/Alt)
-    // que alguna terminal pueda anadir en el formato "ESC [ 1;2X" se ignoran:
-    // solo nos interesa el caracter final para saber que flecha/Home/End es.
+    // Leemos los parametros (numeros y ';') hasta el caracter final,
+    // esperando cada byte con un timeout corto. Si no llega nada tras el
+    // ESC, era un ESC suelto (EventType::Escape); si una secuencia queda
+    // a medias, se descarta sin colgar el editor.
     if (c == 27) { // ESC
-        // Leemos los parametros (numeros y ';') hasta el caracter final,
-        // esperando cada byte con un timeout corto. Si no llega nada
-        // tras el ESC, era un ESC suelto (EventType::Escape); si una
-        // secuencia queda a medias, se descarta sin colgar el editor.
-        std::string params;
+        std::string contents;
         while (true) {
             char b = 0;
             if (!readByteWithTimeout(&b, kEscapeSequenceTimeoutMs)) {
-                if (params.empty()) {
+                if (contents.empty()) {
                     e.type = EventType::Escape; // ESC sin nada mas
                     return e;
                 }
                 e.type = EventType::None; dumpUnrecognized(); return e;
             }
-            params.push_back(b);
+            contents.push_back(b);
             raw.push_back(b);
             // El caracter final es cualquier cosa distinta de digitos, ';' y ESC.
             if (b != '[' && !(b >= '0' && b <= '9') && b != ';') break;
         }
-        const char prefix = params.empty() ? 0 : params[0];
-        const char final = params[params.size() - 1];
 
         // Solo el prefijo [ y O preceden a los parametros. Las demas
         // secuencias (p.ej. ESC ~) no nos interesan.
+        const char prefix = contents.empty() ? 0 : contents[0];
         if (prefix != '[' && prefix != 'O') {
             e.type = EventType::None; dumpUnrecognized(); return e;
         }
 
-        // Creamos "cuerpo" = params sin el prefijo ni el caracter final.
-        std::string body = params.substr(1, params.size() - 2);
-
-        // Sin parametros: flecha/Home/End simples (ESC [ A, ESC [ H, ...).
-        if (body.empty()) {
-            switch (final) {
-                case 'A': e.type = EventType::MoveUp; return e;
-                case 'B': e.type = EventType::MoveDown; return e;
-                case 'C': e.type = EventType::MoveRight; return e;
-                case 'D': e.type = EventType::MoveLeft; return e;
-                case 'H': e.type = EventType::MoveHome; return e;
-                case 'F': e.type = EventType::MoveEnd; return e;
-                default: e.type = EventType::None; dumpUnrecognized(); return e;
-            }
+        // Busqueda en el Keymap: primero tal cual la emitio la terminal
+        // ("[1;2A"), y si no esta, en su forma simple sin modificadores
+        // ("[A"). El significado de cada secuencia es remapeable.
+        auto type = keymap_.sequence(contents);
+        if (!type) type = keymap_.sequence(simpleEscapeForm(contents));
+        if (type) {
+            e.type = *type;
+            return e;
         }
-
-        // Secuencias con parametros: p. ej. "3~" (Delete) o "1;2A"
-        // (flecha con modificador). Los modificadores se ignoran: desde
-        // v0.5 la seleccion se activa con 's', no con Shift.
-        if (prefix != '[') {
-            e.type = EventType::None; dumpUnrecognized(); return e;
-        }
-
-        if (final == '~') {
-            switch (body[0]) {
-                case '3': e.type = EventType::Delete; return e; // Delete
-                case '5': e.type = EventType::PageUp; return e; // RePag
-                case '6': e.type = EventType::PageDown; return e; // AvPag
-                case '1': case '7': e.type = EventType::MoveHome; return e; // Home
-                case '4': case '8': e.type = EventType::MoveEnd; return e; // End
-                default: e.type = EventType::None; dumpUnrecognized(); return e;
-            }
-        }
-
-        // Flecha/Home/End con parametros: nos da igual el modificador.
-        switch (final) {
-            case 'A': e.type = EventType::MoveUp; return e;
-            case 'B': e.type = EventType::MoveDown; return e;
-            case 'C': e.type = EventType::MoveRight; return e;
-            case 'D': e.type = EventType::MoveLeft; return e;
-            case 'H': e.type = EventType::MoveHome; return e;
-            case 'F': e.type = EventType::MoveEnd; return e;
-            default: e.type = EventType::None; dumpUnrecognized(); return e;
-        }
+        e.type = EventType::None; dumpUnrecognized(); return e;
     }
 
     // Caracter imprimible normal.
