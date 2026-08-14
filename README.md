@@ -381,3 +381,30 @@ barata en el render. Decisión: mantener `savedLines`; anotado para no
 reintroducir el bug. Pendiente de revisar si alguna vez el proyecto
 necesita comparar otros snapshots con `savedLines` (entonces sí
 convendría extraer una utilidad común). Dejar anotado, no implementado.
+
+**Editor: dos semánticas de "abrir" (trabajo futuro).** `Editor` tiene dos
+formas de abrir un archivo con significados distintos:
+
+- `openFile(path)` — público, devuelve `bool`. **Sobrescribe el buffer
+  activo** (`Buffer& b = active(); b.filename = ...`). Lo usa `main.cpp`
+  para el archivo inicial (`edit file.txt`) y muchos tests como setup, pero
+  semánticamente "reemplaza el documento actual" aunque el nombre sugiera
+  abrir de forma general.
+- `openFileToBuffer(path)` — privado. **Crea/activa un buffer nuevo**. Solo
+  lo usa el FileBrowser (`Editor.cpp`).
+
+Ambos son razonables, pero la API es confusa: "abrir" significa dos cosas
+según el método. La revisión del FileBrowser (`Editor.cpp:318`) usa el
+segundo camino; el comando inicial (`main.cpp`) usa el primero.
+
+Discusión de nombres (anotado, no implementado): renombrar
+`openFile()` hacia "reemplaza el buffer actual" y `openFileToBuffer()`
+hacia "crea un buffer nuevo". Nombres candidatos más explícitos:
+`loadIntoCurrentBuffer()` / `openInNewBuffer()`; u `openInitialFile()` /
+`openFileInBuffer()`. Nota: `openInitialFile` sería engañoso porque los
+~52 usos de los tests tratan `openFile()` como setup ("abrir y editar"),
+no como abrir solo el primer archivo. Renombrar toca ~53 sitios en 7
+archivos de tests + `main` + el Editor interno, así que se deja anotado
+mientras no aporte más que claridad. Pendiente si la semántica llega a
+diferenciarse funcionalmente (p. ej. preguntar antes de sobrescribir un
+buffer modificado).
