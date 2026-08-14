@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Cursor.h"
+#include "core/Cursor.h"
 
 // El Viewport representa que parte del documento es visible en la
 // terminal en un momento dado. No conoce el contenido del documento,

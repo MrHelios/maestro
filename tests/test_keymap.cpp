@@ -1,4 +1,4 @@
-#include "Keymap.h"
+#include "terminal/Keymap.h"
 #include "test_framework.h"
 
 // ---------------------------------------------------------------------------

@@ -5,8 +5,8 @@
 // Probamos buildScreen(), que es la parte pura del renderer: construye
 // el frame ANSI completo sin tocar la terminal. Para montar un frame
 // usamos construimos un Document/Cursor/Viewport de nivel bajo.
-#include "Renderer.h"
-#include "Editor.h"
+#include "ui/Renderer.h"
+#include "ui/Editor.h"
 
 // Secuencias ANSI usadas por el renderer.
 #define ANSI_INV "\x1b[7m"   // video inverso

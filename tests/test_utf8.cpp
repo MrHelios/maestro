@@ -1,7 +1,7 @@
 #include <string>
 
 #include "test_framework.h"
-#include "utf8.h"
+#include "core/utf8.h"
 
 // utf8::columnOf(line, byteCol) devuelve la COLUMNA VISUAL que ocupan
 // los primeros `byteCol` bytes. El objetivo: la columna se calcula por

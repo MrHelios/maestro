@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include "Buffer.h"
+#include "core/Buffer.h"
 
 // Resultado de BufferManager::closeActive(): un enum con el desenlace de
 // la operacion para que el Editor decida el modo/mensaje correspondiente

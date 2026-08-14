@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 #define private public
-#include "Editor.h"
+#include "ui/Editor.h"
 #undef private
 
 using testfw::TempFile;

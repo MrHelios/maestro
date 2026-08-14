@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Document.h"
+#include "core/Document.h"
 
 // El Cursor tiene reglas propias: sabe en que linea y columna esta,
 // y recuerda una "columna preferida" para que moverse verticalmente

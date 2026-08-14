@@ -1,4 +1,4 @@
-#include "Editor.h"
+#include "ui/Editor.h"
 
 #include <algorithm>
 #include <cctype>
@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "utf8.h"
+#include "core/utf8.h"
 
 namespace {
 

@@ -12,9 +12,9 @@
 #include <string>
 #include <vector>
 #define private public
-#include "Editor.h"
+#include "ui/Editor.h"
 #undef private
-#include "utf8.h"
+#include "core/utf8.h"
 
 using testfw::TempFile;
 

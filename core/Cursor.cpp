@@ -1,9 +1,9 @@
-#include "Cursor.h"
+#include "core/Cursor.h"
 
 #include <algorithm>
 #include <string>
 
-#include "utf8.h"
+#include "core/utf8.h"
 
 namespace {
 // true si el byte es whitespace ASCII separador de palabras (' ' o '\t').

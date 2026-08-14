@@ -1,11 +1,11 @@
-#include "Document.h"
+#include "core/Document.h"
 
 #include <cerrno>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 
-#include "utf8.h"
+#include "core/utf8.h"
 
 Document::Document() {
     // Un documento nunca esta "vacio del todo": siempre tiene al menos

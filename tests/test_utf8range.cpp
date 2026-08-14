@@ -2,7 +2,7 @@
 #include <string>
 
 #include "test_framework.h"
-#include "utf8.h"
+#include "core/utf8.h"
 
 // utf8::range(line, fromCol, toCol) devuelve los bytes de `line` cuyas
 // COLUMNAS VISUALES caen en [fromCol, toCol), sin cortar un caracter

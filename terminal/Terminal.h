@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Event.h"
-#include "Keymap.h"
+#include "terminal/Event.h"
+#include "terminal/Keymap.h"
 
 // Encapsula todo lo especifico de la terminal (POSIX/Linux/macOS):
 // activar/desactivar el modo "raw", leer teclas crudas, y consultar

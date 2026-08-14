@@ -2,7 +2,7 @@
 #include <string>
 
 #include "test_framework.h"
-#include "utf8.h"
+#include "core/utf8.h"
 
 // utf8::truncate(line, maxCols) trunca a maxCols COLUMNAS VISUALES sin
 // cortar un caracter multibyte por la mitad. La propiedad mas importante

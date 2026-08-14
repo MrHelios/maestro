@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "Position.h"
+#include "core/Position.h"
 
 // Resultado de loadFromFile. Diferencia entre un archivo que genuinamente
 // no existe (caso legitimo: se abre como documento nuevo) de un error real

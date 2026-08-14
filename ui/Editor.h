@@ -3,14 +3,14 @@
 #include <optional>
 #include <string>
 #include <vector>
-#include "Buffer.h"
-#include "BufferManager.h"
-#include "CommandMap.h"
-#include "EditorState.h"
-#include "FileBrowser.h"
-#include "Renderer.h"
-#include "Terminal.h"
-#include "Event.h"
+#include "core/Buffer.h"
+#include "core/BufferManager.h"
+#include "ui/CommandMap.h"
+#include "ui/EditorState.h"
+#include "ui/FileBrowser.h"
+#include "ui/Renderer.h"
+#include "terminal/Terminal.h"
+#include "terminal/Event.h"
 
 // Editor es el "engine": maneja una coleccion de buffers (v0.6.3), un
 // buffer activo, el modo, los mensajes y el portapapeles global. Todo lo

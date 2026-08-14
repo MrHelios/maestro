@@ -4,7 +4,7 @@
 #include <optional>
 #include <string>
 
-#include "Event.h"
+#include "terminal/Event.h"
 
 // Tabla de datos que traduce las teclas crudas a Eventos de alto nivel,
 // y que se puede reconfigurar en tiempo de ejecucion.

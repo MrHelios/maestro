@@ -1,8 +1,8 @@
 #include <string>
 #include <vector>
 
-#include "Cursor.h"
-#include "Document.h"
+#include "core/Cursor.h"
+#include "core/Document.h"
 #include "test_framework.h"
 
 using Lines = std::vector<std::string>;

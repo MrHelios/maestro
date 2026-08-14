@@ -1,10 +1,10 @@
-#include "Renderer.h"
+#include "ui/Renderer.h"
 
 #include <unistd.h>
 #include <sstream>
 #include <algorithm>
 
-#include "utf8.h"
+#include "core/utf8.h"
 
 namespace {
 

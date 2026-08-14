@@ -1,5 +1,5 @@
 #include <cstdio>
-#include "Editor.h"
+#include "ui/Editor.h"
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {

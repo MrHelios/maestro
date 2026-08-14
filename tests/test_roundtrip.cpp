@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "test_framework.h"
-#include "Document.h"
+#include "core/Document.h"
 
 using testfw::TempFile;
 

@@ -1,4 +1,4 @@
-#include "Keymap.h"
+#include "terminal/Keymap.h"
 
 // Enlaces por defecto del editor. Son los mismos que hasta v0.7 estaban
 // hardcodeados en Terminal::readEvent; ahora viven como datos y pueden

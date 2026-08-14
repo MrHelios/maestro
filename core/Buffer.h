@@ -4,10 +4,10 @@
 #include <string>
 #include <vector>
 
-#include "Document.h"
-#include "Cursor.h"
-#include "Selection.h"
-#include "Viewport.h"
+#include "core/Document.h"
+#include "core/Cursor.h"
+#include "core/Selection.h"
+#include "core/Viewport.h"
 
 // Estado guardado en cada entrada de undo/redo de un buffer: el
 // contenido completo, el cursor y la seleccion vigente en ese momento.

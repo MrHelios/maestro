@@ -2,7 +2,7 @@
 
 #include <optional>
 
-#include "Position.h"
+#include "core/Position.h"
 
 // La seleccion de texto ES del Editor: ni Document ni Cursor deben
 // conocerla. Es un struct de datos puro: el anchor (fijo mientras se

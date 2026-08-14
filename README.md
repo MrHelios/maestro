@@ -166,56 +166,60 @@ dentro (incl. Ctrl+K) no filtran a los buffers.
 ## Arquitectura
 
 ```
-tests/
-  test_framework.h     -> micro-framework de tests (CHECK/CHECK_EQ, runner)
-  test_main.cpp         -> punto de entrada del runner
-  test_document.cpp     -> carga/guardado, insertar, newline, backspace, delete
-  test_cursor.cpp       -> movimiento horizontal/vertical, home/end, j/k, invariantes
-  test_event.cpp        -> Event transporte un solo EventType (sin campo shift)
-  test_editor.cpp       -> openFile, undo, redo, guardado y quit
-  test_terminal_event.cpp -> traducción de bytes/secuencias de escape a Event
-  test_selection.cpp    -> selección (anchor/position), c/x, prefijo 'a', j/k, páginas
-  test_modes.cpp        -> máquina de estados (Navegación/Interacción/Selección/Prefix)
-  test_invariants.cpp   -> invariantes de estado tras una secuencia determinista
-  test_buffers.cpp      -> multi-buffer: aislamiento, Ctrl+K n/t/w, selector, clipboard
-  test_filebrowser.cpp  -> explorador Ctrl+K o: navegación, carpetas, open, raíz, scroll
-  test_utf8*.cpp        -> utilitarios UTF-8 (columnas, truncado, rango)
+core/              -> MODELO: estado documental, sin saber nada de UI ni terminal
+  Document.h/.cpp    -> el texto en sí (vector<string>), sin saber nada
+                        de cursor, colores, scroll ni selección
+  Buffer.h/.cpp      -> un buffer: Document + Cursor + viewport + selección +
+                        undo/redo + modificado + nombre. Cada buffer es 100%
+                        independiente de los demás
+  Cursor.h/.cpp      -> línea/columna + "columna preferida" al moverse
+                        verticalmente; salto por bloques (j/k) sin partir UTF-8.
+                        Trabaja en BYTES (byte-safe)
+  BufferManager.h/.cpp-> la colección de buffers + el activo
+  Selection.h        -> Selection (anchor/position). La selección es un
+                        estado documental del buffer; Document/Cursor no la
+                        conocen
+  Position.h         -> struct Position (línea/columna)
+  Viewport.h         -> qué franja del documento es visible (scroll)
+  utf8.h             -> utilitarios UTF-8 byte-safe (columnas, truncado, rango)
 
-src/
-  Buffer.cpp      -> un buffer: Document + Cursor + viewport + selección +
-                     undo/redo + modificado + nombre. Cada buffer es 100%
-                     independiente de los demás
-  Document.cpp    -> el texto en sí (vector<string>), sin saber nada
-                     de cursor, colores, scroll ni selección
-  Cursor.cpp      -> línea/columna + "columna preferida" al moverse
-                     verticalmente; salto por bloques (j/k) sin partir UTF-8
-  Cursor.h        -> declaraciones; el cursor trabaja en BYTES (utf-8)
-  Selection.h     -> struct Position + Selection (anchor/position). La
-                     selección ES del Editor: ni Document ni Cursor la
-                     conocen
-  Viewport.h      -> qué franja del documento es visible (scroll)
-  Terminal.cpp    -> modo raw (termios), lee teclas y las traduce
-                     a Event (InsertChar, MoveLeft, PageUp, ...). Los
-                     modificadores (Shift/Ctrl/Alt) de las secuencias de
-                     escape se ignoran
-  Renderer.cpp    -> Documento -> Renderer -> Terminal. Dibuja, nunca
-                     modifica el documento. Resalta la selección con
-                     video inverso y posiciona el cursor por COLUMNA
-                     visual (no por byte)
-  Editor.cpp      -> engine: conecta Document + Cursor + Viewport +
-                     Terminal + Renderer, corre el loop principal. Es
-                     el dueño de la selección y del portapapeles
-                     (global). Mantiene la colección de `Buffer` con un
-                     activo, el selector de buffers (Ctrl+K t), los
-                     comandos Ctrl+K n/w y el explorador de archivos
-                     (Ctrl+K o). Define los modos y el prefijo 'a'.
+ui/                  -> CONTROLADOR + VISTA: el editor y cómo se ve
+  Editor.h/.cpp      -> engine: conecta core + Terminal + Renderer, corre el
+                        loop principal. Es el dueño del estado de UI global
+                        (modo) y del portapapeles (global). Mantiene la
+                        colección de Buffer con un activo, el selector de
+                        buffers (Ctrl+K t), los comandos Ctrl+K n/w y el
+                        explorador de archivos (Ctrl+K o). Define el prefijo 'a'
+  EditorState.h      -> enum class State (modos de la máquina de estados).
+                        Lo comparte Editor y Renderer; vive aparte para que
+                        Renderer NO dependa de Editor.h
+  Renderer.h/.cpp    -> Documento -> Renderer -> Terminal. Dibuja, nunca
+                        modifica el documento. Resalta la selección con
+                        video inverso y posiciona el cursor por COLUMNA
+                        visual (no por byte). Solo usa State como etiqueta
+  CommandMap.h/.cpp  -> despacho de comandos por nombre (tecla -> comando ->
+                        handler), registrado por Editor
+  FileBrowser.h/.cpp -> estado y navegación del explorador de archivos
+                        (Ctrl+K o). Modal; el Editor decide consecuencias
+  main.cpp           -> punto de entrada, abre el archivo pasado por argv
 
-                     Loop principal:
-                         leer evento
-                         actualizar estado (applyPage, selección, ...)
-                         renderizar
-  main.cpp        -> punto de entrada, abre el archivo pasado por argv
+terminal/            -> INPUT: lectura física de teclas y eventos
+  Event.h            -> Event + EventType: desacopla "tecla física" de
+                        "acción lógica". El Editor nunca sabe qué tecla se
+                        apretó, solo qué evento ocurrió
+  Terminal.h/.cpp    -> modo raw (termios), lee teclas y las traduce a Event.
+                        Los modificadores de las secuencias de escape se ignoran
+  Keymap.h/.cpp      -> tabla de datos que traduce teclas crudas a Event.
+                        Separada de Terminal para poder reconfigurarse
+
+tests/               -> suite de tests (ver "Probar")
 ```
+
+La separación en capas (`core` / `ui` / `terminal`) deja la puerta abierta
+a reutilizar el mismo modelo desde otro frontend: un futuro `Maestro GUI`
+(o una variante de terminal) compartiría `core/` + `ui/Editor` sin arrastrar
+`terminal/`, que solo sabe leer teclas físicas. `core/` no incluye nada de
+UI ni terminal; `ui/Renderer` depende de `EditorState.h`, no de `Editor.h`.
 
 `Event` es la capa que desacopla "tecla física" de "acción lógica":
 el `Editor` nunca sabe qué tecla se apretó, solo qué evento ocurrió.

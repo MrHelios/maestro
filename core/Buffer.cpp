@@ -1,4 +1,4 @@
-#include "Buffer.h"
+#include "core/Buffer.h"
 
 Buffer::Buffer() {
     unnamedName = "SinNombre";

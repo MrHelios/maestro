@@ -1,4 +1,4 @@
-#include "Event.h"
+#include "terminal/Event.h"
 #include "test_framework.h"
 
 // ---------------------------------------------------------------------------

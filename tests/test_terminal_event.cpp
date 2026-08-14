@@ -1,8 +1,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "Event.h"
-#include "Terminal.h"
+#include "terminal/Event.h"
+#include "terminal/Terminal.h"
 #include "test_framework.h"
 
 // ---------------------------------------------------------------------------
