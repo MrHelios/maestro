@@ -474,33 +474,39 @@ TEST(selection_escape_cancels) {
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
-TEST(selection_char_does_not_replace) {
-    // v0.5: escribir una letra (que no sea c/x) ya NO reemplaza la
-    // seleccion: se ignora y el modo sigue activo.
+TEST(selection_char_replaces) {
+    // P0 interaction: escribir una letra sobre un rango marcado REEMPLAZA la
+    // seleccion (en una sola edicion, con una sola entrada de undo para el
+    // grupo de escritura consecutivo) y entra a Interaccion.
     Editor ed;
     type(ed, "hello");
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);
     press(ed, EventType::MoveRight); // [h]
     ed.handleEvent(insert('H'));
-    CHECK_EQ(ed.active().document.lineAt(0), "hello"); // sin reemplazo
-    CHECK(ed.hasSelection());
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+    CHECK_EQ(ed.active().document.lineAt(0), "Hello"); // 'h' -> 'H'
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
 }
 
-TEST(selection_newline_backspace_delete_noop) {
-    // Ninguna de estas teclas borra/afecta la seleccion en v0.5.
+TEST(selection_newline_noop_backspace_delete_borran) {
+    // v0.5: InsertNewline sobre una seleccion sigue siendo no-op.
+    // P0 (interaction): Backspace/Delete ahora SÍ borran el rango
+    // seleccionado y vuelven a Navegacion.
     Editor ed;
     type(ed, "abc");
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);
-    press(ed, EventType::MoveRight);
-    press(ed, EventType::InsertNewline);
-    press(ed, EventType::Backspace);
-    press(ed, EventType::Delete);
+    press(ed, EventType::MoveRight); // [a]
+    press(ed, EventType::InsertNewline); // no-op: sigue igual
     CHECK_EQ(ed.active().document.lineAt(0), "abc");
     CHECK(ed.hasSelection());
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+
+    press(ed, EventType::Delete); // borra la seleccion [a]
+    CHECK_EQ(ed.active().document.lineAt(0), "bc");
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK(ed.active().modified);
 }
 
 // ---------------------------------------------------------------------------
@@ -982,7 +988,11 @@ TEST(clipboard_p_in_selection_is_noop) {
 // Aqui se verifica el caso Seleccion con clipboard NO vacio: no pega nada,
 // no toca documento/clipboard/seleccion/undo/redo y no sale del modo.
 // ---------------------------------------------------------------------------
-TEST(clipboard_p_in_selection_noop_with_content) {
+TEST(clipboard_p_in_selection_replaces_selection) {
+    // P0 interaction: 'p' dentro de Seleccion CON rango marcado REEMPLAZA el
+    // texto seleccionado por el clipboard, termina la seleccion y vuelve a
+    // Navegacion en una sola edicion (undoStack +1, redo limpio). El
+    // clipboard se CONSERVA (no se sobreescribe con el rango reemplazado).
     Editor ed;
     type(ed, "abcdef");
     ed.clipboard_ = std::vector<std::string>{"PEGAR"}; // buffer con contenido
@@ -991,34 +1001,26 @@ TEST(clipboard_p_in_selection_noop_with_content) {
     enterSeleccion(ed);                 // 's': anchor (0,0)
     press(ed, EventType::MoveRight);    // (0,1)
     press(ed, EventType::MoveRight);    // (0,2): seleccion [0,0)-(0,2)
-    press(ed, EventType::MoveRight);    // (0,3): seleccion [0,0)-(0,3)
+    press(ed, EventType::MoveRight);    // (0,3): seleccion [0,0)-(0,3) == "abc"
     CHECK(ed.hasSelection());
-    auto selBefore = ed.selection();
-    CHECK(selBefore.has_value());
-    const auto docBefore = ed.active().document.snapshot();
     const auto clipBefore = ed.clipboard_;
     const size_t undoBefore = ed.active().undoStack.size();
-    const size_t redoBefore = ed.active().redoStack.size();
 
     ed.handleEvent(insert('p'));
 
-    // Documento identico.
-    CHECK(ed.active().document.snapshot() == docBefore);
+    // El rango [0,0)-(0,3) ("abc") se reemplaza por el clipboard.
+    CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"PEGARdef"}));
     // Clipboard identico (no se pego ni se sobreescribio).
     CHECK(ed.clipboard_ == clipBefore);
     CHECK(ed.clipboard_ == (std::vector<std::string>{"PEGAR"}));
-    // Seleccion identica (el rango sigue vigente).
-    CHECK(ed.hasSelection());
-    CHECK(ed.selection().has_value());
-    CHECK_EQ(ed.selection()->start.line, selBefore->start.line);
-    CHECK_EQ(ed.selection()->start.col, selBefore->start.col);
-    CHECK_EQ(ed.selection()->end.line, selBefore->end.line);
-    CHECK_EQ(ed.selection()->end.col, selBefore->end.col);
-    // Undo/Redo intactos (no es una edicion).
-    CHECK_EQ(ed.active().undoStack.size(), undoBefore);
-    CHECK_EQ(ed.active().redoStack.size(), redoBefore);
-    // Sigue en Seleccion.
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+    // Seleccion terminada.
+    CHECK(!ed.hasSelection());
+    CHECK(!ed.selection().has_value());
+    // Pegar es una edicion: agrega historial y limpia el redo.
+    CHECK_EQ(ed.active().undoStack.size(), undoBefore + 1);
+    CHECK_EQ(ed.active().redoStack.size(), static_cast<size_t>(0));
+    // Vuelve a Navegacion.
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
 // ---------------------------------------------------------------------------
@@ -1999,4 +2001,83 @@ TEST(prefix_quit_from_prefix_quits) {
     ed.handleEvent(q);
 
     CHECK(!ed.running_);
+}
+
+// ---------------------------------------------------------------------------
+// Seleccion + AvPag/RePag: el movimiento NO genera undo, el anchor se fija
+// al empezar y el cursor/seleccion/viewport acompanan.
+// ---------------------------------------------------------------------------
+TEST(selection_page_down_up_keeps_anchor_no_undo) {
+    Editor ed;
+    ed.active().document.restore(std::vector<std::string>(300, "linea"));
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 0;
+    ed.active().cursor.line = 10;
+    ed.active().cursor.col = 0;
+
+    CHECK(ed.active().undoStack.empty());
+    enterSeleccion(ed);              // -> Seleccion (anchor aun vacio)
+    CHECK(ed.state_ == State::Seleccion);
+
+    // AvPag: anchor = cursor (10,0); cursor y viewport saltan +20.
+    press(ed, EventType::PageDown);
+    CHECK(ed.active().selection->anchor == (Position{10, 0}));
+    CHECK_EQ(ed.active().cursor.line, 30);
+    CHECK_EQ(ed.active().viewport.top, 20);
+    CHECK(ed.active().selection->position.line == ed.active().cursor.line &&
+          ed.active().selection->position.col == ed.active().cursor.col);
+
+    // AvPag de nuevo: el anchor NO cambia, el cursor sigue saltando.
+    press(ed, EventType::PageDown);
+    CHECK(ed.active().selection->anchor == (Position{10, 0}));
+    CHECK_EQ(ed.active().cursor.line, 50);
+    CHECK_EQ(ed.active().viewport.top, 40);
+    CHECK(ed.active().selection->position.line == ed.active().cursor.line &&
+          ed.active().selection->position.col == ed.active().cursor.col);
+
+    // RePag: cursor y viewport retroceden -20 (anchor intacto).
+    press(ed, EventType::PageUp);
+    CHECK(ed.active().selection->anchor == (Position{10, 0}));
+    CHECK_EQ(ed.active().cursor.line, 30);
+    CHECK_EQ(ed.active().viewport.top, 20);
+    CHECK(ed.active().selection->position.line == ed.active().cursor.line &&
+          ed.active().selection->position.col == ed.active().cursor.col);
+
+    // El movimiento por paginas NO genera historial de undo.
+    CHECK(ed.active().undoStack.empty());
+    CHECK(ed.active().redoStack.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Seleccion + flecha: la seleccion se EXTENDE (no se cancela). El anchor se
+// fija donde empezaba la seleccion y el cursor/salto aterrizan en la posicion
+// exacta. Regla actual: las flechas extienden igual que AvPag/RePag.
+// ---------------------------------------------------------------------------
+TEST(selection_arrow_extend_keeps_anchor_exact_cursor) {
+    // Cada flecha parte de un editor nuevo: cursor (1,1) sobre
+    // {"abc","def","ghi"} (linea "def"), entra a Seleccion, pulse la flecha.
+    auto run = [](EventType arrow, Position expectCursor) {
+        Editor ed;
+        ed.active().document.restore({"abc", "def", "ghi"});
+        ed.active().cursor.line = 1;
+        ed.active().cursor.col = 0;
+        press(ed, EventType::MoveRight);  // (1,1): fija preferredCol_=1
+        enterSeleccion(ed);              // Seleccion, anchor aun vacio
+        press(ed, arrow);
+
+        CHECK(ed.state_ == State::Seleccion);            // no se cancela
+        CHECK(ed.hasSelection());                        // sigue con rango
+        CHECK(ed.active().selection->anchor == (Position{1, 1}));  // fixed
+        CHECK(ed.active().selection->position == expectCursor);    // extendido
+        CHECK(ed.active().cursor.line == expectCursor.line);
+        CHECK(ed.active().cursor.col == expectCursor.col);
+        CHECK(ed.active().undoStack.empty());            // no genera undo
+    };
+
+    run(EventType::MoveLeft,  Position{1, 0});
+    run(EventType::MoveRight, Position{1, 2});
+    run(EventType::MoveUp,    Position{0, 1});
+    run(EventType::MoveDown,  Position{2, 1});
+    run(EventType::MoveHome,  Position{1, 0});
+    run(EventType::MoveEnd,   Position{1, 3});   // "def" -> final col 3
 }

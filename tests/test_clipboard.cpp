@@ -313,35 +313,36 @@ TEST(selection_c_without_selection_noop) {
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
-TEST(selection_p_in_seleccion_is_noop) {
-    // Diseno explicito: 'p' NO tiene funcionamiento dentro del modo de
-    // seleccion. Con y sin rango marcado, presionar 'p' deja intacta la
-    // seleccion, el documento, el buffer y el estado (sigue en Seleccion).
+TEST(selection_p_empty_range_pastes_at_cursor) {
+    // P0 interaction: 'p' dentro de Seleccion PERO sin rango marcado pega
+    // en el cursor (el clipboard reemplaza una seleccion vacia: no hay nada
+    // que reemplazar). Termina la seleccion y vuelve a Navegacion.
     Editor ed;
     type(ed, "hola");
     press(ed, EventType::Escape);
     ed.active().modified = false;               // simula estado guardado
     ed.active().savedLines = ed.active().document.snapshot();
-    press(ed, EventType::MoveHome);
+    ed.clipboard_ = std::vector<std::string>{"XYZ"};
+
     enterSeleccion(ed);                            // s, sin rango
-    ed.clipboard_ = std::vector<std::string>{"previo"};
-    const auto docBefore = ed.active().document.snapshot();
     const size_t undoBefore = ed.active().undoStack.size();
-    const size_t redoBefore = ed.active().redoStack.size();
 
-    ed.handleEvent(insert('p'));                   // p sin rango: no-op
+    // El cursor esta en (0,4) tras escribir "hola" (TAB no hay; cada letra
+    // avanza la columna), asi que pegar "XYZ" ahi da "holaXYZ".
+    ed.handleEvent(insert('p'));                   // pega "XYZ" en el cursor
 
-    CHECK(!ed.hasSelection());                     // sin rango sigue sin rango
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
-    CHECK(ed.active().document.snapshot() == docBefore);
-    CHECK(ed.clipboard_ == std::vector<std::string>{"previo"});
-    CHECK_EQ(ed.active().undoStack.size(), undoBefore);
-    CHECK_EQ(ed.active().redoStack.size(), redoBefore);
-    CHECK(!ed.active().modified);
+    CHECK_EQ(ed.active().document.lineAt(0), "holaXYZ");
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK(ed.active().modified);
+    // Pegar es una edicion: agrega historial.
+    CHECK_EQ(ed.active().undoStack.size(), undoBefore + 1);
 }
 
-TEST(selection_p_on_range_in_seleccion_is_noop) {
-    // Hermano con rango real marcado: 'p' tampoco pega ni altera nada.
+TEST(selection_p_range_replaces_selection) {
+    // P0 interaction: 'p' con rango marcado REEMPLAZA el texto seleccionado
+    // por el clipboard. La seleccion desaparece y el editor vuelve a
+    // Navegacion. Un Undo posterior restaurara el rango (ver interaction).
     Editor ed;
     type(ed, "hola");
     press(ed, EventType::Escape);
@@ -350,21 +351,48 @@ TEST(selection_p_on_range_in_seleccion_is_noop) {
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);
     press(ed, EventType::MoveRight);               // [h]
+    press(ed, EventType::MoveRight);               // [ho]
     CHECK(ed.hasSelection());
-    ed.clipboard_ = std::vector<std::string>{"previo"};
-    const auto docBefore = ed.active().document.snapshot();
-    const size_t undoBefore = ed.active().undoStack.size();
-    const size_t redoBefore = ed.active().redoStack.size();
+    ed.clipboard_ = std::vector<std::string>{"XYZ"};
 
-    ed.handleEvent(insert('p'));                   // p con rango: no-op
+    ed.handleEvent(insert('p'));                   // reemplaza [ho] por XYZ
 
-    CHECK(ed.hasSelection());                      // la seleccion se mantiene intacta
+    CHECK(!ed.hasSelection());                      // seleccion reemplazada
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.active().document.lineAt(0), "XYZla");
+    CHECK(ed.active().modified);
+}
+
+TEST(selection_p_on_range_replaces_selection) {
+    // P0 interaction: 'p' con rango marcado REEMPLAZA el texto seleccionado
+    // por el clipboard. La seleccion desaparece, se vuelve a Navegacion, y
+    // un Undo posterior restaura documento, cursor y el rango original.
+    Editor ed;
+    type(ed, "hola");
+    press(ed, EventType::Escape);
+    ed.active().modified = false;               // simula estado guardado
+    ed.active().savedLines = ed.active().document.snapshot();
+    press(ed, EventType::MoveHome);
+    enterSeleccion(ed);
+    press(ed, EventType::MoveRight);               // [h]
+    press(ed, EventType::MoveRight);               // [ho]
+    CHECK(ed.hasSelection());
+    ed.clipboard_ = std::vector<std::string>{"XYZ"};
+
+    ed.handleEvent(insert('p'));                   // reemplaza [ho] por XYZ
+
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.active().document.lineAt(0), "XYZla");
+    CHECK(ed.active().modified);
+
+    press(ed, EventType::Undo);
+    CHECK_EQ(ed.active().document.lineAt(0), "hola");   // texto restaurado
+    CHECK(ed.hasSelection());                            // rango restaurado
+    CHECK((ed.active().selection->anchor == Position{0, 0}));
+    CHECK((ed.active().selection->position == Position{0, 2}));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
-    CHECK(ed.active().document.snapshot() == docBefore);
-    CHECK(ed.clipboard_ == std::vector<std::string>{"previo"});
-    CHECK_EQ(ed.active().undoStack.size(), undoBefore);
-    CHECK_EQ(ed.active().redoStack.size(), redoBefore);
-    CHECK(!ed.active().modified);
+    CHECK(!ed.active().modified);                        // volvio al guardado
 }
 
 TEST(selection_x_cuts_single_char) {

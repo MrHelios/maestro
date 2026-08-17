@@ -1202,6 +1202,133 @@ TEST(browser_open_switch_reopen_open) {
     CHECK_EQ(ed.active().document.lineAt(0), "a.txt");
 }
 
+// ===========================================================================
+// Interaction: abrir B desde el explorador deja el buffer A intacto.
+// A (indice 0) con contenido editado; Ctrl+K O -> FileBrowser -> seleccionar
+// B -> Enter: B queda activo y A conserva contenido y bandera modified.
+// ---------------------------------------------------------------------------
+TEST(browser_interaction_open_keeps_previous_buffer_intact) {
+    TempDir t;
+    t.file("A.txt");
+    t.file("B.txt");
+    CwdGuard g;
+    g.enter(t.path);
+
+    Editor ed;
+    type(ed, "contenido A");         // buffer A (indice 0), editado
+    CHECK_EQ(ed.active().document.lineAt(0), "contenido A");
+    CHECK(ed.active().modified);
+    press(ed, EventType::Escape);    // -> Navegacion
+
+    openFileBrowser(ed);             // Ctrl+K o
+    CHECK(ed.state_ == State::FileBrowser);
+    press(ed, EventType::MoveDown);  // -> A.txt
+    press(ed, EventType::MoveDown);  // -> B.txt
+    press(ed, EventType::InsertNewline);   // Enter: abrir B.txt
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK(ed.active().filename.find("B.txt") != std::string::npos);
+    CHECK_EQ(ed.active().document.lineAt(0), "B.txt");   // contenido del archivo
+    CHECK(!ed.active().modified);    // recien abierto: sin cambios
+
+    // Volver a A: intacto (contenido + modified).
+    ed.activateBuffer(0);
+    CHECK_EQ(ed.active().document.lineAt(0), "contenido A");
+    CHECK(ed.active().modified);
+}
+
+// ===========================================================================
+// Interaction: reabrir desde el explorador un archivo YA abierto solo lo
+// ACTIVA, no crea un tercer buffer (v0.6.4: no duplicar archivos abiertos).
+// A abierto, B abierto; FileBrowser -> seleccionar A -> Enter:
+//   -> A activo y bufferCount sigue siendo 2.
+// ---------------------------------------------------------------------------
+TEST(browser_interaction_reopen_existing_only_activates) {
+    TempDir t;
+    t.file("A.txt");
+    t.file("B.txt");
+    CwdGuard g;
+    g.enter(t.path);
+
+    Editor ed;
+    ed.openFile("A.txt");            // reusa buffer 0 = A
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
+
+    openFileBrowser(ed);             // Ctrl+K o
+    press(ed, EventType::MoveDown);  // -> A.txt
+    press(ed, EventType::MoveDown);  // -> B.txt
+    press(ed, EventType::InsertNewline);   // abre B.txt (buffer 1)
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.active().filename, t.path + "/B.txt");
+
+    // Reabrir el explorador y seleccionar A (ya abierto): activar, NO duplicar.
+    openFileBrowser(ed);
+    press(ed, EventType::MoveDown);  // -> A.txt
+    press(ed, EventType::InsertNewline);   // Enter sobre A.txt
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));   // NO tercer buffer
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);             // A reactivado
+    CHECK_EQ(ed.active().filename, t.path + "/A.txt");
+    CHECK_EQ(ed.active().document.lineAt(0), "A.txt");
+    CHECK(ed.state_ != State::FileBrowser);   // se salio del explorador
+}
+
+// ===========================================================================
+// Interaction: Abrir B desde el explorador, EDITARLO, volver a A y regresar a B.
+// B debe conservar contenido, cursor, modified y su historial de undo.
+// ---------------------------------------------------------------------------
+TEST(browser_interaction_edit_back_and_return_preserves_b_state) {
+    TempDir t;
+    t.file("B.txt");
+    CwdGuard g;
+    g.enter(t.path);
+
+    Editor ed;
+    type(ed, "texto A");             // buffer 0 = A
+    press(ed, EventType::Escape);    // -> Navegacion
+
+    // Abrir B desde FileBrowser -> buffer 1, cursor (0,0), modified false.
+    openFileBrowser(ed);             // Ctrl+K o
+    press(ed, EventType::MoveDown);  // -> B.txt
+    press(ed, EventType::InsertNewline);   // abre B.txt (buffer 1)
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
+    CHECK_EQ(ed.active().document.lineAt(0), "B.txt");
+    CHECK(!ed.active().modified);
+
+    // Editar B: teclear al inicio + mover el cursor en medio.
+    type(ed, "NUEVO");               // "NUEVOB.txt", cursor (0,5), modified true
+    press(ed, EventType::Escape);
+    CHECK_EQ(ed.active().document.lineAt(0), "NUEVOB.txt");
+    CHECK(ed.active().modified);
+    press(ed, EventType::MoveHome);   // Navegacion: cursor a col 0
+    press(ed, EventType::MoveRight);  // -> col 1
+    press(ed, EventType::MoveRight);  // -> col 2
+    press(ed, EventType::MoveRight);  // -> col 3
+    CHECK_EQ(ed.active().cursor.col, 3);
+
+    // Volver a A.
+    ed.activateBuffer(0);
+    CHECK_EQ(ed.active().document.lineAt(0), "texto A");
+
+    // Volver a B: conserva contenido, cursor y modified.
+    ed.activateBuffer(1);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "NUEVOB.txt");
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 3);
+    CHECK(ed.active().modified);     // la edicion de B sigue marcada
+
+    // El historial de undo de B sobrevive al cambio de buffer: undo revierte
+    // (la escritura normal se deshace por caracter) y redo restaura.
+    press(ed, EventType::Undo);
+    CHECK_EQ(ed.active().document.lineAt(0), "NUEVB.txt");   // perdio la 'O'
+    CHECK(ed.active().modified);                             // sigue editado
+    press(ed, EventType::Redo);
+    CHECK_EQ(ed.active().document.lineAt(0), "NUEVOB.txt");  // restaurado
+    CHECK(ed.active().modified);
+}
+
 TEST(browser_close_opened_buffer) {
     // (62) Cerrar con Ctrl+K w un buffer abierto desde el explorador.
     TempDir t;

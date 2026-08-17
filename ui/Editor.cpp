@@ -49,15 +49,28 @@ void Editor::registerCommands() {
         Buffer& b = active();
         if (clipboard_.empty()) {
             statusMessage_ = "Nada para pegar.";
-        } else {
-            b.pushHistory();
-            Position end = b.document.insertBlock(b.cursor.line, b.cursor.col,
-                                                  clipboard_);
-            b.cursor.line = end.line;
-            b.cursor.col = end.col;
-            b.modified = true;
-            statusMessage_ = "Pegado.";
+            return;
         }
+        // P0 interaction: si hay una seleccion vigente, el pegado la
+        // REEMPLAZA por el clipboard en UNA sola operacion de historial
+        // (un unico pushHistory) para que un undo devuelva exactamente el
+        // texto, el cursor y la seleccion previos.
+        auto sel = selection();
+        b.pushHistory();
+        if (sel.has_value()) {
+            b.document.deleteRange(sel->start.line, sel->start.col,
+                                   sel->end.line, sel->end.col);
+            b.cursor.line = sel->start.line;
+            b.cursor.col = sel->start.col;
+        }
+        Position end = b.document.insertBlock(b.cursor.line, b.cursor.col,
+                                              clipboard_);
+        b.cursor.line = end.line;
+        b.cursor.col = end.col;
+        b.modified = true;
+        clearSelection();
+        state_ = State::Navegacion;
+        statusMessage_ = "Pegado.";
     });
     commands_.registerCommand("navegacion.palabra.atras", [this] {
         active().cursor.moveToPreviousWord(active().document);
@@ -462,6 +475,16 @@ void Editor::handleEvent(const Event& event) {
         return;
     }
 
+    // El grupo de escritura coalescente solo sobrevive mientras siga
+    // habiendo InsertChar consecutivos dentro de Interaccion tras haber
+    // empezado el grupo con un reemplazo de seleccion. Cualquier otro
+    // evento lo sella: la proxima escritura empieza un grupo nuevo (por
+    // caracter, si es escritura normal).
+    if (!(state_ == State::Interaccion &&
+          event.type == EventType::InsertChar && coalescingTyping_)) {
+        coalescingTyping_ = false;
+    }
+
     // El resto se interpreta segun el modo actual. Terminal emite los
     // InsertChar ('i'/'s'/'c'/'x' y cualquier letra) tal cual; es el
     // Editor quien decide, segun state_, si una letra puntual es un
@@ -523,11 +546,26 @@ void Editor::handleNavegacionEvent(const Event& event) {
 
 void Editor::handleInteraccionEvent(const Event& event) {
     Buffer& b = active();
+    // Una seleccion DEGENERADA (anchor == position) no tiene significado en
+    // edicion: significa "no hay nada seleccionado". Si queda persistida
+    // aqui (p.ej. restaurada por undo tras un reemplazo) y luego el cursor
+    // se mueve (Backspace/Delete la encogen), se desincronizaria del cursor
+    // y podria quedar fuera de rango. Se elimina al entrar a Interaccion.
+    if (b.selection.has_value() &&
+        b.selection->anchor == b.selection->position) {
+        b.selection.reset();
+    }
     switch (event.type) {
         case EventType::InsertChar:
             // Edicion libre real: cualquier letra (incluida i/s/p/c/x)
             // se inserta como texto. Aqui no son comandos de modo.
-            b.pushHistory();
+            // P0 interaction: si venimos de un reemplazo de seleccion
+            // (coalescingTyping_ ya ha empujado el historial una vez para
+            // todo el grupo), NO empujamos de nuevo: el texto consecutivo
+            // se absorbe en la MISMA entrada de undo.
+            if (!coalescingTyping_) {
+                b.pushHistory();
+            }
             b.document.insertText(b.cursor.line, b.cursor.col, event.text);
             b.cursor.col += static_cast<int>(event.text.size());
             b.modified = true;
@@ -543,6 +581,11 @@ void Editor::handleInteraccionEvent(const Event& event) {
 
         case EventType::Backspace:
         case EventType::Delete: {
+            // interaction P0: si hay una seleccion vigente (p.ej. por entrar
+            // a edicion sin cancelarla antes), Backspace/Delete borran el
+            // rango entero en vez de un solo caracter. deleteSelection()
+            // ya empuja historial.
+            if (deleteSelection()) break;
             b.pushHistory();
             if (event.type == EventType::Backspace) {
                 bool willMergeLines = (b.cursor.col == 0 && b.cursor.line > 0);
@@ -645,6 +688,37 @@ void Editor::handleSeleccionEvent(const Event& event) {
                 commands_.execute("seleccion.copiar");
             } else if (event.text == "x") {
                 commands_.execute("seleccion.cortar");
+            } else if (event.text == "p") {
+                // P0 interaction: 'p' desde Seleccion reemplaza el rango
+                // seleccionado por el clipboard (navegacion.pegar ya
+                // borra la seleccion y vuelve a Navegacion).
+                commands_.execute("navegacion.pegar");
+            } else {
+                // P0 interaction: escribir una letra que NO es comando de
+                // Seleccion REEMPLAZA el rango marcado por esa letra y entra
+                // a Interaccion, abriendo un "grupo de escritura": el
+                // historial se empuja UNA vez aqui y la escritura consecutiva
+                // posterior se absorbe en la misma entrada, de modo que
+                // "reemplazo + tecleo" se deshace en una sola operacion.
+                // Si el rango es vacio (solo se entro al modo), no hay nada
+                // que reemplazar: se inserta igual pero el grupo NO coalesce
+                // (escritura normal, por caracter).
+                bool hadSel = hasSelection();
+                auto sel = selection();
+                b.pushHistory();                 // UNA entrada para el grupo
+                if (hadSel) {
+                    b.document.deleteRange(sel->start.line, sel->start.col,
+                                           sel->end.line, sel->end.col);
+                    b.cursor.line = sel->start.line;
+                    b.cursor.col = sel->start.col;
+                }
+                b.document.insertText(b.cursor.line, b.cursor.col, event.text);
+                b.cursor.col += static_cast<int>(event.text.size());
+                b.modified = true;
+                clearSelection();
+                state_ = State::Interaccion;
+                coalescingTyping_ = hadSel;      // solo el reemplazo coalesce
+                statusMessage_ = "Reemplazando seleccion...";
             }
             break;
         case EventType::Escape:
@@ -653,9 +727,18 @@ void Editor::handleSeleccionEvent(const Event& event) {
             statusMessage_ = "Seleccion cancelada.";
             break;
 
-        // InsertNewline/Backspace/Delete (y el resto): no-op. Salir de
-        // seleccion es siempre a navegacion, nunca a interaccion con
-        // reemplazo del rango.
+        // Delete/Backspace si borran el rango seleccionado (interaction P0)
+        // y vuelven a navegacion.
+        case EventType::Delete:
+        case EventType::Backspace:
+            if (deleteSelection()) {
+                state_ = State::Navegacion;
+                statusMessage_ = "Borrado.";
+            }
+            break;
+
+        // InsertNewline y el resto: no-op. Salir de seleccion es siempre a
+        // navegacion, nunca a interaccion con reemplazo del rango.
         default:
             break;
     }
@@ -947,7 +1030,22 @@ void Editor::save() {
     }
 }
 
+bool Editor::deleteSelection() {
+    Buffer& b = active();
+    if (!hasSelection()) return false;
+    auto sel = selection();
+    b.pushHistory();
+    b.document.deleteRange(sel->start.line, sel->start.col,
+                           sel->end.line, sel->end.col);
+    b.cursor.line = sel->start.line;
+    b.cursor.col = sel->start.col;
+    b.modified = true;
+    clearSelection();
+    return true;
+}
+
 void Editor::undo() {
+    coalescingTyping_ = false;
     Buffer& b = active();
     if (b.undoStack.empty()) {
         statusMessage_ = "Nada que deshacer.";
@@ -960,6 +1058,7 @@ void Editor::undo() {
     current.line = b.cursor.line;
     current.col = b.cursor.col;
     current.selection = b.selection;
+    current.endsWithNewline = b.document.endsWithNewline();
     b.redoStack.push_back(current);
 
     b.applyState(b.undoStack.back());
@@ -974,6 +1073,7 @@ void Editor::undo() {
 }
 
 void Editor::redo() {
+    coalescingTyping_ = false;
     Buffer& b = active();
     if (b.redoStack.empty()) {
         statusMessage_ = "Nada que rehacer.";
@@ -986,6 +1086,7 @@ void Editor::redo() {
     current.line = b.cursor.line;
     current.col = b.cursor.col;
     current.selection = b.selection;
+    current.endsWithNewline = b.document.endsWithNewline();
     b.undoStack.push_back(current);
 
     b.applyState(b.redoStack.back());

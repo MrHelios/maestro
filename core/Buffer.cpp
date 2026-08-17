@@ -34,17 +34,21 @@ void Buffer::applyState(const HistoryState& state) {
     cursor.line = state.line;
     cursor.col = state.col;
     cursor.clampToLine(document);
-    // Restauramos la seleccion del momento. Si quedo fuera de rango
-    // (p.ej. por undo de un documento distinto), la descartamos.
+    // Restauramos la seleccion del momento. La descartamos SOLO si quedo
+    // fuera de rango tras el undo/redo (p.ej. por restauration de un
+    // documento distinto). Una seleccion DEGENERADA (anchor == position)
+    // dentro de rango se CONSERVA tal cual, para que undo/redo sean
+    // simetricos: una seleccion vacia que existia al momento de la edicion
+    // tambien debe restablecerse (tiene hasSelection() == false, como la
+    // original, asi que no cambia el modo).
     selection = state.selection;
     if (selection.has_value()) {
-        auto n = normalize(*selection);
-        if (!n.has_value() || n->start.line >= document.lineCount() ||
-            n->end.line >= document.lineCount() ||
-            n->start.col > document.lineLength(n->start.line) ||
-            n->end.col > document.lineLength(n->end.line)) {
-            selection.reset();
-        }
+        bool outOfRange =
+            selection->anchor.line >= document.lineCount() ||
+            selection->position.line >= document.lineCount() ||
+            selection->anchor.col > document.lineLength(selection->anchor.line) ||
+            selection->position.col > document.lineLength(selection->position.line);
+        if (outOfRange) selection.reset();
     }
     // modified = "¿el contenido difiere del ultimo guardado?"
     modified = (document.snapshot() != savedLines);

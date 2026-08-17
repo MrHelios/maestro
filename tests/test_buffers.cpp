@@ -306,6 +306,34 @@ TEST(ctrl_k_n_creates_and_activates_immediately) {
     CHECK_EQ(ed.active().document.lineAt(0), "zzz");
 }
 
+// A -> Ctrl+K n -> editar -> cambiar -> volver. El nuevo buffer B (creado,
+// activado, vacio y con nombre SinNombre) conserva el contenido al volver.
+TEST(ctrl_k_n_edit_switch_back_preserves_content) {
+    Editor ed;
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));   // A = SinNombre
+
+    newBuffer(ed);                                     // Ctrl+K n
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));   // crea B
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);             // y lo activa
+    CHECK_EQ(ed.active().unnamedName, "SinNombre1");   // nombre auto
+    CHECK(ed.active().document.lineAt(0).empty());     // B vacio
+    CHECK(!ed.active().modified);
+
+    type(ed, "hello");                                 // editar B
+    CHECK_EQ(ed.active().document.lineAt(0), "hello");
+    CHECK(ed.active().modified);
+
+    ed.activateBuffer(0);                              // -> A
+    CHECK_EQ(ed.active().unnamedName, "SinNombre");
+    CHECK(ed.active().document.lineAt(0).empty());     // A sigue vacio
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+
+    ed.activateBuffer(1);                              // -> B
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "hello"); // B conserva contenido
+    CHECK(ed.active().modified);
+}
+
 // Un buffer creado a mitad de sesion debe tomar las dimensiones reales
 // de la terminal (no quedarse con el Viewport por defecto 24x80), o si
 // no el render solo redibuja esas filas y queda resto del buffer
@@ -449,6 +477,178 @@ TEST(ctrl_k_t_single_buffer_message) {
     openSelector(ed);
     CHECK(ed.state_ == State::Navegacion);
     CHECK_EQ(ed.statusMessage_, "Solo hay un buffer.");
+}
+
+// ---------------------------------------------------------------------------
+// Ctrl+K t : vuelta al mismo buffer. define el contrato del modo/selection.
+// El modo global se reconcilia con el BUFFER activado (activateBuffer),
+// no con priorState_:
+//   * fuente Navegacion -> Enter igual buffer -> Navegacion, sin seleccion.
+//   * fuente Interaccion -> Enter igual buffer -> Navegacion (sin rango).
+//   * fuente Seleccion -> Enter igual buffer -> Seleccion, seleccion intacta.
+// (Enter="cambiar a": reconcilia; ESC="cancelar": restaura priorState_.)
+// ---------------------------------------------------------------------------
+
+// Seleccion -> Ctrl+K t -> Enter sobre el MISMO buffer: la seleccion se
+// conserva exactamente y el editor vuelve a Seleccion (rango intacto).
+TEST(ctrl_k_t_return_same_buffer_preserves_selection) {
+    Editor ed;
+    type(ed, "abcdef");                  // B0 con contenido
+    press(ed, EventType::Escape);
+    newBuffer(ed);                       // B1 vacio activo
+    ed.activateBuffer(0);                // seleccion sobre B0
+    press(ed, EventType::MoveHome);
+    pressEvent(ed, insert('s'));         // modo seleccion
+    press(ed, EventType::MoveRight);     // rango [0,0)-(0,1) sobre "abcdef"
+    CHECK(ed.hasSelection());
+
+    const auto anchor = ed.active().selection->anchor;
+    const auto pos = ed.active().selection->position;
+    CHECK(ed.state_ == State::Seleccion);
+
+    openSelector(ed);                    // Ctrl+K t
+    CHECK(ed.state_ == State::BufferSelector);
+    CHECK_EQ(ed.bufferSelectorIndex_, 0);  // activo = B0
+    press(ed, EventType::InsertNewline);   // Enter: mismo buffer
+
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK_EQ(ed.active().document.lineAt(0), "abcdef");          // contenido intacto
+    CHECK(ed.state_ == State::Seleccion);                       // vuelve a Seleccion
+    CHECK(ed.hasSelection());
+    CHECK(ed.active().selection->anchor == anchor);             // seleccion intacta
+    CHECK(ed.active().selection->position == pos);
+}
+
+// Seleccion -> Ctrl+K t -> ir a otro buffer y volver: la seleccion del
+// buffer original sigue intacta (Enter reconcilia con la seleccion de B).
+TEST(ctrl_k_t_switch_away_and_back_preserves_selection) {
+    Editor ed;
+    type(ed, "abcdef");                  // B0
+    press(ed, EventType::Escape);
+    newBuffer(ed);                       // B1 vacio activo
+    ed.activateBuffer(0);                // sobre B0 fijamos la seleccion
+    press(ed, EventType::MoveHome);
+    pressEvent(ed, insert('s'));         // seleccion en B0
+    press(ed, EventType::MoveRight);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK(ed.hasSelection());
+
+    const auto anchor = ed.active().selection->anchor;
+    const auto pos = ed.active().selection->position;
+
+    openSelector(ed);                    // Ctrl+K t (activo = B0)
+    press(ed, EventType::MoveDown);      // -> B1
+    press(ed, EventType::InsertNewline);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK(ed.state_ == State::Navegacion);   // B1 sin seleccion
+
+    openSelector(ed);                    // Ctrl+K t (activo = B1)
+    press(ed, EventType::MoveUp);        // -> B0
+    press(ed, EventType::InsertNewline);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK(ed.state_ == State::Seleccion);    // B0 conserva su seleccion
+    CHECK(ed.hasSelection());
+    CHECK(ed.active().selection->anchor == anchor);
+    CHECK(ed.active().selection->position == pos);
+}
+
+// Fuente en cada modo -> Ctrl+K t -> Enter sobre el MISMO buffer: contrato
+// de modo reconcilado con el buffer activado (tabla de interaccion).
+TEST(ctrl_k_t_mode_table_per_source_mode) {
+    // Navegacion (sin rango) -> Enter -> Navegacion.
+    {
+        Editor ed;
+        newBuffer(ed);
+        CHECK(ed.state_ == State::Navegacion);
+        openSelector(ed);
+        press(ed, EventType::InsertNewline);   // mismo buffer (B1)
+        CHECK(ed.state_ == State::Navegacion);
+        CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    }
+    // Interaccion (sin rango) -> Enter -> Navegacion.
+    {
+        Editor ed;
+        newBuffer(ed);                   // 2 buffers para poder abrir selector
+        type(ed, "hola");
+        openSelector(ed);                // priorState_ = Interaccion
+        press(ed, EventType::InsertNewline);   // mismo buffer (B1)
+        CHECK(ed.state_ == State::Navegacion); // reconcile, no priorState_
+        CHECK_EQ(ed.active().document.lineAt(0), "hola");  // contenido intacto
+    }
+    // Seleccion (con rango) -> Enter -> Seleccion, rango intacto.
+    {
+        Editor ed;
+        type(ed, "abc");
+        press(ed, EventType::Escape);
+        press(ed, EventType::MoveHome);
+        pressEvent(ed, insert('s'));
+        press(ed, EventType::MoveRight);
+        openSelector(ed);
+        press(ed, EventType::InsertNewline);
+        CHECK(ed.state_ == State::Seleccion);
+        CHECK(ed.hasSelection());
+    }
+}
+
+// Seleccion -> Ctrl+K t -> ESC cancela el selector SIN tocar la seleccion
+// y restaurando el modo previo (Seleccion), a diferencia del Enter que lo
+// reconcilia con el buffer.
+TEST(ctrl_k_t_escape_from_selection_keeps_selection) {
+    Editor ed;
+    type(ed, "abcdef");                  // B0
+    press(ed, EventType::Escape);
+    newBuffer(ed);                       // B1 vacio activo
+    ed.activateBuffer(0);                // seleccion sobre B0
+    press(ed, EventType::MoveHome);
+    pressEvent(ed, insert('s'));
+    press(ed, EventType::MoveRight);
+    CHECK(ed.state_ == State::Seleccion);
+
+    openSelector(ed);
+    CHECK(ed.state_ == State::BufferSelector);
+    press(ed, EventType::Escape);          // cancelar
+
+    CHECK(ed.state_ == State::Seleccion);  // restaura priorState_
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK(ed.hasSelection());              // seleccion intacta
+    CHECK_EQ(ed.active().document.lineAt(0), "abcdef");
+}
+
+// ---------------------------------------------------------------------------
+// Seleccion -> Ctrl+K t -> B -> volver A. A CONSERVA la seleccion:
+// el span seleccionado sigue siendo exactamente el mismo texto ("world").
+// ---------------------------------------------------------------------------
+TEST(ctrl_k_t_buffer_switch_returns_preserves_named_selection) {
+    Editor ed;
+    type(ed, "hello world");             // A = B0
+    press(ed, EventType::Escape);
+    press(ed, EventType::MoveHome);      // col 0
+    for (int i = 0; i < 6; ++i) press(ed, EventType::MoveRight); // col 6
+    pressEvent(ed, insert('s'));         // seleccion: anchor (0,6)
+    for (int i = 0; i < 5; ++i) press(ed, EventType::MoveRight); // -> (0,11)
+    CHECK(ed.state_ == State::Seleccion);
+
+    auto span = [&] {                     // texto seleccionado (una linea)
+        auto s = ed.selection();
+        CHECK(s.has_value());
+        return ed.active().document.lineAt(s->start.line)
+                   .substr(s->start.col, s->end.col - s->start.col);
+    };
+    CHECK_EQ(span(), "world");
+
+    newBuffer(ed);                       // Ctrl+K n -> B1 vacio activo
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK(ed.state_ == State::Navegacion);
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(ed.active().document.lineAt(0), "");
+
+    openSelector(ed);                    // Ctrl+K t
+    press(ed, EventType::MoveUp);        // -> A (B0)
+    press(ed, EventType::InsertNewline);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK(ed.state_ == State::Seleccion);      // vuelve a seleccion...
+    CHECK(ed.hasSelection());
+    CHECK_EQ(span(), "world");                 // ...con "world" aun seleccionado
 }
 
 // ---------------------------------------------------------------------------
@@ -640,6 +840,71 @@ TEST(save_as_enter_saves_file) {
     openSaveAs(ed);
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.statusMessage_, "Guardado.");
+}
+
+// Ctrl+K n -> escribir -> Ctrl+K Save As -> guardar. Al confirmar:
+// filename actualizado, SinNombre deja de mostrarse, modified == false.
+// Luego Ctrl+K Ctrl+S guarda de nuevo en el mismo path (sin prompt).
+TEST(save_as_on_new_buffer_updates_name_and_display) {
+    TempFile f;
+    Editor ed;
+    newBuffer(ed);                       // B = SinNombre1
+    CHECK_EQ(ed.active().unnamedName, "SinNombre1");
+    type(ed, "hello");
+    press(ed, EventType::Escape);
+    CHECK(ed.active().filename.empty());          // aun sin nombre
+    CHECK_EQ(ed.active().displayName(), "SinNombre1");
+
+    openSaveAs(ed);                      // Ctrl+K Ctrl+S -> prompt
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
+    typePrompt(ed, f.path);
+    press(ed, EventType::InsertNewline);          // Enter: guardar
+
+    CHECK(!ed.active().filename.empty());         // filename actualizado
+    CHECK_EQ(ed.active().filename, f.path);
+    const std::string base = f.path.substr(f.path.find_last_of('/') + 1);
+    CHECK_EQ(ed.active().displayName(), base);    // SinNombre desaparece de la UI
+    CHECK(!ed.active().modified);                 // modified == false
+
+    // Ctrl+K Ctrl+S ya no abre el prompt: guarda normal en el mismo path.
+    type(ed, "!");
+    press(ed, EventType::Escape);
+    CHECK(ed.active().modified);
+    openSaveAs(ed);
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Navegacion));
+    CHECK(!ed.active().modified);
+
+    std::ifstream in(f.path);
+    std::string content((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>());
+    CHECK_EQ(content, "hello!");                  // guardado en el nuevo path
+}
+
+// Ctrl+K n -> escribir -> Ctrl+K Save As -> Esc: se cancela sin perder nada.
+// El buffer sigue sin nombre (SinNombre), el contenido esta intacto y el
+// estado sigue marcado como modificado.
+TEST(save_as_cancel_keeps_new_buffer_untouched) {
+    TempFile f;
+    Editor ed;
+    newBuffer(ed);                       // B = SinNombre1
+    type(ed, "hello");
+    press(ed, EventType::Escape);
+    CHECK_EQ(ed.active().document.lineAt(0), "hello");
+    CHECK(ed.active().modified);
+    const size_t undoSize = ed.active().undoStack.size();
+
+    openSaveAs(ed);                      // Ctrl+K Ctrl+S -> prompt
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
+    typePrompt(ed, f.path);              // se escribe una ruta...
+    press(ed, EventType::Escape);        // ...pero se cancela con ESC
+
+    CHECK_EQ(ed.active().filename, std::string());        // sigue sin nombre
+    CHECK_EQ(ed.active().unnamedName, "SinNombre1");      // sigue SinNombre
+    CHECK_EQ(ed.active().displayName(), "SinNombre1");
+    CHECK_EQ(ed.active().document.lineAt(0), "hello");    // contenido intacto
+    CHECK(ed.active().modified);                          // modified sigue true
+    CHECK_EQ(ed.active().undoStack.size(), undoSize);      // historial intacto
+    CHECK(!std::ifstream(f.path).good());                  // no se creo archivo
 }
 
 TEST(save_as_cancel_with_escape) {

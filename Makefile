@@ -31,7 +31,9 @@ TEST_SRC := $(TEST_DIR)/test_main.cpp \
             $(TEST_DIR)/test_clipboard.cpp \
             $(TEST_DIR)/test_buffers.cpp \
             $(TEST_DIR)/test_filebrowser.cpp \
-            $(TEST_DIR)/test_roundtrip.cpp
+            $(TEST_DIR)/test_roundtrip.cpp \
+            $(TEST_DIR)/test_interaction.cpp \
+            $(TEST_DIR)/test_e2e.cpp
 TEST_BIN := edit_tests
 
 # --- Build normal (build/) y sanitizado (build-san/) ---

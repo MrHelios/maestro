@@ -1181,17 +1181,19 @@ TEST(selection_c_exits_to_navegacion) {
     CHECK_EQ(ed.active().document.lineAt(0), "abcde");
 }
 
-TEST(selection_other_char_ignored) {
-    // En v0.5 una letra que no sea c/x ya NO reemplaza la seleccion: se
-    // ignora y el modo sigue activo.
+TEST(selection_other_char_replaces) {
+    // P0 interaction: una letra que no es comando de Seleccion REEMPLAZA el
+    // rango marcado por esa letra y entra a Interaccion (en una sola edicion,
+    // es decir con una sola entrada de undo para todo el grupo de escritura
+    // consecutivo). Termina la seleccion.
     Editor ed;
     setupAbcde(ed);
     selectPress(ed, EventType::MoveRight); // [c]
     CHECK(ed.hasSelection());
     ed.handleEvent(insert('Z'));
-    CHECK(ed.hasSelection());
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
-    CHECK_EQ(ed.active().document.lineAt(0), "abcde");
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
+    CHECK_EQ(ed.active().document.lineAt(0), "abZde"); // 'c' -> 'Z'
 }
 
 // ---------------------------------------------------------------------------

@@ -112,6 +112,15 @@ private:
     void registerCommands();
 
     State state_ = State::Navegacion;
+    // P0 interaction: grupo de escritura sobre seleccion. Cuando se escribe
+    // una letra sobre un rango marcado, el reemplazo se empuja UNA vez y la
+    // escritura consecutiva posterior se absorbe en la MISMA entrada de undo,
+    // de modo que "reemplazar + teclear" se deshace en una sola operacion.
+    // true solo mientras se digita continuamente tras un reemplazo de
+    // seleccion; cualquier otra accion (borrar, Enter, ESC, mover, undo/redo)
+    // o una escritura normal (sin reemplazo) lo apagan. La escritura normal
+    // sigue deshaciendose por caracter.
+    bool coalescingTyping_ = false;
     // Estado previo, guardado al entrar en Prefix para volver a el si
     // el prefijo se cancela o ejecuta (p.ej. guardar sin salir de
     // seleccion si el prefijo se abrio estando en Seleccion). Tambien se
@@ -192,6 +201,13 @@ private:
     // avanza (AvPag). Antes de los bordes el cursor se clampa para que
     // nunca quede fuera del documento ni el viewport mas alla del EOF.
     void applyPage(int dir);
+
+    // Borra el rango seleccionado actual (si hay texto marcado) y deja el
+    // cursor en el INICIO del rango. Empuja historial de undo y marca
+    // modified como una edicion (igual que cortar, pero SIN tocar el
+    // portapapeles: la seleccion se elimina sin copiarla). No cambia de
+    // modo. Devuelve true si borro algo.
+    bool deleteSelection();
 
     void undo();
     void redo();

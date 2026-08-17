@@ -900,6 +900,15 @@ static bool stateEqual(const BufferState& a, const BufferState& b) {
 // que puede pedirse de undo/redo (fuerte reversibilidad), y solo se
 // comprueba contra un generador aleatorio de secuencias.
 static void assertUndoRedoRoundtrip(Editor& ed) {
+    // La caminata aleatoria puede terminar con una EDICION DESHECHA a medias
+    // (alguna entrada pendiente en redoStack: una rama de historial que el
+    // usuario ya dejo de lado, no parte del camino hacia el estado final).
+    // Reproducir esa rama durante el redo devolveria un documento distinto,
+    // rompiendo la comparacion contra el estado final. La reversibilidad
+    // fuerte concierne a la CADENA COMMITTED (la del undoStack); normalizamos
+    // descartando la rama divergente que haya quedado pendiente.
+    ed.active().redoStack.clear();
+
     // Captura el estado tras la secuencia aleatoria.
     const BufferState finalState = capture(ed.active());
 
