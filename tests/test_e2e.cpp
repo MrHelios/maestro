@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -655,4 +656,728 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     // comprobar AMBOS archivos en disco (byte a byte, independientes).
     CHECK_EQ(readBytes(fileA.path), "AAAA2\n"); // A conservo su '\n' final
     CHECK_EQ(readBytes(fileB.path), "BBBB2");   // B empezo vacio: sin '\n'
+}
+
+// ===========================================================================
+// E2E-07 — Multi-buffer + undo/redo (P0)
+//
+//   open A -> Ctrl+K n (B) -> A edit -> B edit -> A undo -> B undo
+//       -> A redo -> B redo
+//
+// El undo/redo vive en CADA buffer: deshacer A no toca B y viceversa; y
+// editar un buffer NO limpia el historial (ni la rama de redo) del otro.
+//
+// Workflow determinista (ediciones de UNA letra para que undo/redo sean 1:1):
+//   open A     : "AAA\n"        -> buffer 0 activo, cursor (0,0), modified=false
+//   Ctrl+K n   : buffer B nuevo (vacio, sin nombre), activo
+//   A edit     : volver a A (Ctrl+K t ↑ Enter) + MoveEnd + 'X' -> "AAAX"
+//   B edit     : volver a B (Ctrl+K t ↓ Enter) + 'B'          -> "B"
+//   A undo     : volver a A + Ctrl+U -> "AAA", modified=false
+//   B undo     : volver a B + Ctrl+U -> ""  , modified=false
+//   A redo     : volver a A + Ctrl+Y -> "AAAX", modified=true
+//   B redo     : volver a B + Ctrl+Y -> "B", modified=true
+//
+// En cada paso se verifica tamien que las pilas undo/redo son por-buffer:
+// editar B no vacia el redo pendiente de A, y deshacer A no altera B.
+// ---------------------------------------------------------------------------
+TEST(e2e_07_multibuffer_undo_redo_isolated) {
+    TempFile fileA;
+    writeBytes(fileA.path, "AAA\n");
+
+    Editor ed;
+    CHECK(ed.openFile(fileA.path));             // buffer A activo
+    CHECK_EQ(ed.active().document.lineAt(0), "AAA");
+    CHECK_EQ(ed.active().cursor.col, 0);
+    CHECK(!ed.active().modified);
+
+    // Ctrl+K n: buffer B nuevo (vacio), activo.
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('n'));
+    CHECK_EQ(ed.buffers.count(), 2);
+    CHECK_EQ(ed.active().document.lineAt(0), "");
+
+    // ---- A edit: volver a A y anexar 'X' -> "AAAX".
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));                // selector
+    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
+    Event enter;
+    enter.type = EventType::InsertNewline;
+    ed.handleEvent(enter);                      // activar A
+    press(ed, EventType::MoveEnd);              // (0,3)
+    type(ed, "X");                              // A = "AAAX"
+    CHECK_EQ(ed.active().document.lineAt(0), "AAAX");
+    CHECK(ed.active().modified);
+    CHECK_EQ(ed.active().undoStack.size(), 1u);
+
+    // ---- B edit: volver a B y escribir 'B' -> "B".
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));
+    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
+    ed.handleEvent(enter);
+    type(ed, "B");                              // B = "B"
+    CHECK_EQ(ed.active().document.lineAt(0), "B");
+    CHECK(ed.active().modified);
+    CHECK_EQ(ed.active().undoStack.size(), 1u);
+
+    // ---- A undo: volver a A y deshacer -> "AAA".
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));
+    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
+    ed.handleEvent(enter);
+    press(ed, EventType::Undo);                 // A deshace
+    CHECK_EQ(ed.active().document.lineAt(0), "AAA");
+    CHECK(!ed.active().modified);
+    CHECK_EQ(ed.active().undoStack.size(), 0u);
+    CHECK_EQ(ed.active().redoStack.size(), 1u); // A dejo una rama rehacible
+
+    // ---- B undo: volver a B y deshacer -> "".
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));
+    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
+    ed.handleEvent(enter);
+    press(ed, EventType::Undo);                 // B deshace
+    CHECK_EQ(ed.active().document.lineAt(0), "");
+    CHECK(!ed.active().modified);
+    CHECK_EQ(ed.active().undoStack.size(), 0u);
+    CHECK_EQ(ed.active().redoStack.size(), 1u);
+    // Editar/deshacer B NO toco la rama de redo pendiente de A.
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));
+    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
+    ed.handleEvent(enter);
+    CHECK_EQ(ed.active().redoStack.size(), 1u); // A aun puede rehacer
+
+    // ---- A redo: rehacer en A (el redo de A sigue vivo) -> "AAAX".
+    press(ed, EventType::Redo);                 // A rehace
+    CHECK_EQ(ed.active().document.lineAt(0), "AAAX");
+    CHECK(ed.active().modified);
+    CHECK_EQ(ed.active().redoStack.size(), 0u);
+
+    // ---- B redo: volver a B y rehacer -> "B".
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));
+    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
+    ed.handleEvent(enter);
+    press(ed, EventType::Redo);                 // B rehace
+    CHECK_EQ(ed.active().document.lineAt(0), "B");
+    CHECK(ed.active().modified);
+    CHECK_EQ(ed.active().redoStack.size(), 0u);
+
+    // Estado final: A="AAAX", B="B", cada uno con su propio modificado.
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));
+    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
+    ed.handleEvent(enter);
+    CHECK_EQ(ed.active().document.lineAt(0), "AAAX");
+    CHECK(ed.active().modified);
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));
+    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
+    ed.handleEvent(enter);
+    CHECK_EQ(ed.active().document.lineAt(0), "B");
+    CHECK(ed.active().modified);
+}
+
+// ===========================================================================
+// E2E-08 — FileBrowser: navegar directorios y abrir un archivo (P1)
+//
+//   open A -> Ctrl+K o -> navegar directorios -> abrir B -> editar B
+//       -> save -> volver A
+//
+// El explorador arranca en el cwd del proceso, asi que (igual que los tests
+// de interaccion) le sembramos el directorio de arranque a traves del estado
+// del FileBrowser (ed.fileBrowser.path_) para que el test sea determinista;
+// el resto del flujo (orden de entradas, subir/bajar, Enter, abrir, guardar,
+// selector) es 100% por eventos reales.
+//
+// Arbol temporal (base/):
+//   alpha.txt   "AAA\n"     (archivo A, se abre al inicio)
+//   beta/
+//     gamma.txt "BBB\n"     (archivo B, se abre desde el explorador)
+//
+//   open A      : openFile(alpha.txt) -> buffer 0 activo, "AAA"
+//   Ctrl+K o    : entra al explorador; sembramos base/ -> ["..","beta/","alpha.txt"]
+//   navegar     : MoveDown -> "beta/"; Enter (entra) -> ["..","gamma.txt"]
+//   abrir B     : MoveDown -> "gamma.txt"; Enter -> buffer B activo, "BBB"
+//   editar B    : MoveEnd + 'X' -> "BBBX", modified
+//   save        : Ctrl+K Ctrl+S (B tiene nombre) -> modified=false, disco="BBBX\n"
+//   volver A    : Ctrl+K t + MoveUp + Enter -> buffer A, "AAA" (intacto)
+// ---------------------------------------------------------------------------
+TEST(e2e_08_filebrowser_open_edit_save_switch) {
+    namespace fs = std::filesystem;
+
+    const std::string base =
+        "/tmp/edit_fb_" + std::to_string(::getpid()) + "_e2e08";
+    const std::string dirBeta  = base + "/beta";
+    const std::string pathA    = base + "/alpha.txt";
+    const std::string pathB    = dirBeta + "/gamma.txt";
+
+    fs::create_directories(dirBeta);
+    writeBytes(pathA, "AAA\n");
+    writeBytes(pathB, "BBB\n");
+
+    Editor ed;
+    CHECK(ed.openFile(pathA));                  // open A
+    CHECK_EQ(ed.active().document.lineAt(0), "AAA");
+    CHECK(!ed.active().modified);
+
+    // Ctrl+K o: entrar al explorador, luego sembrar el directorio de arranque
+    // (el explorador por defecto arranca en cwd; fijamos base/ para el test).
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('o'));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::FileBrowser));
+    ed.fileBrowser.path_ = base;                // sembrar dir inicial
+    ed.fileBrowser.reload();
+    ed.fileBrowser.index_ = 0;
+    CHECK_EQ(ed.fileBrowser.displayNames_.size(), 3u);
+    CHECK_EQ(ed.fileBrowser.displayNames_[0], "../");      // siempre arriba
+    CHECK_EQ(ed.fileBrowser.displayNames_[1], "beta/");   // carpetas primero
+    CHECK_EQ(ed.fileBrowser.displayNames_[2], "alpha.txt");
+
+    // navegar directorios: bajar a "beta/" y entrar.
+    press(ed, EventType::MoveDown);             // 0 -> 1 "beta/"
+    Event enter;
+    enter.type = EventType::InsertNewline;
+    ed.handleEvent(enter);                      // enter() -> entrar a beta/
+    CHECK(ed.fileBrowser.path_ == dirBeta);
+    CHECK_EQ(ed.fileBrowser.displayNames_.size(), 2u);
+    CHECK_EQ(ed.fileBrowser.displayNames_[0], "../");
+    CHECK_EQ(ed.fileBrowser.displayNames_[1], "gamma.txt");
+
+    // abrir B: bajar a "gamma.txt" y Enter.
+    press(ed, EventType::MoveDown);             // 0 -> 1 "gamma.txt"
+    ed.handleEvent(enter);                      // abrir archivo -> buffer B
+    CHECK_EQ(ed.buffers.count(), 2);            // A + B
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK(ed.active().document.lineAt(0) == "BBB");
+    CHECK(ed.active().filename == pathB);
+
+    // editar B: anexar 'X'.
+    press(ed, EventType::MoveEnd);              // (0,3)
+    type(ed, "X");                              // B = "BBBX"
+    CHECK_EQ(ed.active().document.lineAt(0), "BBBX");
+    CHECK(ed.active().modified);
+
+    // save: Ctrl+K Ctrl+S (B tiene nombre -> guardado directo).
+    prefix(ed, EventType::Prefix, EventType::Save);
+    CHECK(!ed.active().modified);
+    CHECK_EQ(readBytes(pathB), "BBBX\n");       // conservo el '\n' final de B
+
+    // volver A: selector Ctrl+K t, subir, Enter.
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));
+    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
+    ed.handleEvent(enter);
+    CHECK_EQ(ed.active().document.lineAt(0), "AAA");
+    CHECK(!ed.active().modified);
+    CHECK_EQ(readBytes(pathA), "AAA\n");        // A intacto en disco
+
+    // limpieza del arbol temporal.
+    fs::remove_all(base);
+}
+
+// ===========================================================================
+// E2E-09 — Nuevo buffer -> Save As (P0)
+//
+//   Ctrl+K n -> escribir archivo -> Save As -> elegir path -> save -> quit
+//   -> verificar filesystem
+//
+// Un buffer nuevo (Ctrl+K n) no tiene nombre, asi que Ctrl+K Ctrl+S no
+// guarda directo: abre el prompt "Guardar archivo:" (SaveAs). Se escribe la
+// ruta destino y Enter guarda y ancla el nombre al buffer. Luego quit y se
+// relee el archivo FUERA del editor para verificar los BYTES escritos.
+//
+// Workflow determinista:
+//   Ctrl+K n   : buffer nuevo sin nombre, vacio, activo, Navegacion
+//   escribir   : "Hola" + Enter + "mundo"      -> [ "Hola", "mundo" ]
+//   Save As    : Ctrl+K Ctrl+S                 -> state = SaveAs
+//   path       : escribir la ruta destino      -> Enter (commit)
+//                 -> filename = ruta, modified=false
+//   quit       : Ctrl+K Ctrl+Q                 -> running_=false
+//   filesystem : readBytes(ruta) == "Hola\nmundo" (sin '\n' final: el buffer
+//                 empezo vacio y nunca termino en newline)
+// ---------------------------------------------------------------------------
+TEST(e2e_09_new_buffer_save_as_byte_exact) {
+    TempFile f;                                 // ruta destino (no existe aun)
+
+    Editor ed;
+    // Ctrl+K n: buffer nuevo sin nombre, activo.
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('n'));
+    CHECK(ed.active().filename.empty());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.active().document.lineAt(0), "");
+
+    // escribir el contenido: "Hola\nmundo".
+    type(ed, "Hola");
+    CHECK_EQ(ed.active().document.lineAt(0), "Hola");
+    Event nl;
+    nl.type = EventType::InsertNewline;
+    ed.handleEvent(nl);                         // -> ["Hola", ""]
+    type(ed, "mundo");                          // -> ["Hola", "mundo"]
+    CHECK(ed.active().document.snapshot() ==
+          (std::vector<std::string>{"Hola", "mundo"}));
+    CHECK(ed.active().modified);
+
+    // Save As: Ctrl+K Ctrl+S -> prompt (buffer sin nombre).
+    prefix(ed, EventType::Prefix, EventType::Save);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
+
+    // elegir path: escribir la ruta destino y Enter.
+    for (char c : f.path)
+        ed.handleEvent(insert(c));
+    ed.handleEvent(nl);                         // Enter: commitSaveAs
+    CHECK(ed.active().filename == f.path);
+    CHECK(!ed.active().modified);
+    CHECK(ed.active().document.snapshot() ==
+          (std::vector<std::string>{"Hola", "mundo"}));   // el texto se conserva
+
+    // quit.
+    prefix(ed, EventType::Prefix, EventType::Quit);
+    CHECK(!ed.running_);
+
+    // verificar filesystem: el archivo fue creado en disco con los bytes.
+    CHECK_EQ(readBytes(f.path), "Hola\nmundo");
+}
+
+// ===========================================================================
+// E2E-10 — Nuevo buffer -> Save As cancelado (P1)
+//
+//   Ctrl+K n -> escribir -> Save As -> Esc -> seguir editando -> quit
+//
+// Cancelar el prompt "Guardar archivo:" con Esc debe volver al modo previo
+// SIN tocar nada: el buffer queda sin nombre, con su texto intacto y sigue
+// modificado. Se puede seguir editando, y al salir no se escribe nada.
+//
+// Workflow determinista:
+//   Ctrl+K n   : buffer nuevo sin nombre, activo
+//   escribir   : "Hola" + Enter + "mundo"      -> [ "Hola", "mundo" ]
+//   Save As    : Ctrl+K Ctrl+S                 -> state = SaveAs
+//   Esc        : cancela el prompt             -> vuelve a Interaccion
+//                 -> filename vacio, texto intacto, modified, sin guardar
+//   editar     : MoveEnd + '!'                 -> [ "Hola", "mundo!" ]
+//   quit       : Ctrl+K Ctrl+Q                 -> running_=false
+//   verificar  : filename aun vacio; el archivo destino NO se creo
+// ---------------------------------------------------------------------------
+TEST(e2e_10_new_buffer_save_as_cancel_keeps_state) {
+    TempFile f;                                 // ruta destino (nunca escrita)
+
+    Editor ed;
+    // Ctrl+K n: buffer nuevo sin nombre, activo.
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('n'));
+    CHECK(ed.active().filename.empty());
+
+    // escribir "Hola\nmundo".
+    type(ed, "Hola");
+    Event nl;
+    nl.type = EventType::InsertNewline;
+    ed.handleEvent(nl);
+    type(ed, "mundo");
+    CHECK(ed.active().document.snapshot() ==
+          (std::vector<std::string>{"Hola", "mundo"}));
+    CHECK(ed.active().modified);
+    CHECK_EQ(ed.active().cursor.col, 5);        // fin de "mundo" (1,5)
+
+    // Save As: Ctrl+K Ctrl+S -> prompt.
+    prefix(ed, EventType::Prefix, EventType::Save);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
+
+    // elegir algo de ruta y luego cancelar con Esc (no llega a confirmarse).
+    for (char c : f.path)
+        ed.handleEvent(insert(c));
+    press(ed, EventType::Escape);               // cancela el prompt
+
+    // El estado se CONSERVA: volvio al modo previo (Interaccion), el buffer
+    // sigue sin nombre, con su texto intacto y sigue modificado.
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
+    CHECK(ed.active().filename.empty());
+    CHECK(ed.active().document.snapshot() ==
+          (std::vector<std::string>{"Hola", "mundo"}));
+    CHECK(ed.active().modified);
+    CHECK_EQ(ed.active().cursor.col, 5);        // el cursor no se movio
+
+    // seguir editando: anexar '!' a "mundo".
+    press(ed, EventType::MoveEnd);              // (1,5)
+    ed.handleEvent(insert('!'));                // -> "mundo!"
+    CHECK(ed.active().document.snapshot() ==
+          (std::vector<std::string>{"Hola", "mundo!"}));
+    CHECK(ed.active().modified);
+
+    // quit.
+    prefix(ed, EventType::Prefix, EventType::Quit);
+    CHECK(!ed.running_);
+
+    // cancelar el Save As NO escribio nada: sin nombre y sin archivo creado.
+    CHECK(ed.active().filename.empty());
+    CHECK(!std::filesystem::exists(f.path));
+}
+
+// ===========================================================================
+// E2E-11 — Buffer selector: A/B/C/D (P1)
+//
+// Con 4 buffers (A B C D), abrir el selector y moverse:
+//   Ctrl+K t -> Down -> Down -> Enter  (elige C)
+//   -> edit C -> volver selector -> elegir A -> volver C
+// Verificar el estado de TODOS los buffers.
+//
+// El selector abre en el buffer activo; para que "Down Down -> C" sea
+// determinista, el flujo arranca con A activo. B, C, D se crean con
+// Ctrl+K n y se les escribe contenido (indices 0=A 1=B 2=C 3=D).
+//
+//   setup   : A="AAA" (archivo) ; B="BBB" ; C="CCC" ; D="DDD"  (activo=D)
+//             -> selector Up Up Up -> A (activo A para arrancar)
+//   Ctrl+K t: selector @A -> Down Down -> Enter -> activar C ("CCC")
+//   edit C  : MoveEnd + '!'              -> C="CCC!"
+//   volver  : Ctrl+K t @C -> Up Up -> Enter -> A ("AAA")
+//   volver C: Ctrl+K t @A -> Down Down -> Enter -> C ("CCC!" conservado)
+//   verificar: A="AAA", B="BBB", C="CCC!", D="DDD", y al final se activa C.
+// ---------------------------------------------------------------------------
+TEST(e2e_11_buffer_selector_abc_verify_states) {
+    TempFile fileA;
+    writeBytes(fileA.path, "AAA\n");
+
+    Editor ed;
+    CHECK(ed.openFile(fileA.path));             // buffer 0 = A
+    Event enter;
+    enter.type = EventType::InsertNewline;
+
+    // B, C, D: buffer nuevo + escribir contenido.
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('n'));
+    type(ed, "BBB");                            // buffer 1 = B "BBB"
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('n'));
+    type(ed, "CCC");                            // buffer 2 = C "CCC"
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('n'));
+    type(ed, "DDD");                            // buffer 3 = D "DDD" (activo)
+    CHECK_EQ(ed.buffers.count(), 4);
+
+    // Activar A para arrancar el flujo desde el tope del selector.
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));                // selector @ D(3)
+    press(ed, EventType::MoveUp);               // -> ...
+    press(ed, EventType::MoveUp);
+    press(ed, EventType::MoveUp);               // -> 0 (A)
+    ed.handleEvent(enter);                      // activar A
+    CHECK_EQ(ed.active().document.lineAt(0), "AAA");
+
+    // ---- Ctrl+K t -> Down -> Down -> Enter: activar C (indice 2).
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::BufferSelector));
+    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
+    press(ed, EventType::MoveDown);             // 1 -> 2 (C)
+    ed.handleEvent(enter);                      // activar C
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.active().document.lineAt(0), "CCC");
+
+    // ---- editar C: anexar '!' -> "CCC!".
+    press(ed, EventType::MoveEnd);              // (0,3)
+    type(ed, "!");                              // C = "CCC!"
+    CHECK_EQ(ed.active().document.lineAt(0), "CCC!");
+    CHECK(ed.active().modified);
+
+    // ---- volver selector y elegir A.
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));                // selector @ C(2)
+    press(ed, EventType::MoveUp);               // -> 1 (B)
+    press(ed, EventType::MoveUp);               // -> 0 (A)
+    ed.handleEvent(enter);                      // activar A
+    CHECK_EQ(ed.active().document.lineAt(0), "AAA");
+    CHECK(!ed.active().modified);               // A intacto/no modificado
+
+    // ---- volver a C: el buffer C conserva su edicion "CCC!".
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));                // selector @ A(0)
+    press(ed, EventType::MoveDown);             // -> 1 (B)
+    press(ed, EventType::MoveDown);             // -> 2 (C)
+    ed.handleEvent(enter);                      // activar C
+    CHECK_EQ(ed.active().document.lineAt(0), "CCC!");
+    CHECK_EQ(ed.active().cursor.col, 4);        // cursor conservado (fin "CCC!")
+
+    // ---- verificar todos los estados: B y D quedaron como estaban.
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));                // selector @ C(2)
+    press(ed, EventType::MoveDown);             // -> 3 (D)
+    ed.handleEvent(enter);
+    CHECK_EQ(ed.active().document.lineAt(0), "DDD");
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));                // selector @ D(3)
+    press(ed, EventType::MoveUp);               // -> 2 (C)
+    press(ed, EventType::MoveUp);               // -> 1 (B)
+    ed.handleEvent(enter);
+    CHECK_EQ(ed.active().document.lineAt(0), "BBB");
+
+    // de vuelta a C (el estado final pedido), aun con su edicion.
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('t'));                // selector @ B(1)
+    press(ed, EventType::MoveDown);             // -> 2 (C)
+    ed.handleEvent(enter);
+    CHECK_EQ(ed.active().document.lineAt(0), "CCC!");
+    CHECK_EQ(ed.buffers.count(), 4);            // nadie se perdio
+}
+
+// ===========================================================================
+// E2E-12 — Binario / byte-safe (P0)
+//
+// Un archivo que contiene TODOS los bytes 0x00..0xFF en orden. El \n (0x0A)
+// actua de separador de linea, por lo que el archivo queda partido en varias
+// lineas; el resto son bytes de contenido (incluidos 0x00 NUL y 0x80..0xFF).
+//
+// El objetivo es DETECTAR una conversion accidental de char/UTF-8 al cargar,
+// mover el cursor, editar, deshacer o guardar. Si el editor convirtiera bytes
+// en algo (validacion/codificacion), el conteo de bytes romperia.
+//
+//   setup  : content = concatenacion de 0x00..0xFF; writeBytes(path, content)
+//   open   : readBytes + serialize(documento) deben reproducir `content` EXACTO
+//            (prueba de que abre sin conversion, incluida la cola sin \n).
+//   move   : MoveEnd, MoveDown, MoveHome, MoveRight (cursor sobre bytes altos)
+//   edit   : insertar 0xE9 (byte aislado UTF-8) -> modified=true
+//   undo   : restaurar el documento exacto -> modified=false
+//   save   : Ctrl+K Ctrl+S -> readBytes(path) == content (byte a byte)
+// ---------------------------------------------------------------------------
+TEST(e2e_12_binary_bytes_00_to_ff_roundtrip) {
+    std::string content;
+    for (int i = 0; i <= 255; ++i)
+        content.push_back(static_cast<char>(i));
+    CHECK_EQ(content.size(), 256u);
+
+    TempFile f;
+    writeBytes(f.path, content);
+
+    Editor ed;
+    CHECK(ed.openFile(f.path));
+    Buffer& b = ed.active();
+
+    // Serializa el documento como se guardaria en disco (lineas unidas por \n,
+    // mas la cola si endsWithNewline). Comparar contra `content` verifica sin
+    // conversion al abrir.
+    auto serialize = [&b] {
+        std::string s;
+        int n = b.document.lineCount();
+        for (int i = 0; i < n; ++i) {
+            s += b.document.lineAt(i);
+            if (i + 1 < n)
+                s += "\n";
+        }
+        if (b.document.endsWithNewline())
+            s += "\n";
+        return s;
+    };
+    CHECK_EQ(serialize(), content);
+    CHECK(!b.modified);
+
+    // move: ejercitar el cursor sobre bytes arbitrarios (incluidos 0x80..0xFF).
+    press(ed, EventType::MoveEnd);
+    press(ed, EventType::MoveDown);
+    press(ed, EventType::MoveHome);
+    press(ed, EventType::MoveRight);
+
+    // edit: insertar un byte aislado UTF-8 (0xE9), bien en Interaccion.
+    ed.handleEvent(insert('i'));                 // entrar a Interaccion
+    Event raw;
+    raw.type = EventType::InsertChar;
+    raw.text = std::string(1, static_cast<char>(0xE9));
+    ed.handleEvent(raw);                         // insertar 0xE9
+    CHECK(b.modified);
+
+    // undo: restaurar el documento exacto (incluida la cola sin \n).
+    press(ed, EventType::Undo);
+    CHECK(!b.modified);
+    CHECK_EQ(serialize(), content);
+
+    // save: guardar y releer en disco byte a byte.
+    prefix(ed, EventType::Prefix, EventType::Save);
+    CHECK(!b.modified);
+    CHECK_EQ(readBytes(f.path), content);
+}
+
+// ===========================================================================
+// E2E-13 — Error al guardar (P0)
+//
+// buffer nuevo -> editar -> intentar guardar (Save As) en un path invalido
+// (directorio inexistente -> ofstream no puede abrir el archivo ->
+// saveToFile()==false). La ruta se elige en el prompt de "Guardar archivo:",
+// que es donde se escribe un path; en un buffer con nombre Ctrl+K Ctrl+S
+// guarda directo (sin prompt), asi que el error de path solo se dispara aqui.
+//
+// Verificar:
+//   - error visible     (statusMessage_ = "Error al guardar: <path>")
+//   - contenido del buffer INTACTO (el error no toco el documento)
+//   - modified == true  (los cambios no se marcaron como guardados)
+//   - editor sigue funcionando (ESC vuelve a Navegacion y un Save As a una
+//     ruta valida termina correctamente en disco)
+// ---------------------------------------------------------------------------
+TEST(e2e_13_save_error_invalid_path) {
+    const std::string badParent = "/tmp/maestro_e2e13_missing_dir";
+    const std::string badPath = badParent + "/out.txt";
+    std::filesystem::remove_all(badParent);      // garantizar que NO existe
+
+    TempFile f;                                 // ruta valida de recuperacion
+
+    Editor ed;
+    Event nl;
+    nl.type = EventType::InsertNewline;
+
+    // buffer nuevo (sin nombre) y escribir contenido.
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('n'));
+    CHECK(ed.active().filename.empty());
+    type(ed, "AAA_world");                       // -> Interaccion
+    CHECK_EQ(ed.active().document.lineAt(0), "AAA_world");
+    CHECK(ed.active().modified);
+
+    // Save As a una ruta invalida: Ctrl+K Ctrl+S -> escribir path -> Enter.
+    prefix(ed, EventType::Prefix, EventType::Save);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
+    for (char c : badPath)
+        ed.handleEvent(insert(c));
+    ed.handleEvent(nl);                          // Enter: intenta guardar
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
+
+    // error visible
+    CHECK_EQ(ed.statusMessage_, "Error al guardar: " + badPath);
+    CHECK(!std::filesystem::exists(badPath));    // nada se escribio en disco
+
+    // contenido del buffer INTACTO y seguimos modificados
+    CHECK_EQ(ed.active().document.lineAt(0), "AAA_world");
+    CHECK(ed.active().modified);
+    CHECK(ed.active().filename.empty());         // no se caso a la ruta mala
+
+    // editor sigue funcionando: ESC sale del prompt (vuelve a priorState_,
+    // que aqui es Interaccion, porque la edicion se hizo con type)...
+    press(ed, EventType::Escape);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
+    CHECK_EQ(ed.active().document.lineAt(0), "AAA_world");   // intacto
+
+    // ...y un Save As a una ruta VALIDA termina en disco ya sin error.
+    prefix(ed, EventType::Prefix, EventType::Save);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
+    for (char c : f.path)
+        ed.handleEvent(insert(c));
+    ed.handleEvent(nl);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
+    CHECK_EQ(ed.active().filename, f.path);
+    CHECK(!ed.active().modified);
+    CHECK_EQ(ed.active().document.lineAt(0), "AAA_world");   // intacto
+    CHECK_EQ(readBytes(f.path), "AAA_world");
+
+    // limpieza
+    std::filesystem::remove_all(badParent);
+}
+
+// ===========================================================================
+// E2E-14 — Error al abrir desde el FileBrowser (P1)
+//
+//   open A -> editar (historial) -> seleccionar -> Ctrl+K o -> FileBrowser
+//   -> intentar abrir un archivo SIN permisos de lectura -> error visible
+//
+// El editor NO debe: crashear, perder el buffer actual, perder la seleccion,
+// perder el historial de undo/redo, ni cambiar accidentalmente de buffer.
+//
+// openFileToBuffer ante un error real (PermissionDenied) no crea buffer ni
+// toca nada: solo pinta el error en la fila de mensajes. La verificacion es
+// que TODO el estado previo sobrevive byte/columna a columna.
+//
+// Arbol temporal (base/):
+//   alpha.txt   "AAA\n"     (archivo A, se abre al inicio)
+//   no_perm.txt "SECRET\n"  (sin permisos de lectura -> PermissionDenied)
+//
+//   open A       : openFile(alpha.txt) -> buffer 0 activo, "AAA"
+//   editar       : MoveEnd + "XYZ" -> "AAAXYZ" (historial de undo/redo)
+//   seleccionar  : ESC (a Navegacion) + 's' (anchor=cursor) + MoveLeft x2
+//   Ctrl+K o     : entra al FileBrowser; sembramos base/
+//   abrir malo   : MoveDown x2 -> "no_perm.txt"; Enter -> error, sin cambio
+// ---------------------------------------------------------------------------
+TEST(e2e_14_filebrowser_open_error_preserves_state) {
+    namespace fs = std::filesystem;
+
+    const std::string base =
+        "/tmp/edit_fb_" + std::to_string(::getpid()) + "_e2e14";
+    const std::string pathA = base + "/alpha.txt";
+    const std::string pathNoPerm = base + "/no_perm.txt";
+
+    fs::create_directories(base);
+    writeBytes(pathA, "AAA\n");
+    writeBytes(pathNoPerm, "SECRET\n");
+    fs::permissions(pathNoPerm, fs::perms::none);   // 000: sin lectura
+
+    Editor ed;
+    CHECK(ed.openFile(pathA));                  // buffer 0 = A
+    CHECK_EQ(ed.active().document.lineAt(0), "AAA");
+
+    // editar: crear historial de undo/redo (sin guardar).
+    press(ed, EventType::MoveEnd);              // (0,3)
+    type(ed, "XYZ");                            // -> "AAAXYZ"
+    CHECK_EQ(ed.active().document.lineAt(0), "AAAXYZ");
+    CHECK(ed.active().modified);
+
+    // seleccionar "XY": ESC a Navegacion, 's' (anchor=cursor), MoveLeft x2.
+    press(ed, EventType::Escape);               // Interaccion -> Navegacion
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    ed.handleEvent(insert('s'));                // Seleccion, anchor=(0,6)
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+    press(ed, EventType::MoveLeft);             // position -> (0,5)
+    press(ed, EventType::MoveLeft);             // position -> (0,4)
+    CHECK(ed.hasSelection());
+
+    // recordar el estado previo, para comparar que nada cambia.
+    const std::string beforeDoc = ed.active().document.snapshot().empty()
+                                      ? std::string()
+                                      : ed.active().document.lineAt(0);
+    CHECK(ed.active().selection.has_value());
+    const auto anchorBefore = ed.active().selection->anchor;
+    const auto posBefore = ed.active().selection->position;
+
+    // Ctrl+K o: abrir el FileBrowser y sembrar base/ (ver E2E-08).
+    press(ed, EventType::Prefix);
+    ed.handleEvent(insert('o'));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::FileBrowser));
+    ed.fileBrowser.path_ = base;
+    ed.fileBrowser.reload();
+    ed.fileBrowser.index_ = 0;
+    CHECK_EQ(ed.fileBrowser.displayNames_.size(), 3u);
+    CHECK_EQ(ed.fileBrowser.displayNames_[0], "../");
+    CHECK_EQ(ed.fileBrowser.displayNames_[1], "alpha.txt");
+    CHECK_EQ(ed.fileBrowser.displayNames_[2], "no_perm.txt");
+
+    // intentar abrir el archivo sin permisos.
+    Event enter;
+    enter.type = EventType::InsertNewline;
+    press(ed, EventType::MoveDown);             // 0 -> 1 "alpha.txt"
+    press(ed, EventType::MoveDown);             // 1 -> 2 "no_perm.txt"
+    ed.handleEvent(enter);                      // Enter: intenta abrir
+
+    // --- error visible, editor vivo, nada cambio ---
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::FileBrowser));
+    CHECK(ed.statusMessage_.find("Sin permisos de lectura:") == 0);
+    CHECK(ed.statusMessage_.find(pathNoPerm) != std::string::npos);
+
+    CHECK_EQ(ed.buffers.count(), 1);            // NO se creo buffer nuevo
+    CHECK(ed.active().filename == pathA);       // sigue el mismo buffer (A)
+    CHECK_EQ(ed.active().document.lineAt(0), beforeDoc);   // contenido intacto
+    CHECK(ed.active().modified);                // sigue sin guardar
+
+    // historial intacto: undo -> "AAA", redo -> "AAAXYZ".
+    press(ed, EventType::Escape);               // FileBrowser -> Seleccion
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+    CHECK(ed.hasSelection());                   // seleccion intacta
+    CHECK(ed.active().selection->anchor == anchorBefore);
+    CHECK(ed.active().selection->position == posBefore);
+
+    press(ed, EventType::Escape);               // Seleccion -> Navegacion
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    // historial intacto: undo por caracter -> "AAA", redo -> "AAAXYZ".
+    for (int i = 0; i < 3; ++i)
+        press(ed, EventType::Undo);
+    CHECK_EQ(ed.active().document.lineAt(0), "AAA");
+    for (int i = 0; i < 3; ++i)
+        press(ed, EventType::Redo);
+    CHECK_EQ(ed.active().document.lineAt(0), "AAAXYZ");
+    CHECK(ed.active().filename == pathA);       // nunca se cambio de buffer
+
+    // limpieza del arbol temporal.
+    fs::remove_all(base);
 }

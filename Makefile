@@ -63,28 +63,33 @@ SAN_OBJ_NO_MAIN := $(filter-out build-san/main.o,$(SAN_OBJ))
 # Flags extra para el build sanitizado (compilacion y link).
 SANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer -g
 
-build/%.o: core/%.cpp build
+# Los directorios build/ y build-san/ se declaran como prerequisito
+# ORDER-ONLY (| build): hacen falta para poder escribir los .o, pero su
+# mtime NO debe invalidar los objetos. Si fueran prerequisito normal, el
+# directorio se actualiza al escribir cada .o y quedaria mas nuevo que los
+# objetos anteriores, provocando un rebuild perpetuo en cada `make`.
+build/%.o: core/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-build/%.o: ui/%.cpp build
+build/%.o: ui/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-build/%.o: terminal/%.cpp build
+build/%.o: terminal/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-build/%.o: tests/%.cpp build
+build/%.o: tests/%.cpp | build
 	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
 
-build-san/%.o: core/%.cpp build-san
+build-san/%.o: core/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
-build-san/%.o: ui/%.cpp build-san
+build-san/%.o: ui/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
-build-san/%.o: terminal/%.cpp build-san
+build-san/%.o: terminal/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
-build-san/%.o: tests/%.cpp build-san
+build-san/%.o: tests/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
 
 build build-san:
