@@ -12,28 +12,15 @@ BIN := edit
 SRC := $(wildcard core/*.cpp ui/*.cpp terminal/*.cpp)
 
 # --- Tests ---
+# Los tests se agrupan por nivel: unit/ (core puro), interaction/ (usan
+# ui/) y e2e/ (flujo completo); los helpers (test_framework.h) viven en
+# helpers/. test_main.cpp es el runner en la raiz de tests/.
 TEST_DIR := tests
-TEST_INC := -I$(TEST_DIR)
+TEST_INC := -I$(TEST_DIR) -I$(TEST_DIR)/helpers
 TEST_SRC := $(TEST_DIR)/test_main.cpp \
-            $(TEST_DIR)/test_document.cpp \
-            $(TEST_DIR)/test_cursor.cpp \
-            $(TEST_DIR)/test_event.cpp \
-            $(TEST_DIR)/test_terminal_event.cpp \
-            $(TEST_DIR)/test_editor.cpp \
-            $(TEST_DIR)/test_keymap.cpp \
-            $(TEST_DIR)/test_selection.cpp \
-            $(TEST_DIR)/test_renderer.cpp \
-            $(TEST_DIR)/test_modes.cpp \
-            $(TEST_DIR)/test_invariants.cpp \
-            $(TEST_DIR)/test_utf8.cpp \
-            $(TEST_DIR)/test_truncate.cpp \
-            $(TEST_DIR)/test_utf8range.cpp \
-            $(TEST_DIR)/test_clipboard.cpp \
-            $(TEST_DIR)/test_buffers.cpp \
-            $(TEST_DIR)/test_filebrowser.cpp \
-            $(TEST_DIR)/test_roundtrip.cpp \
-            $(TEST_DIR)/test_interaction.cpp \
-            $(TEST_DIR)/test_e2e.cpp
+            $(wildcard $(TEST_DIR)/unit/*.cpp) \
+            $(wildcard $(TEST_DIR)/interaction/*.cpp) \
+            $(wildcard $(TEST_DIR)/e2e/*.cpp)
 TEST_BIN := edit_tests
 
 # --- Build normal (build/) y sanitizado (build-san/) ---
@@ -80,6 +67,15 @@ build/%.o: terminal/%.cpp | build
 build/%.o: tests/%.cpp | build
 	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
 
+build/%.o: tests/unit/%.cpp | build
+	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
+
+build/%.o: tests/interaction/%.cpp | build
+	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
+
+build/%.o: tests/e2e/%.cpp | build
+	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
+
 build-san/%.o: core/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
@@ -90,6 +86,15 @@ build-san/%.o: terminal/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
 build-san/%.o: tests/%.cpp | build-san
+	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
+
+build-san/%.o: tests/unit/%.cpp | build-san
+	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
+
+build-san/%.o: tests/interaction/%.cpp | build-san
+	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
+
+build-san/%.o: tests/e2e/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
 
 build build-san:
