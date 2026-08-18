@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <string>
 
 #include "test_framework.h"
@@ -66,15 +67,25 @@ std::string curFrame(const std::string& line, int byteCol) {
                          State::Navegacion, std::nullopt);
 }
 
-// Extrae la columna VISUAL a la que el renderer mueve el cursor al final
-// del frame. La secuencia es "\x1b[<fila>;<col>H" (fila 1 en un frame de
-// una sola linea). Devuelve -1 si no la encuentra.
+// Ancho del gutter de numeros de linea (mismo calculo que el Renderer).
+int gutterWFor(int totalLines) {
+    int digits = 1;
+    for (int n = totalLines; n >= 10; n /= 10) ++digits;
+    return std::max(3, digits + 1);
+}
+
+// Extrae la columna VISUAL del texto a la que el renderer mueve el cursor
+// al final del frame. La secuencia es "\x1b[<fila>;<col>H" (fila 1 en un
+// frame de una sola linea); de esa columna de terminal se resta el gutter
+// de numeros de linea (3 para un frame de 1 linea), porque el texto ya no
+// arranca en la columna 1 de la terminal. Devuelve -1 si no la encuentra.
 int cursorVisibleCol(const std::string& frame) {
     size_t pos = frame.rfind("\x1b[1;");
     if (pos == std::string::npos) return -1;
     size_t end = frame.find('H', pos);
     if (end == std::string::npos) return -1;
-    return std::stoi(frame.substr(pos + 4, end - pos - 4));
+    int terminalCol = std::stoi(frame.substr(pos + 4, end - pos - 4));
+    return terminalCol - gutterWFor(1);
 }
 
 } // namespace
@@ -296,48 +307,52 @@ int colWidthLocal(const std::string& s) {
     return col;
 }
 
-// Fila del documento (la primera, antes del primer \r\n) ya sin ANSI.
-std::string docRow(const std::string& frame) {
+// Fila del documento (la primera, antes del primer \r\n) ya sin ANSI y con
+// el gutter de numeros de linea restado. `lineCount` es el numero de lineas
+// del documento con que se (re)calcula el ancho del gutter.
+std::string rowText(const std::string& frame, int lineCount) {
     std::string plain = stripAnsiLocal(frame);
     size_t nl = plain.find("\r\n");
-    if (nl == std::string::npos) return plain;
-    return plain.substr(0, nl);
+    if (nl == std::string::npos) nl = plain.size();
+    std::string row = plain.substr(0, nl);
+    int gw = gutterWFor(lineCount);
+    row.erase(0, std::min(gw, static_cast<int>(row.size())));
+    return row;
+}
+
+// Renderiza la fila de un documento de 2 lineas (el cursor va en la linea
+// 2, asi la fila probada no lleva resaltado de "fila actual") con `cols`
+// columnas de ANCHO DE TEXTO (el gutter se resta del viewport) y devuelve
+// solo el TEXTO visible, sin ANSI y sin el gutter.
+std::string textRow(const std::string& line, int cols) {
+    Document doc; doc.restore({line, ""});
+    int gw = gutterWFor(2);
+    Viewport vp; vp.top = 0; vp.height = 1; vp.width = gw + cols;
+    Cursor cur; cur.line = 1; cur.col = 0;
+    Renderer r;
+    std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
+    return rowText(f, 2);
 }
 
 } // namespace
 
 TEST(truncate_line_to_ascii_width) {
     // "abcdef" recortado a 3 columnas.
-    Document doc; doc.restore({"abcdef"});
-    Viewport vp; vp.top = 0; vp.height = 1; vp.width = 3;
-    Cursor c; c.line = 0; c.col = 0;
-    Renderer r;
-    std::string frame3 = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
-    CHECK_EQ(docRow(frame3), "abc");
-    CHECK(validUtf8(docRow(frame3)));
+    CHECK_EQ(textRow("abcdef", 3), "abc");
+    CHECK(validUtf8(textRow("abcdef", 3)));
 }
 
 TEST(truncate_cafe_just_before_e) {
     // "café" con ancho 3: termina justo antes del acento. No debe dejar
     // un byte suelto del acento.
-    Document doc; doc.restore({"caf\xc3\xa9"});
-    Viewport vp; vp.top = 0; vp.height = 1; vp.width = 3;
-    Cursor c; c.line = 0; c.col = 0;
-    Renderer r;
-    std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
-    CHECK_EQ(docRow(f), "caf");
-    CHECK(validUtf8(docRow(f)));
+    CHECK_EQ(textRow("caf\xc3\xa9", 3), "caf");
+    CHECK(validUtf8(textRow("caf\xc3\xa9", 3)));
 }
 
 TEST(truncate_cafe_includes_e) {
     // "café" con ancho 4: el acento entra completo, 2 bytes intactos.
-    Document doc; doc.restore({"caf\xc3\xa9"});
-    Viewport vp; vp.top = 0; vp.height = 1; vp.width = 4;
-    Cursor c; c.line = 0; c.col = 0;
-    Renderer r;
-    std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
-    CHECK_EQ(docRow(f), "caf\xc3\xa9");
-    CHECK(validUtf8(docRow(f)));
+    CHECK_EQ(textRow("caf\xc3\xa9", 4), "caf\xc3\xa9");
+    CHECK(validUtf8(textRow("caf\xc3\xa9", 4)));
 }
 
 TEST(truncate_dash_around_em_dash) {
@@ -350,13 +365,8 @@ TEST(truncate_dash_around_em_dash) {
         {6, "abc\xe2\x80\x94" "de"},
     };
     for (const auto& cs : cases) {
-        Document doc; doc.restore({"abc\xe2\x80\x94" "def"});
-        Viewport vp; vp.top = 0; vp.height = 1; vp.width = cs.w;
-        Cursor c; c.line = 0; c.col = 0;
-        Renderer r;
-        std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
-        CHECK(validUtf8(docRow(f)));
-        CHECK_EQ(docRow(f), cs.expect);
+        CHECK(validUtf8(textRow("abc\xe2\x80\x94" "def", cs.w)));
+        CHECK_EQ(textRow("abc\xe2\x80\x94" "def", cs.w), cs.expect);
     }
 }
 
@@ -369,13 +379,8 @@ TEST(truncate_emoji_around) {
         {6, "abc\xf0\x9f\x98\x80" "de"},
     };
     for (const auto& cs : cases) {
-        Document doc; doc.restore({"abc\xf0\x9f\x98\x80" "def"});
-        Viewport vp; vp.top = 0; vp.height = 1; vp.width = cs.w;
-        Cursor c; c.line = 0; c.col = 0;
-        Renderer r;
-        std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
-        CHECK(validUtf8(docRow(f)));
-        CHECK_EQ(docRow(f), cs.expect);
+        CHECK(validUtf8(textRow("abc\xf0\x9f\x98\x80" "def", cs.w)));
+        CHECK_EQ(textRow("abc\xf0\x9f\x98\x80" "def", cs.w), cs.expect);
     }
 }
 
@@ -391,12 +396,7 @@ TEST(truncate_never_splits_multibyte_any_width) {
     for (const std::string& line : lines) {
         const int total = colWidthLocal(line);
         for (int w = 1; w <= total + 3; ++w) {
-            Document doc; doc.restore({line});
-            Viewport vp; vp.top = 0; vp.height = 1; vp.width = w;
-            Cursor c; c.line = 0; c.col = 0;
-            Renderer r;
-            std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
-            std::string row = docRow(f);
+            std::string row = textRow(line, w);
             CHECK(validUtf8(row));
             CHECK(colWidthLocal(row) <= w);
         }
@@ -565,8 +565,10 @@ TEST(selection_multiline_utf8_mid_first_to_mid_third) {
                                             "— mundo"};
     std::string out = frame(lines, selAt({0, 1}, {2, 5}));
 
-    // l0: la 'c' queda sin invertir, "afé" (bytes 1..5, incl. é) invertido.
-    CHECK(contains(out, "c" ANSI_INV "afé" ANSI_RESET));
+    // l0: la 'c' queda sin invertir (pero con el estilo de "fila actual",
+    // que se cierra con reset antes del bloque invertido), "afé" (bytes
+    // 1..5, incl. é) invertido.
+    CHECK(contains(out, "c" ANSI_RESET ANSI_INV "afé" ANSI_RESET));
     CHECK(!contains(out, ANSI_INV "café"));
     // l1: linea intermedia invertida entera.
     CHECK(contains(out, ANSI_INV "mañana" ANSI_RESET));
@@ -616,25 +618,27 @@ std::string barFrame(const std::string& file, bool modified,
 } // namespace
 
 TEST(statusbar_two_rows_present) {
-    // Debe haber exactamente una fila fija (video inverso) y una fila de
-    // mensajes (sin inverso). El texto del mensaje no debe estar invertido.
+    // Debe haber exactamente una fila fija (fondo gris 60%) y una fila de
+    // mensajes (sin estilo). El texto del mensaje no debe estar estilizado.
     std::string out = barFrame("/a/b.txt", false, "hola", State::Navegacion, 200);
-    CHECK(contains(out, ANSI_INV));
+    CHECK(contains(out, kStatusBarStyle));
     CHECK(contains(out, "hola"));
-    CHECK(!contains(out, ANSI_INV "hola"));
+    CHECK(!contains(out, std::string(kStatusBarStyle) + "hola"));
 }
 
 TEST(statusbar_left_format_name_path_estado) {
-    // <nombre> - <ruta> - <ESTADO>, en ese orden, dentro del bloque inverso.
+    // <nombre> - <ruta> - <ESTADO>, en ese orden. Se compara sobre el texto
+    // plano (stripAnsiLocal): los fragmentos llevan colores distintos
+    // (nombre blanco, estado dorado) que rompen la contiguedad cruda.
     std::string out = barFrame("/home/alice/proyecto/odo.txt", false, "",
                                State::Navegacion, 200);
-    CHECK(contains(out, "odo.txt - /home/alice/proyecto - NAVEGACION"));
+    CHECK(contains(stripAnsiLocal(out), "odo.txt - /home/alice/proyecto - NAVEGACION"));
 }
 
 TEST(statusbar_modified_indicator) {
     // Un cambio sin guardar agrega [modificado] junto al nombre.
     std::string out = barFrame("/home/a/x.cc", true, "", State::Navegacion, 200);
-    CHECK(contains(out, "x.cc [modificado] - /home/a - NAVEGACION"));
+    CHECK(contains(stripAnsiLocal(out), "x.cc [modificado] - /home/a - NAVEGACION"));
 }
 
 TEST(statusbar_modified_indicator_survives_long_name) {
@@ -729,43 +733,69 @@ TEST(statusbar_label_fills_whole_width_edge_normal) {
 TEST(statusbar_state_labels) {
     // SELECCION y COMANDO se mapean 1 a 1 con los estados Seleccion y Prefix.
     std::string sel = barFrame("/a.txt", false, "", State::Seleccion, 200);
-    CHECK(contains(sel, "a.txt - / - SELECCION"));
+    CHECK(contains(stripAnsiLocal(sel), "a.txt - / - SELECCION"));
 
     std::string pre = barFrame("/a.txt", false, "", State::Prefix, 200);
-    CHECK(contains(pre, "a.txt - / - COMANDO"));
+    CHECK(contains(stripAnsiLocal(pre), "a.txt - / - COMANDO"));
 }
 
 TEST(statusbar_right_block_always_visible) {
-    // Linea/Col siempre se muestra, anclado a la derecha, incluso en una
-    // terminal estrecha: no es un derrota del sacrificio.
+    // (fila,columna) y el porcentaje de altura siempre se muestran, anclados
+    // a la derecha, incluso en una terminal estrecha: no es un derrota del
+    // sacrificio. Con un documento de una sola linea, la posicion del cursor
+    // (linea 0) es 0% del archivo.
     std::string out = barFrame(
         "/data/muy/largo/dir/de/archivos/nombre.txt", false, "",
         State::Navegacion, 20);
-    CHECK(contains(out, "Linea: 1 Col: 1"));
+    CHECK(contains(out, "(1,1)"));
+    CHECK(contains(stripAnsiLocal(out), "0%"));
+}
+
+TEST(statusbar_cursor_percentage_position) {
+    // El bloque derecho conserva (fila,columna) y agrega la posicion vertical
+    // del cursor como porcentaje del archivo: 0% en la primera linea, 100% en
+    // la ultima. En un doc de 6 lineas, la linea 2 esta al 40% (2 / (6-1)).
+    const int lines = 6;
+    for (int cursorLine : {0, 2, 5}) {
+        Document doc;
+        doc.restore(std::vector<std::string>(static_cast<size_t>(lines), "x"));
+        Viewport v;
+        v.top = 0;
+        v.height = 1;
+        v.width = 200;
+        Cursor c;
+        c.line = cursorLine;
+        c.col = 0;
+        Renderer r;
+        int expected = (cursorLine * 100) / (lines - 1);
+        std::string out = r.buildScreen(doc, c, v, "/a.txt", false, "",
+                                        State::Navegacion, std::nullopt);
+        CHECK(contains(stripAnsiLocal(out), std::to_string(expected) + "%"));
+    }
 }
 
 TEST(statusbar_path_sacrificed_before_name) {
     // Terminal no muy ancha: la ruta cede con "..." al inicio, el nombre
-    // y el bloque Ln/Col se mantienen enteros.
+    // y los bloques (linea,col) / % se mantienen enteros.
     std::string out = barFrame(
         "/a/very/long/directory/chain/for/the/path/iz/archivo.txt",
         false, "", State::Navegacion, 55);
     CHECK(contains(out, "archivo.txt"));   // nombre intacto
     CHECK(contains(out, "..."));           // la ruta se corto con "..." al inicio
     CHECK(contains(out, "NAVEGACION"));        // etiqueta de estado intacta
-    CHECK(contains(out, "Linea: 1 Col: 1"));
+    CHECK(contains(out, "(1,1)"));
 }
 
 TEST(statusbar_path_uses_rest_after_name_reserved) {
     // El nombre se reserva primero; la ruta toma SOLO lo que sobra y se
     // agota (hasta "..." ) antes de tocar el nombre. En un presupuesto
     // apretado, el nombre queda completo y la ruta se reduce a lo minimo.
-    // (El ancho refleja la etiqueta NAVEGACION, mas larga que la antigua
-    // NORMAL: con menos columnas la ruta ya no deja ni "..." para mostrar.)
+    // (El ancho considera el padding de la barra y el bloque %:
+    // con mas columnas la ruta mostraria mas alla de "...".)
     std::string out = barFrame(
         "/some/verylongdirectorychainloading/ending.txt",
-        false, "", State::Navegacion, 45);
-    CHECK(contains(out, "ending.txt - ... - NAVEGACION"));
+        false, "", State::Navegacion, 41);
+    CHECK(contains(stripAnsiLocal(out), "ending.txt - ... - NAVEGACION"));
     // La ruta casi no deja componente visible: su nombre de archivo no
     // debe colarse en el recorte.
     CHECK(!contains(out, "verylongdirectory"));
@@ -773,13 +803,14 @@ TEST(statusbar_path_uses_rest_after_name_reserved) {
 
 TEST(statusbar_second_row_message_independent) {
     // La fila de mensajes es propia: se muestra tal cual y se trunca al
-    // ancho de la terminal sin competir con la barra fija.
+    // ancho de la terminal (descontando el padding de la barra superior)
+    // sin competir con la barra fija.
     std::string out = barFrame("/a.txt", false, "mensaje de estado", State::Navegacion, 15);
-    CHECK(contains(out, "mensaje de esta")); // truncado a 15 columnas
-    CHECK(!contains(out, "mensaje de estado ")); // no cabe el final
+    CHECK(contains(out, "mensaje de ")); // truncado a 11 columnas (15 - 1 izq - 3 der)
+    CHECK(!contains(out, "mensaje de estado")); // el texto sigue alineado con la barra
     // La barra fija tiene su propio ancho: en 15 columnas el bloque
-    // Linea/Col cabe (Linea+Col no depende del mensaje).
-    CHECK(contains(out, "Linea: 1 Col: 1"));
+    // (fila,col) cabe (no depende del mensaje).
+    CHECK(contains(out, "(1,1)"));
 }
 
 // ---------------------------------------------------------------------------
@@ -834,14 +865,10 @@ TEST(consecutive_truncate_each_position) {
             std::string expect;
             for (int i = 0; i < w; ++i) expect += c.utf8;
 
-            Document doc; doc.restore({line});
-            Viewport vp; vp.top = 0; vp.height = 1; vp.width = w;
-            Cursor cur; cur.line = 0; cur.col = 0;
-            Renderer r;
-            std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
-            CHECK_EQ(docRow(f), expect);
-            CHECK(validUtf8(docRow(f)));
-            CHECK(colWidthLocal(docRow(f)) <= w);
+            std::string row = textRow(line, w);
+            CHECK_EQ(row, expect);
+            CHECK(validUtf8(row));
+            CHECK(colWidthLocal(row) <= w);
         }
     }
 }
@@ -906,14 +933,10 @@ TEST(mixed_extreme_truncate_each_width) {
         {9, kMix},
     };
     for (const Tr& t : tr) {
-        Document doc; doc.restore({kMix});
-        Viewport vp; vp.top = 0; vp.height = 1; vp.width = t.w;
-        Cursor cur; cur.line = 0; cur.col = 0;
-        Renderer r;
-        std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
-        CHECK_EQ(docRow(f), t.expect);
-        CHECK(validUtf8(docRow(f)));
-        CHECK(colWidthLocal(docRow(f)) <= t.w);
+        std::string row = textRow(kMix, t.w);
+        CHECK_EQ(row, t.expect);
+        CHECK(validUtf8(row));
+        CHECK(colWidthLocal(row) <= t.w);
     }
 }
 
@@ -924,12 +947,10 @@ TEST(mixed_extreme_truncate_each_width) {
 // ---------------------------------------------------------------------------
 namespace {
 std::string renderRow(const std::string& line, int width) {
-    Document doc; doc.restore({line});
-    Viewport vp; vp.top = 0; vp.height = 1; vp.width = width;
-    Cursor cur; cur.line = 0; cur.col = 0;
-    Renderer r;
-    std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
-    return docRow(f);
+    // textRow aïslA el recorte a columnas del resaltado de "fila actual"
+    // (el cursor va en la linea 2) y del gutter: estos tests solo verifican
+    // el truncado de columnas, no el resaltado ni la numeracion.
+    return textRow(line, width);
 }
 } // namespace
 
@@ -1110,8 +1131,9 @@ TEST(renderer_selection_utf8_cafe_accent) {
 
     // No corta bytes: el bloque es el "é" completo, no un byte suelto.
     CHECK(contains(out, ANSI_INV "\xc3\xa9" ANSI_RESET));
-    // Empieza DESPUES de "caf" (que no esta invertido).
-    CHECK(contains(out, "caf" ANSI_INV));
+    // Empieza DESPUES de "caf" (que no esta invertido; lleva el estilo de
+    // "fila actual", cerrado con reset antes del bloque invertido).
+    CHECK(contains(out, "caf" ANSI_RESET ANSI_INV));
     CHECK(!contains(out, ANSI_INV "caf"));
     // Columna final del cursor: tras é (visual 4) -> 1;5H.
     CHECK_EQ(cursorVisibleCol(out), 5);
@@ -1135,9 +1157,11 @@ TEST(renderer_selection_utf8_mixed_em_dash_emoji) {
 
     // El bloque invertido es "—😀" (9 bytes, sin partir).
     CHECK(contains(out, ANSI_INV "\xe2\x80\x94\xf0\x9f\x98\x80" ANSI_RESET));
-    // "abc" sin invertir delante y "def" sin invertir detras.
-    CHECK(contains(out, "abc" ANSI_INV));
-    CHECK(contains(out, ANSI_RESET "def"));
+    // "abc" sin invertir delante y "def" sin invertir detras. En la fila
+    // actual ambos tramos llevan el estilo de linea (kCurrentLineStyle),
+    // cerrado/abierto con reset alrededor del bloque seleccionado.
+    CHECK(contains(out, "abc" ANSI_RESET ANSI_INV));
+    CHECK(contains(out, std::string(ANSI_RESET) + kCurrentLineStyle + "def"));
     CHECK(!contains(out, ANSI_INV "abc"));
     CHECK(!contains(out, ANSI_INV "def"));
     // Cursor en la columna correcta (tras emoji, visual 5 -> 1;6H).
@@ -1161,8 +1185,8 @@ TEST(renderer_selection_utf8_mixed_reverse_direction) {
     std::string out = selCurFrame(line, 3, selAt({0, 10}, {0, 3}));
 
     CHECK(contains(out, ANSI_INV "\xe2\x80\x94\xf0\x9f\x98\x80" ANSI_RESET));
-    CHECK(contains(out, "abc" ANSI_INV));
-    CHECK(contains(out, ANSI_RESET "def"));
+    CHECK(contains(out, "abc" ANSI_RESET ANSI_INV));
+    CHECK(contains(out, std::string(ANSI_RESET) + kCurrentLineStyle + "def"));
     CHECK_EQ(cursorVisibleCol(out), 4);   // cursor en el anchor (byte 3)
 }
 
@@ -1176,4 +1200,220 @@ TEST(renderer_selection_utf8_cursor_after_each_char) {
         std::string out = selCurFrame(line, c.byte, std::nullopt);
         CHECK_EQ(cursorVisibleCol(out), c.termCol);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Resaltado de la fila del cursor (Paso 2). El resaltado usa
+// kCurrentLineStyle (placeholder dim, a reemplazar por el color real en la
+// etapa de colores). Reglas:
+//   - la fila del cursor, sin seleccion, lleva el estilo en TODO el ancho
+//     (incluido el relleno tras el texto);
+//   - la seleccion SIEMPRE gana: en la fila del cursor, el tramo
+//     seleccionado se pinta en video inverso y el estilo de fila cubre solo
+//     los huecos (antes, despues y relleno);
+//   - las filas sin cursor y las filas "~" nunca llevan resaltado.
+// ---------------------------------------------------------------------------
+namespace {
+
+// Monta un frame de una unica linea con ancho y fila de cursor controlables.
+std::string curRowFrame(const std::string& line, int width, int cursorLine,
+                        const std::optional<Selection>& sel = std::nullopt) {
+    Document doc; doc.restore({line});
+    Viewport vp; vp.top = 0; vp.height = 1; vp.width = width;
+    Cursor cur; cur.line = cursorLine; cur.col = 0;
+    Renderer r;
+    return r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, sel);
+}
+
+} // namespace
+
+TEST(currentline_no_selection_full_width) {
+    // Fila del cursor sin seleccion: todo el ancho lleva kCurrentLineStyle,
+    // incluido el relleno tras el texto (hasta width).
+    std::string out = curRowFrame("hello", 20, 0);
+    CHECK(contains(out, std::string(kCurrentLineStyle) + "hello"));
+    // El relleno llega al ancho completo del AREA DE TEXTO (20 - gutter de
+    // 3 = 17) con el estilo aplicado.
+    CHECK_EQ(rowText(out, 1), "hello" + std::string(12, ' '));
+}
+
+TEST(currentline_selection_wins_over_row_style) {
+    // Seleccion completa de la fila del cursor: la seleccion gana, el bloque
+    // seleccionado se ve en video inverso "limpio", sin kCurrentLineStyle
+    // superpuesto al tramo seleccionado.
+    std::string out = frame({"hello"}, selAt({0, 0}, {0, 5}));
+    CHECK(contains(out, ANSI_INV "hello" ANSI_RESET));
+    // El estilo de fila no debe quedar pegado al bloque invertido.
+    CHECK(!contains(out, std::string(kCurrentLineStyle) + ANSI_INV));
+}
+
+TEST(currentline_partial_selection_unselected_keeps_style) {
+    // Seleccion parcial ("world" de "hello world") sobre la fila del cursor:
+    // el tramo NO seleccionado de esa misma fila ("hello " y el relleno)
+    // lleva el estilo de fila actual.
+    std::string out = curRowFrame("hello world", 20, 0, selAt({0, 6}, {0, 11}));
+    CHECK(contains(out, std::string(kCurrentLineStyle) + "hello "));
+    CHECK(contains(out, ANSI_INV "world" ANSI_RESET));
+    // "world" son 5 cols; la fila se rellena hasta el area de texto (17).
+    CHECK_EQ(rowText(out, 1), "hello world" + std::string(6, ' '));
+}
+
+TEST(currentline_line_without_cursor_unaffected) {
+    // Fila sin cursor: sin estilo de fila ni relleno. El cursor en la linea
+    // 1 de un documento de 1 linea mantiene la fila 0 fuera del resaltado.
+    std::string out = curRowFrame("hello", 20, 1);
+    CHECK(!contains(out, kCurrentLineStyle));
+    CHECK_EQ(rowText(out, 1), "hello");
+}
+
+TEST(currentline_tilde_row_never_highlighted) {
+    // Una fila "~" (fuera del documento) nunca lleva el resaltado de fila.
+    Document doc; doc.restore({"hello"});
+    Viewport vp; vp.top = 0; vp.height = 3; vp.width = 20;
+    Cursor cur; cur.line = 0; cur.col = 0;
+    Renderer r;
+    std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion,
+                                    std::nullopt);
+    CHECK(contains(out, std::string(kCurrentLineStyle) + "hello"));
+    // Las filas 1 y 2 son "~" de relleno: jamas llevan el estilo de fila.
+    CHECK(!contains(out, std::string(kCurrentLineStyle) + "~"));
+}
+
+// ---------------------------------------------------------------------------
+// Gutter de numeros de linea (Paso 3). Reglas:
+//   - numeros alineados a la derecha en un gutter de ancho `digitos+1`
+//     (minimo 3), con un espacio de separacion antes del texto;
+//   - las filas "~" (fuera del documento) llevan gutter en blanco del mismo
+//     ancho, sin numero;
+//   - el cursor real de terminal se posiciona tras el gutter (columna visual
+//     0 = columna de terminal gutterW+1);
+//   - al cruzar un umbral de digitos (9 -> 10 lineas) el gutter crece y
+//     todas las filas se re-renderizan con el nuevo ancho.
+// ---------------------------------------------------------------------------
+namespace {
+
+// Fila `index` (0-based) del frame ya sin ANSI (con su gutter y contenido).
+std::string plainRow(const std::string& frame, int index) {
+    std::string plain = stripAnsiLocal(frame);
+    size_t start = 0;
+    for (int i = 0; i < index; ++i) {
+        size_t pos = plain.find("\r\n", start);
+        if (pos == std::string::npos) return "";
+        start = pos + 2;
+    }
+    size_t end = plain.find("\r\n", start);
+    if (end == std::string::npos) end = plain.size();
+    return plain.substr(start, end - start);
+}
+
+} // namespace
+
+TEST(gutter_shows_right_aligned_numbers) {
+    // Documento de 3 lineas: gutter de ancho 3, numeros a la derecha
+    // (" 1 ", " 2 ", " 3 ") seguidos del contenido.
+    Document doc; doc.restore({"aaa", "bbb", "ccc"});
+    Viewport vp; vp.top = 0; vp.height = 3; vp.width = 20;
+    Cursor cur; cur.line = 0; cur.col = 0;
+    Renderer r;
+    std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion,
+                                    std::nullopt);
+    CHECK(plainRow(out, 0).substr(0, 3) == " 1 ");
+    CHECK(plainRow(out, 1).substr(0, 3) == " 2 ");
+    CHECK(plainRow(out, 2).substr(0, 3) == " 3 ");
+    // Y el contenido sigue al gutter.
+    CHECK(plainRow(out, 2) == " 3 ccc");
+}
+
+TEST(gutter_tilde_rows_blank) {
+    // Filas fuera del documento: gutter en blanco del mismo ancho y "~".
+    Document doc; doc.restore({"aaa"});
+    Viewport vp; vp.top = 0; vp.height = 3; vp.width = 20;
+    Cursor cur; cur.line = 0; cur.col = 0;
+    Renderer r;
+    std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion,
+                                    std::nullopt);
+    CHECK(plainRow(out, 1) == std::string(3, ' ') + "~");
+    CHECK(plainRow(out, 2) == std::string(3, ' ') + "~");
+}
+
+TEST(gutter_cursor_col_starts_after_gutter) {
+    // Con gutter de ancho 3 y cursor en la columna visual 0, el cursor real
+    // de terminal se posiciona en la columna 4 (no en la 1).
+    Document doc; doc.restore({"hello"});
+    Viewport vp; vp.top = 0; vp.height = 1; vp.width = 20;
+    Cursor cur; cur.line = 0; cur.col = 0;
+    Renderer r;
+    std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion,
+                                    std::nullopt);
+    size_t pos = out.rfind("\x1b[1;");
+    CHECK(pos != std::string::npos);
+    size_t end = out.find('H', pos);
+    CHECK(out.substr(pos + 4, end - pos - 4) == "4");
+}
+
+TEST(gutter_width_grows_at_digit_threshold) {
+    // De 99 a 100 lineas el gutter pasa de 3 a 4 (numeros de 3 digitos).
+    // Hasta 99 (2 digitos) el gutter se mantiene en el minimo de 3.
+    Viewport vp; vp.top = 0; vp.height = 100; vp.width = 40;
+    Cursor cur; cur.line = 0; cur.col = 0;
+    Renderer r;
+
+    Document doc99; doc99.restore(std::vector<std::string>(99, "x"));
+    std::string out99 = r.buildScreen(doc99, cur, vp, "t", false, "", State::Navegacion,
+                                      std::nullopt);
+    // 99 lineas -> gutter 3: la ultima fila de documento lleva "99 ".
+    CHECK(plainRow(out99, 98).substr(0, 3) == "99 ");
+    // La fila 99 ya es "~" (fuera del documento): gutter en blanco de 3.
+    CHECK(plainRow(out99, 99) == std::string(3, ' ') + "~");
+
+    Document doc100; doc100.restore(std::vector<std::string>(100, "x"));
+    std::string out100 = r.buildScreen(doc100, cur, vp, "t", false, "", State::Navegacion,
+                                       std::nullopt);
+    // 100 lineas -> gutter 4: la fila 99 (linea 100 del doc) se
+    // re-renderiza con el nuevo ancho: "100 " (numero + separador).
+    CHECK(plainRow(out100, 99).substr(0, 4) == "100 ");
+}
+
+TEST(selection_empty_line_marks_crossed_line_break) {
+    // Atravesar una fila VACIA con la seleccion la marca sin ningun
+    // simbolo: la fila completa se pinta en video inverso (espacios).
+    std::string out = frame({"a", "", "b"}, selAt({0, 0}, {2, 1}));
+    CHECK(contains(out, std::string(ANSI_INV) + " "));
+    CHECK(!contains(out, ANSI_INV + std::string("\xc2\xb6")));
+    CHECK_EQ(plainRow(out, 1).substr(0, 3), " 2 ");
+    // Las filas con texto se seleccionan como siempre.
+    CHECK(contains(out, std::string(ANSI_INV) + "a" + ANSI_RESET));
+    CHECK(contains(out, std::string(ANSI_INV) + "b" + ANSI_RESET));
+}
+
+TEST(selection_empty_line_not_in_selection_no_mark) {
+    // La fila vacia no cae dentro de la seleccion: sin marca alguna.
+    std::string out = frame({"a", "", "b"}, selAt({0, 0}, {0, 1}));
+    CHECK(!contains(out, std::string(ANSI_INV) + " "));
+    CHECK_EQ(plainRow(out, 1), " 2 ");
+}
+
+TEST(selection_empty_line_collapsed_no_mark) {
+    // anchor == position en la fila vacia: nada seleccionado, sin marca y
+    // la fila queda limpia.
+    std::string out = frame({"a", "", "b"}, selAt({1, 0}, {1, 0}));
+    CHECK(!contains(out, std::string(ANSI_INV) + " "));
+    CHECK_EQ(plainRow(out, 1), " 2 ");
+}
+
+TEST(selection_empty_line_as_end_no_mark) {
+    // La seleccion termina en el INICIO de la fila vacia: su salto no quedo
+    // incluido, asi que no se marca.
+    std::string out = frame({"a", "", "b"}, selAt({0, 1}, {1, 0}));
+    CHECK(!contains(out, std::string(ANSI_INV) + " "));
+    CHECK_EQ(plainRow(out, 1), " 2 ");
+}
+
+TEST(selection_empty_line_as_start_marks) {
+    // La seleccion ARRANCA en la fila vacia y cruza hacia abajo: su salto
+    // queda incluido y se marca en video inverso, sin simbolo.
+    std::string out = frame({"a", "", "b"}, selAt({1, 0}, {2, 1}));
+    CHECK(contains(out, std::string(ANSI_INV) + " "));
+    CHECK(!contains(out, ANSI_INV + std::string("\xc2\xb6")));
+    CHECK_EQ(plainRow(out, 1).substr(0, 3), " 2 ");
 }

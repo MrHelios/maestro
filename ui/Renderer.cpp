@@ -13,6 +13,10 @@ constexpr int kNameMax    = 30;   // columnas maximas del nombre
 constexpr int kPathMax    = 40;   // columnas maximas de la ruta
 constexpr int kNamePathMax = 60;  // tope combinado nombre + ruta
 
+// ---- Padding de la barra de estado ----
+constexpr int kStatusBarPadLeft  = 1;  // espacio inicial antes del nombre
+constexpr int kStatusBarPadRight = 3;  // margen derecho: bloque (%, fila,col) no pegado al borde
+
 std::string utf8Tail(const std::string& line, int maxTailCols) {
     int total = utf8::columnOf(line, static_cast<int>(line.size()));
     if (maxTailCols <= 0 || total <= maxTailCols) return line;
@@ -71,37 +75,23 @@ std::string stateLabel(State state) {
 // puede evitar), se resta del presupuesto y el resto entero se da a la
 // ruta. Devuelve la parte que cabe del bloque (sin la etiqueta de
 // estado).
-std::string buildLeftParts(int budget, const std::string& name,
-                           const std::string& path) {
-    if (budget <= 0) return "";
+// Piezas del bloque izquierdo de la barra fija: `content` (nombre[ - ruta])
+// y `estado`, devueltos POR SEPARADO para poder colorearlos distinto en
+// buildChrome (nombre en blanco, estado en negrita dorada). Respeta los
+// limites fijos y, ante falta de espacio (terminal chica), sacrifica primero
+// la ruta y despues el nombre. `onlyEstado` queda true cuando no hay sitio
+// para nombre+ruta: se muestra solo el estado (sin separador) para no
+// exceder el presupuesto.
+struct BarLeft {
+    std::string name;     // nombre[ [modificado]], sin estilo; vacio si onlyEstado
+    std::string path;     // ruta, sin estilo; vacia si no cabe / no aplica
+    std::string estado;   // etiqueta de estado, sin estilo
+    bool onlyEstado;      // true => no hubo lugar para el contenido
+};
 
-    int nameW = colCount(name);
-    // Si el nombre ya ocupa el presupuesto entero (o mas), se trunca el
-    // nombre: no queda lugar para la ruta ni el separador.
-    if (nameW >= budget) return utf8::truncate(name, budget);
-
-    const std::string sep = " - ";
-    int sepW = static_cast<int>(sep.size());
-
-    // Resto del presupuesto para la ruta (separiendo tambien el separador).
-    int pathBudget = budget - nameW - sepW;
-
-    std::string out = name;
-    if (!path.empty() && pathBudget > 0) {
-        out += sep;
-        out += utf8TruncateFront(path, pathBudget);
-    }
-    return out;
-}
-
-// Construye el bloque izquierdo de la barra fija:
-//   `name SEP path SEP estado`
-// respetando los limites fijos y, ante falta de espacio (terminal
-// chica), sacrificando primero la ruta y despues el nombre. La etiqueta
-// de estado y el bloque Ln/Col nunca se truncan.
-std::string buildLeftBlock(const std::string& filename, bool modified,
-                           const std::string& estado, int budget) {
-    if (budget <= 0) return "";
+BarLeft buildBarLeft(const std::string& filename, bool modified,
+                     const std::string& estado, int budget) {
+    if (budget <= 0) return {"", "", utf8::truncate(estado, 0), true};
 
     std::string name = baseName(filename);
     if (name.empty()) name = "[sin nombre]";
@@ -127,55 +117,133 @@ std::string buildLeftBlock(const std::string& filename, bool modified,
         path = utf8TruncateFront(path, std::max(0, kNamePathMax - colCount(name)));
 
     int estadoW = colCount(estado);
-    if (budget <= estadoW) return utf8::truncate(estado, budget);
-
-    // Reservamos el espacio del estado (a la derecha) y el separador
-    // anterior; el resto es para nombre + ruta. Si aun no cabe el
-    // separador entero (partsBudget negativo), no hay lugar para ningun
-    // nombre: mostramos solo el estado, sin usar el separador, para no
-    // exceder `budget` (y de paso viewport.width).
     const std::string sep = " - ";
+    // Reservamos el espacio del estado (a la derecha) y el separador
+    // anterior; el resto es para nombre + ruta. Si no cabe ni el separador
+    // entero (partsBudget negativo), se muestra solo el estado.
     int partsBudget = budget - estadoW - static_cast<int>(sep.size());
-    if (partsBudget < 0) return utf8::truncate(estado, budget);
-    std::string izquierda = buildLeftParts(partsBudget, name, path);
-    return izquierda + sep + estado;
+    if (budget <= estadoW || partsBudget < 0)
+        return {"", "", utf8::truncate(estado, budget), true};
+
+    int nameW = colCount(name);
+    if (nameW >= partsBudget) {
+        // El nombre consume el presupuesto entero: se trunca, sin ruta.
+        name = utf8::truncate(name, partsBudget);
+        return {name, "", estado, false};
+    }
+
+    // El nombre cabe; la ruta toma lo que sobra (con su separador). Si no
+    // queda sitio, se omite la ruta (solo nombre + estado).
+    int pathBudget = partsBudget - nameW - static_cast<int>(sep.size());
+    if (path.empty() || pathBudget <= 0) return {name, "", estado, false};
+    return {name, utf8TruncateFront(path, pathBudget), estado, false};
 }
 
-// Barra de estado fija (fila en video inverso) + fila de mensajes, tal
-// cual las dibuja el editor normal. Se comparte entre buildScreen y el
-// selector de buffers para mantener SIEMPRE el mismo aspecto visual: el
-// bloque izquierdo (nombre - ruta - ESTADO), el bloque derecho anclado
-// a la derecha (Linea/Col), y abajo la fila de mensajes. Asume que el
-// cursor de la terminal esta al inicio de la fila de la barra.
+// Barra de estado fija (fondo gris 60%) + fila de mensajes, tal cual las
+// dibuja el editor normal. Se comparte entre buildScreen y el selector de
+// buffers para mantener SIEMPRE el mismo aspecto visual. El contenido es
+// "  BLANCO[nombre] NEGRO[ - ruta] DORADO[ - comando] relleno  {pct}%".
+// Asume que el cursor de la terminal esta al inicio de la fila de la barra.
+// `totalLines` es el numero de lineas del documento: sirve para expresar la
+// posicion vertical del cursor como porcentaje (0% al inicio, 100% al fin).
 std::string buildChrome(const std::string& filename, bool modified,
                         const std::string& estado,
                         const std::string& statusMessage,
-                        int width, const Cursor& cursor) {
+                        int width, const Cursor& cursor, int totalLines) {
     std::ostringstream out;
     out << "\x1b[K";
-    out << "\x1b[7m"; // video inverso
+    out << kStatusBarStyle; // base: negro sobre gris 60%
 
-    std::string rightBlock = "Linea: " + std::to_string(cursor.line + 1) +
-                             " Col: " + std::to_string(cursor.col + 1);
+    // Posicion vertical del cursor como porcentaje del archivo: 0% al
+    // inicio (linea 0) y 100% al final (ultima linea). Con una sola linea
+    // el inicio y el fin coinciden: se muestra 0%.
+    int pct = totalLines <= 1 ? 0
+                              : (cursor.line * 100) / (totalLines - 1);
+    // Bloque derecho con ambos valores: la altura del cursor como
+    // porcentaje y luego (fila,columna), anclado a la derecha.
+    std::string rightBlock = std::to_string(pct) + "% (" +
+                             std::to_string(cursor.line + 1) + "," +
+                             std::to_string(cursor.col + 1) + ")";
     int rightW = colCount(rightBlock);
 
-    int leftBudget = std::max(0, width - rightW - 1);
-    std::string leftBlock = buildLeftBlock(filename, modified, estado,
-                                           leftBudget);
+    int leftBudget = std::max(0, width - kStatusBarPadLeft - kStatusBarPadRight -
+                                     rightW);
+    BarLeft left = buildBarLeft(filename, modified, estado, leftBudget);
 
-    out << leftBlock;
-    int fill = width - colCount(leftBlock) - rightW;
+    // Ancho VISIBLE (sin ANSI) de todo a la izquierda del relleno, para que
+    // el relleno consiga exactamente `width` columnas y el bloque derecho
+    // (fila,columnapct%) quede anclado a la derecha.
+    const std::string sep = " - ";
+    int plainW;
+    if (left.onlyEstado) {
+        plainW = colCount(left.estado);
+    } else {
+        // "nombre[ - ruta] - estado": un separador si no hay ruta, dos si la
+        // hay, y el texto de nombre + ruta + estado.
+        int sepCount = left.path.empty() ? 1 : 2;
+        plainW = colCount(left.name) + colCount(left.path) +
+                 colCount(left.estado) +
+                 sepCount * static_cast<int>(sep.size());
+    }
+
+    for (int i = 0; i < kStatusBarPadLeft; ++i) out << ' ';
+    if (left.onlyEstado) {
+        out << kStatusBarCommand << left.estado << kStatusBarReset;
+    } else {
+        out << kStatusBarName << left.name << kStatusBarReset;
+        if (!left.path.empty()) {
+            out << kStatusBarPath << sep << left.path << kStatusBarReset;
+        }
+        out << kStatusBarCommand << sep << left.estado << kStatusBarReset;
+    }
+
+    int fill = std::max(0, width - kStatusBarPadLeft - plainW -
+                           kStatusBarPadRight - rightW);
     for (int i = 0; i < fill; ++i) out << ' ';
+    for (int i = 0; i < kStatusBarPadRight; ++i) out << ' ';
     out << rightBlock;
 
     out << "\x1b[0m"; // reset de estilo
 
-    // Fila de mensajes (sin inverso, fila propia).
+    // Fila de mensajes (sin estilo, fila propia). El padding izquierdo y
+    // derecho coincide con el de la barra superior para alinear el texto.
     out << "\r\n";
     out << "\x1b[K";
-    out << utf8::truncate(statusMessage, width);
+    for (int i = 0; i < kStatusBarPadLeft; ++i) out << ' ';
+    out << utf8::truncate(statusMessage,
+                          std::max(0, width - kStatusBarPadLeft - kStatusBarPadRight));
+    for (int i = 0; i < kStatusBarPadRight; ++i) out << ' ';
 
     return out.str();
+}
+
+// Ancho del gutter de numeros de linea (estilo vim): `d(n)+1` columnas,
+// con `n` = cantidad de digitos del numero mas largo del documento, y un
+// minimo de 3 (para que no este saltando de ancho con archivos chicos).
+// La columna extra es el separador antes del texto.
+int gutterWidth(int totalLines) {
+    int digits = 1;
+    for (int n = totalLines; n >= 10; n /= 10) ++digits;
+    return std::max(3, digits + 1); // +1 = separador antes del texto
+}
+
+// Celda de numero de linea: numero alineado a la derecha + un espacio de
+// separacion. El numero de la fila actual deja la rama lista para el color
+// real (TODO(colores)).
+std::string renderGutterCell(int lineNumber1Based, int gutterW,
+                             bool /*isCurrentLine*/) {
+    std::string numStr = std::to_string(lineNumber1Based);
+    int pad = gutterW - 1 - static_cast<int>(numStr.size());
+    std::string out(std::max(0, pad), ' ');
+    out += numStr;
+    out += ' ';
+    return out;
+}
+
+// Celda de gutter para una fila fuera del documento ("~"): en blanco,
+// mismo ancho, sin numero.
+std::string renderGutterBlank(int gutterW) {
+    return std::string(gutterW, ' ');
 }
 
 // Devuelve los bytes de `line` cuyas COLUMNAS VISUALES caen dentro de
@@ -185,14 +253,46 @@ std::string buildChrome(const std::string& filename, bool modified,
 // Renderiza una sola linea del documento, aplicando video inverso a los
 // bytes dentro de [selStartByte, selEndByte) si la linea esta seleccionada.
 // selStartByte/selEndByte -1 significa "sin seleccion en esta linea".
+//
+// `isCurrentLine` resalta la fila del cursor con kCurrentLineStyle: el
+// resaltado cubre TODA la fila (incluido el relleno hasta `width`, no solo
+// el texto), y la seleccion siempre gana sobre el (el tramo seleccionado se
+// pinta en video inverso y el resto de la fila lleva el estilo de linea).
+//
+// `lineBreakSelected` marca el caso de una fila VACIA atravesada por la
+// seleccion: su unico "contenido" es el salto de linea, y al estar
+// seleccionado se pinta la fila entera en video inverso, sin ningun
+// simbolo (si no, la fila quedaria en blanco y no se veria que se la
+// selecciono).
 void renderLine(std::ostringstream& out,
                 const std::string& line,
                 int width,
+                bool isCurrentLine,
                 int selStartByte = -1,
-                int selEndByte = -1) {
+                int selEndByte = -1,
+                bool lineBreakSelected = false) {
+    // Fila vacia con su salto de linea seleccionado: la fila completa se
+    // pinta en video inverso (sin simbolo) para que se vea que quedo
+    // seleccionada.
+    if (line.empty() && lineBreakSelected) {
+        out << "\x1b[7m";
+        for (int i = 0; i < width; ++i) out << ' ';
+        out << "\x1b[0m";
+        return;
+    }
+
+    // Sin seleccion aqui (o seleccion vacia): el texto (truncado a width).
+    // Si es la fila actual, se rellena hasta `width` para que el resaltado
+    // cubra toda la fila, no solo el texto.
     if (selStartByte < 0 || selEndByte < 0 || selStartByte >= selEndByte) {
-        // Sin seleccion aqui (o seleccion vacia): caso normal.
-        out << utf8::truncate(line, width);
+        std::string text = utf8::truncate(line, width);
+        if (!isCurrentLine) {
+            out << text;
+            return;
+        }
+        out << kCurrentLineStyle << text;
+        for (int i = colCount(text); i < width; ++i) out << ' ';
+        out << "\x1b[0m";
         return;
     }
 
@@ -204,16 +304,25 @@ void renderLine(std::ostringstream& out,
     int startCol = utf8::columnOf(line, startByte);
     int endCol = utf8::columnOf(line, endByte);
 
-    // Parte antes de la seleccion.
-    out << utf8::range(line, 0, std::min(startCol, width));
-
-    // Parte seleccionada, en video inverso.
-    out << "\x1b[7m";
-    out << utf8::range(line, std::min(startCol, width), std::min(endCol, width));
-    out << "\x1b[0m";
-
+    // Parte antes de la seleccion, en estilo de linea actual si corresponde.
+    std::string before = utf8::range(line, 0, std::min(startCol, width));
+    // Parte seleccionada, en video inverso (siempre gana).
+    std::string selected = utf8::range(line, std::min(startCol, width),
+                                       std::min(endCol, width));
     // Parte despues de la seleccion (si queda espacio).
-    out << utf8::range(line, std::min(endCol, width), width);
+    std::string after = utf8::range(line, std::min(endCol, width), width);
+
+    if (isCurrentLine) out << kCurrentLineStyle;
+    out << before;
+    if (isCurrentLine) out << "\x1b[0m";
+    out << "\x1b[7m" << selected << "\x1b[0m";
+    if (isCurrentLine) out << kCurrentLineStyle;
+    out << after;
+    if (isCurrentLine) {
+        int used = colCount(before) + colCount(selected) + colCount(after);
+        for (int i = used; i < width; ++i) out << ' ';
+        out << "\x1b[0m";
+    }
 }
 
 } // namespace
@@ -237,13 +346,21 @@ std::string Renderer::buildScreen(const Document& doc,
     out << "\x1b[?25l"; // ocultar cursor mientras dibujamos
     out << "\x1b[H";    // mover cursor a home (fila 1, col 1)
 
+    // Gutter de numeros de linea (solo el area del documento): se resta del
+    // ancho total para el texto. El resto del chrome (barra de estado,
+    // selectores) sigue usando viewport.width tal cual.
+    int gutterW = gutterWidth(doc.lineCount());
+    int textWidth = std::max(0, viewport.width - gutterW);
+
     for (int row = 0; row < viewport.height; ++row) {
         int docLine = viewport.top + row;
         out << "\x1b[K"; // limpiar la linea actual
 
         if (docLine < doc.lineCount()) {
             const std::string& line = doc.lineAt(docLine);
+            bool isCurrentLine = (docLine == cursor.line);
             int selStart = -1, selEnd = -1;
+            bool lineBreakSelected = false;
 
             if (sel.has_value() && docLine >= sel->start.line && docLine <= sel->end.line) {
                 if (sel->start.line == sel->end.line) {
@@ -265,15 +382,31 @@ std::string Renderer::buildScreen(const Document& doc,
                 }
             }
 
-            renderLine(out, line, viewport.width, selStart, selEnd);
+            // Una fila VACIA dentro de la seleccion "toma" su salto de linea:
+            // se marca para que se vea que quedo seleccionada. No se marca
+            // cuando la seleccion es de una sola linea colapsada (nada
+            // seleccionado) ni cuando termina exactamente en el inicio de esa
+            // fila (su salto no quedo incluido).
+            if (line.empty() && sel.has_value() && docLine >= sel->start.line &&
+                docLine <= sel->end.line) {
+                bool singleLine = (sel->start.line == sel->end.line);
+                bool endsAtStart =
+                    (docLine == sel->end.line && sel->end.col == 0);
+                lineBreakSelected = !singleLine && !endsAtStart;
+            }
+
+            out << renderGutterCell(docLine + 1, gutterW, isCurrentLine);
+            renderLine(out, line, textWidth, isCurrentLine, selStart, selEnd,
+                       lineBreakSelected);
         } else {
+            out << renderGutterBlank(gutterW);
             out << "~"; // linea fuera del documento, estilo vim
         }
         out << "\r\n";
     }
 
     out << buildChrome(filename, modified, stateLabel(state), statusMessage,
-                       viewport.width, cursor);
+                       viewport.width, cursor, doc.lineCount());
 
     // Posicionar el cursor real de la terminal donde corresponde.
     // OJO: cursor.col es un offset en BYTES dentro de la linea (asi
@@ -282,7 +415,9 @@ std::string Renderer::buildScreen(const Document& doc,
     // vez de usar cursor.col directamente.
     int visualCol = utf8::columnOf(doc.lineAt(cursor.line), cursor.col);
     int screenRow = cursor.line - viewport.top + 1; // +1: terminal es 1-indexada
-    int screenCol = visualCol + 1;
+    // +gutterW: la columna visual 0 del texto hoy no es la columna 1 de la
+    // terminal, sino la primera tras el gutter de numeros de linea.
+    int screenCol = gutterW + visualCol + 1;
     out << "\x1b[" << screenRow << ";" << screenCol << "H";
 
     out << "\x1b[?25h"; // volver a mostrar el cursor
@@ -418,10 +553,14 @@ std::string Renderer::buildFileListScreen(
     out << right;
     out << "\x1b[0m";
 
-    // Fila de mensajes (height+2).
+    // Fila de mensajes (height+2). Mismo padding izquierdo/derecho que la
+    // barra de estado para alinear el texto.
     out << "\r\n";
     out << "\x1b[K";
-    out << utf8::truncate(statusMessage, width);
+    for (int i = 0; i < kStatusBarPadLeft; ++i) out << ' ';
+    out << utf8::truncate(statusMessage,
+                          std::max(0, width - kStatusBarPadLeft - kStatusBarPadRight));
+    for (int i = 0; i < kStatusBarPadRight; ++i) out << ' ';
 
     // Cursor real sobre la fila seleccionada de la lista, clampeado a las
     // filas dibujadas para no invadir la barra de estado.

@@ -97,6 +97,11 @@ build-san/%.o: tests/interaction/%.cpp | build-san
 build-san/%.o: tests/e2e/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
 
+# Default (make a secas): compila el editor y la suite, como documenta el
+# Uso de arriba. Debe ser el PRIMER target: `build` (el directorio) no debe
+# ganar, o un `make` desnudo solo crearia la carpeta sin compilar nada.
+all: $(BIN) $(TEST_BIN)
+
 build build-san:
 	@mkdir -p $@
 
@@ -128,4 +133,4 @@ clean:
 
 -include $(OBJ:.o=.d) $(TEST_OBJ:.o=.d) $(SAN_OBJ:.o=.d) $(SAN_TEST_OBJ:.o=.d)
 
-.PHONY: test sanitize test-sanitize clean
+.PHONY: all test sanitize test-sanitize clean

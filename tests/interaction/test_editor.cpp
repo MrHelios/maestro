@@ -876,7 +876,9 @@ int cursorScreenCol(const std::string& line, int byteCol) {
     size_t pos = f.rfind("\x1b[1;");
     if (pos == std::string::npos) return -1;
     size_t end = f.find('H', pos);
-    return std::stoi(f.substr(pos + 4, end - pos - 4));
+    // La columna de terminal emite gutter+visual+1; se resta el gutter (3
+    // para un frame de 1 linea) para devolver la columna VISUAL del texto.
+    return std::stoi(f.substr(pos + 4, end - pos - 4)) - 3;
 }
 } // namespace
 

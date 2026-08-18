@@ -47,7 +47,13 @@ struct SavedAction {
 SavedAction g_savedActions[kFatalSignalCount];
 
 void fatalSignalHandler(int sig) {
-    // Restaurar la terminal antes de morir.
+    // Restaurar la terminal antes de morir. write() a un fd conocido es
+    // razonablemente seguro aqui (mismo criterio que tcsetattr en este
+    // handler): devolver el cursor a su forma por defecto, ya que el raw
+    // mode deja la terminal en cursor de bloque fijo.
+    if (g_rawActive) {
+        write(STDOUT_FILENO, "\x1b[0 q", 5);
+    }
     if (g_rawActive && g_origTermios) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, g_origTermios);
     }
@@ -123,6 +129,11 @@ void Terminal::enableRawMode() {
     }
     rawModeEnabled_ = true;
 
+    // Cursor en bloque fijo (DECSCUSR). Se emite solo tras aplicar el raw
+    // mode con exito: si tcsetattr fallo no estamos en raw mode y no tiene
+    // sentido cambiar la forma del cursor.
+    write(STDOUT_FILENO, "\x1b[2 q", 5);
+
     // Raw mode activo: instalar el handler de restauracion de senales.
     g_origTermios = orig;
     g_rawActive = 1;
@@ -133,6 +144,10 @@ void Terminal::disableRawMode() {
     // Apagar los handlers ANTES de restaurar: una senal que caiga sobre una
     // terminal que ya no esta en raw mode no debe intentar restaurarla.
     restoreFatalSignalHandlers();
+
+    // Restaurar la forma por defecto del cursor antes de devolver la
+    // terminal al shell (el raw mode la deja en bloque fijo).
+    write(STDOUT_FILENO, "\x1b[0 q", 5);
 
     termios* orig = static_cast<termios*>(origTermios_);
     // Restaurar el estado original. Aunque falle (poco probable), dejamos de
@@ -219,9 +234,17 @@ static std::string simpleEscapeForm(const std::string& contents) {
 }
 
 Event Terminal::readEvent() {
-    char c = readRawByte();
-
     Event e;
+    readEvent(e, -1); // -1: bloquea indefinidamente
+    return e;
+}
+
+bool Terminal::readEvent(Event& e, int timeoutMs) {
+    char c = 0;
+    // Espera el primer byte con el timeout pedido. Si no llega nada en
+    // `timeoutMs` (poll devuelve 0), no hay tecla que traducir.
+    if (!readByteWithTimeout(&c, timeoutMs)) return false;
+
     std::string raw; // bytes leidos de esta tecla (para el debug)
     raw.push_back(c);
 
@@ -239,7 +262,7 @@ Event Terminal::readEvent() {
     // (remapeable); aqui solo se hace la busqueda.
     if (auto type = keymap_.control(static_cast<unsigned char>(c)); type) {
         e.type = *type;
-        return e;
+        return true;
     }
 
     // Secuencias de escape: flechas, Home, End, Delete, RePag, AvPag.
@@ -255,9 +278,9 @@ Event Terminal::readEvent() {
             if (!readByteWithTimeout(&b, kEscapeSequenceTimeoutMs)) {
                 if (contents.empty()) {
                     e.type = EventType::Escape; // ESC sin nada mas
-                    return e;
+                    return true;
                 }
-                e.type = EventType::None; dumpUnrecognized(); return e;
+                e.type = EventType::None; dumpUnrecognized(); return true;
             }
             contents.push_back(b);
             raw.push_back(b);
@@ -269,7 +292,7 @@ Event Terminal::readEvent() {
         // secuencias (p.ej. ESC ~) no nos interesan.
         const char prefix = contents.empty() ? 0 : contents[0];
         if (prefix != '[' && prefix != 'O') {
-            e.type = EventType::None; dumpUnrecognized(); return e;
+            e.type = EventType::None; dumpUnrecognized(); return true;
         }
 
         // Busqueda en el Keymap: primero tal cual la emitio la terminal
@@ -279,16 +302,16 @@ Event Terminal::readEvent() {
         if (!type) type = keymap_.sequence(simpleEscapeForm(contents));
         if (type) {
             e.type = *type;
-            return e;
+            return true;
         }
-        e.type = EventType::None; dumpUnrecognized(); return e;
+        e.type = EventType::None; dumpUnrecognized(); return true;
     }
 
     // Caracter imprimible normal.
     if (c >= 32 && c < 127) {
         e.type = EventType::InsertChar;
         e.text = std::string(1, c);
-        return e;
+        return true;
     }
 
     // Caracter UTF-8 multibyte. El primer byte es el byte de inicio y
@@ -303,7 +326,7 @@ Event Terminal::readEvent() {
         else {
             // Byte de continuacion suelto o lead invalido: no es imprimible.
             e.type = EventType::None;
-            return e;
+            return true;
         }
 
         std::string bytes;
@@ -314,13 +337,13 @@ Event Terminal::readEvent() {
             raw.push_back(b);
             // Todo byte salvo el lead debe ser de continuacion (10xxxxxx).
             if ((static_cast<unsigned char>(b) & 0xC0) != 0x80) {
-                e.type = EventType::None; dumpUnrecognized(); return e;
+                e.type = EventType::None; dumpUnrecognized(); return true;
             }
             bytes.push_back(b);
         }
 
         e.type = EventType::InsertChar;
         e.text = bytes;
-        return e;
+        return true;
     }
 }

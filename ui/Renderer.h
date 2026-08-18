@@ -9,6 +9,36 @@
 #include "core/Viewport.h"
 #include "ui/EditorState.h"
 
+// Placeholder de estilo para la fila del cursor (Paso 2). Fondo gris
+// (\x1b[100m = bright black, de la paleta basica de 16 colores) como
+// reemplazo provisorio del color real de fondo (etapa de colores,
+// pendiente): visible en cualquier terminal con color (el 256-color
+// 48;5;236 resultaba casi invisible en fondos oscuros), y sin chocar con
+// el video inverso de la seleccion. Se expone para que los tests y un grep
+// trivial encuentren el hook cuando haya que sustituirlo por el definitivo.
+inline constexpr const char* kCurrentLineStyle = "\x1b[100m"; // gris, placeholder
+
+// Estilo de la barra de estado (texto negro sobre fondo gris 60%). El
+// gris se mide con 100% = negro y 0% = blanco: 60% => nivel 0.4*255 = 102,
+// RGB(102,102,102) en truecolor. Reemplaza al video inverso que se usaba
+// para marcar la fila fija.
+inline constexpr const char* kStatusBarStyle = "\x1b[30m\x1b[48;2;102;102;102m";
+
+// Fragmentos de la barra de estado. El fondo (kStatusBarStyle) se aplica
+// una sola vez al inicio; los fragmentos solo cambian el color/atributos
+// del texto manteniendo ese fondo:
+//  - kStatusBarName:     nombre (y ruta) del archivo en blanco.
+//  - kStatusBarReset:    vuelve a la base (negro sobre gris 60%).
+//  - kStatusBarCommand:  etiqueta de estado (comando) en negrita dorada
+//                        opaca (dorado de la paleta 256, 38;5;178, + bold).
+//  - kStatusBarPath:     ruta del archivo en negro, distinguiendola del
+//                        nombre (blanco) y del comando (dorado).
+inline constexpr const char* kStatusBarName = "\x1b[37m";                        // blanco
+inline constexpr const char* kStatusBarPath = "\x1b[30m";                          // negro
+inline constexpr const char* kStatusBarReset =
+    "\x1b[0m\x1b[30m\x1b[48;2;102;102;102m";                                      // base
+inline constexpr const char* kStatusBarCommand = "\x1b[1m\x1b[38;5;178m";        // bold + dorado
+
 // El Renderer sabe DIBUJAR, pero nunca modifica el Document, el
 // Cursor ni el Viewport (salvo scrollToCursor, que es responsabilidad
 // del propio Viewport, llamada desde Editor antes de renderizar).

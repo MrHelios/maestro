@@ -25,8 +25,16 @@ public:
     void disableRawMode();
 
     // Bloquea hasta leer una tecla y la traduce a un Event de alto
-    // nivel (esta es la unica funcion que "sabe" de teclas).
+    // nivel (esta es la unica funcion que "sabe" de teclas). Bloquea
+    // indefinidamente.
     Event readEvent();
+
+    // Igual que readEvent(), pero espera a lo sumo `timeoutMs` milisegundos
+    // (0 = no bloquea, negativo = indefinido). Devuelve true si se leyo y
+    // tradujo una tecla; false si el timeout expiro sin entrada. Es el
+    // mecanismo que permite al Editor despertar el ciclo para limpiar un
+    // mensaje de accion expirado sin que el usuario aprete ninguna tecla.
+    bool readEvent(Event& event, int timeoutMs);
 
     // Tamano actual de la terminal.
     void getWindowSize(int& rows, int& cols);
