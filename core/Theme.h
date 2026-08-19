@@ -105,11 +105,11 @@ inline constexpr const char* kMessageError        = "\x1b[31m";                 
 inline constexpr const char* kMessageReset        = "\x1b[0m";
 
 // Accents por estado activo (negrita + color 256 suave).
-inline constexpr const char* kAccentNavegacion   = "\x1b[1m\x1b[38;5;75m";       // azul suave
-inline constexpr const char* kAccentInteraccion  = "\x1b[1m\x1b[38;5;78m";       // verde suave
-inline constexpr const char* kAccentSeleccion    = "\x1b[1m\x1b[38;5;212m";      // magenta suave
+inline constexpr const char* kAccentNavegacion   = "\x1b[1m\x1b[38;5;178m";      // azul suave
+inline constexpr const char* kAccentInteraccion  = "\x1b[1m\x1b[38;5;178m";      // verde suave
+inline constexpr const char* kAccentSeleccion    = "\x1b[1m\x1b[38;5;178m";      // magenta suave
 inline constexpr const char* kAccentComando      = "\x1b[1m\x1b[38;5;178m";      // dorado
-inline constexpr const char* kAccentBuffers      = "\x1b[1m\x1b[38;5;117m";      // cyan suave
+inline constexpr const char* kAccentBuffers      = "\x1b[1m\x1b[38;5;178m";      // cyan suave
 inline constexpr const char* kAccentGuardar      = "\x1b[1m\x1b[38;5;221m";      // amarillo suave
 inline constexpr const char* kAccentAbrir        = "\x1b[1m\x1b[38;5;117m";      // cyan suave
 
