@@ -9,16 +9,16 @@ using namespace chrome;
 namespace {
 
 // Estilo de la fila de mensajes segun el tipo (paso 8). El tipo lo decide
-// la pantalla/el Editor cuando produce el Message; aqui solo se traduce a
-// color. Info es el caso base (sin color).
-std::string messageStyle(MessageKind kind) {
+// la pantalla/el Editor cuando produce el Message; aqui se traduce al color
+// del Theme. Info es el caso base (sin color).
+std::string messageStyle(const Theme& theme, MessageKind kind) {
     switch (kind) {
-        case MessageKind::Info:    return "";
-        case MessageKind::Success: return "\x1b[32m"; // verde
-        case MessageKind::Warning: return "\x1b[33m"; // amarillo
-        case MessageKind::Error:   return "\x1b[31m"; // rojo
+        case MessageKind::Info:    return theme.message;
+        case MessageKind::Success: return theme.success;
+        case MessageKind::Warning: return theme.warning;
+        case MessageKind::Error:   return theme.error;
     }
-    return "";
+    return theme.message;
 }
 
 // ---- Limites fijos de la barra de estado (bloque izquierdo) ----
@@ -97,12 +97,13 @@ BarLeft buildBarLeft(const std::string& rawName, const std::string& rawPath,
 
 std::string StatusBar::render(const Rect& area, const StatusBarData& data) {
     const int width = area.width;
+    const Theme& T = theme_;
     std::ostringstream out;
 
     // Fila fija (barra de estado): fondo gris 60%. El contenido es
     // "  BLANCO[nombre] NEGRO[ - ruta] DORADO[ - comando] relleno  {pct}%".
     out << "\x1b[K";
-    out << kStatusBarStyle; // base: negro sobre gris 60%
+    out << T.statusBar; // base: negro sobre gris 60%
 
     // Bloque derecho: si hay un `right` explicito (pantallas sin documento:
     // selector, explorador) se usa tal cual; si no, se calcula la posicion
@@ -157,13 +158,13 @@ std::string StatusBar::render(const Rect& area, const StatusBarData& data) {
 
     for (int i = 0; i < padL; ++i) out << ' ';
     if (left.onlyEstado) {
-        out << kStatusBarCommand << left.estado << kStatusBarReset;
+        out << T.statusBarAccent << left.estado << T.reset;
     } else {
-        out << kStatusBarName << left.name << kStatusBarReset;
+        out << T.statusBarName << left.name << T.reset;
         if (!left.path.empty()) {
-            out << kStatusBarPath << sep << left.path << kStatusBarReset;
+            out << T.statusBarPath << sep << left.path << T.reset;
         }
-        out << kStatusBarCommand << sep << left.estado << kStatusBarReset;
+        out << T.statusBarAccent << sep << left.estado << T.reset;
     }
 
     int fill = std::max(0, width - padL - plainW - padR - rightW);
@@ -171,7 +172,7 @@ std::string StatusBar::render(const Rect& area, const StatusBarData& data) {
     for (int i = 0; i < padR; ++i) out << ' ';
     out << rightBlock;
 
-    out << "\x1b[0m"; // reset de estilo
+    out << T.reset; // reset de estilo
 
     // Fila de mensajes (fila propia). Solo existe si el area de la barra
     // tiene mas de una fila. El texto se colorea por tipo (Message.kind);
@@ -186,11 +187,11 @@ std::string StatusBar::render(const Rect& area, const StatusBarData& data) {
         const int msgPadR = std::min(kStatusBarPadRight,
                                      std::max(0, width - msgPadL));
         for (int i = 0; i < msgPadL; ++i) out << ' ';
-        const std::string style = messageStyle(data.message.kind);
+        const std::string style = messageStyle(T, data.message.kind);
         out << style;
         out << utf8::truncate(data.message.text,
                               std::max(0, width - msgPadL - msgPadR));
-        if (!style.empty()) out << "\x1b[0m";
+        if (!style.empty()) out << T.reset;
         for (int i = 0; i < msgPadR; ++i) out << ' ';
     }
 

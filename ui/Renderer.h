@@ -7,23 +7,15 @@
 #include "core/Cursor.h"
 #include "core/Layout.h"
 #include "core/Selection.h"
+#include "core/Theme.h"
 #include "core/Viewport.h"
 #include "ui/EditorState.h"
 #include "ui/Message.h"
 #include "ui/StatusBar.h"
 
-// Placeholder de estilo para la fila del cursor (Paso 2). Fondo gris
-// (\x1b[100m = bright black, de la paleta basica de 16 colores) como
-// reemplazo provisorio del color real de fondo (etapa de colores,
-// pendiente): visible en cualquier terminal con color (el 256-color
-// 48;5;236 resultaba casi invisible en fondos oscuros), y sin chocar con
-// el video inverso de la seleccion. Se expone para que los tests y un grep
-// trivial encuentren el hook cuando haya que sustituirlo por el definitivo.
-inline constexpr const char* kCurrentLineStyle = "\x1b[100m"; // gris, placeholder
-
-// Los estilos de la barra de estado (kStatusBarStyle, kStatusBarName,
-// etc.) y StatusBarData viven en ui/StatusBar.h: la barra es un componente
-// propio, no parte del Renderer.
+// El estilo de la fila del cursor (kCurrentLineStyle) y los colores de la
+// barra (kStatusBar*) viven en core/Theme.h (v1.2): el Renderer usa un
+// Theme en vez de colores hardcodeados.
 
 // El Renderer sabe DIBUJAR, pero nunca modifica el Document, el
 // Cursor ni el Viewport (salvo scrollToCursor, que es responsabilidad
@@ -40,6 +32,11 @@ inline constexpr const char* kCurrentLineStyle = "\x1b[100m"; // gris, placehold
 // NOMBRES (no los Buffer en si) y el indice seleccionado.
 class Renderer {
 public:
+    // Tema de colores del contenido (gutter, fila actual, seleccion) y de la
+    // barra de estado. Default: defaultTheme() (aspecto identico a v1.1).
+    void setTheme(const Theme& t) { theme_ = t; }
+    const Theme& theme() const { return theme_; }
+
     // Construye la secuencia ANSI completa (todo el frame) y la devuelve
     // como string. Es la pieza pura y testeable: no toca la terminal.
     std::string buildScreen(const Document& doc,
@@ -99,6 +96,9 @@ public:
                         int height);
 
 private:
+    // Tema de colores del contenido y de la barra.
+    Theme theme_ = defaultTheme();
+
     // ---- Frame completo (v1.0) ----
     // El Renderer controla el frame: calcula el Layout UNA vez y delega en
     // las dos partes. Ninguna pantalla decide por si misma donde termina el

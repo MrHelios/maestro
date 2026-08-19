@@ -2,32 +2,22 @@
 
 #include <string>
 #include "core/Layout.h"
+#include "core/Theme.h"
 #include "ui/Message.h"
 
 // ---------------------------------------------------------------------------
-// Estilos de la barra de estado (v1.0). Antes vivian en Renderer.h; se
-// mudan aqui porque la barra es un componente propio, no parte del Renderer.
+// La barra usa un Theme para sus colores (v1.2): ya no tiene estilos
+// hardcodeados. La paleta por defecto vive en core/Theme.h (kStatusBarStyle
+// = texto negro sobre fondo gris 60%, RGB(102,102,102); kStatusBarName
+// blanco; kStatusBarPath negro; kStatusBarCommand bold dorado).
 //
-// kStatusBarStyle: texto negro sobre fondo gris 60%. El gris se mide con
-// 100% = negro y 0% = blanco: 60% => nivel 0.4*255 = 102, RGB(102,102,102)
-// en truecolor. Reemplaza al video inverso que se usaba para marcar la
-// fila fija.
-//
-// El fondo (kStatusBarStyle) se aplica UNA sola vez al inicio; los
-// fragmentos solo cambian el color/atributos del texto manteniendo ese
-// fondo:
-//  - kStatusBarName:    nombre (y ruta) del archivo en blanco.
-//  - kStatusBarReset:   vuelve a la base (negro sobre gris 60%).
-//  - kStatusBarCommand: etiqueta de estado (comando) en negrita dorada
-//                       opaca (dorado de la paleta 256, 38;5;178, + bold).
-//  - kStatusBarPath:    ruta del archivo en negro, distinguiendola del
-//                       nombre (blanco) y del comando (dorado).
-inline constexpr const char* kStatusBarStyle = "\x1b[30m\x1b[48;2;102;102;102m";
-inline constexpr const char* kStatusBarName = "\x1b[37m";                        // blanco
-inline constexpr const char* kStatusBarPath = "\x1b[30m";                          // negro
-inline constexpr const char* kStatusBarReset =
-    "\x1b[0m\x1b[30m\x1b[48;2;102;102;102m";                                      // base
-inline constexpr const char* kStatusBarCommand = "\x1b[1m\x1b[38;5;178m";        // bold + dorado
+// El Theme tambien documenta el aspecto de v1.0/v1.1, que era:
+//  - kStatusBarStyle se aplica UNA sola vez al inicio; los fragmentos solo
+//    cambian el color/atributos del texto manteniendo ese fondo.
+//  - kStatusBarName:   nombre (y ruta) del archivo en blanco.
+//  - kStatusBarReset:  vuelve a la base (negro sobre gris 60%).
+//  - kStatusBarCommand: etiqueta de estado (comando) en negrita dorada.
+//  - kStatusBarPath:   ruta del archivo en negro.
 
 // ---- Padding de la barra de estado ----
 inline constexpr int kStatusBarPadLeft  = 1;  // espacio inicial antes del nombre
@@ -61,6 +51,13 @@ class StatusBar {
 public:
     // Construye la secuencia ANSI de la barra completa (fila fija + fila de
     // mensajes) dentro de `area` (espera area.height == 2). No toca la
-    // terminal; devuelve el string.
+    // terminal; devuelve el string. Usa el Theme de la instancia.
     std::string render(const Rect& area, const StatusBarData& data);
+
+    // Tema de colores de la barra (default: defaultTheme()).
+    void setTheme(const Theme& t) { theme_ = t; }
+    const Theme& theme() const { return theme_; }
+
+private:
+    Theme theme_ = defaultTheme();
 };

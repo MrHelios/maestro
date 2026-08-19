@@ -104,10 +104,11 @@ std::string renderGutterBlank(int gutterW) {
 // bytes dentro de [selStartByte, selEndByte) si la linea esta seleccionada.
 // selStartByte/selEndByte -1 significa "sin seleccion en esta linea".
 //
-// `isCurrentLine` resalta la fila del cursor con kCurrentLineStyle: el
-// resaltado cubre TODA la fila (incluido el relleno hasta `width`, no solo
-// el texto), y la seleccion siempre gana sobre el (el tramo seleccionado se
-// pinta en video inverso y el resto de la fila lleva el estilo de linea).
+// `isCurrentLine` resalta la fila del cursor con el estilo del Theme
+// (theme_.currentLine): el resaltado cubre TODA la fila (incluido el
+// relleno hasta `width`, no solo el texto), y la seleccion siempre gana
+// sobre el (el tramo seleccionado se pinta en video inverso y el resto de
+// la fila lleva el estilo de linea).
 //
 // `lineBreakSelected` marca el caso de una fila VACIA atravesada por la
 // seleccion: su unico "contenido" es el salto de linea, y al estar
@@ -115,6 +116,7 @@ std::string renderGutterBlank(int gutterW) {
 // simbolo (si no, la fila quedaria en blanco y no se veria que se la
 // selecciono).
 void renderLine(std::string& out,
+                const Theme& T,
                 const std::string& line,
                 int width,
                 bool isCurrentLine,
@@ -125,9 +127,9 @@ void renderLine(std::string& out,
     // pinta en video inverso (sin simbolo) para que se vea que quedo
     // seleccionada.
     if (line.empty() && lineBreakSelected) {
-        out += "\x1b[7m";
+        out += T.selection;
         for (int i = 0; i < width; ++i) out += ' ';
-        out += "\x1b[0m";
+        out += T.reset;
         return;
     }
 
@@ -140,10 +142,10 @@ void renderLine(std::string& out,
             out += text;
             return;
         }
-        out += kCurrentLineStyle;
+        out += T.currentLine;
         out += text;
         for (int i = colCount(text); i < width; ++i) out += ' ';
-        out += "\x1b[0m";
+        out += T.reset;
         return;
     }
 
@@ -163,18 +165,18 @@ void renderLine(std::string& out,
     // Parte despues de la seleccion (si queda espacio).
     std::string after = utf8::range(line, std::min(endCol, width), width);
 
-    if (isCurrentLine) out += kCurrentLineStyle;
+    if (isCurrentLine) out += T.currentLine;
     out += before;
-    if (isCurrentLine) out += "\x1b[0m";
-    out += "\x1b[7m";
+    if (isCurrentLine) out += T.reset;
+    out += T.selection;
     out += selected;
-    out += "\x1b[0m";
-    if (isCurrentLine) out += kCurrentLineStyle;
+    out += T.reset;
+    if (isCurrentLine) out += T.currentLine;
     out += after;
     if (isCurrentLine) {
         int used = colCount(before) + colCount(selected) + colCount(after);
         for (int i = used; i < width; ++i) out += ' ';
-        out += "\x1b[0m";
+        out += T.reset;
     }
 }
 
@@ -308,8 +310,8 @@ void Renderer::renderEditorContent(std::string& out,
             }
 
             out += renderGutterCell(docLine + 1, gutterW, isCurrentLine);
-            renderLine(out, line, textWidth, isCurrentLine, selStart, selEnd,
-                       lineBreakSelected);
+            renderLine(out, theme_, line, textWidth, isCurrentLine, selStart,
+                       selEnd, lineBreakSelected);
         } else {
             out += renderGutterBlank(gutterW);
             out += "~"; // linea fuera del documento, estilo vim
@@ -322,8 +324,10 @@ void Renderer::renderStatusBar(std::string& out,
                                const Rect& area,
                                const StatusBarData& data) const {
     // La barra NO conoce editor, buffer ni documento: la pantalla produce
-    // un StatusBarData y la barra comun (StatusBar) solo lo pinta.
+    // un StatusBarData y la barra comun (StatusBar) solo lo pinta. El Theme
+    // del Renderer se propaga a la barra: es un unico esquema de color.
     StatusBar bar;
+    bar.setTheme(theme_);
     out += bar.render(area, data);
 }
 
@@ -390,9 +394,9 @@ void Renderer::renderBufferListContent(std::string& out,
         out += "\x1b[K";
         std::string line = "  " + names[i];
         if (static_cast<int>(i) == selected) {
-            out += "\x1b[7m";
+            out += theme_.selection;
             out += utf8::truncate(line, area.width);
-            out += "\x1b[0m";
+            out += theme_.reset;
         } else {
             out += utf8::truncate(line, area.width);
         }
@@ -469,9 +473,9 @@ void Renderer::renderFileListContent(std::string& out,
         if (idx < static_cast<int>(names.size())) {
             std::string line = "  " + names[static_cast<size_t>(idx)];
             if (idx == selected) {
-                out += "\x1b[7m";
+                out += theme_.selection;
                 out += utf8::truncate(line, area.width);
-                out += "\x1b[0m";
+                out += theme_.reset;
             } else {
                 out += utf8::truncate(line, area.width);
             }
