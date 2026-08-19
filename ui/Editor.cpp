@@ -35,24 +35,21 @@ Editor::Editor() {
     registerCommands();
 }
 
-void Editor::setStatusMessage(const std::string& msg) {
-    statusMessage_ = msg;
-    actionMessageActive_ = false;
+void Editor::setStatusMessage(const std::string& msg, MessageKind kind) {
+    statusMessage_ = Message{msg, kind, std::nullopt};
 }
 
-void Editor::setActionMessage(const std::string& msg) {
-    statusMessage_ = msg;
-    actionMessageActive_ = true;
-    actionMessageExpiry_ = std::chrono::steady_clock::now() + kActionMessageTimeout;
+void Editor::setActionMessage(const std::string& msg, MessageKind kind) {
+    statusMessage_ = Message{msg, kind,
+                             std::chrono::steady_clock::now() + kActionMessageTimeout};
 }
 
 void Editor::clearExpiredActionMessage() {
     // Un mensaje de accion expira por si solo pasados los 5 segundos. Los
-    // mensajes persistentes no se tocan (actionMessageActive_ es false).
-    if (!actionMessageActive_) return;
-    if (std::chrono::steady_clock::now() >= actionMessageExpiry_) {
-        setStatusMessage("");
-        actionMessageActive_ = false;
+    // mensajes persistentes NO se tocan (persistent() es true).
+    if (statusMessage_.persistent()) return;
+    if (statusMessage_.expired()) {
+        statusMessage_ = Message{};
     }
 }
 
@@ -70,7 +67,7 @@ void Editor::registerCommands() {
     commands_.registerCommand("navegacion.pegar", [this] {
         Buffer& b = active();
         if (clipboard_.empty()) {
-            setActionMessage("Nada para pegar.");
+            setActionMessage("Nada para pegar.", MessageKind::Warning);
             return;
         }
         // P0 interaction: si hay una seleccion vigente, el pegado la
@@ -92,7 +89,7 @@ void Editor::registerCommands() {
         b.modified = true;
         clearSelection();
         state_ = State::Navegacion;
-        setActionMessage("Pegado.");
+        setActionMessage("Pegado.", MessageKind::Success);
     });
     commands_.registerCommand("navegacion.palabra.atras", [this] {
         active().cursor.moveToPreviousWord(active().document);
@@ -157,7 +154,7 @@ void Editor::registerCommands() {
     });
     commands_.registerCommand("buffer.selector", [this] {
         if (buffers.count() <= 1) {
-            setActionMessage("Solo hay un buffer.");
+            setActionMessage("Solo hay un buffer.", MessageKind::Warning);
             state_ = priorState_;
         } else {
             bufferSelectorIndex_ = buffers.activeIndex();
@@ -189,7 +186,7 @@ bool Editor::openFile(const std::string& path) {
     // v0.6.2: solo archivos. Una carpeta no se trata como archivo
     // nuevo: se rechaza y el editor queda como estaba.
     if (isDirectory(path)) {
-        setActionMessage("No se pueden abrir carpetas.");
+        setActionMessage("No se pueden abrir carpetas.", MessageKind::Error);
         return false;
     }
 
@@ -207,7 +204,8 @@ bool Editor::openFile(const std::string& path) {
         b.filename = oldFilename;
         setActionMessage((result == LoadResult::PermissionDenied)
                                   ? "Sin permisos de lectura: " + path
-                                  : "No se pudo leer: " + path);
+                                  : "No se pudo leer: " + path,
+                         MessageKind::Error);
         return false;
     }
     b.modified = false;
@@ -220,7 +218,7 @@ bool Editor::openFile(const std::string& path) {
     state_ = State::Navegacion;
     setStatusMessage("");
     if (result == LoadResult::NotFound) {
-        setActionMessage("Archivo nuevo: " + path);
+        setActionMessage("Archivo nuevo: " + path, MessageKind::Success);
     }
     return result == LoadResult::Success;
 }
@@ -235,7 +233,7 @@ void Editor::createBuffer() {
     int rows, cols;
     terminal_.getWindowSize(rows, cols);
     const int idx = buffers.createBuffer(rows, cols);
-    setActionMessage("Buffer nuevo: " + buffers.at(idx).unnamedName);
+    setActionMessage("Buffer nuevo: " + buffers.at(idx).unnamedName, MessageKind::Success);
 }
 
 void Editor::closeActiveBuffer() {
@@ -243,7 +241,7 @@ void Editor::closeActiveBuffer() {
     terminal_.getWindowSize(rows, cols);
     switch (buffers.closeActive(rows, cols)) {
         case CloseResult::ModifiedBlocked:
-            setActionMessage("Buffer modificado: guarda con Ctrl+K s o restaura.");
+            setActionMessage("Buffer modificado: guarda con Ctrl+K s o restaura.", MessageKind::Warning);
             state_ = priorState_;
             break;
         case CloseResult::ResetLast:
@@ -305,7 +303,7 @@ void Editor::startFileBrowser() {
     fileBrowser.start();
     const std::string err = fileBrowser.reload();
     if (!err.empty()) {
-        setActionMessage(err);
+        setActionMessage(err, MessageKind::Error);
     } else {
         setStatusMessage("ABRIR: ↑/↓ mover | Enter abrir/entrar | ESC cancelar");
     }
@@ -343,7 +341,7 @@ void Editor::fileBrowserEnterSelected() {
         case FileBrowser::EnterResult::EnteredDirectory: {
             const std::string err = fileBrowser.reload();
             if (!err.empty()) {
-                setActionMessage(err);
+                setActionMessage(err, MessageKind::Error);
             } else {
                 setStatusMessage("ABRIR: ↑/↓ mover | Enter abrir/entrar | ESC cancelar");
             }
@@ -382,7 +380,8 @@ void Editor::openFileToBuffer(const std::string& path) {
         // Error real (permisos, E/S): no se crea ni se toca nada.
         setActionMessage((result == LoadResult::PermissionDenied)
                              ? "Sin permisos de lectura: " + filePath
-                             : "No se pudo leer: " + filePath);
+                             : "No se pudo leer: " + filePath,
+                         MessageKind::Error);
         return;
     }
     nuevo.modified = false;
@@ -397,7 +396,7 @@ void Editor::openFileToBuffer(const std::string& path) {
     if (result == LoadResult::Success) {
         setStatusMessage("");
     } else {
-        setActionMessage("Archivo nuevo: " + path);
+        setActionMessage("Archivo nuevo: " + path, MessageKind::Success);
     }
 }
 
@@ -427,8 +426,8 @@ void Editor::run() {
         // al timeout para poder limpiarlo y redibujar SIN que el usuario
         // aprete nada. Sin mensaje de accion, -1 = esperar para siempre.
         int waitMs = -1;
-        if (actionMessageActive_) {
-            const auto remaining = actionMessageExpiry_ -
+        if (statusMessage_.expiry) {
+            const auto remaining = *statusMessage_.expiry -
                                    std::chrono::steady_clock::now();
             const long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                 remaining).count();
@@ -967,7 +966,7 @@ void Editor::handleSaveAsEvent(const Event& event) {
             break;
         case EventType::Escape:
             state_ = priorState_;
-            setActionMessage("Guardado cancelado.");
+            setActionMessage("Guardado cancelado.", MessageKind::Warning);
             break;
         default:
             // Cualquier otra tecla es no-op: el prompt es una pantalla
@@ -985,17 +984,17 @@ void Editor::commitSaveAs() {
         return;
     }
     if (isDirectory(path)) {
-        setActionMessage("Es una carpeta: " + path);
+        setActionMessage("Es una carpeta: " + path, MessageKind::Error);
         return;
     }
     if (b.document.saveToFile(path)) {
         b.filename = path;
         b.modified = false;
         b.savedLines = b.document.snapshot();
-        setActionMessage("Guardado: " + path);
+        setActionMessage("Guardado: " + path, MessageKind::Success);
         state_ = priorState_;
     } else {
-        setActionMessage("Error al guardar: " + path);
+        setActionMessage("Error al guardar: " + path, MessageKind::Error);
     }
 }
 
@@ -1068,15 +1067,15 @@ void Editor::save() {
     // desvia los sin nombre al prompt SaveAs). El guard sigue aqui como
     // invariante defensivo: un buffer sin nombre no tiene a donde guardar.
     if (b.filename.empty()) {
-        setActionMessage("Archivo sin nombre: usa Ctrl+K Ctrl+S para elegir ruta.");
+        setActionMessage("Archivo sin nombre: usa Ctrl+K Ctrl+S para elegir ruta.", MessageKind::Warning);
         return;
     }
     if (b.document.saveToFile(b.filename)) {
         b.modified = false;
         b.savedLines = b.document.snapshot();
-        setActionMessage("Guardado.");
+        setActionMessage("Guardado.", MessageKind::Success);
     } else {
-        setActionMessage("Error al guardar.");
+        setActionMessage("Error al guardar.", MessageKind::Error);
     }
 }
 
@@ -1098,7 +1097,7 @@ void Editor::undo() {
     coalescingTyping_ = false;
     Buffer& b = active();
     if (b.undoStack.empty()) {
-        setActionMessage("Nada que deshacer.");
+        setActionMessage("Nada que deshacer.", MessageKind::Warning);
         return;
     }
 
@@ -1119,14 +1118,14 @@ void Editor::undo() {
     state_ = (b.selection.has_value() && b.selection->anchor != b.selection->position)
            ? State::Seleccion
            : State::Navegacion;
-    setActionMessage("Deshecho.");
+    setActionMessage("Deshecho.", MessageKind::Success);
 }
 
 void Editor::redo() {
     coalescingTyping_ = false;
     Buffer& b = active();
     if (b.redoStack.empty()) {
-        setActionMessage("Nada que rehacer.");
+        setActionMessage("Nada que rehacer.", MessageKind::Warning);
         return;
     }
 
@@ -1144,5 +1143,5 @@ void Editor::redo() {
     state_ = (b.selection.has_value() && b.selection->anchor != b.selection->position)
            ? State::Seleccion
            : State::Navegacion;
-    setActionMessage("Rehecho.");
+    setActionMessage("Rehecho.", MessageKind::Success);
 }

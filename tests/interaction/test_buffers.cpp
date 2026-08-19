@@ -1120,7 +1120,12 @@ TEST(renderer_buffer_list_marks_selected) {
     CHECK(contains(out, "\x1b[7m  b.txt\x1b[0m"));
     CHECK(contains(out, "  a.txt"));
     CHECK(contains(out, "  SinNombre"));
-    CHECK(contains(out, "MULTIBUFFER"));
+    // Barra unificada al estilo del editor: Buffers | SELECCIONAR | 2/3.
+    // (El nombre y el estado llevan colores distintos, asi que se verifican
+    // por separado: hay secuencias ANSI entre medio.)
+    CHECK(contains(out, "Buffers"));
+    CHECK(contains(out, "SELECCIONAR"));
+    CHECK(contains(out, "2/3"));
 }
 
 TEST(renderer_buffer_list_first_selected) {
@@ -1130,22 +1135,26 @@ TEST(renderer_buffer_list_first_selected) {
     CHECK(!contains(out, "\x1b[7m  b.txt"));
 }
 
-// El selector mantiene el aspecto del editor: filas vacias con "~" y una
-// barra final en video inverso que solo dice MULTIBUFFER (nada de ruta,
-// Linea/Col ni fila de mensajes).
-TEST(renderer_buffer_list_only_multibuffer_bar) {
+// El selector mantiene el aspecto del editor: filas vacias con "~". Ya no
+// dibuja su propia barra en video inverso (MULTIBUFFER): produce datos
+// (Buffers | SELECCIONAR | n/total) y se los entrega al StatusBar comun.
+TEST(renderer_buffer_list_only_unified_bar) {
     Renderer r;
     std::string out = r.buildBufferListScreen({"a.txt", "b.txt"}, 1, 80, 10);
     // Filas vacias con el marcador del editor, sin el texto "BUFFERS".
     CHECK(contains(out, "\x1b[K~\r\n"));
     CHECK(!contains(out, "~ BUFFERS"));
-    // Barra final: solo MULTIBUFFER.
-    CHECK(contains(out, "\x1b[7mMULTIBUFFER"));
+    // Ya no hay barra en video inverso MULTIBUFFER: la barra es la del
+    // StatusBar comun (fondo gris 60%) con Buffers/SELECCIONAR y el
+    // contador estilo editor, sin Linea/Col ni la ruta del buffer.
+    CHECK(!contains(out, "\x1b[7mMULTIBUFFER"));
+    CHECK(contains(out, kStatusBarStyle));
+    CHECK(contains(out, "Buffers"));
+    CHECK(contains(out, "SELECCIONAR"));
+    CHECK(contains(out, "2/2"));
     CHECK(!contains(out, "Linea:"));
     CHECK(!contains(out, "Col:"));
     CHECK(!contains(out, "a.txt - "));
-    // Sin fila de mensajes: la barra MULTIBUFFER es la ultima fila dibujada.
-    CHECK(!contains(out, "Buffers:"));
 }
 
 TEST(buffer_names_include_modified_marker) {

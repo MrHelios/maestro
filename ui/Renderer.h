@@ -5,9 +5,12 @@
 #include <vector>
 #include "core/Document.h"
 #include "core/Cursor.h"
+#include "core/Layout.h"
 #include "core/Selection.h"
 #include "core/Viewport.h"
 #include "ui/EditorState.h"
+#include "ui/Message.h"
+#include "ui/StatusBar.h"
 
 // Placeholder de estilo para la fila del cursor (Paso 2). Fondo gris
 // (\x1b[100m = bright black, de la paleta basica de 16 colores) como
@@ -18,26 +21,9 @@
 // trivial encuentren el hook cuando haya que sustituirlo por el definitivo.
 inline constexpr const char* kCurrentLineStyle = "\x1b[100m"; // gris, placeholder
 
-// Estilo de la barra de estado (texto negro sobre fondo gris 60%). El
-// gris se mide con 100% = negro y 0% = blanco: 60% => nivel 0.4*255 = 102,
-// RGB(102,102,102) en truecolor. Reemplaza al video inverso que se usaba
-// para marcar la fila fija.
-inline constexpr const char* kStatusBarStyle = "\x1b[30m\x1b[48;2;102;102;102m";
-
-// Fragmentos de la barra de estado. El fondo (kStatusBarStyle) se aplica
-// una sola vez al inicio; los fragmentos solo cambian el color/atributos
-// del texto manteniendo ese fondo:
-//  - kStatusBarName:     nombre (y ruta) del archivo en blanco.
-//  - kStatusBarReset:    vuelve a la base (negro sobre gris 60%).
-//  - kStatusBarCommand:  etiqueta de estado (comando) en negrita dorada
-//                        opaca (dorado de la paleta 256, 38;5;178, + bold).
-//  - kStatusBarPath:     ruta del archivo en negro, distinguiendola del
-//                        nombre (blanco) y del comando (dorado).
-inline constexpr const char* kStatusBarName = "\x1b[37m";                        // blanco
-inline constexpr const char* kStatusBarPath = "\x1b[30m";                          // negro
-inline constexpr const char* kStatusBarReset =
-    "\x1b[0m\x1b[30m\x1b[48;2;102;102;102m";                                      // base
-inline constexpr const char* kStatusBarCommand = "\x1b[1m\x1b[38;5;178m";        // bold + dorado
+// Los estilos de la barra de estado (kStatusBarStyle, kStatusBarName,
+// etc.) y StatusBarData viven en ui/StatusBar.h: la barra es un componente
+// propio, no parte del Renderer.
 
 // El Renderer sabe DIBUJAR, pero nunca modifica el Document, el
 // Cursor ni el Viewport (salvo scrollToCursor, que es responsabilidad
@@ -61,7 +47,7 @@ public:
                             const Viewport& viewport,
                             const std::string& filename,
                             bool modified,
-                            const std::string& statusMessage,
+                            const Message& message,
                             State state,
                             const std::optional<Selection>& selection = std::nullopt);
 
@@ -71,7 +57,7 @@ public:
                       const Viewport& viewport,
                       const std::string& filename,
                       bool modified,
-                      const std::string& statusMessage,
+                      const Message& message,
                       State state,
                       const std::optional<Selection>& selection = std::nullopt);
 
@@ -100,7 +86,7 @@ public:
                                     int selected,
                                     int scroll,
                                     const std::string& path,
-                                    const std::string& statusMessage,
+                                    const Message& message,
                                     int width,
                                     int height);
 
@@ -108,7 +94,61 @@ public:
                         int selected,
                         int scroll,
                         const std::string& path,
-                        const std::string& statusMessage,
+                        const Message& message,
                         int width,
                         int height);
+
+private:
+    // ---- Frame completo (v1.0) ----
+    // El Renderer controla el frame: calcula el Layout UNA vez y delega en
+    // las dos partes. Ninguna pantalla decide por si misma donde termina el
+    // contenido; la ultima fila queda reservada para el StatusBar.
+    //
+    //   renderFrame()
+    //     ├── calculateLayout()  -> area de contenido + barra comun
+    //     ├── renderContent()    -> la pantalla dibuja su contenido
+    //     └── renderStatusBar()  -> la barra comun dibuja su chrome
+    //
+    // `contentRows` es la altura disponible para el contenido (viewport):
+    // el area de la barra ocupa las 2 filas finales (fila fija + mensajes).
+    Layout calculateLayout(int contentRows, int width) const;
+
+    // Dibuja solo el CONTENIDO del Editor (filas del documento) dentro de
+    // `area`. Emite cada fila terminada en \r\n, dejando el cursor terminal
+    // al inicio de la fila del StatusBar.
+    void renderEditorContent(std::string& out,
+                             const Document& doc,
+                             const Cursor& cursor,
+                             const Viewport& viewport,
+                             const std::optional<Normalized>& sel,
+                             const Rect& area,
+                             int gutterW) const;
+
+    // CONTENIDO del selector de buffers: la lista (`names`, el seleccionado
+    // en video inverso) y las filas vacias con "~". Solo contenido; la barra
+    // la dibuja el StatusBar comun.
+    void renderBufferListContent(std::string& out,
+                                 const std::vector<std::string>& names,
+                                 int selected,
+                                 const Rect& area) const;
+
+    // CONTENIDO del explorador de archivos: la lista con ventana (scroll) y
+    // las filas vacias con "~". Solo contenido; la barra la dibuja el
+    // StatusBar comun.
+    void renderFileListContent(std::string& out,
+                               const std::vector<std::string>& names,
+                               int selected,
+                               int scroll,
+                               const Rect& area) const;
+
+    // Dibuja la barra comun (StatusBar) dentro de `area` a partir de los
+    // datos que cada pantalla produce. No conoce editor, buffer ni
+    // documento: solo recibe un StatusBarData ya armado.
+    void renderStatusBar(std::string& out,
+                         const Rect& area,
+                         const StatusBarData& data) const;
+
+    // Unico lugar del Renderer que emite la secuencia de posicionamiento
+    // "\x1b[{row};{col}H" (fila/columna 1-indexadas). Paso 9 (coordenadas).
+    void moveCursorTo(std::string& out, int row, int col) const;
 };

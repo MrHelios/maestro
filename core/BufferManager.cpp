@@ -1,4 +1,5 @@
 #include "core/BufferManager.h"
+#include "core/Layout.h"
 
 #include <algorithm>
 
@@ -111,7 +112,11 @@ bool BufferManager::activate(int idx) {
 }
 
 void BufferManager::fitViewport(Buffer& b, int rows, int cols) {
-    b.viewport.height = rows > 2 ? rows - 2 : 1;
+    // La unica fuente de la geometria del frame es computeLayout()
+    // (ui/Layout.h): aqui se copia la altura del CONTENIDO (la terminal
+    // menos el chrome) al viewport del buffer.
+    const Layout layout = computeLayout(rows, cols);
+    b.viewport.height = layout.content.height;
     b.viewport.width = cols;
 }
 

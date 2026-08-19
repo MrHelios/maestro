@@ -9,6 +9,7 @@
 #include "ui/CommandMap.h"
 #include "ui/EditorState.h"
 #include "ui/FileBrowser.h"
+#include "ui/Message.h"
 #include "ui/Renderer.h"
 #include "terminal/Terminal.h"
 #include "terminal/Event.h"
@@ -60,17 +61,19 @@ public:
     static constexpr auto kActionMessageTimeout = std::chrono::seconds(5);
 
 private:
-    // ---- Mensajes al usuario ----
-    // `setStatusMessage` muestra un mensaje PERSISTENTE (ayuda de modo,
-    // prompts de comando, informacion de estado): se queda hasta que otra
-    // cosa lo reemplace y cancela cualquier timeout vigente.
-    // `setActionMessage` muestra un mensaje de ACCION (feedback de una
-    // accion ya realizada) con timeout de kActionMessageTimeout: se limpia
-    // solo pasado ese tiempo, para no quedar pegado en pantalla.
-    void setStatusMessage(const std::string& msg);
-    void setActionMessage(const std::string& msg);
+    // ---- Mensajes al usuario (paso 8) ----
+    // Un unico valor `statusMessage_` (ui::Message) lleva el texto, el tipo
+    // y el vencimiento del mensaje vigente. `setStatusMessage` muestra un
+    // mensaje PERSISTENTE (ayuda de modo, prompts de comando, informacion
+    // de estado): se queda hasta que otra cosa lo reemplace y cancela
+    // cualquier timeout vigente. `setActionMessage` muestra un mensaje de
+    // ACCION (feedback de una accion ya realizada) con timeout de
+    // kActionMessageTimeout: se limpia solo pasado ese tiempo, para no
+    // quedar pegado en pantalla.
+    void setStatusMessage(const std::string& msg, MessageKind kind = MessageKind::Info);
+    void setActionMessage(const std::string& msg, MessageKind kind = MessageKind::Info);
     // En el ciclo principal, si hay un mensaje de accion expirado se limpia
-    // (statusMessage_ pasa a vacio). Tampoco: nunca toca los persistentes.
+    // (statusMessage_ pasa a vacio). Nunca toca los persistentes.
     void clearExpiredActionMessage();
 
     // ---- Coleccion de buffers (v0.6.3) ----
@@ -147,12 +150,10 @@ private:
     // usa para saber a que modo volver al cancelar el selector con ESC.
     State priorState_ = State::Navegacion;
     bool running_ = true;
-    std::string statusMessage_;
-    // Timeout del mensaje de accion vigente: true mientras haya un mensaje
-    // de accion en pantalla esperando a expirar; en la marca de tiempo
-    // (actionMessageExpiry_) se almacena cuando debe limpiarse.
-    bool actionMessageActive_ = false;
-    std::chrono::steady_clock::time_point actionMessageExpiry_;
+    // Mensaje vigente (paso 8): texto + tipo + vencimiento en un solo valor.
+    // En lugar de testear actionMessageActive_/actionMessageExpiry_, se
+    // pregunta statusMessage_.persistent()/.expired().
+    Message statusMessage_;
 
     // Buffer de copiar/cortar/pegar (v0.55). Contenido del ultimo rango
     // copiado/cortado, como bloque de lineas. Vive FUERA de HistoryState:
