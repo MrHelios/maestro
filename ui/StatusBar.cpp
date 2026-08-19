@@ -178,14 +178,14 @@ std::string StatusBar::render(const Rect& area, const StatusBarData& data) {
     if (hasMod) nameText = nameText.substr(0, nameText.size() - modMarker.size());
 
     if (left.onlyEstado) {
-        out << accent << left.estado << T.reset;
+        out << accent << left.estado << T.reset << T.statusBar;
     } else {
-        out << T.statusBarName << nameText << T.reset;
-        if (hasMod) out << T.statusBarModified << modMarker << T.reset;
+        out << T.statusBarName << nameText << T.reset << T.statusBar;
+        if (hasMod) out << T.statusBarModified << modMarker << T.reset << T.statusBar;
         if (!left.path.empty()) {
-            out << T.statusBarPath << sep << left.path << T.reset;
+            out << T.statusBarPath << sep << left.path << T.reset << T.statusBar;
         }
-        out << accent << sep << left.estado << T.reset;
+        out << accent << sep << left.estado << T.reset << T.statusBar;
     }
 
     int fill = std::max(0, width - padL - plainW - padR - rightW);
