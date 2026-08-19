@@ -96,20 +96,6 @@ std::vector<std::string> visibleRows(const std::string& frame) {
     return out;
 }
 
-// Fila `index` (del frame completo) ya sin ANSI: con su gutter y contenido.
-std::string plainRow(const std::string& frame, int index) {
-    std::string plain = stripAnsiLocal(frame);
-    size_t start = 0;
-    for (int i = 0; i < index; ++i) {
-        size_t pos = plain.find("\r\n", start);
-        if (pos == std::string::npos) return "";
-        start = pos + 2;
-    }
-    size_t end = plain.find("\r\n", start);
-    if (end == std::string::npos) end = plain.size();
-    return plain.substr(start, end - start);
-}
-
 // ----- Frames de cada pantalla ----------------------------------------------
 
 // Editor: documento de `lines`, `content` filas de contenido, `width` cols.
