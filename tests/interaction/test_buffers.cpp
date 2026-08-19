@@ -1117,7 +1117,10 @@ static bool contains(const std::string& hay, const std::string& needle) {
 TEST(renderer_buffer_list_marks_selected) {
     Renderer r;
     std::string out = r.buildBufferListScreen({"a.txt", "b.txt", "SinNombre"}, 1, 80, 10);
-    CHECK(contains(out, "\x1b[7m  b.txt\x1b[0m"));
+    // El item activo de la lista lleva el mismo gris que la fila del cursor
+    // (listSelected == currentLine: lenguaje ACTIVO unificado), no video
+    // inverso.
+    CHECK(contains(out, std::string(kListSelectedStyle) + "  b.txt" + "\x1b[0m"));
     CHECK(contains(out, "  a.txt"));
     CHECK(contains(out, "  SinNombre"));
     // Barra unificada al estilo del editor: Buffers | SELECCIONAR | 2/3.
@@ -1131,8 +1134,8 @@ TEST(renderer_buffer_list_marks_selected) {
 TEST(renderer_buffer_list_first_selected) {
     Renderer r;
     std::string out = r.buildBufferListScreen({"a.txt", "b.txt"}, 0, 80, 10);
-    CHECK(contains(out, "\x1b[7m  a.txt\x1b[0m"));
-    CHECK(!contains(out, "\x1b[7m  b.txt"));
+    CHECK(contains(out, std::string(kListSelectedStyle) + "  a.txt" + "\x1b[0m"));
+    CHECK(!contains(out, std::string(kListSelectedStyle) + "  b.txt"));
 }
 
 // El selector mantiene el aspecto del editor: filas vacias con "~". Ya no
@@ -1141,8 +1144,9 @@ TEST(renderer_buffer_list_first_selected) {
 TEST(renderer_buffer_list_only_unified_bar) {
     Renderer r;
     std::string out = r.buildBufferListScreen({"a.txt", "b.txt"}, 1, 80, 10);
-    // Filas vacias con el marcador del editor, sin el texto "BUFFERS".
-    CHECK(contains(out, "\x1b[K~\r\n"));
+    // Filas vacias con el marcador del editor, alineado con las entradas
+    // (misma indentacion de 2 espacios) y sin el texto "BUFFERS".
+    CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~\x1b[0m\r\n"));
     CHECK(!contains(out, "~ BUFFERS"));
     // Ya no hay barra en video inverso MULTIBUFFER: la barra es la del
     // StatusBar comun (fondo gris 60%) con Buffers/SELECCIONAR y el

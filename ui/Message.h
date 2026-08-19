@@ -26,6 +26,7 @@ enum class MessageKind {
     Success,  // accion realizada correctamente ("Guardado.", "Pegado.")
     Warning,  // aviso ("Solo hay un buffer.", "Nada para pegar.")
     Error,    // fallo ("Error al guardar:", "No se pudo leer")
+    Prompt,   // prompt de entrada ("Guardar archivo:") -> negrita (v1.3)
 };
 
 struct Message {

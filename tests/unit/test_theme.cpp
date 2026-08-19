@@ -71,6 +71,31 @@ TEST(theme_default_matches_legacy_colors) {
 }
 
 // ---------------------------------------------------------------------------
+// El Theme por defecto define los estilos del lenguaje visual v1.3:
+// gutter, marcador, item activo de listas, prompts, indicador [modificado]
+// y los accents por estado.
+// ---------------------------------------------------------------------------
+TEST(theme_defaults_new_visual_language) {
+    const Theme t = defaultTheme();
+    CHECK_EQ(t.lineNumber, std::string(kLineNumberStyle));
+    CHECK_EQ(t.gutterCurrent, std::string(kGutterCurrentStyle));
+    CHECK_EQ(t.marker, std::string(kMarkerStyle));
+    CHECK_EQ(t.listSelected, std::string(kListSelectedStyle));
+    CHECK_EQ(t.prompt, std::string(kPromptStyle));
+    CHECK_EQ(t.statusBarModified, std::string(kStatusBarModified));
+    CHECK_EQ(t.accentNavegacion, std::string(kAccentNavegacion));
+    CHECK_EQ(t.accentInteraccion, std::string(kAccentInteraccion));
+    CHECK_EQ(t.accentSeleccion, std::string(kAccentSeleccion));
+    CHECK_EQ(t.accentComando, std::string(kAccentComando));
+    CHECK_EQ(t.accentBuffers, std::string(kAccentBuffers));
+    CHECK_EQ(t.accentGuardar, std::string(kAccentGuardar));
+    CHECK_EQ(t.accentAbrir, std::string(kAccentAbrir));
+    // El lenguaje ACTIVO se unifica: el item de lista usa el mismo gris que
+    // la fila del cursor del editor (listSelected == currentLine).
+    CHECK_EQ(t.listSelected, t.currentLine);
+}
+
+// ---------------------------------------------------------------------------
 // Renderer: el color de seleccion y de fila actual salen del Theme, no de
 // constantes. Un Theme con colores BIZARROS debe verse en el output.
 // ---------------------------------------------------------------------------
@@ -92,6 +117,27 @@ TEST(theme_renderer_uses_theme_for_selection_and_currentline) {
     // El default theme SEGUIRIA usando video inverso: el output debe
     // diferir con este tema, demostrando que el Theme se usa.
     CHECK(frame != editorFrameWithSelection(defaultTheme()));
+}
+
+// ---------------------------------------------------------------------------
+// Las listas (selector de buffers, explorador) usan el accent del item
+// ACTIVO (listSelected), NO el de la seleccion de TEXTO (selection). Asi el
+// lenguaje ACTIVO (gris) cubre la fila del cursor y el item de lista, y el
+// de SELECCION (video inverso) queda solo para el texto marcado.
+// ---------------------------------------------------------------------------
+TEST(theme_lists_use_listselected_not_selection) {
+    const std::string base = bufferFrameWithSelection(defaultTheme());
+    // Un cambio en selection (video inverso -> fondo rojo) NO altera la
+    // lista: la lista no lee selection.
+    Theme t1 = defaultTheme();
+    t1.selection = "\x1b[41m";
+    CHECK_EQ(bufferFrameWithSelection(t1), base);
+    // Un cambio en listSelected SI altera la lista.
+    Theme t2 = defaultTheme();
+    t2.listSelected = "\x1b[41m";
+    CHECK(bufferFrameWithSelection(t2) != base);
+    // Por defecto el item activo lleva el mismo gris que la fila del cursor.
+    CHECK(base.find(defaultTheme().listSelected) != std::string::npos);
 }
 
 // ---------------------------------------------------------------------------

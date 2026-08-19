@@ -277,3 +277,83 @@ TEST(statusbar_right_block_edge_layout) {
     CHECK(contains(r.fixed, "0% (1,1)"));
     CHECK_EQ(r.fixed.back(), ')');
 }
+
+// ---------------------------------------------------------------------------
+// v1.3: el accent de la etiqueta de estado viene de EstadoData.estadoAccent
+// (color por estado activo); vacio usa el fallback statusBarAccent del Theme.
+// ---------------------------------------------------------------------------
+TEST(statusbar_estado_accent_from_data) {
+    Theme t = defaultTheme();
+    t.statusBarAccent = "\x1b[34m";      // azul (fallback)
+    t.accentNavegacion = "\x1b[33m";     // amarillo (estado activo)
+    StatusBar bar;
+    bar.setTheme(t);
+    Rect area; area.width = 40; area.height = 2;
+
+    StatusBarData d;
+    d.name = "a.txt";
+    d.estado = "NAVEGACION";
+    d.totalLines = 1;
+
+    d.estadoAccent = "";
+    const std::string fallback = bar.render(area, d);
+    CHECK(fallback.find(t.statusBarAccent) != std::string::npos);
+
+    d.estadoAccent = t.accentNavegacion;
+    const std::string withAccent = bar.render(area, d);
+    CHECK(withAccent.find(t.accentNavegacion) != std::string::npos);
+    CHECK(withAccent.find(t.statusBarAccent) == std::string::npos);
+    CHECK(withAccent != fallback);
+}
+
+// ---------------------------------------------------------------------------
+// v1.3: el indicador "[modificado]" se pinta con statusBarModified (no con
+// statusBarName), distinto del nombre y nunca presente si no hay cambios.
+// ---------------------------------------------------------------------------
+TEST(statusbar_modified_indicator_styled) {
+    Theme t = defaultTheme();
+    t.statusBarModified = "\x1b[1;38;5;200m";
+    StatusBar bar;
+    bar.setTheme(t);
+    Rect area; area.width = 60; area.height = 2;
+
+    StatusBarData d;
+    d.name = "x.cc";
+    d.modified = true;
+    d.estado = "NAVEGACION";
+    d.totalLines = 1;
+
+    const std::string out = bar.render(area, d);
+    CHECK(out.find(t.statusBarModified + " [modificado]") != std::string::npos);
+
+    StatusBarData c = d;
+    c.modified = false;
+    CHECK(bar.render(area, c).find(" [modificado]") == std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// v1.3: un mensaje de tipo Prompt se pinta con theme.prompt (negrita);
+// los mensajes Info no llevan ese estilo.
+// ---------------------------------------------------------------------------
+TEST(statusbar_prompt_message_styled) {
+    Theme t = defaultTheme();
+    // Italica: distintiva, no colisiona con el bold de la etiqueta de estado.
+    t.prompt = "\x1b[3m";
+    StatusBar bar;
+    bar.setTheme(t);
+    Rect area; area.width = 60; area.height = 2;
+
+    StatusBarData d;
+    d.name = "x";
+    d.estado = "NAVEGACION";
+    d.totalLines = 1;
+    d.message = Message("Guardar archivo: /tmp/x", MessageKind::Prompt,
+                        std::nullopt);
+
+    const std::string out = bar.render(area, d);
+    CHECK(out.find(t.prompt + "Guardar archivo: /tmp/x") != std::string::npos);
+
+    StatusBarData c = d;
+    c.message = Message("ayuda", MessageKind::Info, std::nullopt);
+    CHECK(bar.render(area, c).find(t.prompt) == std::string::npos);
+}

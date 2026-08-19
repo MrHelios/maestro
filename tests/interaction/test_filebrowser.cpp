@@ -1526,9 +1526,10 @@ TEST(renderer_file_list_layout) {
     std::string out = r.buildFileListScreen(
         {"..", "sub/", "a.txt", "b.txt"}, 1, 0, "/tmp/sandbox",
         "ABRIR: arriba/abajo mover | Enter abrir/entrar | ESC cancelar", 80, 10);
-    // Entradas: sin inverso las no seleccionadas, con inverso la activa.
+    // Entradas: sin estilo la no seleccionada; la activa lleva el gris del
+    // item marcado (listSelected: mismo lenguaje ACTIVO que el editor).
     CHECK(contains(out, "  .."));
-    CHECK(contains(out, "\x1b[7m  sub/\x1b[0m"));
+    CHECK(contains(out, std::string(kListSelectedStyle) + "  sub/" + "\x1b[0m"));
     CHECK(contains(out, "  a.txt"));
     CHECK(contains(out, "  b.txt"));
     // Barra de estado con la ruta y la etiqueta de modo.
@@ -1536,8 +1537,8 @@ TEST(renderer_file_list_layout) {
     CHECK(contains(out, "ABRIR ARCHIVO"));
     // Fila de mensajes con la ayuda.
     CHECK(contains(out, "Enter abrir/entrar"));
-    // Filas vacias bajo la lista con el marcador del editor.
-    CHECK(contains(out, "\x1b[K~\r\n"));
+    // Filas vacias bajo la lista con el marcador del editor, alineado.
+    CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~\x1b[0m\r\n"));
 }
 
 TEST(renderer_file_list_scroll_hides_off_window) {
@@ -1546,7 +1547,7 @@ TEST(renderer_file_list_scroll_hides_off_window) {
     std::string out = r.buildFileListScreen(
         {"..", "a.txt", "b.txt", "c.txt"}, 3, 2, "/", "x", 80, 2);
     CHECK(contains(out, "  b.txt"));
-    CHECK(contains(out, "\x1b[7m  c.txt\x1b[0m"));
+    CHECK(contains(out, std::string(kListSelectedStyle) + "  c.txt" + "\x1b[0m"));
     CHECK(!contains(out, "  a.txt"));
     CHECK(!contains(out, "  .."));
 }

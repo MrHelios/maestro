@@ -10,13 +10,15 @@ namespace {
 
 // Estilo de la fila de mensajes segun el tipo (paso 8). El tipo lo decide
 // la pantalla/el Editor cuando produce el Message; aqui se traduce al color
-// del Theme. Info es el caso base (sin color).
+// del Theme. Info es el caso base (sin color); Prompt resalta la entrada
+// del usuario en negrita (v1.3).
 std::string messageStyle(const Theme& theme, MessageKind kind) {
     switch (kind) {
         case MessageKind::Info:    return theme.message;
         case MessageKind::Success: return theme.success;
         case MessageKind::Warning: return theme.warning;
         case MessageKind::Error:   return theme.error;
+        case MessageKind::Prompt:  return theme.prompt;
     }
     return theme.message;
 }
@@ -157,14 +159,33 @@ std::string StatusBar::render(const Rect& area, const StatusBarData& data) {
     }
 
     for (int i = 0; i < padL; ++i) out << ' ';
+
+    // Accent de la etiqueta de estado: el EstadoData puede traer el color
+    // propio del estado activo (v1.3); si no, se usa el fallback del Theme.
+    const std::string accent = data.estadoAccent.empty() ? T.statusBarAccent
+                                                         : data.estadoAccent;
+
+    // El sufijo [modificado] se identifica y pinta por separado (v1.3): el
+    // nombre va en statusBarName y el indicador en statusBarModified. Se
+    // conservan exactamente las columnas de left.name (nameText + marker),
+    // asi el calculo de ancho/relleno sigue siendo correcto.
+    const std::string modMarker = " [modificado]";
+    std::string nameText = left.name;
+    bool hasMod = data.modified &&
+                  nameText.size() >= modMarker.size() &&
+                  nameText.compare(nameText.size() - modMarker.size(),
+                                   modMarker.size(), modMarker) == 0;
+    if (hasMod) nameText = nameText.substr(0, nameText.size() - modMarker.size());
+
     if (left.onlyEstado) {
-        out << T.statusBarAccent << left.estado << T.reset;
+        out << accent << left.estado << T.reset;
     } else {
-        out << T.statusBarName << left.name << T.reset;
+        out << T.statusBarName << nameText << T.reset;
+        if (hasMod) out << T.statusBarModified << modMarker << T.reset;
         if (!left.path.empty()) {
             out << T.statusBarPath << sep << left.path << T.reset;
         }
-        out << T.statusBarAccent << sep << left.estado << T.reset;
+        out << accent << sep << left.estado << T.reset;
     }
 
     int fill = std::max(0, width - padL - plainW - padR - rightW);

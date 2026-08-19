@@ -28,6 +28,22 @@ std::string stateLabel(State state) {
     return "";
 }
 
+// Accent de la etiqueta de estado segun el modo activo (v1.3): cada estado
+// de la maquina tiene su propio color en el Theme. `estadoAccent` se pasa
+// en el StatusBarData y la barra lo usa en vez del fallback statusBarAccent.
+std::string stateAccent(const Theme& T, State state) {
+    switch (state) {
+        case State::Navegacion:    return T.accentNavegacion;
+        case State::Interaccion:   return T.accentInteraccion;
+        case State::Seleccion:     return T.accentSeleccion;
+        case State::Prefix:        return T.accentComando;
+        case State::BufferSelector: return T.accentBuffers;
+        case State::SaveAs:        return T.accentGuardar;
+        case State::FileBrowser:   return T.accentAbrir;
+    }
+    return T.statusBarAccent;
+}
+
 // Arma el StatusBarData del Editor a partir de filename/modified/estado/
 // statusMessage/cursor/totalLines. La barra comun no conoce nada de esto;
 // solo recibe los datos ya traducidos. (El selector y el explorador arman
@@ -69,24 +85,29 @@ int gutterWidth(int totalLines) {
 }
 
 // Celda de numero de linea: numero alineado a la derecha + un espacio de
-// separacion. El numero de la fila actual deja la rama lista para el color
-// real (TODO(colores)).
+// separacion. La fila del cursor (isCurrentLine) lleva el estilo propio
+// del numero activo (gutterCurrent: negrita blanca sobre el mismo gris de
+// currentLine, conectando el numero con el resaltado de la fila); el resto
+// de los numeros va en gris tenue (lineNumber).
 //
 // Cota de ancho (v1.1, regresion): la celda NUNCA supera `gutterW` columnas,
 // aun en una terminal ultra-chica donde el numero es mas ancho que el propio
 // gutter (buildScreen recorta gutterW al ancho disponible). Se conserva la
 // COLA del numero (se pierde el inicio), igual que se trunca la ruta en la
 // barra de estado.
-std::string renderGutterCell(int lineNumber1Based, int gutterW,
-                             bool /*isCurrentLine*/) {
+std::string renderGutterCell(const Theme& T, int lineNumber1Based, int gutterW,
+                             bool isCurrentLine) {
     std::string numStr = std::to_string(lineNumber1Based);
     const int maxNumCols = std::max(0, gutterW - 1); // 1 columna es el separador
     if (static_cast<int>(numStr.size()) > maxNumCols)
         numStr = numStr.substr(numStr.size() - static_cast<size_t>(maxNumCols));
     const int pad = std::max(0, gutterW - 1 - static_cast<int>(numStr.size()));
-    std::string out(pad, ' ');
+    std::string out;
+    out += isCurrentLine ? T.gutterCurrent : T.lineNumber;
+    out.append(pad, ' ');
     out += numStr;
     out += ' ';
+    out += T.reset;
     return out;
 }
 
@@ -194,12 +215,12 @@ std::string Renderer::buildScreen(const Document& doc,
     // para evitar parpadeo.
     std::string out;
 
+    // Ciclo de vida del frame global (ocultar cursor / home / limpiar).
+    beginFrame(out);
+
     // Si hay seleccion, la normalizamos una vez para conocer los limites.
     std::optional<Normalized> sel = selection.has_value() ? normalize(*selection)
                                                           : std::nullopt;
-
-    out += "\x1b[?25l"; // ocultar cursor mientras dibujamos
-    out += "\x1b[H";    // mover cursor a home (fila 1, col 1)
 
     // El Renderer calcula el Layout UNA vez: el contenido arriba y la barra
     // comun (fila fija + mensajes) en las 2 filas finales. Ninguna pantalla
@@ -217,9 +238,13 @@ std::string Renderer::buildScreen(const Document& doc,
 
     renderEditorContent(out, doc, cursor, viewport, sel, layout.content,
                         gutterW);
-    renderStatusBar(out, layout.statusBar,
-                    editorBarData(filename, modified, stateLabel(state),
-                                  message, cursor, doc.lineCount()));
+
+    // La etiqueta de estado lleva el accent del modo activo (v1.3).
+    StatusBarData data =
+        editorBarData(filename, modified, stateLabel(state), message, cursor,
+                      doc.lineCount());
+    data.estadoAccent = stateAccent(theme_, state);
+    renderStatusBar(out, layout.statusBar, data);
 
     // Posicionar el cursor real de la terminal donde corresponde (v1.0,
     // paso 9: un unico lugar decide la coordenada terminal del cursor).
@@ -233,7 +258,7 @@ std::string Renderer::buildScreen(const Document& doc,
     int screenCol = gutterW + visualCol + 1 + layout.content.col;
     moveCursorTo(out, screenRow, screenCol);
 
-    out += "\x1b[?25h"; // volver a mostrar el cursor
+    endFrame(out);
 
     return out;
 }
@@ -247,6 +272,21 @@ void Renderer::moveCursorTo(std::string& out, int row, int col) const {
     out += ";";
     out += std::to_string(col);
     out += "H";
+}
+
+void Renderer::beginFrame(std::string& out) const {
+    // Oculta el cursor mientras dibujamos el frame completo (evita parpadeo),
+    // va a home y limpia lo que quede de la pantalla anterior. Es identico
+    // para las tres pantallas: el contenido se redibuja entero despues.
+    out += "\x1b[?25l";
+    out += "\x1b[H";
+    out += "\x1b[J";
+}
+
+void Renderer::endFrame(std::string& out) const {
+    // Vuelve a mostrar el cursor real de la terminal ya posicionado sobre
+    // la coordenada que la pantalla eligio (moveCursorTo).
+    out += "\x1b[?25h";
 }
 
 Layout Renderer::calculateLayout(int contentRows, int width) const {
@@ -309,12 +349,16 @@ void Renderer::renderEditorContent(std::string& out,
                 lineBreakSelected = !singleLine && !endsAtStart;
             }
 
-            out += renderGutterCell(docLine + 1, gutterW, isCurrentLine);
+            out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
             renderLine(out, theme_, line, textWidth, isCurrentLine, selStart,
                        selEnd, lineBreakSelected);
         } else {
             out += renderGutterBlank(gutterW);
-            out += "~"; // linea fuera del documento, estilo vim
+            // Fila fuera del documento: marcador "~" con el estilo del Theme
+            // (dim), mas tenue que los numeros de linea.
+            out += theme_.marker;
+            out += "~";
+            out += theme_.reset;
         }
         out += "\r\n";
     }
@@ -355,11 +399,8 @@ std::string Renderer::buildBufferListScreen(const std::vector<std::string>& name
                                             int height) {
     std::string out;
 
-    out += "\x1b[?25l";   // ocultar cursor mientras dibujamos
-    out += "\x1b[H";      // mover a home
-    out += "\x1b[J";      // limpiar todo lo que quede debajo (incl. la
-                          // barra de estado y los mensajes de la pantalla
-                          // anterior)
+    // Ciclo de vida del frame global (ocultar cursor / home / limpiar).
+    beginFrame(out);
 
     // El Renderer calcula el Layout y delega: el selector solo dibuja su
     // contenido; la barra la dibuja el StatusBar comun.
@@ -370,6 +411,7 @@ std::string Renderer::buildBufferListScreen(const std::vector<std::string>& name
     StatusBarData data;
     data.name = "Buffers";
     data.estado = "SELECCIONAR";
+    data.estadoAccent = theme_.accentBuffers;
     const int total = static_cast<int>(names.size());
     data.right = std::to_string(std::min(selected + 1, total)) + "/" +
                  std::to_string(total);
@@ -381,7 +423,7 @@ std::string Renderer::buildBufferListScreen(const std::vector<std::string>& name
     int cursorRow = std::max(1, std::min(selected + 1, rows));
     moveCursorTo(out, cursorRow, 1);
 
-    out += "\x1b[?25h"; // volver a mostrar el cursor
+    endFrame(out);
     return out;
 }
 
@@ -394,7 +436,9 @@ void Renderer::renderBufferListContent(std::string& out,
         out += "\x1b[K";
         std::string line = "  " + names[i];
         if (static_cast<int>(i) == selected) {
-            out += theme_.selection;
+            // Item activo de la lista: mismo lenguaje visual que la fila del
+            // cursor del editor (listSelected == currentLine, fondo gris).
+            out += theme_.listSelected;
             out += utf8::truncate(line, area.width);
             out += theme_.reset;
         } else {
@@ -402,10 +446,14 @@ void Renderer::renderBufferListContent(std::string& out,
         }
         out += "\r\n";
     }
-    // Filas vacias: mismo marcador de linea fuera del documento que el editor.
+    // Filas vacias: marcador del editor ("~") alineado con las entradas
+    // (misma indentacion de 2 espacios), con el estilo del Theme.
     for (int r = rows; r < area.height; ++r) {
         out += "\x1b[K";
+        out += "  ";
+        out += theme_.marker;
         out += "~";
+        out += theme_.reset;
         out += "\r\n";
     }
 }
@@ -433,9 +481,8 @@ std::string Renderer::buildFileListScreen(
         int height) {
     std::string out;
 
-    out += "\x1b[?25l";   // ocultar cursor mientras dibujamos
-    out += "\x1b[H";      // mover a home
-    out += "\x1b[J";      // limpiar el resto
+    // Ciclo de vida del frame global (ocultar cursor / home / limpiar).
+    beginFrame(out);
 
     Layout layout = calculateLayout(height, width);
     renderFileListContent(out, names, selected, scroll, layout.content);
@@ -444,6 +491,7 @@ std::string Renderer::buildFileListScreen(
     StatusBarData data;
     data.name = path.empty() ? "/" : path;
     data.estado = "ABRIR ARCHIVO";
+    data.estadoAccent = theme_.accentAbrir;
     const int total = static_cast<int>(names.size());
     data.right = std::to_string(std::min(selected - scroll + 1, total)) + "/" +
                  std::to_string(total);
@@ -457,7 +505,7 @@ std::string Renderer::buildFileListScreen(
     int cursorRow = std::max(1, std::min(selected - scroll + 1, rows));
     moveCursorTo(out, cursorRow, 1);
 
-    out += "\x1b[?25h";
+    endFrame(out);
     return out;
 }
 
@@ -473,14 +521,19 @@ void Renderer::renderFileListContent(std::string& out,
         if (idx < static_cast<int>(names.size())) {
             std::string line = "  " + names[static_cast<size_t>(idx)];
             if (idx == selected) {
-                out += theme_.selection;
+                // Item activo de la lista: mismo gris que la fila del cursor.
+                out += theme_.listSelected;
                 out += utf8::truncate(line, area.width);
                 out += theme_.reset;
             } else {
                 out += utf8::truncate(line, area.width);
             }
         } else {
+            // Filas vacias: marcador "~" alineado con las entradas.
+            out += "  ";
+            out += theme_.marker;
             out += "~";
+            out += theme_.reset;
         }
         out += "\r\n";
     }

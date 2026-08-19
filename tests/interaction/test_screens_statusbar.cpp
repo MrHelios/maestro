@@ -291,3 +291,21 @@ TEST(integration_same_resize_behavior_across_screens) {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// v1.4: el ciclo de vida del frame (ocultar cursor / home / limpiar /
+// mostrar) es responsabilidad del frame GLOBAL, no de cada pantalla. Las tres
+// pantallas arrancan con la MISMA secuencia de preludio y cierran con la
+// misma de epilogo. Antes el editor omitia el limpiado \x1b[J que el selector
+// y el explorador si emitian (ciclo de vida inconsistente).
+// ---------------------------------------------------------------------------
+TEST(integration_frame_lifecycle_shared) {
+    const std::string prelude = "\x1b[?25l\x1b[H\x1b[J";
+    const std::string epilogue = "\x1b[?25h";
+    for (const std::string& frame :
+         {frameEditor(5, 80), frameBuffer(5, 80), frameFile(5, 80)}) {
+        CHECK(frame.compare(0, prelude.size(), prelude) == 0);
+        CHECK(frame.compare(frame.size() - epilogue.size(), epilogue.size(),
+                            epilogue) == 0);
+    }
+}

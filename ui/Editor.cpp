@@ -944,14 +944,15 @@ void Editor::startSaveAs() {
     // modo desde el que se abrio el prefijo (aqui no se toca).
     saveAsPath_.clear();
     state_ = State::SaveAs;
-    setStatusMessage("Guardar archivo: ");
+    setStatusMessage("Guardar archivo: ", MessageKind::Prompt);
 }
 
 void Editor::handleSaveAsEvent(const Event& event) {
     switch (event.type) {
         case EventType::InsertChar:
             saveAsPath_ += event.text;
-            setStatusMessage("Guardar archivo: " + saveAsPath_);
+            setStatusMessage("Guardar archivo: " + saveAsPath_,
+                             MessageKind::Prompt);
             break;
         case EventType::Backspace:
             if (!saveAsPath_.empty()) {
@@ -959,7 +960,8 @@ void Editor::handleSaveAsEvent(const Event& event) {
                                           static_cast<int>(saveAsPath_.size()));
                 saveAsPath_ = utf8::truncate(saveAsPath_, cols - 1);
             }
-            setStatusMessage("Guardar archivo: " + saveAsPath_);
+            setStatusMessage("Guardar archivo: " + saveAsPath_,
+                             MessageKind::Prompt);
             break;
         case EventType::InsertNewline: // Enter: guardar en la ruta escrita
             commitSaveAs();
@@ -980,7 +982,7 @@ void Editor::commitSaveAs() {
     const std::string path = resolveAbsolutePath(saveAsPath_);
     if (path.empty()) {
         // Sin ruta escrita: se sigue en el prompt, esperando un nombre.
-        setStatusMessage("Guardar archivo: ");
+        setStatusMessage("Guardar archivo: ", MessageKind::Prompt);
         return;
     }
     if (isDirectory(path)) {

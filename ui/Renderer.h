@@ -151,4 +151,15 @@ private:
     // Unico lugar del Renderer que emite la secuencia de posicionamiento
     // "\x1b[{row};{col}H" (fila/columna 1-indexadas). Paso 9 (coordenadas).
     void moveCursorTo(std::string& out, int row, int col) const;
+
+    // Ciclo de vida del frame (v1.4). Antes cada pantalla emitia su propio
+    // preludio/epilogo y quedaron INCONSISTENTES: el editor omitia el
+    // limpiado "\x1b[J" que el selector y el explorador si emitian. Es
+    // responsabilidad del frame global (no de la pantalla que dibuja su
+    // contenido), asi que un solo lugar lo garantiza identico en las tres.
+    //   beginFrame: ocultar cursor mientras dibujamos, mover a home y limpiar
+    //               todo lo que quede de la pantalla anterior.
+    //   endFrame  : volver a mostrar el cursor, ya dibujado el frame.
+    void beginFrame(std::string& out) const;
+    void endFrame(std::string& out) const;
 };

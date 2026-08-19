@@ -35,6 +35,8 @@ struct StatusBarData {
     std::string name;        // nombre del archivo (izquierda, en blanco)
     std::string path;        // ruta (izquierda, en negro); vacia si no aplica
     std::string estado;      // etiqueta de estado (izquierda, en dorado)
+    std::string estadoAccent; // accent de la etiqueta segun el estado activo
+                              // (v1.3); vacio => usa statusBarAccent del Theme
     Message message;         // fila de mensajes (fila propia, coloreada por tipo)
     std::string right;       // overrlde del bloque derecho; vacio = calcular
     bool modified = false;   // fila [modificado] junto al nombre
