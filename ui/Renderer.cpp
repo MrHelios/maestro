@@ -1,5 +1,6 @@
 #include "ui/Renderer.h"
 
+#include <cstdlib>
 #include <unistd.h>
 #include <algorithm>
 
@@ -44,6 +45,25 @@ std::string stateAccent(const Theme& T, State state) {
     return T.statusBarAccent;
 }
 
+// Solo para MOSTRAR en la barra de estado: reemplaza el home del usuario
+// por "~" al inicio de la ruta (estilo shell). NO toca filename real: esa
+// sigue siendo la ruta absoluta que usan save()/openFileToBuffer() para
+// guardar y detectar duplicados. Si $HOME no esta seteado, devuelve la
+// ruta sin cambios.
+std::string collapseHome(const std::string& path) {
+    const char* home = std::getenv("HOME");
+    if (!home || !*home) return path;
+    std::string h(home);
+    // Evita cortar a mitad de nombre: "/home/usuario2" no debe volverse
+    // "~2" cuando HOME es "/home/usuario". Solo colapsa si coincide entero
+    // o coincide seguido de un separador "/".
+    if (path.size() < h.size() || path.compare(0, h.size(), h) != 0)
+        return path;
+    if (path.size() > h.size() && path[h.size()] != '/')
+        return path;
+    return "~" + path.substr(h.size());
+}
+
 // Arma el StatusBarData del Editor a partir de filename/modified/estado/
 // statusMessage/cursor/totalLines. La barra comun no conoce nada de esto;
 // solo recibe los datos ya traducidos. (El selector y el explorador arman
@@ -55,7 +75,7 @@ StatusBarData editorBarData(const std::string& filename, bool modified,
     StatusBarData data;
     data.name = baseName(filename);
     if (data.name.empty()) data.name = "[sin nombre]";
-    data.path = dirName(filename);
+    data.path = collapseHome(dirName(filename));   // <-- antes: data.path = dirName(filename);
     // v0.6.3: un buffer sin nombre se muestra con su nombre generico
     // ("SinNombre", ...) que no tiene directorio; no tiene sentido mostrar
     // "." como ruta.
