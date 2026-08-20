@@ -7,7 +7,12 @@ CXX := g++
 # "ui/Editor.h", "terminal/Event.h"), asi que se compila desde la raiz.
 CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -I. -MMD -MP
 
-BIN := edit
+# El binario final se llama "maestro" y vive en build/: el punto de
+# entrada del proyecto para el usuario es el script wrapper ./maestro en
+# la raiz (ver README), que decide si compila+abre el editor o delega en
+# `make test` / `make test-sanitize` / `make clean`. Compilar el binario
+# DENTRO de build/ evita que colisione en el filesystem con ese script.
+BIN := build/maestro
 # Program sources por capa (modelo / ui / terminal).
 SRC := $(wildcard core/*.cpp ui/*.cpp terminal/*.cpp)
 
@@ -21,7 +26,7 @@ TEST_SRC := $(TEST_DIR)/test_main.cpp \
             $(wildcard $(TEST_DIR)/unit/*.cpp) \
             $(wildcard $(TEST_DIR)/interaction/*.cpp) \
             $(wildcard $(TEST_DIR)/e2e/*.cpp)
-TEST_BIN := edit_tests
+TEST_BIN := build/edit_tests
 
 # --- Build normal (build/) y sanitizado (build-san/) ---
 # Compilar con -fsanitize requiere que TODOS los objetos (y el link) usen
@@ -34,15 +39,21 @@ TEST_BIN := edit_tests
 # Terminal.cpp solo en terminal/), asi que no hay colisiones.
 #
 # Uso:
-#   make            build normal: edit + edit_tests
+#   make            build normal: build/maestro + build/edit_tests
 #   make test       compila y ejecuta la suite (build/)
 #   make sanitize   build con -fsanitize=address,undefined (build-san/)
 #   make test-sanitize  compila y ejecuta la suite sanitizada
+#
+# El uso recomendado para el dia a dia es el wrapper ./maestro (ver
+# raiz del repo): ./maestro <archivo>, ./maestro test, ./maestro
+# test-sanitize, ./maestro clean.
 OBJ := $(addprefix build/,$(notdir $(SRC:.cpp=.o)))
 TEST_OBJ := $(addprefix build/,$(notdir $(TEST_SRC:.cpp=.o)))
 # Fuentes del programa enlazadas en los tests (sin el main).
 OBJ_NO_MAIN := $(filter-out build/main.o,$(OBJ))
 
+SAN_BIN := build-san/maestro
+SAN_TEST_BIN := build-san/edit_tests
 SAN_OBJ := $(addprefix build-san/,$(notdir $(SRC:.cpp=.o)))
 SAN_TEST_OBJ := $(addprefix build-san/,$(notdir $(TEST_SRC:.cpp=.o)))
 SAN_OBJ_NO_MAIN := $(filter-out build-san/main.o,$(SAN_OBJ))
@@ -51,8 +62,9 @@ SAN_OBJ_NO_MAIN := $(filter-out build-san/main.o,$(SAN_OBJ))
 SANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer -g
 
 # Los directorios build/ y build-san/ se declaran como prerequisito
-# ORDER-ONLY (| build): hacen falta para poder escribir los .o, pero su
-# mtime NO debe invalidar los objetos. Si fueran prerequisito normal, el
+# ORDER-ONLY (| build): hacen falta para poder escribir los .o (y los
+# binarios finales, que ahora tambien viven adentro), pero su mtime NO
+# debe invalidar los objetos. Si fueran prerequisito normal, el
 # directorio se actualiza al escribir cada .o y quedaria mas nuevo que los
 # objetos anteriores, provocando un rebuild perpetuo en cada `make`.
 build/%.o: core/%.cpp | build
@@ -105,17 +117,17 @@ all: $(BIN) $(TEST_BIN)
 build build-san:
 	@mkdir -p $@
 
-$(BIN): $(OBJ)
+$(BIN): $(OBJ) | build
 	$(CXX) $(OBJ) -o $(BIN)
 
-$(TEST_BIN): $(TEST_OBJ) $(OBJ_NO_MAIN)
+$(TEST_BIN): $(TEST_OBJ) $(OBJ_NO_MAIN) | build
 	$(CXX) $(TEST_OBJ) $(OBJ_NO_MAIN) -o $(TEST_BIN)
 
-edit-san: $(SAN_OBJ)
-	$(CXX) $(SANFLAGS) $(SAN_OBJ) -o $(BIN)-san
+edit-san: $(SAN_OBJ) | build-san
+	$(CXX) $(SANFLAGS) $(SAN_OBJ) -o $(SAN_BIN)
 
-test-san: $(SAN_TEST_OBJ) $(SAN_OBJ_NO_MAIN)
-	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ) $(SAN_OBJ_NO_MAIN) -o $(TEST_BIN)-san
+test-san: $(SAN_TEST_OBJ) $(SAN_OBJ_NO_MAIN) | build-san
+	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN)
 
 sanitize: edit-san test-san
 
@@ -126,11 +138,11 @@ test: $(TEST_BIN)
 # veces, la segunda con ASan/UBSan). No correrlo por defecto; solo cuando
 # lo pida el usuario o lo exija el CI.
 test-sanitize: test-san
-	./$(TEST_BIN)-san
+	./$(SAN_TEST_BIN)
 
 clean:
-	rm -rf build build-san $(BIN) $(TEST_BIN) $(BIN)-san $(TEST_BIN)-san
+	rm -rf build build-san
 
 -include $(OBJ:.o=.d) $(TEST_OBJ:.o=.d) $(SAN_OBJ:.o=.d) $(SAN_TEST_OBJ:.o=.d)
 
-.PHONY: all test sanitize test-sanitize clean
+.PHONY: all test sanitize test-sanitize clean edit-san test-san
