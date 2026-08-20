@@ -765,7 +765,7 @@ TEST(save_unnamed_buffer_opens_save_as_prompt) {
     press(ed, EventType::Escape);
     openSaveAs(ed);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
-    CHECK_EQ(ed.statusMessage_, "Guardar archivo: ");
+    CHECK_EQ(ed.statusMessage_, "Save file: ");
     CHECK(ed.active().modified);
     CHECK(ed.active().filename.empty());
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
@@ -778,7 +778,7 @@ TEST(save_as_prompt_collects_typed_path) {
     openSaveAs(ed);
     typePrompt(ed, "/tmp/nuevo.txt");
     CHECK_EQ(ed.saveAsPath_, "/tmp/nuevo.txt");
-    CHECK_EQ(ed.statusMessage_, "Guardar archivo: /tmp/nuevo.txt");
+    CHECK_EQ(ed.statusMessage_, "Save file: /tmp/nuevo.txt");
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
     CHECK(ed.active().filename.empty()); // aun no se confirma
     CHECK(ed.active().modified);
@@ -790,11 +790,11 @@ TEST(save_as_prompt_backspace_removes_characters) {
     typePrompt(ed, "abc");
     press(ed, EventType::Backspace);
     CHECK_EQ(ed.saveAsPath_, "ab");
-    CHECK_EQ(ed.statusMessage_, "Guardar archivo: ab");
+    CHECK_EQ(ed.statusMessage_, "Save file: ab");
     press(ed, EventType::Backspace);
     press(ed, EventType::Backspace);
     CHECK_EQ(ed.saveAsPath_, "");
-    CHECK_EQ(ed.statusMessage_, "Guardar archivo: ");
+    CHECK_EQ(ed.statusMessage_, "Save file: ");
 }
 
 TEST(save_as_prompt_backspace_on_empty_is_noop) {
@@ -802,7 +802,7 @@ TEST(save_as_prompt_backspace_on_empty_is_noop) {
     openSaveAs(ed);
     press(ed, EventType::Backspace);
     CHECK_EQ(ed.saveAsPath_, "");
-    CHECK_EQ(ed.statusMessage_, "Guardar archivo: ");
+    CHECK_EQ(ed.statusMessage_, "Save file: ");
 }
 
 TEST(save_as_prompt_ignores_other_keys) {
@@ -941,7 +941,7 @@ TEST(save_as_enter_empty_path_stays_in_prompt) {
     press(ed, EventType::InsertNewline);    // Enter sin ruta
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
     CHECK(ed.active().filename.empty());
-    CHECK_EQ(ed.statusMessage_, "Guardar archivo: ");
+    CHECK_EQ(ed.statusMessage_, "Save file: ");
 }
 
 TEST(save_as_directory_rejected) {

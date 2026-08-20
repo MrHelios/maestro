@@ -111,7 +111,7 @@ inline constexpr const char* kAccentSeleccion    = "\x1b[1m\x1b[38;5;178m";
 inline constexpr const char* kAccentComando      = "\x1b[1m\x1b[38;5;178m";
 inline constexpr const char* kAccentBuffers      = "\x1b[1m\x1b[38;5;178m";
 inline constexpr const char* kAccentGuardar      = "\x1b[1m\x1b[38;5;221m";      // amarillo suave
-inline constexpr const char* kAccentAbrir        = "\x1b[1m\x1b[38;5;117m";      // cyan suave
+inline constexpr const char* kAccentAbrir        = "\x1b[1m\x1b[38;5;178m";      
 
 // El Theme por defecto (mismo aspecto que v1.1/v1.2 en los campos que ya
 // existian; los nuevos extienden el esquema con el lenguaje v1.3).

@@ -11,6 +11,23 @@
 
 namespace {
 
+// Mensajes de ayuda fijos por modo (v?.?): centralizados aca para que
+// cambiar el texto sea tocar un solo lugar, no buscarlo repetido por el
+// archivo. Antes "ABRIR: ..." estaba duplicado en startFileBrowser() y
+// fileBrowserEnterSelected(); con esto solo hay una fuente de verdad.
+constexpr const char* kHelpBufferSelector =
+    "ENTER: open | ESC: cancel | \u2191/\u2193: move";
+constexpr const char* kHelpSaveAsPrompt = "Save file: ";
+constexpr const char* kHelpNavegacion =
+    "NAVEGACION: i escribir | s seleccionar | c/x copiar/cortar | p pegar | "
+    "Ctrl+K buffer/guardar/salir | Ctrl+U/Y deshacer/rehacer";
+constexpr const char* kHelpEmpty = "";
+constexpr const char* kHelpPrefix =
+    "command: Ctrl+k";
+}
+
+namespace {
+
 // Convierte una ruta a su forma CANONICA-LEXICA: absoluta contra cwd() y
 // con "." / ".." reducidos ("foo/../bar" -> "bar"). Unifica rutas que
 // apuntan al mismo archivo pero se escriben distinto, de modo que el
@@ -28,7 +45,7 @@ std::string resolveAbsolutePath(const std::string& path) {
 } // namespace
 
 Editor::Editor() {
-    setStatusMessage("NAVEGACION: i escribir | s seleccionar | c/x copiar/cortar | p pegar | Ctrl+K buffer/guardar/salir | Ctrl+U/Y deshacer/rehacer");
+    setStatusMessage(kHelpPrefix);
     // Invariante 1 y 2 (v0.6.3): siempre existe al menos un buffer y hay
     // exactamente uno activo. BufferManager arranca con un unico buffer
     // sin nombre y lo deja activo.
@@ -57,12 +74,12 @@ void Editor::registerCommands() {
     // --- Navegacion ---
     commands_.registerCommand("navegacion.interaccion", [this] {
         state_ = State::Interaccion;
-        setStatusMessage("INTERACCION (ESC vuelve a navegacion)");
+        setStatusMessage(kHelpEmpty);
     });
     commands_.registerCommand("navegacion.seleccion", [this] {
         beginSelection();
         state_ = State::Seleccion;
-        setStatusMessage("SELECCION (ESC/c/x terminan)");
+        setStatusMessage(kHelpEmpty);
     });
     commands_.registerCommand("navegacion.pegar", [this] {
         Buffer& b = active();
@@ -104,7 +121,7 @@ void Editor::registerCommands() {
         b.selectAllPrevious = b.selection;
         b.selection = selectAllSelection();
         b.selectAllActive = true;
-        setStatusMessage("SELECCION TOTAL (a togglea | flechas a extremos | c/x/ESC terminan)");
+        setStatusMessage(kHelpEmpty);
     });
     commands_.registerCommand("seleccion.j", [this] {
         beginSelection();
@@ -305,7 +322,8 @@ void Editor::startFileBrowser() {
     if (!err.empty()) {
         setActionMessage(err, MessageKind::Error);
     } else {
-        setStatusMessage("ABRIR: ↑/↓ mover | Enter abrir/entrar | ESC cancelar");
+        //setStatusMessage("MOVER: ↑/↓ | ABRIR: enter | CANCEL: esc");
+        setStatusMessage(kHelpBufferSelector);
     }
     state_ = State::FileBrowser;
 }
@@ -343,7 +361,8 @@ void Editor::fileBrowserEnterSelected() {
             if (!err.empty()) {
                 setActionMessage(err, MessageKind::Error);
             } else {
-                setStatusMessage("ABRIR: ↑/↓ mover | Enter abrir/entrar | ESC cancelar");
+                //setStatusMessage("MOVER: ↑/↓ | ABRIR: enter | CANCEL: esc");
+                setStatusMessage(kHelpBufferSelector);
             }
             break;
         }
@@ -520,7 +539,7 @@ void Editor::handleEvent(const Event& event) {
     if (event.type == EventType::Prefix) {
         priorState_ = state_;
         state_ = State::Prefix;
-        setStatusMessage("Ctrl+K: s guardar | q salir | n nuevo | o abrir | t buffers | w cerrar");
+        setStatusMessage(kHelpPrefix);
         return;
     }
 
@@ -663,7 +682,7 @@ void Editor::handleInteraccionEvent(const Event& event) {
 
         case EventType::Escape:
             state_ = State::Navegacion;
-            setStatusMessage("NAVEGACION");
+            setStatusMessage(kHelpEmpty);
             break;
 
         case EventType::MoveLeft: b.cursor.moveLeft(b.document); break;
@@ -944,14 +963,14 @@ void Editor::startSaveAs() {
     // modo desde el que se abrio el prefijo (aqui no se toca).
     saveAsPath_.clear();
     state_ = State::SaveAs;
-    setStatusMessage("Guardar archivo: ", MessageKind::Prompt);
+    setStatusMessage(kHelpSaveAsPrompt, MessageKind::Prompt);
 }
 
 void Editor::handleSaveAsEvent(const Event& event) {
     switch (event.type) {
         case EventType::InsertChar:
             saveAsPath_ += event.text;
-            setStatusMessage("Guardar archivo: " + saveAsPath_,
+            setStatusMessage(kHelpSaveAsPrompt + saveAsPath_,
                              MessageKind::Prompt);
             break;
         case EventType::Backspace:
@@ -960,7 +979,7 @@ void Editor::handleSaveAsEvent(const Event& event) {
                                           static_cast<int>(saveAsPath_.size()));
                 saveAsPath_ = utf8::truncate(saveAsPath_, cols - 1);
             }
-            setStatusMessage("Guardar archivo: " + saveAsPath_,
+            setStatusMessage(kHelpSaveAsPrompt + saveAsPath_,
                              MessageKind::Prompt);
             break;
         case EventType::InsertNewline: // Enter: guardar en la ruta escrita
@@ -982,7 +1001,7 @@ void Editor::commitSaveAs() {
     const std::string path = resolveAbsolutePath(saveAsPath_);
     if (path.empty()) {
         // Sin ruta escrita: se sigue en el prompt, esperando un nombre.
-        setStatusMessage("Guardar archivo: ", MessageKind::Prompt);
+        setStatusMessage(kHelpSaveAsPrompt, MessageKind::Prompt);
         return;
     }
     if (isDirectory(path)) {

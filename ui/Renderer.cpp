@@ -513,7 +513,7 @@ std::string Renderer::buildFileListScreen(
 
     // Datos de la barra (paso 7): ruta | ABRIR ARCHIVO | n/m + ayuda.
     StatusBarData data;
-    data.name = path.empty() ? "/" : path;
+    data.name = path.empty() ? "/" : collapseHome(path);
     data.estado = "ABRIR ARCHIVO";
     data.estadoAccent = theme_.accentAbrir;
     const int total = static_cast<int>(names.size());
