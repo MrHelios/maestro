@@ -1119,13 +1119,30 @@ TEST(renderer_buffer_list_marks_selected) {
     std::string out = r.buildBufferListScreen({"a.txt", "b.txt", "SinNombre"}, 1, 80, 10);
     // El item activo de la lista lleva el mismo gris que la fila del cursor
     // (listSelected == currentLine: lenguaje ACTIVO unificado), no video
-    // inverso.
-    CHECK(contains(out, std::string(kListSelectedStyle) + "  b.txt" + "\x1b[0m"));
+    // inverso. El fondo debe cubrir TODO el ancho de la fila, no solo el
+    // texto: en vez de asumir el ancho exacto del area de contenido (que
+    // depende de computeLayout), se verifica la FORMA: estilo, texto,
+    // padding de espacios, y reciEN despues el reset.
+    std::string styledText = std::string(kListSelectedStyle) + "  b.txt";
+    size_t stylePos = out.find(styledText);
+    CHECK(stylePos != std::string::npos);
+    size_t textEnd = stylePos + styledText.size();
+
+    // El reset no debe estar pegado inmediatamente al texto: tiene que
+    // haber padding (espacios) entre medio, prueba de que el fondo cubre
+    // el resto de la fila.
+    CHECK(out.compare(textEnd, 4, "\x1b[0m") != 0);
+
+    size_t resetPos = out.find("\x1b[0m", textEnd);
+    CHECK(resetPos != std::string::npos);
+    CHECK(resetPos > textEnd); // hay espacios de relleno entre medio
+
+    // Todo lo que hay entre el texto y el reset debe ser padding (espacios).
+    std::string between = out.substr(textEnd, resetPos - textEnd);
+    CHECK(between.find_first_not_of(' ') == std::string::npos);
+
     CHECK(contains(out, "  a.txt"));
     CHECK(contains(out, "  SinNombre"));
-    // Barra unificada al estilo del editor: Buffers | SELECCIONAR | 2/3.
-    // (El nombre y el estado llevan colores distintos, asi que se verifican
-    // por separado: hay secuencias ANSI entre medio.)
     CHECK(contains(out, "Buffers"));
     CHECK(contains(out, "SELECCIONAR"));
     CHECK(contains(out, "2/3"));
@@ -1134,7 +1151,15 @@ TEST(renderer_buffer_list_marks_selected) {
 TEST(renderer_buffer_list_first_selected) {
     Renderer r;
     std::string out = r.buildBufferListScreen({"a.txt", "b.txt"}, 0, 80, 10);
-    CHECK(contains(out, std::string(kListSelectedStyle) + "  a.txt" + "\x1b[0m"));
+    std::string styledText = std::string(kListSelectedStyle) + "  a.txt";
+    size_t stylePos = out.find(styledText);
+    CHECK(stylePos != std::string::npos);
+    size_t textEnd = stylePos + styledText.size();
+    // Mismo criterio: reset no pegado, hay padding antes.
+    CHECK(out.compare(textEnd, 4, "\x1b[0m") != 0);
+    size_t resetPos = out.find("\x1b[0m", textEnd);
+    CHECK(resetPos != std::string::npos && resetPos > textEnd);
+
     CHECK(!contains(out, std::string(kListSelectedStyle) + "  b.txt"));
 }
 

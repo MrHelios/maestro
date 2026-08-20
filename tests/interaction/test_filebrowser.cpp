@@ -1528,8 +1528,19 @@ TEST(renderer_file_list_layout) {
         "ABRIR: arriba/abajo mover | Enter abrir/entrar | ESC cancelar", 80, 10);
     // Entradas: sin estilo la no seleccionada; la activa lleva el gris del
     // item marcado (listSelected: mismo lenguaje ACTIVO que el editor).
+    // El fondo cubre TODO el ancho de la fila, no solo el texto: estilo,
+    // texto, padding de espacios, y reciEN despues el reset.
     CHECK(contains(out, "  .."));
-    CHECK(contains(out, std::string(kListSelectedStyle) + "  sub/" + "\x1b[0m"));
+    std::string styledText = std::string(kListSelectedStyle) + "  sub/";
+    size_t stylePos = out.find(styledText);
+    CHECK(stylePos != std::string::npos);
+    size_t textEnd = stylePos + styledText.size();
+    CHECK(out.compare(textEnd, 4, "\x1b[0m") != 0);
+    size_t resetPos = out.find("\x1b[0m", textEnd);
+    CHECK(resetPos != std::string::npos);
+    CHECK(resetPos > textEnd);
+    std::string between = out.substr(textEnd, resetPos - textEnd);
+    CHECK(between.find_first_not_of(' ') == std::string::npos);
     CHECK(contains(out, "  a.txt"));
     CHECK(contains(out, "  b.txt"));
     // Barra de estado con la ruta y la etiqueta de modo.
@@ -1547,7 +1558,14 @@ TEST(renderer_file_list_scroll_hides_off_window) {
     std::string out = r.buildFileListScreen(
         {"..", "a.txt", "b.txt", "c.txt"}, 3, 2, "/", "x", 80, 2);
     CHECK(contains(out, "  b.txt"));
-    CHECK(contains(out, std::string(kListSelectedStyle) + "  c.txt" + "\x1b[0m"));
+    std::string styledText = std::string(kListSelectedStyle) + "  c.txt";
+    size_t stylePos = out.find(styledText);
+    CHECK(stylePos != std::string::npos);
+    size_t textEnd = stylePos + styledText.size();
+    // Mismo criterio: reset no pegado, hay padding antes.
+    CHECK(out.compare(textEnd, 4, "\x1b[0m") != 0);
+    size_t resetPos = out.find("\x1b[0m", textEnd);
+    CHECK(resetPos != std::string::npos && resetPos > textEnd);
     CHECK(!contains(out, "  a.txt"));
     CHECK(!contains(out, "  .."));
 }

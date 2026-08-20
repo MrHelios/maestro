@@ -104,6 +104,24 @@ int gutterWidth(int totalLines) {
     return std::max(3, digits + 1); // +1 = separador antes del texto
 }
 
+// Escribe una fila de texto de ancho fijo `width`, truncando si excede y
+// rellenando con espacios si sobra, para que el fondo (si se pasa uno)
+// cubra SIEMPRE las `width` columnas completas y no solo el texto.
+// `bgStyle` vacio ("") = sin fondo, se escribe el texto truncado tal cual
+// (mismo comportamiento que antes para las filas no-activas).
+void renderFilledRow(std::string& out, const std::string& text, int width,
+                     const std::string& bgStyle, const std::string& reset) {
+    std::string truncated = utf8::truncate(text, width);
+    if (bgStyle.empty()) {
+        out += truncated;
+        return;
+    }
+    out += bgStyle;
+    out += truncated;
+    for (int c = colCount(truncated); c < width; ++c) out += ' ';
+    out += reset;
+}
+
 // Celda de numero de linea: numero alineado a la derecha + un espacio de
 // separacion. La fila del cursor (isCurrentLine) lleva el estilo propio
 // del numero activo (gutterCurrent: negrita blanca sobre el mismo gris de
@@ -178,15 +196,7 @@ void renderLine(std::string& out,
     // Si es la fila actual, se rellena hasta `width` para que el resaltado
     // cubra toda la fila, no solo el texto.
     if (selStartByte < 0 || selEndByte < 0 || selStartByte >= selEndByte) {
-        std::string text = utf8::truncate(line, width);
-        if (!isCurrentLine) {
-            out += text;
-            return;
-        }
-        out += T.currentLine;
-        out += text;
-        for (int i = colCount(text); i < width; ++i) out += ' ';
-        out += T.reset;
+        renderFilledRow(out, line, width, isCurrentLine ? T.currentLine : "", T.reset);
         return;
     }
 
@@ -455,15 +465,9 @@ void Renderer::renderBufferListContent(std::string& out,
     for (size_t i = 0; i < names.size() && rows < area.height; ++i, ++rows) {
         out += "\x1b[K";
         std::string line = "  " + names[i];
-        if (static_cast<int>(i) == selected) {
-            // Item activo de la lista: mismo lenguaje visual que la fila del
-            // cursor del editor (listSelected == currentLine, fondo gris).
-            out += theme_.listSelected;
-            out += utf8::truncate(line, area.width);
-            out += theme_.reset;
-        } else {
-            out += utf8::truncate(line, area.width);
-        }
+        bool isSelected = (static_cast<int>(i) == selected);
+        renderFilledRow(out, line, area.width,
+                isSelected ? theme_.listSelected : "", theme_.reset);
         out += "\r\n";
     }
     // Filas vacias: marcador del editor ("~") alineado con las entradas
@@ -540,14 +544,10 @@ void Renderer::renderFileListContent(std::string& out,
         out += "\x1b[K";
         if (idx < static_cast<int>(names.size())) {
             std::string line = "  " + names[static_cast<size_t>(idx)];
-            if (idx == selected) {
-                // Item activo de la lista: mismo gris que la fila del cursor.
-                out += theme_.listSelected;
-                out += utf8::truncate(line, area.width);
-                out += theme_.reset;
-            } else {
-                out += utf8::truncate(line, area.width);
-            }
+
+            bool isSelected = (idx == selected);
+            renderFilledRow(out, line, area.width,
+                isSelected ? theme_.listSelected : "", theme_.reset);
         } else {
             // Filas vacias: marcador "~" alineado con las entradas.
             out += "  ";
