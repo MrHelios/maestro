@@ -1381,3 +1381,35 @@ TEST(e2e_14_filebrowser_open_error_preserves_state) {
     // limpieza del arbol temporal.
     fs::remove_all(base);
 }
+// E2E-15 — Tabulacion de una seleccion y persistencia en disco (P0)
+//
+//   seleccionar (s + flecha)
+//   -> tabular con '}'
+//   -> guardar (Ctrl+K Ctrl+S)
+//   -> releer el archivo FUERA del editor y comparar bytes.
+//
+// Confirma que saveToFile/loadFromFile no normalizan ni corrompen el
+// whitespace agregado por la tabulacion: los espacios persistidos se
+// releen exactos.
+// ---------------------------------------------------------------------------
+TEST(e2e_15_indent_selection_save_byte_exact) {
+    TempFile f;
+    writeBytes(f.path, "aaa\nbbb\nccc\n");     // LF, con '\n' final
+
+    Editor ed;
+    CHECK(ed.openFile(f.path));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+
+    ed.handleEvent(insert('s'));               // entrar a Seleccion (anchor 0,0)
+    press(ed, EventType::MoveDown);            // (1,0)
+    press(ed, EventType::MoveRight);           // (1,1): seleccion lineas 0..1
+    ed.handleEvent(insert('}'));               // tabular las lineas 0..1
+    CHECK_EQ(ed.active().document.lineAt(0), "    aaa");
+    CHECK_EQ(ed.active().document.lineAt(1), "    bbb");
+    CHECK_EQ(ed.active().document.lineAt(2), "ccc");   // fuera del rango
+
+    press(ed, EventType::Escape);              // -> Navegacion
+    prefix(ed, EventType::Prefix, EventType::Save);
+
+    CHECK_EQ(readBytes(f.path), "    aaa\n    bbb\nccc\n");
+}

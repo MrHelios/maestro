@@ -162,6 +162,23 @@ public:
     // devuelve (line, col) sin modificar.
     Position insertBlock(int line, int col, const std::vector<std::string>& block);
 
+    // Indenta / desindenta una linea COMPLETA por su comienzo, sin tocar
+    // el resto del contenido (es la primitiva usada por la tabulacion sobre
+    // una seleccion). `indent` true anade `indentLen` espacios al comienzo;
+    // `indent` false quita un nivel de indentacion: si la linea arranca con
+    // un tabulador lo quita entero (un solo caracter, un nivel); si no,
+    // quita hasta `indentLen` espacios INICIALES (en mezclas espacio+tab
+    // solo cuenta la corrida de espacios antes del tab).
+    //
+    // Devuelve el DELTA de bytes que el cambio movio el comienzo de la
+    // linea respecto de la posicion 0: un valor positivo (+indentLen) tras
+    // indentar, un valor negativo (el numero de bytes quitados) tras
+    // desindentar, y 0 si no hubo cambio (linea invalida, `indentLen` <= 0,
+    // o desindentar una linea sin indentacion). Este delta permite al
+    // Editor corregir cursor/seleccion tras tabular. La linea no cambia
+    // si devuelve 0.
+    int indentLine(int line, bool indent, int indentLen);
+
 private:
     std::vector<std::string> lines_;
 

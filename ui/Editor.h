@@ -232,6 +232,13 @@ private:
     // nunca quede fuera del documento ni el viewport mas alla del EOF.
     void applyPage(int dir);
 
+    // Indenta / desindenta el rango seleccionado actual (todas las lineas
+    // que toca). `indent` true tabula hacia adentro ('}'), `indent` false
+    // quita un nivel ('{'). Solo opera si hay rango NO vacio (hasSelection);
+    // si no, avisa y no cambia nada. Empuja una sola entrada de historial y
+    // marca modified. No cambia de modo: la seleccion se conserva.
+    void indentSelection(bool indent);
+
     // Borra el rango seleccionado actual (si hay texto marcado) y deja el
     // cursor en el INICIO del rango. Empuja historial de undo y marca
     // modified como una edicion (igual que cortar, pero SIN tocar el

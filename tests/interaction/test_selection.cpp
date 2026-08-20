@@ -2579,3 +2579,319 @@ TEST(combo_pageup_then_k) {
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 7);
 }
+
+// ---------------------------------------------------------------------------
+// Tabulacion de la seleccion ('}' indenta, '{' desindenta) -- solo en el
+// modo Seleccion y solo si hay un rango NO vacio.
+// ---------------------------------------------------------------------------
+TEST(selection_indent_adds_one_level_to_touched_lines) {
+    Editor ed;
+    editorOfLines({"foo", "bar", "baz"}, 0, 0, ed);
+    enterSeleccion(ed);                // anchor (0,0)
+    press(ed, EventType::MoveDown);    // (1,0)
+    press(ed, EventType::MoveRight);   // (1,1): seleccion cubre lineas 0..1
+    CHECK(ed.hasSelection());
+
+    ed.handleEvent(insert('}'));
+    CHECK_EQ(ed.active().document.lineAt(0), "    foo");
+    CHECK_EQ(ed.active().document.lineAt(1), "    bar");
+    CHECK_EQ(ed.active().document.lineAt(2), "baz");  // fuera del rango intacta
+    CHECK(ed.active().modified);
+    // Sigue en Seleccion con la seleccion viva (el '}' no sale del modo).
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+    CHECK(ed.hasSelection());
+}
+
+TEST(selection_dedent_removes_one_level) {
+    Editor ed;
+    editorOfLines({"    foo", "    bar", "    baz"}, 0, 4, ed);
+    enterSeleccion(ed);                // anchor (0,4)
+    press(ed, EventType::MoveDown);    // (1,4)
+    press(ed, EventType::MoveRight);   // (1,5)
+    ed.handleEvent(insert('{'));
+    CHECK_EQ(ed.active().document.lineAt(0), "foo");
+    CHECK_EQ(ed.active().document.lineAt(1), "bar");
+    CHECK_EQ(ed.active().document.lineAt(2), "    baz"); // no la toca
+}
+
+TEST(selection_indent_repeated_presses_add_more) {
+    Editor ed;
+    editorOfLines({"foo"}, 0, 0, ed);
+    enterSeleccion(ed);
+    press(ed, EventType::MoveRight);   // (0,1): rango no vacio linea 0
+    ed.handleEvent(insert('}'));
+    ed.handleEvent(insert('}'));
+    CHECK_EQ(ed.active().document.lineAt(0), "        foo");
+    press(ed, EventType::Undo);        // undo global, disponible en Seleccion
+    CHECK_EQ(ed.active().document.lineAt(0), "    foo");
+    press(ed, EventType::Undo);
+    CHECK_EQ(ed.active().document.lineAt(0), "foo");
+}
+
+TEST(selection_indent_requires_actual_selection) {
+    Editor ed;
+    editorOfLines({"foo", "bar"}, 0, 0, ed);
+    enterSeleccion(ed);                // anchor == position, sin rango aun
+    CHECK(!ed.hasSelection());
+    const size_t undoBefore = ed.active().undoStack.size();
+    const bool modified = ed.active().modified;
+
+    ed.handleEvent(insert('}'));
+    ed.handleEvent(insert('{'));
+    CHECK_EQ(ed.active().document.lineAt(0), "foo");
+    CHECK_EQ(ed.active().document.lineAt(1), "bar");
+    CHECK_EQ(ed.active().undoStack.size(), undoBefore); // sin entradas vacias
+    CHECK_EQ(ed.active().modified, modified);           // no marca como modificado
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+    // El gate es hasSelection() (anchor != position): con una seleccion
+    // degenerada (recien entrado al modo, sin mover el cursor) se debe
+    // avisar y no tocar nada.
+    CHECK_EQ(ed.statusMessage_, "Nada seleccionado.");
+}
+
+TEST(selection_indent_single_line_keeps_selection_and_cursor_coherent) {
+    // Seleccion REAL de una sola linea y parcial (dentro de "bar"): al
+    // indentar, la linea se tabula pero el cursor y la seleccion se
+    // desplazan con el +4, conservando el mismo texto seleccionado.
+    Editor ed;
+    editorOfLines({"bar"}, 0, 1, ed);  // cursor (0,1)
+    enterSeleccion(ed);                // anchor (0,1)
+    press(ed, EventType::MoveRight);   // (0,2): seleccion [1,2) sobre "bar"
+    const auto before = ed.selection();
+    CHECK(before.has_value());
+    CHECK_EQ(before->start.col, 1);
+    CHECK_EQ(before->end.col, 2);
+    const int cursorBefore = ed.active().cursor.col;
+
+    ed.handleEvent(insert('}'));
+    CHECK_EQ(ed.active().document.lineAt(0), "    bar");
+    auto sel = ed.selection();
+    CHECK(sel.has_value());
+    // Cursor y seleccion se desplazaron +4, apuntando a la misma zona.
+    CHECK_EQ(sel->start.col, before->start.col + 4);
+    CHECK_EQ(sel->end.col, before->end.col + 4);
+    CHECK_EQ(ed.active().cursor.col, cursorBefore + 4);
+    // La seleccion sigue cubriendo el mismo texto ("a" de "bar").
+    CHECK_EQ(ed.active().document.lineAt(0).substr(sel->start.col,
+                                                   sel->end.col - sel->start.col),
+             "a");
+}
+
+TEST(selection_indent_single_line_partial_selection_indents_whole_line) {
+    // Seleccion que solo toca parte de una linea (comienzo de la linea
+    // dentro del rango): la linea entera se tabula.
+    Editor ed;
+    editorOfLines({"if (a) {", "    bar", "}"}, 1, 2, ed);
+    enterSeleccion(ed);                // anchor (1,2)
+    press(ed, EventType::MoveLeft);    // (1,1): rango dentro de la linea 1
+    ed.handleEvent(insert('}'));
+    CHECK_EQ(ed.active().document.lineAt(1), "        bar");
+    CHECK_EQ(ed.active().document.lineAt(0), "if (a) {");
+    CHECK_EQ(ed.active().document.lineAt(2), "}");
+}
+
+TEST(selection_indent_excludes_line_when_selection_ends_at_col_0) {
+    // La seleccion termina justo en el COMIENZO de la ultima linea
+    // (sel->end.col == 0): esa linea NO quedo incluida y no se tabula,
+    // igual que el Renderer no la marca como seleccionada (endsAtStart).
+    Editor ed;
+    editorOfLines({"a", "b", "c"}, 0, 0, ed);
+    enterSeleccion(ed);               // anchor (0,0)
+    press(ed, EventType::MoveDown);   // (1,0): seleccion [0,0)..(1,0)
+    press(ed, EventType::MoveDown);   // (2,0): [0,0)..(2,0), end.col == 0
+    CHECK(ed.hasSelection());
+
+    ed.handleEvent(insert('}'));
+    CHECK_EQ(ed.active().document.lineAt(0), "    a");
+    CHECK_EQ(ed.active().document.lineAt(1), "    b");
+    CHECK_EQ(ed.active().document.lineAt(2), "c");   // NO se tabula
+}
+
+TEST(selection_dedent_excludes_line_when_selection_ends_at_col_0) {
+    Editor ed;
+    editorOfLines({"    a", "    b", "    c"}, 0, 0, ed);
+    enterSeleccion(ed);               // anchor (0,0)
+    press(ed, EventType::MoveDown);   // (1,0)
+    press(ed, EventType::MoveDown);   // (2,0): end.col == 0 en linea 2
+    ed.handleEvent(insert('{'));
+    CHECK_EQ(ed.active().document.lineAt(0), "a");
+    CHECK_EQ(ed.active().document.lineAt(1), "b");
+    CHECK_EQ(ed.active().document.lineAt(2), "    c");  // intacta
+}
+
+TEST(select_all_tabular_indents_whole_file_and_keeps_mode_on) {
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 1, 1, ed);
+    enterSeleccion(ed);                 // 's' -> modo seleccion
+    ed.handleEvent(insert('a'));        // seleccion total [0,0]..[2,3)
+    CHECK(ed.active().selectAllActive);
+    CHECK(ed.hasSelection());
+
+    ed.handleEvent(insert('}'));
+    CHECK(ed.active().selectAllActive); // el modo 'a' sigue activo
+    CHECK_EQ(ed.active().document.lineAt(0), "    aaa");
+    CHECK_EQ(ed.active().document.lineAt(1), "    bbb");
+    CHECK_EQ(ed.active().document.lineAt(2), "    ccc");
+    CHECK(ed.active().modified);
+
+    // Un '{' mas desindenta todo el archivo de nuevo.
+    ed.handleEvent(insert('{'));
+    CHECK_EQ(ed.active().document.lineAt(0), "aaa");
+    CHECK_EQ(ed.active().document.lineAt(1), "bbb");
+    CHECK_EQ(ed.active().document.lineAt(2), "ccc");
+}
+
+// ---------------------------------------------------------------------------
+// Tabulacion de la seleccion: casos 5-7 (historial, mezcla y push unico)
+// ---------------------------------------------------------------------------
+TEST(selection_dedent_no_indentation_no_history_noop) {
+    // Desindentar un rango donde NINGUNA linea tiene indentacion: no se
+    // pushea historial, no se marca modified y se avisa.
+    Editor ed;
+    editorOfLines({"foo", "bar", "baz"}, 0, 0, ed);
+    enterSeleccion(ed);                // anchor (0,0)
+    press(ed, EventType::MoveDown);    // (1,0)
+    press(ed, EventType::MoveRight);   // (1,1): seleccion lineas 0..1
+    const size_t undoBefore = ed.active().undoStack.size();
+    const bool modified = ed.active().modified;
+
+    ed.handleEvent(insert('{'));
+    CHECK_EQ(ed.active().undoStack.size(), undoBefore);   // sin push
+    CHECK_EQ(ed.active().modified, modified);
+    CHECK_EQ(ed.active().document.lineAt(0), "foo");
+    CHECK_EQ(ed.active().document.lineAt(1), "bar");
+    CHECK_EQ(ed.statusMessage_, "Nada que tabular.");
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+}
+
+TEST(selection_dedent_partial_indentation_only_touches_indented) {
+    // Algunas lineas indentadas y otras no: solo las que tienen indentacion
+    // cambian; willChange detecta el caso general (no "todas o ninguna").
+    Editor ed;
+    editorOfLines({"    foo", "bar", "    baz"}, 0, 4, ed);
+    enterSeleccion(ed);                // anchor (0,4)
+    press(ed, EventType::MoveDown);    // (1,4)
+    press(ed, EventType::MoveDown);    // (2,4): seleccion lineas 0..2
+
+    ed.handleEvent(insert('{'));
+    CHECK_EQ(ed.active().document.lineAt(0), "foo");       // tenia -> cambia
+    CHECK_EQ(ed.active().document.lineAt(1), "bar");       // no tenia -> intacta
+    CHECK_EQ(ed.active().document.lineAt(2), "baz");       // tenia -> cambia
+    CHECK(ed.active().modified);
+
+    // Un solo undo revierte las 3 lineas a la vez.
+    press(ed, EventType::Undo);
+    CHECK_EQ(ed.active().document.lineAt(0), "    foo");
+    CHECK_EQ(ed.active().document.lineAt(1), "bar");
+    CHECK_EQ(ed.active().document.lineAt(2), "    baz");
+}
+
+TEST(selection_indent_undo_redo_single_operation) {
+    // Un solo pushHistory cubre el rango entero: un undo() revierte las N
+    // lineas en una operacion y un redo() reaplica el cambio completo.
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 0, 0, ed);
+    enterSeleccion(ed);                // anchor (0,0)
+    press(ed, EventType::MoveDown);    // (1,0)
+    press(ed, EventType::MoveDown);    // (2,0)
+    press(ed, EventType::MoveRight);   // (2,1): seleccion lineas 0..2
+    CHECK(!ed.active().modified);
+
+    ed.handleEvent(insert('}'));
+    CHECK(ed.active().modified);
+    CHECK_EQ(ed.active().document.lineAt(0), "    aaa");
+    CHECK_EQ(ed.active().document.lineAt(1), "    bbb");
+    CHECK_EQ(ed.active().document.lineAt(2), "    ccc");
+
+    press(ed, EventType::Undo);
+    CHECK_EQ(ed.active().document.lineAt(0), "aaa");
+    CHECK_EQ(ed.active().document.lineAt(1), "bbb");
+    CHECK_EQ(ed.active().document.lineAt(2), "ccc");
+
+    press(ed, EventType::Redo);
+    CHECK_EQ(ed.active().document.lineAt(0), "    aaa");
+    CHECK_EQ(ed.active().document.lineAt(1), "    bbb");
+    CHECK_EQ(ed.active().document.lineAt(2), "    ccc");
+}
+
+// ---------------------------------------------------------------------------
+// Tabulacion de la seleccion: modo, contexto y limites del documento
+// ---------------------------------------------------------------------------
+TEST(selection_indent_does_not_change_mode) {
+    // A diferencia de 'c'/'x' (que salen a Navegacion), '}'/'{' se quedan
+    // en Seleccion y mantienen la seleccion vigente (desplazada, no borrada).
+    Editor ed;
+    editorOfLines({"aaa", "bbb"}, 0, 0, ed);
+    enterSeleccion(ed);                // anchor (0,0)
+    press(ed, EventType::MoveDown);    // (1,0)
+    press(ed, EventType::MoveRight);   // (1,1)
+    CHECK(ed.hasSelection());
+
+    ed.handleEvent(insert('}'));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+    CHECK(ed.hasSelection());
+
+    ed.handleEvent(insert('{'));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+    CHECK(ed.hasSelection());          // sigue con rango tras '}'-'{'
+    CHECK_EQ(ed.active().document.lineAt(0), "aaa");
+}
+
+TEST(selection_braces_are_noop_in_navegacion) {
+    // En Navegacion no hay edicion: '}'-'{' no hacen nada (no comando).
+    Editor ed;
+    editorOfLines({"abc"}, 0, 1, ed);
+    const bool modified = ed.active().modified;
+    const size_t undo = ed.active().undoStack.size();
+    ed.handleEvent(insert('}'));
+    ed.handleEvent(insert('{'));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.active().document.lineAt(0), "abc");
+    CHECK_EQ(ed.active().modified, modified);
+    CHECK_EQ(ed.active().undoStack.size(), undo);
+}
+
+TEST(selection_braces_are_text_in_interaccion) {
+    // En Interaccion '}'/'{' son texto normal y se insertan, como cualquier
+    // otra letra (no son comandos de tabulacion ahi).
+    Editor ed;
+    editorOfLines({""}, 0, 0, ed);
+    type(ed, "{}");
+    CHECK_EQ(ed.active().document.lineAt(0), "{}");
+}
+
+TEST(selection_indent_document_boundaries) {
+    // Indentar en la primera linea y en la ultima no rompe ni desborda.
+    // Primera linea:
+    Editor ed1;
+    editorOfLines({"first", "mid", "last"}, 0, 0, ed1);
+    enterSeleccion(ed1);
+    press(ed1, EventType::MoveRight);   // (0,1)
+    ed1.handleEvent(insert('}'));
+    CHECK_EQ(ed1.active().document.lineAt(0), "    first");
+    CHECK_EQ(ed1.active().document.lineCount(), 3);
+
+    // Ultima linea (contenido dentro de ella):
+    Editor ed2;
+    editorOfLines({"first", "mid", "last"}, 2, 2, ed2);   // cursor (2,2)
+    enterSeleccion(ed2);
+    press(ed2, EventType::MoveRight);   // (2,3)
+    ed2.handleEvent(insert('}'));
+    CHECK_EQ(ed2.active().document.lineAt(2), "    last");
+    CHECK_EQ(ed2.active().document.lineCount(), 3);
+
+    // Seleccion que "roza" el inicio de la ultima linea: esa linea NO se
+    // tabula (mismo criterio de lineBreakSelected), sin desbordar.
+    Editor ed3;
+    editorOfLines({"a", "b", "c", "d"}, 0, 0, ed3);
+    enterSeleccion(ed3);
+    press(ed3, EventType::MoveDown);    // (1,0)
+    press(ed3, EventType::MoveDown);    // (2,0)
+    press(ed3, EventType::MoveDown);    // (3,0): end.col == 0 en la ultima
+    ed3.handleEvent(insert('}'));
+    CHECK_EQ(ed3.active().document.lineAt(0), "    a");
+    CHECK_EQ(ed3.active().document.lineAt(1), "    b");
+    CHECK_EQ(ed3.active().document.lineAt(2), "    c");
+    CHECK_EQ(ed3.active().document.lineAt(3), "d");   // intacta
+    CHECK_EQ(ed3.active().document.lineCount(), 4);
+}

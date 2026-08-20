@@ -163,6 +163,15 @@ void Editor::registerCommands() {
         state_ = State::Navegacion;
         setActionMessage(hadSelection ? "Cortado." : "Nada seleccionado.");
     });
+    // '}' tabula el rango seleccionado hacia adentro; '{' le quita un nivel.
+    // Solo tienen significado en modo Seleccion ('}' / '{' se ignoran en
+    // el resto de modos) y solo si hay rango NO vacio.
+    commands_.registerCommand("seleccion.indentar", [this] {
+        indentSelection(true);
+    });
+    commands_.registerCommand("seleccion.desindentar", [this] {
+        indentSelection(false);
+    });
 
     // --- Prefijo (Ctrl+K) ---
     commands_.registerCommand("buffer.nuevo", [this] {
@@ -756,6 +765,10 @@ void Editor::handleSeleccionEvent(const Event& event) {
                 commands_.execute("seleccion.copiar");
             } else if (event.text == "x") {
                 commands_.execute("seleccion.cortar");
+            } else if (event.text == "}") {
+                commands_.execute("seleccion.indentar");
+            } else if (event.text == "{") {
+                commands_.execute("seleccion.desindentar");
             } else if (event.text == "p") {
                 // P0 interaction: 'p' desde Seleccion reemplaza el rango
                 // seleccionado por el clipboard (navegacion.pegar ya
@@ -853,6 +866,13 @@ void Editor::handleSelectAllEvent(const Event& event) {
                 setActionMessage(hadSelection ? (event.text == "x" ? "Cortado."
                                                                     : "Copiado.")
                                               : "Nada seleccionado.");
+            } else if (event.text == "}") {
+                // Tabulacion sobre el archivo ENTERO (la seleccion total es
+                // una seleccion real): indentar todo. indentSelection deja
+                // el modo 'a' intacto, asi que se puede seguir tabulando.
+                commands_.execute("seleccion.indentar");
+            } else if (event.text == "{") {
+                commands_.execute("seleccion.desindentar");
             }
             // Cualquier otra letra: no pasa nada.
             break;
@@ -1112,6 +1132,81 @@ bool Editor::deleteSelection() {
     b.modified = true;
     clearSelection();
     return true;
+}
+
+void Editor::indentSelection(bool indent) {
+    Buffer& b = active();
+    if (!hasSelection()) {
+        setActionMessage("Nada seleccionado.", MessageKind::Warning);
+        return;
+    }
+    auto sel = selection();
+
+    // Ancho de una tabulacion (en espacios). Un solo '}' / '{' mueve un
+    // nivel. Si mas adelante se configura ancho de tab, esto es el lugar.
+    constexpr int kIndentLen = 4;
+
+    // La tabulacion aplica a las lineas COMPLETAS que toca la seleccion.
+    // Como el rango es [start, end) con end exclusivo, la ultima linea
+    // (sel->end.line) SOLO cuenta si la seleccion llega hasta dentro de
+    // ella (sel->end.col > 0): si termina justo en su columna 0, esa linea
+    // no quedo realmente incluida y no se tabula. Mismo criterio que usa el
+    // Renderer para decidir el salto de linea seleccionado (endsAtStart) y
+    // que el resto del codigo distingue a proposito. No puede darse single
+    // line + end.col == 0 con una seleccion no vacia, pero el guard lo deja
+    // explicito igual.
+    int firstLine = sel->start.line;
+    int lastLine = sel->end.line;
+    if (sel->end.col == 0 && lastLine > firstLine) {
+        --lastLine;
+    }
+
+    // Hacer un solo pushHistory cubre el rango entero, de modo que el
+    // '}' / '{' se deshace en UNA sola operacion. Para no dejar entradas
+    // de undo vacias (p.ej. des-indentar algo que ya no tiene margen),
+    // primero miramos si ALGUNA linea del rango va a cambiar realmente.
+    //
+    // OJO: este criterio de "la linea va a cambiar" debe mantenerse
+    // SINCRONIZADO con lo que indentLine() decide internamente (un tab
+    // inicial cuenta como nivel, o hasta `kIndentLen` espacios iniciales).
+    // No basta con tenerlo solo aqui explicito pero distinto: si indentLine
+    // cambia el criterio de desindentado (tabs mixtos, ancho configurable,
+    // ...) hay que tocar este predicado en el mismo commit. El loop es el
+    // mismo que aplica los cambios abajo, salvo que este es de solo-lectura
+    // y corta apenas encuentra una linea que cambie.
+    bool willChange = false;
+    for (int l = firstLine; l <= lastLine; ++l) {
+        const std::string& s = b.document.lineAt(l);
+        bool change = indent || (!s.empty() && (s[0] == '\t' || s[0] == ' '));
+        if (change) { willChange = true; break; }
+    }
+    if (!willChange) {
+        setActionMessage("Nada que tabular.", MessageKind::Info);
+        return;
+    }
+
+    b.pushHistory();
+    for (int l = firstLine; l <= lastLine; ++l) {
+        int delta = b.document.indentLine(l, indent, kIndentLen);
+        if (delta == 0) continue;
+        // Desplazar el cursor y los extremos de la seleccion sobre ESTA
+        // linea por el delta que el cambio movio su comienzo (positivo al
+        // indentar, negativo al desindentar). Asi la tabulacion no deja
+        // cursor/seleccion apuntando a offsets viejos, sino sobre el mismo
+        // texto de siempre (respetando las selecciones parciales).
+        auto shift = [delta](int col) {
+            // Al desindentar (< 0) nunca se pasa del inicio: col queda 0.
+            return delta > 0 ? col + delta : std::max(0, col + delta);
+        };
+        if (b.cursor.line == l) b.cursor.col = shift(b.cursor.col);
+        if (b.selection.has_value()) {
+            if (b.selection->anchor.line == l) b.selection->anchor.col = shift(b.selection->anchor.col);
+            if (b.selection->position.line == l) b.selection->position.col = shift(b.selection->position.col);
+        }
+    }
+    b.modified = true;
+    setActionMessage(indent ? "Tabulado." : "Tabulacion quitada.",
+                     MessageKind::Success);
 }
 
 void Editor::undo() {

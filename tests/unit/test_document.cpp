@@ -1274,3 +1274,149 @@ TEST(doc_crlf_edit_then_save_preserves) {
     CHECK(d.saveToFile(dst.path));
     CHECK_EQ(fileContent(dst.path), "aZ\r\nb\r\n");
 }
+
+TEST(doc_indent_line_adds_spaces_at_start) {
+    Document d;
+    d.restore(Lines({"if (x) {", "    foo();", "}", ""}));
+    CHECK(d.indentLine(0, true, 4));
+    CHECK_EQ(d.lineAt(0), "    if (x) {");
+    CHECK_EQ(d.lineCount(), 4);   // no creo lineas
+    CHECK(d.indentLine(2, true, 4));
+    CHECK_EQ(d.lineAt(2), "    }");
+}
+
+TEST(doc_indent_line_empty_line) {
+    Document d;
+    d.restore(Lines({"", "x", ""}));
+    CHECK(d.indentLine(0, true, 4));
+    CHECK_EQ(d.lineAt(0), "    ");
+}
+
+TEST(doc_indent_line_bad_args_noop) {
+    Document d;
+    d.restore(Lines({"x", "y"}));
+    CHECK(!d.indentLine(0, true, 0));    // indentLen <= 0
+    CHECK(!d.indentLine(-1, true, 4));   // linea invalida
+    CHECK(!d.indentLine(99, true, 4));   // fuera de rango
+    CHECK_EQ(d.lineAt(0), "x");
+}
+
+TEST(doc_dedent_line_removes_up_to_level) {
+    Document d;
+    d.restore(Lines({"    foo();", "        inner();", "noindent", "\tTab", "  two", ""}));
+    // Quita hasta 4 espacios.
+    CHECK(d.indentLine(0, false, 4));
+    CHECK_EQ(d.lineAt(0), "foo();");
+    // Dedenta en dos pasos una indentacion mas profunda.
+    CHECK(d.indentLine(1, false, 4));
+    CHECK_EQ(d.lineAt(1), "    inner();");
+    CHECK(d.indentLine(1, false, 4));
+    CHECK_EQ(d.lineAt(1), "inner();");
+}
+
+TEST(doc_dedent_line_tab_counts_one_level) {
+    Document d;
+    d.restore(Lines({"\tfoo();", "  "}));
+    CHECK(d.indentLine(0, false, 4));
+    CHECK_EQ(d.lineAt(0), "foo();");     // un tab se quita entero
+    CHECK(d.indentLine(1, false, 4));
+    CHECK_EQ(d.lineAt(1), "");           // 2 espacios se quitan
+}
+
+TEST(doc_dedent_line_no_leading_whitespace_returns_false) {
+    Document d;
+    d.restore(Lines({"foo();", ""}));
+    CHECK(!d.indentLine(0, false, 4));
+    CHECK_EQ(d.lineAt(0), "foo();");
+    CHECK(!d.indentLine(1, false, 4));   // linea vacia no cambia
+}
+
+TEST(doc_dedent_line_fewer_than_level_spaces_removes_only_present) {
+    // La linea arranca con MENOS de indentLen espacios seguidos de
+    // contenido: se quitan solo los que hay (no "mas alla" del contenido),
+    // el contenido queda intacto y el resultado nunca es negativo.
+    Document d;
+    d.restore(Lines({"  foo", "   bar"}));
+    CHECK(d.indentLine(0, false, 4));
+    CHECK_EQ(d.lineAt(0), "foo");
+    CHECK(d.indentLine(1, false, 4));
+    CHECK_EQ(d.lineAt(1), "bar");
+}
+
+TEST(doc_dedent_line_more_than_level_spaces_removes_only_level) {
+    // La linea arranca con MAS de indentLen espacios: un solo dedent quita
+    // exactamente indentLen, el resto (y el contenido) queda intacto.
+    Document d;
+    d.restore(Lines({"             foo"}));   // 13 espacios + "foo"
+    CHECK(d.indentLine(0, false, 4));
+    CHECK_EQ(d.lineAt(0), "         foo");    // 9 espacios + "foo"
+}
+
+TEST(doc_dedent_line_leading_tab_removed_whole_is_not_spaces) {
+    // Un tab inicial se quita ENTERO (un solo caracter), NO como si valiera
+    // indentLen espacios ni se traduce a nada mas.
+    Document d;
+    d.restore(Lines({"\tfoo"}));
+    CHECK(d.indentLine(0, false, 4));
+    CHECK_EQ(d.lineAt(0), "foo");
+}
+
+TEST(doc_dedent_line_no_indentation_returns_false_untouched) {
+    // Las lineas SIN indentacion (arrancan con texto o estan vacias)
+    // devuelven false y no se modifican.
+    Document d;
+    d.restore(Lines({"foo", "\t", ""}));
+    CHECK(!d.indentLine(0, false, 4));
+    CHECK_EQ(d.lineAt(0), "foo");
+    CHECK(!d.indentLine(2, false, 4));
+    CHECK_EQ(d.lineAt(2), "");
+}
+
+TEST(doc_dedent_line_mixed_space_tab_keys_off_first_char) {
+    // " \tfoo": el criterio mira al primer caracter (un espacio), asi que
+    // un dedent quita SOLO la corrida de espacios inicial (el tab la corta)
+    // y deja "\tfoo"; un segundo dedent quita el tab y deja "foo". El tab
+    // nunca se traduce a indentLen espacios.
+    Document d;
+    d.restore(Lines({" \tfoo"}));
+    CHECK(d.indentLine(0, false, 4));
+    CHECK_EQ(d.lineAt(0), "\tfoo");
+    CHECK(d.indentLine(0, false, 4));
+    CHECK_EQ(d.lineAt(0), "foo");
+}
+
+TEST(doc_indent_line_out_of_range_safe) {
+    // line negativo o >= lineCount(): devuelve false sin crashear, para
+    // indent y dedent por igual.
+    Document d;
+    d.restore(Lines({"x", "y"}));
+    CHECK(!d.indentLine(-1, true, 4));
+    CHECK(!d.indentLine(99, true, 4));
+    CHECK(!d.indentLine(-1, false, 4));
+    CHECK(!d.indentLine(99, false, 4));
+    CHECK_EQ(d.lineAt(0), "x");
+    CHECK_EQ(d.lineAt(1), "y");
+}
+
+TEST(doc_indent_line_invalid_indentlen_noop_both_directions) {
+    // indentLen <= 0: false sin modificar, para indent=true Y indent=false.
+    Document d;
+    d.restore(Lines({"  foo", "bar"}));
+    CHECK(!d.indentLine(0, true, 0));
+    CHECK(!d.indentLine(0, false, 0));
+    CHECK(!d.indentLine(0, true, -2));
+    CHECK(!d.indentLine(0, false, -2));
+    CHECK_EQ(d.lineAt(0), "  foo");
+    CHECK_EQ(d.lineAt(1), "bar");
+}
+
+TEST(doc_indent_line_preserves_multibyte_content) {
+    // Indentar/desindentar inserta/quita bytes ASCII antes del contenido
+    // sin corromper un caracter UTF-8 multibyte que arranque la linea.
+    Document d;
+    d.restore(Lines({std::string("\xC3\xA9x")}));        // "éx"
+    CHECK(d.indentLine(0, true, 4));
+    CHECK_EQ(d.lineAt(0), std::string("    \xC3\xA9x")); // "    éx"
+    CHECK(d.indentLine(0, false, 4));
+    CHECK_EQ(d.lineAt(0), std::string("\xC3\xA9x"));     // vuelve a "éx"
+}

@@ -53,7 +53,8 @@ El editor es modal. En cada modo las teclas significan cosas distintas:
   `Esc` vuelve a Navegación.
 - **Selección** (con `s`): las flechas, `j`/`k` y RePag/AvPag extienden la
   selección (el *anchor* se fija al entrar y nunca cambia). `Esc`, `c`
-  o `x` la terminan. `a` entra al prefijo de "selección total".
+  o `x` la terminan. `a` entra al prefijo de "selección total". `}` y
+  `{` tabulan la selección (solo aquí, y solo si hay un rango marcado).
 
 ### Teclas
 
@@ -66,6 +67,7 @@ El editor es modal. En cada modo las teclas significan cosas distintas:
 | `j` / `k` (Naveg./Sel.)    | Mover por *bloques*: previo / siguiente palabra |
 | `a` (en Selección)         | Prefijo de selección total (todo el archivo)  |
 | `c` / `x` (en Selección)   | Copiar / cortar la selección                  |
+| `}` / `{` (en Selección)   | Tabular hacia adentro / quitar tabulación de la selección |
 | `p` (en Naveg.)            | Pegar el contenido del buffer                 |
 | Ctrl+U / Ctrl+Y            | Deshacer / Rehacer                            |
 | Ctrl+K, Ctrl+S             | Guardar. Si el buffer no tiene nombre, abre el prompt *Guardar archivo:* |

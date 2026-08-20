@@ -346,3 +346,40 @@ Position Document::insertBlock(int line, int col, const std::vector<std::string>
     return {line + static_cast<int>(block.size()) - 1,
             static_cast<int>(block.back().size())};
 }
+
+int Document::indentLine(int line, bool indent, int indentLen) {
+    if (line < 0 || line >= lineCount() || indentLen <= 0) return 0;
+    std::string& s = lines_[line];
+
+    if (indent) {
+        s.insert(0, static_cast<size_t>(indentLen), ' ');
+        return indentLen;             // el comienzo se movio +indentLen bytes
+    }
+
+    // Desindentar: quitar UN nivel de indentacion del comienzo. Un
+    // tabulador INICIAL equivale a un nivel completo (se quita entero, un
+    // solo caracter); si no arranca con tab, se quitan hasta `indentLen`
+    // espacios iniciales, la corrida de espacios anterior a cualquier otro
+    // caracter (contenido o tabulador).
+    //
+    // Regla para mezcla espacios+tab (ej. " \tfoo"): el criterio mira al
+    // primer caracter. Si es un tab -> se quita el tab. Si es un espacio ->
+    // solo se cuentan los espacios INICIALES (el recorrido se detiene al
+    // primer no-espacio, que puede ser un tab), asi que en " \tfoo" se
+    // quita solo el espacio y queda "\tfoo"; un segundo '{' quita el tab.
+    // Nunca se "traduce" un tab a `indentLen` espacios ni se mezclan: cada
+    // pulsacion desindenta exactamente un nivel a partir del primer byte.
+    int remove = 0;
+    if (!s.empty() && s[0] == '\t') {
+        remove = 1;
+    } else {
+        while (remove < indentLen && remove < static_cast<int>(s.size()) &&
+               s[static_cast<size_t>(remove)] == ' ') {
+            ++remove;
+        }
+    }
+
+    if (remove == 0) return 0;
+    s.erase(0, static_cast<size_t>(remove));
+    return -remove;                   // el comienzo se movio -remove bytes
+}
