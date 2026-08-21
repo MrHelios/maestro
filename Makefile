@@ -41,7 +41,7 @@ TEST_BIN := build/edit_tests
 # Terminal.cpp solo en terminal/), asi que no hay colisiones.
 #
 # Uso:
-#   make            build normal: build/maestro + build/edit_tests
+#   make            build normal: build/maestro
 #   make test       compila y ejecuta la suite (build/)
 #   make sanitize   build con -fsanitize=address,undefined (build-san/)
 #   make test-sanitize  compila y ejecuta la suite sanitizada
@@ -129,10 +129,8 @@ build-san/%.o: tests/integration/%.cpp | build-san
 build-san/%.o: tests/integration/x11_clipboard/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
 
-# Default (make a secas): compila el editor y la suite, como documenta el
-# Uso de arriba. Debe ser el PRIMER target: `build` (el directorio) no debe
-# ganar, o un `make` desnudo solo crearia la carpeta sin compilar nada.
-all: $(BIN) $(TEST_BIN)
+# Default (make a secas): compila el editor.
+all: $(BIN)
 
 build build-san:
 	@mkdir -p $@
