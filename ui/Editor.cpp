@@ -159,15 +159,16 @@ void Editor::registerCommands() {
     commands_.registerCommand("navegacion.palabra.adelante", [this] {
         active().cursor.moveToNextWord(active().document);
     });
-
-    // --- Seleccion ---
     commands_.registerCommand("seleccion.total", [this] {
         Buffer& b = active();
         b.selectAllPrevious = b.selection;
         b.selection = selectAllSelection();
         b.selectAllActive = true;
+        state_ = State::Seleccion;
         setStatusMessage(kHelpEmpty);
     });
+
+    // --- Seleccion ---
     commands_.registerCommand("seleccion.j", [this] {
         beginSelection();
         active().cursor.moveToPreviousWord(active().document);
@@ -675,6 +676,8 @@ void Editor::handleNavegacionEvent(const Event& event) {
                 commands_.execute("navegacion.palabra.atras");
             } else if (event.text == "k") {
                 commands_.execute("navegacion.palabra.adelante");
+            } else if (event.text == "a") {
+                commands_.execute("seleccion.total");
             }
             break;
 

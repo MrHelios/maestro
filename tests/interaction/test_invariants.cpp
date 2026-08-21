@@ -1014,25 +1014,33 @@ TEST(property_undo_redo_roundtrip_random_mixed) {
 }
 
 TEST(property_undo_redo_roundtrip_empty_document) {
-    // Sobre un documento vacio la propiedad tambien debe mantenerse.
     Editor ed;
     const BufferState initial = capture(ed.active());
 
-    // Algunas inserciones y deshaceres intermedios.
-    insert('a'); // no-op; solo comprobar invariante tras cada paso
-    // Secuencia real: editar, deshacer todo, rehacer todo.
+    // Entrar explícitamente en modo edición.
+    Event enter;
+    enter.type = EventType::InsertChar;
+    enter.text = "i";
+    ed.handleEvent(enter);
+
+    // Escribir 200 caracteres.
     for (int i = 0; i < 200; ++i) {
         Event e;
         e.type = EventType::InsertChar;
         e.text = std::string(1, static_cast<char>('a' + (i % 3)));
         ed.handleEvent(e);
     }
-    // Deshacer todo debe volver al estado inicial vacio.
+
     while (!ed.active().undoStack.empty())
         ed.handleEvent(ev(EventType::Undo));
-    CHECK(stateEqual(capture(ed.active()), initial));
+
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
+    CHECK(!ed.active().selection.has_value());
+
+    CHECK(stateEqual(capture(ed.active()), initial));
     assertStateConsistent(ed);
 }
 
