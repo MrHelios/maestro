@@ -1,11 +1,13 @@
 #pragma once
 
 #include <chrono>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 #include "core/Buffer.h"
 #include "core/BufferManager.h"
+#include "clipboard/SystemClipboard.h"
 #include "ui/CommandMap.h"
 #include "ui/EditorState.h"
 #include "ui/FileBrowser.h"
@@ -24,6 +26,7 @@
 class Editor {
 public:
     Editor();
+    explicit Editor(std::unique_ptr<SystemClipboard> clipboard);
 
     // v0.6.2: true si `path` existe y es una carpeta (absoluta o relativa).
     // Las carpetas no se pueden abrir todavia: solo archivos. Delega en
@@ -155,15 +158,13 @@ private:
     // pregunta statusMessage_.persistent()/.expired().
     Message statusMessage_;
 
-    // Buffer de copiar/cortar/pegar (v0.55). Contenido del ultimo rango
-    // copiado/cortado, como bloque de lineas. Vive FUERA de HistoryState:
-    // nunca se guarda en un pushHistory ni se restaura con undo/redo. Es
-    // estado de la UI (que tiene el usuario "en la mano"), no del documento,
-    // asi que deshacer una edicion NO debe deshacer el portapapeles. Si no
-    // parece participar del historial no es un olvido: es la decision de
-    // diseno del punto 3 de v0.5. Es GLOBAL al editor: compartido por
-    // todos los buffers (v0.6.3, invariante 11).
-    std::vector<std::string> clipboard_;
+    std::unique_ptr<SystemClipboard> clipboard_;
+    static std::string blockToString(const std::vector<std::string>& block);
+    static std::vector<std::string> stringToBlock(const std::string& text);
+    std::vector<std::string> getClipboardBlock() const;
+    void setClipboardBlock(const std::vector<std::string>& block);
+    std::string getClipboardText() const;
+    bool isClipboardEmpty() const;
 
     // Indice seleccionado en la pantalla del selector de buffers.
     int bufferSelectorIndex_ = 0;

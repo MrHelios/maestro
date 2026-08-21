@@ -169,7 +169,7 @@ static void assertStateConsistent(Editor& ed) {
     // --- Invariantes del clipboard ---
     // Cada linea del clipboard es una cadena UTF-8 valida (sin bytes de
     // continuacion colgando): es un bloque bien formado de lineas.
-    for (const std::string& l : ed.clipboard_)
+    for (const std::string& l : ed.getClipboardBlock())
         CHECK(validUtf8(l));
 
     // --- Invariantes del historial ---
@@ -177,7 +177,7 @@ static void assertStateConsistent(Editor& ed) {
     // "viajando" en undo/redo que el estado reconozca como portapapeles.
     // (Históricamente: si se restaurara el clipboard en undo, aqui no habria
     // ningun indicio del que fiarse; la regla no es un mero consejo.)
-    CHECK(ed.clipboard_.size() <= Editor::MAX_UNDO);
+    CHECK(ed.getClipboardBlock().size() <= Editor::MAX_UNDO);
 }
 
 // Secuencia determinista de eventos que cubre todas las mutaciones,
@@ -1050,7 +1050,7 @@ TEST(invariant_clipboard_not_in_history) {
     ed.handleEvent(ev(EventType::MoveRight));
     ed.handleEvent(ev(EventType::MoveRight));
     ed.handleEvent(insert('c'));
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ab"}));
 
     // Editar distinto contenido (que apila historia).
     ed.handleEvent(ev(EventType::MoveEnd));
@@ -1060,8 +1060,8 @@ TEST(invariant_clipboard_not_in_history) {
 
     // Undo y Redo: el clipboard "ab" debe permanecer intacto.
     ed.handleEvent(ev(EventType::Undo));
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ab"}));
     ed.handleEvent(ev(EventType::Redo));
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ab"}));
     assertStateConsistent(ed);
 }

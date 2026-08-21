@@ -1211,7 +1211,7 @@ static void assertCopied(Editor& ed,
     CHECK(ed.active().document.snapshot() == docBefore);     // documento identico
     CHECK_EQ(ed.active().cursor.line, lineBefore);            // cursor en el mismo lugar
     CHECK_EQ(ed.active().cursor.col, colBefore);
-    CHECK(ed.clipboard_ == expectedClipboard);        // buffer exacto
+    CHECK(ed.getClipboardBlock() == expectedClipboard);        // buffer exacto
 }
 
 TEST(selection_c_without_selection_noop) {
@@ -1223,7 +1223,7 @@ TEST(selection_c_without_selection_noop) {
     const std::vector<std::string> docBefore = ed.active().document.snapshot();
     const size_t undoBefore = ed.active().undoStack.size();
     const size_t redoBefore = ed.active().redoStack.size();
-    ed.clipboard_ = std::vector<std::string>{"previo"}; // contenido previo
+    ed.setClipboardBlock(std::vector<std::string>{"previo"}); // contenido previo
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);                 // s
     CHECK(!ed.hasSelection());
@@ -1236,7 +1236,7 @@ TEST(selection_c_without_selection_noop) {
     CHECK_EQ(ed.active().redoStack.size(), redoBefore);        // no modifica redo
     CHECK(!ed.active().modified);                              // no modifica modified_
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK(ed.clipboard_ == std::vector<std::string>{"previo"}); // buffer intacto
+    CHECK(ed.getClipboardBlock() == std::vector<std::string>{"previo"}); // buffer intacto
 }
 
 TEST(selection_c_copies_single_char) {
@@ -1709,7 +1709,7 @@ TEST(select_all_c_copies_whole_file) {
 
     ed.handleEvent(insert('c'));
     CHECK(!ed.active().selectAllActive);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"linea1", "linea2"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"linea1", "linea2"}));
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     // El documento no cambia al copiar.
@@ -1724,7 +1724,7 @@ TEST(select_all_x_cuts_whole_file) {
 
     ed.handleEvent(insert('x'));
     CHECK(!ed.active().selectAllActive);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"linea1", "linea2"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"linea1", "linea2"}));
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     // El archivo entero se borro -> queda una unica linea vacia.
@@ -1810,7 +1810,7 @@ TEST(select_all_toggle_then_copy_copies_previous) {
     CHECK_EQ(sel->end.col, before->end.col);
 
     ed.handleEvent(insert('c')); // copia SOLO [c]
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"c"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"c"}));
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
@@ -1828,7 +1828,7 @@ TEST(select_all_toggle_then_cut_cuts_previous) {
     CHECK(!ed.active().selectAllActive);
 
     ed.handleEvent(insert('x')); // corta SOLO la 'c'
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"c"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"c"}));
     CHECK_EQ(ed.active().document.lineAt(0), "abde");
     // Cursor al inicio de lo cortado (0,2).
     CHECK_EQ(ed.active().cursor.line, 0);

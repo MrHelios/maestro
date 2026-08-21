@@ -516,7 +516,7 @@ TEST(e2e_05_utf8_workflow_byte_exact) {
 
     // copy: clipboard ["mañana"] (7 bytes), vuelve a Navegacion.
     ed.handleEvent(insert('c'));
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ma" "\xC3\xB1" "ana"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ma" "\xC3\xB1" "ana"}));
     CHECK_EQ(ed.active().cursor.line, 1);
     CHECK_EQ(ed.active().cursor.col, 7);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));

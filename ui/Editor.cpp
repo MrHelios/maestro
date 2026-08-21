@@ -4,10 +4,14 @@
 #include <cctype>
 #include <climits>
 #include <filesystem>
+#include <poll.h>
+#include <cerrno>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include "core/utf8.h"
+#include "clipboard/FakeClipboard.h"
+#include "clipboard/X11Clipboard.h"
 
 namespace {
 
@@ -44,12 +48,52 @@ std::string resolveAbsolutePath(const std::string& path) {
 
 } // namespace
 
-Editor::Editor() {
+Editor::Editor() : Editor(std::make_unique<X11Clipboard>()) {}
+
+Editor::Editor(std::unique_ptr<SystemClipboard> clipboard) : clipboard_(std::move(clipboard)) {
+    if (!clipboard_) clipboard_ = std::make_unique<FakeClipboard>();
     setStatusMessage(kHelpPrefix);
-    // Invariante 1 y 2 (v0.6.3): siempre existe al menos un buffer y hay
-    // exactamente uno activo. BufferManager arranca con un unico buffer
-    // sin nombre y lo deja activo.
     registerCommands();
+}
+
+std::string Editor::blockToString(const std::vector<std::string>& block) {
+    if (block.empty()) return "";
+    std::string s = block[0];
+    for (size_t i = 1; i < block.size(); ++i) { s += "\n"; s += block[i]; }
+    return s;
+}
+
+std::vector<std::string> Editor::stringToBlock(const std::string& text) {
+    if (text.empty()) return {};
+    std::vector<std::string> out;
+    size_t start = 0;
+    for (size_t i = 0; i <= text.size(); ++i) {
+        if (i == text.size() || text[i] == '\n') {
+            out.emplace_back(text.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    return out;
+}
+
+std::vector<std::string> Editor::getClipboardBlock() const {
+    auto opt = clipboard_->paste();
+    if (!opt) return {};
+    return stringToBlock(*opt);
+}
+
+void Editor::setClipboardBlock(const std::vector<std::string>& block) {
+    clipboard_->copy(blockToString(block));
+}
+
+std::string Editor::getClipboardText() const {
+    auto opt = clipboard_->paste();
+    return opt ? *opt : "";
+}
+
+bool Editor::isClipboardEmpty() const {
+    auto opt = clipboard_->paste();
+    return !opt || opt->empty();
 }
 
 void Editor::setStatusMessage(const std::string& msg, MessageKind kind) {
@@ -83,14 +127,16 @@ void Editor::registerCommands() {
     });
     commands_.registerCommand("navegacion.pegar", [this] {
         Buffer& b = active();
-        if (clipboard_.empty()) {
+        auto maybe = clipboard_->paste();
+        if (!maybe || maybe->empty()) {
             setActionMessage("Nada para pegar.", MessageKind::Warning);
             return;
         }
-        // P0 interaction: si hay una seleccion vigente, el pegado la
-        // REEMPLAZA por el clipboard en UNA sola operacion de historial
-        // (un unico pushHistory) para que un undo devuelva exactamente el
-        // texto, el cursor y la seleccion previos.
+        auto block = stringToBlock(*maybe);
+        if (block.empty()) {
+            setActionMessage("Nada para pegar.", MessageKind::Warning);
+            return;
+        }
         auto sel = selection();
         b.pushHistory();
         if (sel.has_value()) {
@@ -99,8 +145,7 @@ void Editor::registerCommands() {
             b.cursor.line = sel->start.line;
             b.cursor.col = sel->start.col;
         }
-        Position end = b.document.insertBlock(b.cursor.line, b.cursor.col,
-                                              clipboard_);
+        Position end = b.document.insertBlock(b.cursor.line, b.cursor.col, block);
         b.cursor.line = end.line;
         b.cursor.col = end.col;
         b.modified = true;
@@ -136,22 +181,31 @@ void Editor::registerCommands() {
     commands_.registerCommand("seleccion.copiar", [this] {
         Buffer& b = active();
         bool hadSelection = hasSelection();
+        bool ok = true;
         if (hadSelection) {
             auto sel = selection();
-            clipboard_ = b.document.extractRange(sel->start.line, sel->start.col,
+            auto block = b.document.extractRange(sel->start.line, sel->start.col,
                                                  sel->end.line, sel->end.col);
+            ok = clipboard_->copy(blockToString(block));
         }
         clearSelection();
         state_ = State::Navegacion;
-        setActionMessage(hadSelection ? "Copiado." : "Nada seleccionado.");
+        if (!hadSelection) setActionMessage("Nada seleccionado.");
+        else if (!ok) setActionMessage("Error al copiar al portapapeles.", MessageKind::Error);
+        else setActionMessage("Copiado.");
     });
     commands_.registerCommand("seleccion.cortar", [this] {
         Buffer& b = active();
         bool hadSelection = hasSelection();
         if (hadSelection) {
             auto sel = selection();
-            clipboard_ = b.document.extractRange(sel->start.line, sel->start.col,
+            auto block = b.document.extractRange(sel->start.line, sel->start.col,
                                                  sel->end.line, sel->end.col);
+            std::string text = blockToString(block);
+            if (!clipboard_->copy(text)) {
+                setActionMessage("Error al copiar al portapapeles.", MessageKind::Error);
+                return;
+            }
             b.pushHistory();
             b.document.deleteRange(sel->start.line, sel->start.col,
                                    sel->end.line, sel->end.col);
@@ -449,37 +503,58 @@ void Editor::run() {
     }
 
     while (running_) {
-        // Espera de la proxima tecla. Si hay un mensaje de accion vigente,
-        // no bloqueamos indefinidamente: esperamos a lo sumo lo que le queda
-        // al timeout para poder limpiarlo y redibujar SIN que el usuario
-        // aprete nada. Sin mensaje de accion, -1 = esperar para siempre.
         int waitMs = -1;
+        if (clipboard_ && clipboard_->hasPending()) {
+            waitMs = 20;
+        }
         if (statusMessage_.expiry) {
             const auto remaining = *statusMessage_.expiry -
                                    std::chrono::steady_clock::now();
             const long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                 remaining).count();
-            waitMs = ms <= 0 ? 0
-                             : static_cast<int>(std::min<long>(ms, INT_MAX));
+            int msgMs = ms <= 0 ? 0 : static_cast<int>(std::min<long>(ms, INT_MAX));
+            if (waitMs < 0) waitMs = msgMs;
+            else waitMs = std::min(waitMs, msgMs);
         }
-
-        Event event;
-        if (!terminal_.readEvent(event, waitMs)) {
-            // Timeout sin tecla: solo puede haber expirado el mensaje de
-            // accion. Se limpia y se vuelve a dibujar la pantalla.
+        if (clipboard_) clipboard_->processEvents();
+        int cfd = clipboard_ ? clipboard_->fd() : -1;
+        struct pollfd pfds[2];
+        pfds[0].fd = STDIN_FILENO;
+        pfds[0].events = POLLIN;
+        pfds[0].revents = 0;
+        int nfds = 1;
+        if (cfd >= 0) {
+            pfds[1].fd = cfd;
+            pfds[1].events = POLLIN;
+            pfds[1].revents = 0;
+            nfds = 2;
+        }
+        int pr = poll(pfds, nfds, waitMs);
+        if (pr < 0) {
+            if (errno == EINTR) continue;
+            continue;
+        }
+        if (pr == 0) {
             clearExpiredActionMessage();
             renderFrame();
             continue;
         }
-
-        handleEvent(event);
-
-        if (!running_) break;
-
-        // Un mensaje de accion ("Copiado.", "Seleccion cancelada.", ...)
-        // se limpia solo pasados los 5 segundos; los comando/prompts no.
-        clearExpiredActionMessage();
-        renderFrame();
+        bool xReady = (nfds == 2 && (pfds[1].revents & POLLIN));
+        bool inReady = (pfds[0].revents & POLLIN);
+        if (xReady) clipboard_->processEvents();
+        if (inReady) {
+            Event event;
+            if (!terminal_.readEvent(event, 0)) {
+                if (xReady) continue;
+            } else {
+                handleEvent(event);
+                if (!running_) break;
+                clearExpiredActionMessage();
+                renderFrame();
+            }
+        } else if (xReady) {
+            clearExpiredActionMessage();
+        }
     }
 
     terminal_.disableRawMode();
@@ -841,15 +916,18 @@ void Editor::handleSelectAllEvent(const Event& event) {
                 b.selectAllActive = false;
                 setStatusMessage("SELECCION");
             } else if (event.text == "c" || event.text == "x") {
-                // c/x operan sobre el archivo entero (la seleccion total es
-                // una seleccion real): copiar copia todo; cortar borra todo.
                 bool hadSelection = hasSelection();
                 if (hadSelection) {
                     auto sel = selection();
-                    clipboard_ = b.document.extractRange(sel->start.line,
+                    auto block = b.document.extractRange(sel->start.line,
                                                          sel->start.col,
                                                          sel->end.line,
                                                          sel->end.col);
+                    std::string text = blockToString(block);
+                    if (!clipboard_->copy(text)) {
+                        setActionMessage("Error al copiar al portapapeles.", MessageKind::Error);
+                        return;
+                    }
                     if (event.text == "x") {
                         b.pushHistory();
                         b.document.deleteRange(sel->start.line, sel->start.col,

@@ -85,7 +85,7 @@ TEST(clipboard_copy_does_not_push_undo) {
 
     CHECK_EQ(ed.active().undoStack.size(), undoBefore); // sin pushHistory
     CHECK_EQ(ed.active().redoStack.size(), redoBefore); // tampoco crea redo
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ab"}));
 }
 
 TEST(clipboard_copy_does_not_create_redo) {
@@ -111,14 +111,14 @@ TEST(clipboard_undo_does_not_erase_buffer) {
     press(ed, EventType::MoveRight);  // [h]
     CHECK(ed.hasSelection());
     copySelection(ed);                // buffer ["h"]
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"h"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"h"}));
 
     type(ed, "X");                    // edicion: doc "hXola" (el buffer no cambia)
 
     press(ed, EventType::Escape);     // -> Navegacion (undo tambien funciona en)
     press(ed, EventType::Undo);       // deshace la edicion
     CHECK_EQ(ed.active().document.lineAt(0), "hola");        // doc restaurado
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"h"})); // buffer intacto
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"h"})); // buffer intacto
 }
 
 TEST(clipboard_redo_does_not_restore_buffer) {
@@ -130,16 +130,16 @@ TEST(clipboard_redo_does_not_restore_buffer) {
     enterSeleccion(ed);
     press(ed, EventType::MoveRight);  // [h]
     copySelection(ed);                // buffer ["h"]
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"h"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"h"}));
 
     type(ed, "X");                    // edicion: doc "Xhola"
     press(ed, EventType::Escape);
     press(ed, EventType::Undo);       // doc "hola", buffer ["h"]
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"h"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"h"}));
 
     press(ed, EventType::Redo);       // doc "hXola" otra vez
     CHECK_EQ(ed.active().document.lineAt(0), "hXola");
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"h"})); // sigue intacto
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"h"})); // sigue intacto
 }
 
 TEST(clipboard_survives_undo_of_edit_after_copy) {
@@ -155,14 +155,14 @@ TEST(clipboard_survives_undo_of_edit_after_copy) {
     press(ed, EventType::MoveRight);  // [te]
     CHECK(ed.hasSelection());
     copySelection(ed);                // A = "te"
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"te"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"te"}));
 
     type(ed, "Z");                    // doc "Ztexto" (una sola edicion)
     press(ed, EventType::Escape);
     press(ed, EventType::Undo);       // deshace la edicion
 
     CHECK_EQ(ed.active().document.lineAt(0), "texto");          // doc restaurado
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"te"})); // A intacto
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"te"})); // A intacto
 }
 
 TEST(clipboard_after_copy_then_edit_then_full_undo_redo_cycle) {
@@ -175,7 +175,7 @@ TEST(clipboard_after_copy_then_edit_then_full_undo_redo_cycle) {
     enterSeleccion(ed);
     press(ed, EventType::MoveRight);  // [h]
     copySelection(ed);                // A = "h"
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"h"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"h"}));
 
     type(ed, "AB");                   // doc "hABola" (dos ediciones)
     press(ed, EventType::Escape);
@@ -185,7 +185,7 @@ TEST(clipboard_after_copy_then_edit_then_full_undo_redo_cycle) {
     press(ed, EventType::Redo);       // doc "hABola"
 
     CHECK_EQ(ed.active().document.lineAt(0), "hABola");
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"h"})); // buffer intacto
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"h"})); // buffer intacto
 }
 
 TEST(clipboard_change_then_undo_redo_keeps_latest_buffer) {
@@ -201,19 +201,19 @@ TEST(clipboard_change_then_undo_redo_keeps_latest_buffer) {
     press(ed, EventType::MoveRight);      // [h]
     press(ed, EventType::MoveRight);      // [ho] = A
     copySelection(ed);                    // clipboard A = ["ho"]
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ho"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ho"}));
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
 
     ed.handleEvent(insert('p'));          // pega A en (0,2): doc "hohola"
     CHECK_EQ(ed.active().document.lineAt(0), "hohola");
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ho"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ho"}));
 
     enterSeleccion(ed);                   // nueva seleccion para copiar B
     press(ed, EventType::MoveRight);      // (0,5)
     press(ed, EventType::MoveRight);      // (0,6): [la] = B
     CHECK(ed.hasSelection());
     copySelection(ed);                    // clipboard B = ["la"]
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"la"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"la"}));
 
     press(ed, EventType::Undo);           // deshace el pegado de A
 
@@ -222,7 +222,7 @@ TEST(clipboard_change_then_undo_redo_keeps_latest_buffer) {
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 2);          // donde estaba antes de pegar
     // ...pero el clipboard es B, no A (no participa del historial).
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"la"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"la"}));
 
     press(ed, EventType::Redo);           // reaplica el pegado de A
 
@@ -230,7 +230,7 @@ TEST(clipboard_change_then_undo_redo_keeps_latest_buffer) {
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 6);          // final del bloque pegado
     // El clipboard sigue siendo B durante todo el ciclo.
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"la"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"la"}));
 }
 
 // ---------------------------------------------------------------------------
@@ -248,7 +248,7 @@ static void assertCut(Editor& ed,
     CHECK(ed.active().document.snapshot() == expectedDoc);      // deleteRange aplicado
     CHECK_EQ(ed.active().cursor.line, cursorLine);               // cursor -> inicio
     CHECK_EQ(ed.active().cursor.col, cursorCol);
-    CHECK(ed.clipboard_ == expectedClipboard);           // seleccion -> clipboard
+    CHECK(ed.getClipboardBlock() == expectedClipboard);           // seleccion -> clipboard
     CHECK(ed.active().modified);
 }
 
@@ -273,7 +273,7 @@ TEST(selection_x_without_selection_noop) {
     const auto docBefore = ed.active().document.snapshot();
     const size_t undoBefore = ed.active().undoStack.size();
     const size_t redoBefore = ed.active().redoStack.size();
-    ed.clipboard_ = std::vector<std::string>{"previo"};
+    ed.setClipboardBlock(std::vector<std::string>{"previo"});
 
     ed.handleEvent(insert('x'));
 
@@ -281,7 +281,7 @@ TEST(selection_x_without_selection_noop) {
     CHECK(ed.active().document.snapshot() == docBefore);   // no modifica documento
     CHECK_EQ(ed.active().undoStack.size(), undoBefore);    // no crea undo
     CHECK_EQ(ed.active().redoStack.size(), redoBefore);    // tampoco toca redo
-    CHECK(ed.clipboard_ == std::vector<std::string>{"previo"}); // no altera clipboard
+    CHECK(ed.getClipboardBlock() == std::vector<std::string>{"previo"}); // no altera clipboard
     CHECK(!ed.active().modified);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
@@ -300,7 +300,7 @@ TEST(selection_c_without_selection_noop) {
     const auto docBefore = ed.active().document.snapshot();
     const size_t undoBefore = ed.active().undoStack.size();
     const size_t redoBefore = ed.active().redoStack.size();
-    ed.clipboard_ = std::vector<std::string>{"previo"};
+    ed.setClipboardBlock(std::vector<std::string>{"previo"});
 
     ed.handleEvent(insert('c'));
 
@@ -308,7 +308,7 @@ TEST(selection_c_without_selection_noop) {
     CHECK(ed.active().document.snapshot() == docBefore);   // no modifica documento
     CHECK_EQ(ed.active().undoStack.size(), undoBefore);    // no crea undo
     CHECK_EQ(ed.active().redoStack.size(), redoBefore);    // tampoco toca redo
-    CHECK(ed.clipboard_ == std::vector<std::string>{"previo"}); // no altera clipboard
+    CHECK(ed.getClipboardBlock() == std::vector<std::string>{"previo"}); // no altera clipboard
     CHECK(!ed.active().modified);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
@@ -322,7 +322,7 @@ TEST(selection_p_empty_range_pastes_at_cursor) {
     press(ed, EventType::Escape);
     ed.active().modified = false;               // simula estado guardado
     ed.active().savedLines = ed.active().document.snapshot();
-    ed.clipboard_ = std::vector<std::string>{"XYZ"};
+    ed.setClipboardBlock(std::vector<std::string>{"XYZ"});
 
     enterSeleccion(ed);                            // s, sin rango
     const size_t undoBefore = ed.active().undoStack.size();
@@ -353,7 +353,7 @@ TEST(selection_p_range_replaces_selection) {
     press(ed, EventType::MoveRight);               // [h]
     press(ed, EventType::MoveRight);               // [ho]
     CHECK(ed.hasSelection());
-    ed.clipboard_ = std::vector<std::string>{"XYZ"};
+    ed.setClipboardBlock(std::vector<std::string>{"XYZ"});
 
     ed.handleEvent(insert('p'));                   // reemplaza [ho] por XYZ
 
@@ -377,7 +377,7 @@ TEST(selection_p_on_range_replaces_selection) {
     press(ed, EventType::MoveRight);               // [h]
     press(ed, EventType::MoveRight);               // [ho]
     CHECK(ed.hasSelection());
-    ed.clipboard_ = std::vector<std::string>{"XYZ"};
+    ed.setClipboardBlock(std::vector<std::string>{"XYZ"});
 
     ed.handleEvent(insert('p'));                   // reemplaza [ho] por XYZ
 
@@ -584,7 +584,7 @@ TEST(selection_x_undo_restores_everything) {
     CHECK_EQ(ed.selection()->end.col, 2);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     // El clipboard NO se deshace (decision de diseno v0.5).
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ho"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ho"}));
 }
 
 TEST(selection_x_redo_reapplies_cut) {
@@ -637,7 +637,7 @@ TEST(selection_x_multiline_cut_undo_redo_cycle) {
     CHECK_EQ(ed.active().cursor.col, 0);
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"aaa", "bbb", "ccc"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"aaa", "bbb", "ccc"}));
     // modified_ recoge que el contenido restaurado ({""}) coincide con el
     // ultimo guardado (savedLines_ inicial = doc vacio), asi que es false.
     // Es el comportamiento correcto: modified_ se deriva de la comparacion.
@@ -661,7 +661,7 @@ TEST(clipboard_copy_then_select_other_esc_then_paste) {
     press(ed, EventType::MoveRight);  // (0,1)
     press(ed, EventType::MoveRight);  // (0,2): [AB]
     copySelection(ed);                // clipboard = ["AB"]
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"AB"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"AB"}));
 
     enterSeleccion(ed);               // nueva seleccion
     press(ed, EventType::MoveRight);  // (0,3)
@@ -673,7 +673,7 @@ TEST(clipboard_copy_then_select_other_esc_then_paste) {
     CHECK(!ed.hasSelection());
 
     // Seleccionar DE NO toco el clipboard: sigue siendo AB.
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"AB"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"AB"}));
 
     ed.handleEvent(insert('p'));      // pega AB en (0,4)
 
@@ -681,7 +681,7 @@ TEST(clipboard_copy_then_select_other_esc_then_paste) {
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 6);      // final del bloque pegado (4+2)
     // El clipboard se conserva: lo que se pega es AB, no DE.
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"AB"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"AB"}));
 }
 
 // ---------------------------------------------------------------------------
@@ -703,7 +703,7 @@ TEST(clipboard_cut_then_copy_other_replaces_buffer) {
     ed.handleEvent(insert('x'));      // corta AB
 
     CHECK_EQ(ed.active().document.lineAt(0), "CDEF");
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"AB"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"AB"}));
     const size_t undoAfterCut = ed.active().undoStack.size();
 
     enterSeleccion(ed);               // nueva seleccion
@@ -713,7 +713,7 @@ TEST(clipboard_cut_then_copy_other_replaces_buffer) {
     copySelection(ed);                // copia CD -> sobreescribe el buffer
 
     // El clipboard termina conteniendo CD.
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"CD"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"CD"}));
     // El documento refleja solamente el corte de AB (copiar no edita).
     CHECK_EQ(ed.active().document.lineAt(0), "CDEF");
     // Copiar no empuja historial: undo intacto tras el corte.
@@ -749,7 +749,7 @@ TEST(clipboard_cut_paste_full_undo_redo_cycle) {
     ed.handleEvent(insert('x'));          // corta "DEF" -> doc "ABC ", buffer ["DEF"]
 
     CHECK_EQ(ed.active().document.lineAt(0), "ABC ");   // el espacio sobrevive
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"DEF"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"DEF"}));
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 4);          // inicio del rango
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -759,33 +759,33 @@ TEST(clipboard_cut_paste_full_undo_redo_cycle) {
     CHECK_EQ(ed.active().document.lineAt(0), "ABC DEF");
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 7);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"DEF"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"DEF"}));
 
     press(ed, EventType::Undo);           // deshace SOLO el pegado
 
     CHECK_EQ(ed.active().document.lineAt(0), "ABC ");   // vuelve al estado post-corte
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 4);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"DEF"})); // buffer intacto
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"DEF"})); // buffer intacto
 
     press(ed, EventType::Undo);           // deshace el CORTE
 
     CHECK_EQ(ed.active().document.lineAt(0), "ABC DEF"); // doc original restaurado
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 7);          // donde estaba al cortar (final del rango)
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"DEF"})); // sigue intacto
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"DEF"})); // sigue intacto
 
     press(ed, EventType::Redo);           // reaplica el corte
 
     CHECK_EQ(ed.active().document.lineAt(0), "ABC ");   // cortado otra vez
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"DEF"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"DEF"}));
 
     press(ed, EventType::Redo);           // reaplica el pegado
 
     CHECK_EQ(ed.active().document.lineAt(0), "ABC DEF"); // reconstruido completo
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 7);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"DEF"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"DEF"}));
     CHECK(ed.active().redoStack.empty());
 }
 
@@ -803,7 +803,7 @@ TEST(clipboard_cut_paste_multiline_undo_redo_cycle) {
     // deleteRange multilinea deja una linea vacia al inicio (la cola vacia
     // de la ultima linea del rango): {"", "cccc"}.
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"", "cccc"}));
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"aaaa", "bbbb"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"aaaa", "bbbb"}));
 
     press(ed, EventType::MoveHome);       // (0,0)
     ed.handleEvent(insert('p'));          // pega -> {"aaaa","bbbb","cccc"}
@@ -815,12 +815,12 @@ TEST(clipboard_cut_paste_multiline_undo_redo_cycle) {
     press(ed, EventType::Undo);           // deshace solo el pegado
 
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"", "cccc"}));
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"aaaa", "bbbb"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"aaaa", "bbbb"}));
 
     press(ed, EventType::Undo);           // deshace el corte
 
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"aaaa", "bbbb", "cccc"}));
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"aaaa", "bbbb"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"aaaa", "bbbb"}));
 
     press(ed, EventType::Redo);           // reaplica el corte
     press(ed, EventType::Redo);           // reaplica el pegado
@@ -828,7 +828,7 @@ TEST(clipboard_cut_paste_multiline_undo_redo_cycle) {
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"aaaa", "bbbb", "cccc"}));
     CHECK_EQ(ed.active().cursor.line, 1);
     CHECK_EQ(ed.active().cursor.col, 4);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"aaaa", "bbbb"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"aaaa", "bbbb"}));
     CHECK(ed.active().redoStack.empty());
 }
 
@@ -861,7 +861,7 @@ TEST(clipboard_utf8_copy_paste_cafe) {
 
     copyWholeLine(ed);
 
-    CHECK(ed.clipboard_ == (std::vector<std::string>{std::string("caf\xC3\xA9")}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{std::string("caf\xC3\xA9")}));
     CHECK_EQ(ed.active().document.lineAt(0), std::string("caf\xC3\xA9"));
 
     press(ed, EventType::MoveEnd);        // cursor al final (byte 5)
@@ -871,7 +871,7 @@ TEST(clipboard_utf8_copy_paste_cafe) {
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 10);         // 5 + 5 bytes
-    CHECK(ed.clipboard_ == (std::vector<std::string>{std::string("caf\xC3\xA9")}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{std::string("caf\xC3\xA9")}));
 }
 
 TEST(clipboard_utf8_copy_paste_em_dash) {
@@ -883,7 +883,7 @@ TEST(clipboard_utf8_copy_paste_em_dash) {
 
     copyWholeLine(ed);
 
-    CHECK(ed.clipboard_ == (std::vector<std::string>{std::string("\xE2\x80\x94")}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{std::string("\xE2\x80\x94")}));
 
     press(ed, EventType::MoveEnd);        // cursor al final (byte 3)
     ed.handleEvent(insert('p'));
@@ -903,7 +903,7 @@ TEST(clipboard_utf8_copy_paste_emoji) {
 
     copyWholeLine(ed);
 
-    CHECK(ed.clipboard_ == (std::vector<std::string>{std::string("\xF0\x9F\x98\x80")}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{std::string("\xF0\x9F\x98\x80")}));
 
     press(ed, EventType::MoveEnd);        // cursor al final (byte 4)
     ed.handleEvent(insert('p'));
@@ -926,7 +926,7 @@ TEST(clipboard_utf8_copy_paste_mixed) {
 
     copyWholeLine(ed);
 
-    CHECK(ed.clipboard_ == (std::vector<std::string>{mixto}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{mixto}));
     CHECK_EQ(ed.active().document.lineAt(0), mixto);
 
     press(ed, EventType::MoveEnd);        // cursor al final (byte 14)
@@ -936,7 +936,7 @@ TEST(clipboard_utf8_copy_paste_mixed) {
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 28);         // 14 + 14 bytes
-    CHECK(ed.clipboard_ == (std::vector<std::string>{mixto}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{mixto}));
 }
 
 TEST(clipboard_utf8_cut_paste_partial_range) {
@@ -962,7 +962,7 @@ TEST(clipboard_utf8_cut_paste_partial_range) {
     copySelection(ed);
 
     // El bloque es "é " (bytes 3..6).
-    CHECK(ed.clipboard_ == (std::vector<std::string>{std::string("\xC3\xA9 ")}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{std::string("\xC3\xA9 ")}));
 
     press(ed, EventType::MoveHome);
     ed.handleEvent(insert('p'));
@@ -997,7 +997,7 @@ TEST(clipboard_utf8_cut_undo_cafe) {
 
     cutFirstChar(ed);
 
-    CHECK(ed.clipboard_ == (std::vector<std::string>{std::string("\xC3\xA9")}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{std::string("\xC3\xA9")}));
     CHECK(ed.active().document.lineAt(0).empty());
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
@@ -1020,7 +1020,7 @@ TEST(clipboard_utf8_cut_undo_em_dash) {
 
     cutFirstChar(ed);
 
-    CHECK(ed.clipboard_ == (std::vector<std::string>{std::string("\xE2\x80\x94")}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{std::string("\xE2\x80\x94")}));
     CHECK(ed.active().document.lineAt(0).empty());
 
     press(ed, EventType::Undo);
@@ -1040,7 +1040,7 @@ TEST(clipboard_utf8_cut_undo_emoji) {
 
     cutFirstChar(ed);
 
-    CHECK(ed.clipboard_ == (std::vector<std::string>{std::string("\xF0\x9F\x98\x80")}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{std::string("\xF0\x9F\x98\x80")}));
     CHECK(ed.active().document.lineAt(0).empty());
 
     press(ed, EventType::Undo);
@@ -1062,7 +1062,7 @@ TEST(clipboard_utf8_cut_undo_mixed) {
 
     cutFirstChar(ed);
 
-    CHECK(ed.clipboard_ == (std::vector<std::string>{std::string("a")}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{std::string("a")}));
     CHECK_EQ(ed.active().document.lineAt(0), std::string("\xC3\xA9\xE2\x80\x94\xF0\x9F\x98\x80"));
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
@@ -1122,7 +1122,7 @@ TEST(clipboard_multiline_utf8_paste_at_start) {
     // primera linea del bloque la reemplaza y la ultima se funde con "AAAA".
     Editor ed;
     copyThreeLineUtf8Block(ed);
-    CHECK(ed.clipboard_ == utf8Block());
+    CHECK(ed.getClipboardBlock() == utf8Block());
 
     ed.active().document.restore({"AAAA", "BBBB", "CCCC"});
     ed.active().cursor.line = 0;
@@ -1236,7 +1236,7 @@ TEST(clipboard_select_all_cut_paste_restores_document) {
     CHECK(ed.active().document.lineAt(0).empty());
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"hola", "mundo", "cafe"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"hola", "mundo", "cafe"}));
     CHECK(ed.state_ == State::Navegacion);
     CHECK_EQ(ed.active().undoStack.size(), size_t{1});
 
@@ -1246,7 +1246,7 @@ TEST(clipboard_select_all_cut_paste_restores_document) {
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"hola", "mundo", "cafe"}));
     CHECK_EQ(ed.active().cursor.line, 2);
     CHECK_EQ(ed.active().cursor.col, 4);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"hola", "mundo", "cafe"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"hola", "mundo", "cafe"}));
 }
 
 // ---------------------------------------------------------------------------
@@ -1276,7 +1276,7 @@ TEST(clipboard_select_all_copy_is_side_effect_free) {
     ed.handleEvent(insert('c'));
 
     // Copiar no debe tocar nada del documento ni del historial.
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"hola", "mundo", "cafe"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"hola", "mundo", "cafe"}));
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"hola", "mundo", "cafe"}));
     CHECK_EQ(ed.active().document.lineCount(), 3);
     CHECK(ed.active().undoStack.empty());
@@ -1295,7 +1295,7 @@ TEST(clipboard_select_all_copy_is_side_effect_free) {
         "hola", "mundo", "hola", "mundo", "cafecafe"}));
     CHECK_EQ(ed.active().cursor.line, 4);
     CHECK_EQ(ed.active().cursor.col, 4);          // final de "cafecafe"
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"hola", "mundo", "cafe"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"hola", "mundo", "cafe"}));
     CHECK_EQ(ed.active().undoStack.size(), size_t{1});
 }
 
@@ -1367,7 +1367,7 @@ TEST(modified_matrix_copy_keeps_clean) {
     press(ed, EventType::MoveEnd);
     ed.handleEvent(insert('c'));
 
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"hola"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"hola"}));
     CHECK(!ed.active().modified);
     CHECK(ed.active().undoStack.empty());
 }
@@ -1482,7 +1482,7 @@ TEST(modified_save_copy_paste_undo_returns_clean) {
     ed.handleEvent(insert('s'));
     press(ed, EventType::MoveEnd);
     ed.handleEvent(insert('c'));
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"hola"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"hola"}));
     CHECK(!ed.active().modified);
 
     saveForReal(ed);                        // guardar -> modified_ false
@@ -1517,7 +1517,7 @@ TEST(undo_redo_never_restores_clipboard) {
     // Copiar A = "ab" (seleccion de las 2 primeras letras).
     selectFirstChars(ed, 2);
     copySelection(ed);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ab"}));
 
     // Edicion B: escribir "XYZ" al final (Interaccion, 3 entradas undo).
     press(ed, EventType::MoveEnd);
@@ -1527,7 +1527,7 @@ TEST(undo_redo_never_restores_clipboard) {
     ed.handleEvent(insert('Z'));
     press(ed, EventType::Escape);
     CHECK_EQ(ed.active().document.lineAt(0), "abcdXYZ");
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));   // sigue A
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ab"}));   // sigue A
 
     // Copiar C = "cd" (seleccion de las ultimas 2 letras, posicion 2..4).
     press(ed, EventType::MoveHome);
@@ -1537,21 +1537,21 @@ TEST(undo_redo_never_restores_clipboard) {
     press(ed, EventType::MoveRight);
     press(ed, EventType::MoveRight);        // (0,4): rango [2,4) = "cd"
     copySelection(ed);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"cd"}));   // ahora C
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"cd"}));   // ahora C
 
     // Undo: deshace la 'Z'. El clipboard NO debe volver a A.
     press(ed, EventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "abcdXY");
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"cd"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"cd"}));
 
     // Redo: reaplica la 'Z'. El clipboard sigue en C.
     press(ed, EventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "abcdXYZ");
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"cd"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"cd"}));
 
     // Un ciclo mas de Undo/Redo sobre otra entrada: sigue C.
     press(ed, EventType::Undo);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"cd"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"cd"}));
     press(ed, EventType::Redo);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"cd"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"cd"}));
 }

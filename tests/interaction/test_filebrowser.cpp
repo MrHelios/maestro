@@ -243,10 +243,10 @@ TEST(browser_escape_touches_nothing) {
     Editor ed;
     type(ed, "hola");
     press(ed, EventType::Escape);
-    ed.clipboard_ = {"cosa"};                   // hay algo en el portapapeles
+    ed.setClipboardBlock({"cosa"});                   // hay algo en el portapapeles
 
     const auto docBefore = ed.active().document.snapshot();
-    const auto clipBefore = ed.clipboard_;
+    const auto clipBefore = ed.getClipboardBlock();
     const int undoSize = static_cast<int>(ed.active().undoStack.size());
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);             // mover dentro del explorador
@@ -254,7 +254,7 @@ TEST(browser_escape_touches_nothing) {
     press(ed, EventType::Escape);
 
     CHECK(ed.active().document.snapshot() == docBefore);
-    CHECK(ed.clipboard_ == clipBefore);
+    CHECK(ed.getClipboardBlock() == clipBefore);
     CHECK_EQ(ed.active().undoStack.size(), size_t(undoSize));
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));    // no se abrio ni cerro nada
     CHECK(ed.active().filename.empty());
@@ -844,11 +844,11 @@ TEST(browser_open_does_not_touch_clipboard) {
     CwdGuard g;
     g.enter(t.path);
     Editor ed;
-    ed.clipboard_ = {"texto copiado"};
+    ed.setClipboardBlock({"texto copiado"});
     openFileBrowser(ed);
     press(ed, EventType::MoveDown);
     press(ed, EventType::InsertNewline);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"texto copiado"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"texto copiado"}));
 }
 
 TEST(browser_reopen_file_activates_existing) {

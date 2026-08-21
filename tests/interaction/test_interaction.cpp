@@ -172,24 +172,24 @@ static void runCutCase(
     Editor ed;
     prepareScenario(ed, lines, a, p);
     expectState(ed, lines, p, true, a, p, false);   // inicial
-    CHECK(ed.clipboard_.empty());                    // sin portapapeles previo
+    CHECK(ed.getClipboardBlock().empty());                    // sin portapapeles previo
 
     ed.handleEvent(insert('x'));                     // cortar
     expectState(ed, afterCut, cursorAfterCut, false,
                 {0, 0}, {0, 0}, true);               // despues de cut
-    CHECK(ed.clipboard_ == clipboard);
+    CHECK(ed.getClipboardBlock() == clipboard);
 
     press(ed, EventType::Undo);
     // undo restaura documento, cursor y seleccion; modified vuelve al
     // guardado; el clipboard NO se deshace y conserva lo cortado.
     expectState(ed, lines, p, true, a, p, false);    // despues de undo
-    CHECK(ed.clipboard_ == clipboard);
+    CHECK(ed.getClipboardBlock() == clipboard);
 
     press(ed, EventType::Redo);
     // redo reproduce EXACTAMENTE el estado tras el corte.
     expectState(ed, afterCut, cursorAfterCut, false,
                 {0, 0}, {0, 0}, true);               // despues de redo
-    CHECK(ed.clipboard_ == clipboard);
+    CHECK(ed.getClipboardBlock() == clipboard);
 }
 
 // ---------------------------------------------------------------------------
@@ -421,21 +421,21 @@ static void runPasteCase(
     Position cursorAfterPaste) {
     Editor ed;
     preparePaste(ed, lines, cursorPos);
-    ed.clipboard_ = clipboard;
+    ed.setClipboardBlock(clipboard);
     expectState(ed, lines, cursorPos, false, {0, 0}, {0, 0}, false); // inicial
-    CHECK(ed.clipboard_ == clipboard);
+    CHECK(ed.getClipboardBlock() == clipboard);
 
     ed.handleEvent(insert('p'));              // pegar en el cursor
     expectState(ed, afterPaste, cursorAfterPaste, false,
                 {0, 0}, {0, 0}, true);        // despues de paste
-    CHECK(ed.clipboard_ == clipboard);        // clipboard intacto
+    CHECK(ed.getClipboardBlock() == clipboard);        // clipboard intacto
 
     press(ed, EventType::Undo);
     // undo elimina EXACTAMENTE el texto insertado y restaura cursor;
     // modified vuelve al guardado; no habia seleccion que restaurar.
     expectState(ed, lines, cursorPos, false,
                 {0, 0}, {0, 0}, false);       // despues de undo
-    CHECK(ed.clipboard_ == clipboard);
+    CHECK(ed.getClipboardBlock() == clipboard);
 }
 
 // Peatado REPLAZANDO una seleccion activa: undo debe restaurar ademas el
@@ -449,19 +449,19 @@ static void runPasteReplaceCase(
     Position cursorAfterPaste) {
     Editor ed;
     prepareScenario(ed, lines, a, p);         // seleccion [a,p], cursor=p, Seleccion
-    ed.clipboard_ = clipboard;
+    ed.setClipboardBlock(clipboard);
     expectState(ed, lines, p, true, a, p, false);  // inicial
-    CHECK(ed.clipboard_ == clipboard);
+    CHECK(ed.getClipboardBlock() == clipboard);
 
     ed.handleEvent(insert('p'));              // reemplaza la seleccion
     expectState(ed, afterPaste, cursorAfterPaste, false,
                 {0, 0}, {0, 0}, true);        // despues de paste
-    CHECK(ed.clipboard_ == clipboard);
+    CHECK(ed.getClipboardBlock() == clipboard);
 
     press(ed, EventType::Undo);
     // restaure documento, cursor y SELECCION; modified vuelve al guardado.
     expectState(ed, lines, p, true, a, p, false);    // despues de undo
-    CHECK(ed.clipboard_ == clipboard);
+    CHECK(ed.getClipboardBlock() == clipboard);
 }
 
 TEST(interaction_paste_at_cursor_then_undo) {
@@ -567,11 +567,11 @@ TEST(interaction_cut_selection_utf8_undo_redo) {
     Editor ed;
     prepareScenario(ed, {line}, {0, 3}, {0, 22});
     expectState(ed, {line}, {0, 22}, true, {0, 3}, {0, 22}, false);
-    CHECK(ed.clipboard_.empty());
+    CHECK(ed.getClipboardBlock().empty());
 
     ed.handleEvent(insert('x'));                  // cortar "é — mañana 😀"
     expectState(ed, {"caf"}, {0, 3}, false, {0, 0}, {0, 0}, true);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{selText}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{selText}));
     CHECK(ed.active().document.lineAt(0) == std::string("caf"));
 
     press(ed, EventType::Undo);
@@ -580,7 +580,7 @@ TEST(interaction_cut_selection_utf8_undo_redo) {
     expectState(ed, {line}, {0, 22}, true, {0, 3}, {0, 22}, false);
     CHECK(ed.active().document.lineAt(0) == line);
     CHECK(ed.active().document.lineAt(0).size() == 22u);   // cuenta de bytes
-    CHECK(ed.clipboard_ == (std::vector<std::string>{selText})); // conservado
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{selText})); // conservado
 
     press(ed, EventType::Redo);
     expectState(ed, {"caf"}, {0, 3}, false, {0, 0}, {0, 0}, true);

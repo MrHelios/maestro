@@ -280,7 +280,7 @@ TEST(clipboard_global_across_buffers) {
     pressEvent(ed, insert('s'));
     press(ed, EventType::MoveRight);   // [a]
     pressEvent(ed, insert('c'));            // copia "a" -> Navegacion
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"a"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"a"}));
 
     newBuffer(ed);
     pressEvent(ed, insert('p'));            // pega en B1

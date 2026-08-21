@@ -393,7 +393,7 @@ TEST(interaction_c_inserts_literal) {
     Editor ed;
     type(ed, "c");
     CHECK_EQ(ed.active().document.lineAt(0), "c");
-    CHECK(ed.clipboard_.empty());
+    CHECK(ed.getClipboardBlock().empty());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
 }
 
@@ -402,14 +402,14 @@ TEST(interaction_x_inserts_literal) {
     Editor ed;
     type(ed, "x");
     CHECK_EQ(ed.active().document.lineAt(0), "x");
-    CHECK(ed.clipboard_.empty());
+    CHECK(ed.getClipboardBlock().empty());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
 }
 
 TEST(interaction_p_inserts_literal) {
     // 'p' en Interaccion es texto: NO pega nada del buffer.
     Editor ed;
-    ed.clipboard_ = std::vector<std::string>{"sei"};
+    ed.setClipboardBlock(std::vector<std::string>{"sei"});
     type(ed, "p");
     CHECK_EQ(ed.active().document.lineAt(0), "p"); // no se pego "sei"
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
@@ -458,7 +458,7 @@ TEST(selection_x_exits_to_navegacion) {
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().document.lineAt(0), "bc");
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"a"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"a"}));
     CHECK(ed.active().modified);
 }
 
@@ -698,7 +698,7 @@ static void assertInitialState(const Editor& ed) {
     CHECK(!ed.hasSelection());
 
     // Portapapeles vacio.
-    CHECK(ed.clipboard_.empty());
+    CHECK(ed.getClipboardBlock().empty());
 
     // Sin cambios sin guardar.
     CHECK(!ed.active().modified);
@@ -770,7 +770,7 @@ TEST(initial_state_after_save_is_navegacion) {
     prefix(ed, EventType::Prefix, EventType::Save); // guarda -> vuelve
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(!ed.active().modified);
-    CHECK(ed.clipboard_.empty()); // sin portapapeles
+    CHECK(ed.getClipboardBlock().empty()); // sin portapapeles
     CHECK(!ed.hasSelection());
     CHECK(ed.active().cursor.line >= 0 && ed.active().cursor.col >= 0);
 }
@@ -782,7 +782,7 @@ TEST(initial_state_after_quit_ends_running) {
     prefix(ed, EventType::Prefix, EventType::Quit);
     CHECK(!ed.running_);
     CHECK(!ed.active().modified);
-    CHECK(ed.clipboard_.empty());
+    CHECK(ed.getClipboardBlock().empty());
 }
 
 TEST(initial_state_after_cancel_prefix_returns_navegacion) {
@@ -819,7 +819,7 @@ TEST(clipboard_c_copies_without_removing) {
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().document.lineAt(0), "abc");     // copiar no borra
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ab"}));
     CHECK_EQ(ed.active().undoStack.size(), undoBefore);  // copiar no muta: sin pushHistory
 }
 
@@ -830,13 +830,13 @@ TEST(clipboard_c_with_empty_selection_copies_nothing) {
     // incluso para un objeto Selection vacio; ver bug corregido en v0.55).
     Editor ed;
     type(ed, "abc");
-    ed.clipboard_ = std::vector<std::string>{"precioso"}; // contenido previo
+    ed.setClipboardBlock(std::vector<std::string>{"precioso"}); // contenido previo
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);            // modo seleccion, pero sin texto marcado
     CHECK(!ed.hasSelection());
     ed.handleEvent(insert('c'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK(ed.clipboard_ == std::vector<std::string>{"precioso"}); // intacto
+    CHECK(ed.getClipboardBlock() == std::vector<std::string>{"precioso"}); // intacto
     CHECK_EQ(ed.statusMessage_, "Nada seleccionado.");
     CHECK_EQ(ed.active().document.lineAt(0), "abc");
 }
@@ -847,7 +847,7 @@ TEST(clipboard_x_cuts_and_pushes_history) {
     selectChars(ed, 2);            // selecciona "ab"
     ed.handleEvent(insert('x'));
     CHECK_EQ(ed.active().document.lineAt(0), "c");
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ab"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ab"}));
     CHECK_EQ(ed.active().cursor.col, 0);   // cursor reposicionado al inicio del rango
     CHECK(ed.active().modified);
     CHECK(!ed.active().undoStack.empty()); // cortar SI entra al historial
@@ -860,13 +860,13 @@ TEST(clipboard_x_with_empty_selection_cuts_nothing) {
     CHECK(!ed.active().redoStack.empty());
     size_t undoBefore = ed.active().undoStack.size();
     size_t redoBefore = ed.active().redoStack.size();
-    ed.clipboard_ = std::vector<std::string>{"precioso"}; // contenido previo
+    ed.setClipboardBlock(std::vector<std::string>{"precioso"}); // contenido previo
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);
     CHECK(!ed.hasSelection());
     ed.handleEvent(insert('x'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    CHECK(ed.clipboard_ == std::vector<std::string>{"precioso"}); // intacto
+    CHECK(ed.getClipboardBlock() == std::vector<std::string>{"precioso"}); // intacto
     CHECK_EQ(ed.statusMessage_, "Nada seleccionado.");
     CHECK_EQ(ed.active().document.lineAt(0), "ab");      // el undo la dejo en "ab"
     CHECK_EQ(ed.active().undoStack.size(), undoBefore);  // sin mutation: no pushHistory
@@ -908,7 +908,7 @@ TEST(clipboard_p_pastes_multiline_block) {
     ed.active().document.restore({"Z", "Z"}); // documento de 2 lineas
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
-    ed.clipboard_ = std::vector<std::string>{"X", "Y"};
+    ed.setClipboardBlock(std::vector<std::string>{"X", "Y"});
     ed.handleEvent(insert('p'));
     CHECK_EQ(ed.active().document.lineCount(), 3);
     CHECK_EQ(ed.active().document.lineAt(0), "X");
@@ -951,7 +951,7 @@ TEST(interaction_p_between_text_does_not_paste) {
     // i -> "abc" -> p -> "def" debe dar "abcpdef": la 'p' es un caracter
     // mas, no un pegado del clipboard.
     Editor ed;
-    ed.clipboard_ = std::vector<std::string>{"PEGAR"}; // buffer con contenido
+    ed.setClipboardBlock(std::vector<std::string>{"PEGAR"}); // buffer con contenido
     type(ed, "abc");
     ed.handleEvent(insert('p'));     // 'p' literal
     type(ed, "def");
@@ -961,7 +961,7 @@ TEST(interaction_p_between_text_does_not_paste) {
     CHECK_EQ(ed.active().cursor.col, 7);     // 6 letras + 'p'
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
     // El clipboard NO se pego ni se toco.
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"PEGAR"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"PEGAR"}));
 }
 
 TEST(clipboard_p_in_selection_is_noop) {
@@ -975,7 +975,7 @@ TEST(clipboard_p_in_selection_is_noop) {
     CHECK(ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     CHECK_EQ(ed.active().document.lineAt(0), "abc"); // nada se posiciono
-    CHECK(ed.clipboard_.empty());
+    CHECK(ed.getClipboardBlock().empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -995,7 +995,7 @@ TEST(clipboard_p_in_selection_replaces_selection) {
     // clipboard se CONSERVA (no se sobreescribe con el rango reemplazado).
     Editor ed;
     type(ed, "abcdef");
-    ed.clipboard_ = std::vector<std::string>{"PEGAR"}; // buffer con contenido
+    ed.setClipboardBlock(std::vector<std::string>{"PEGAR"}); // buffer con contenido
     press(ed, EventType::Escape);       // -> Navegacion
     press(ed, EventType::MoveHome);     // (0,0)
     enterSeleccion(ed);                 // 's': anchor (0,0)
@@ -1003,7 +1003,7 @@ TEST(clipboard_p_in_selection_replaces_selection) {
     press(ed, EventType::MoveRight);    // (0,2): seleccion [0,0)-(0,2)
     press(ed, EventType::MoveRight);    // (0,3): seleccion [0,0)-(0,3) == "abc"
     CHECK(ed.hasSelection());
-    const auto clipBefore = ed.clipboard_;
+    const auto clipBefore = ed.getClipboardBlock();
     const size_t undoBefore = ed.active().undoStack.size();
 
     ed.handleEvent(insert('p'));
@@ -1011,8 +1011,8 @@ TEST(clipboard_p_in_selection_replaces_selection) {
     // El rango [0,0)-(0,3) ("abc") se reemplaza por el clipboard.
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"PEGARdef"}));
     // Clipboard identico (no se pego ni se sobreescribio).
-    CHECK(ed.clipboard_ == clipBefore);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"PEGAR"}));
+    CHECK(ed.getClipboardBlock() == clipBefore);
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"PEGAR"}));
     // Seleccion terminada.
     CHECK(!ed.hasSelection());
     CHECK(!ed.selection().has_value());
@@ -1064,7 +1064,7 @@ TEST(clipboard_p_from_navegacion_single_char) {
     ed.active().document.restore({"abc"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 1;
-    ed.clipboard_ = {"X"};
+    ed.setClipboardBlock({"X"});
     const size_t undoBefore = ed.active().undoStack.size();
 
     ed.handleEvent(insert('p'));
@@ -1086,7 +1086,7 @@ TEST(clipboard_p_from_navegacion_multiple_chars) {
     ed.active().document.restore({"abc"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
-    ed.clipboard_ = {"hola"};
+    ed.setClipboardBlock({"hola"});
     const size_t undoBefore = ed.active().undoStack.size();
 
     ed.handleEvent(insert('p'));
@@ -1107,7 +1107,7 @@ TEST(clipboard_p_from_navegacion_single_line) {
     ed.active().document.restore({"abc", "def"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 3;
-    ed.clipboard_ = {"XYZ"};
+    ed.setClipboardBlock({"XYZ"});
     const size_t undoBefore = ed.active().undoStack.size();
 
     ed.handleEvent(insert('p'));
@@ -1128,7 +1128,7 @@ TEST(clipboard_p_from_navegacion_multiple_lines) {
     ed.active().document.restore({"abc"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 1;
-    ed.clipboard_ = {"X", "Y"};
+    ed.setClipboardBlock({"X", "Y"});
     const size_t undoBefore = ed.active().undoStack.size();
 
     ed.handleEvent(insert('p'));
@@ -1150,7 +1150,7 @@ TEST(clipboard_p_from_navegacion_utf8) {
     ed.active().document.restore({"abc"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
-    ed.clipboard_ = {"\xC3\xB1"};   // "ñ"
+    ed.setClipboardBlock({"\xC3\xB1"});   // "ñ"
     const size_t undoBefore = ed.active().undoStack.size();
 
     ed.handleEvent(insert('p'));
@@ -1165,27 +1165,22 @@ TEST(clipboard_p_from_navegacion_utf8) {
 }
 
 TEST(clipboard_p_from_navegacion_empty_string_element) {
-    // clipboard_ es vector<string> y puede contener una cadena vacia como
-    // unico elemento. Pegarla no altera el documento ni el cursor
-    // (insertBlock con un bloque de una cadena vacia es no-op), pero SÍ
-    // cuenta como operacion de pegar: empuja undo y marca modified_.
     Editor ed;
     ed.active().document.restore({"abc"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 1;
-    ed.clipboard_ = {""};
-    CHECK_EQ(ed.clipboard_.empty(), false);   // el VECTOR no esta vacio
+    ed.setClipboardBlock({""});
+    CHECK(ed.getClipboardBlock().empty());
     const size_t undoBefore = ed.active().undoStack.size();
-
+    ed.active().modified = false;
     ed.handleEvent(insert('p'));
-
-    CHECK_EQ(ed.active().document.lineAt(0), "abc");  // el texto no cambia
+    CHECK_EQ(ed.active().document.lineAt(0), "abc");
     CHECK_EQ(ed.active().document.lineCount(), 1);
-    CHECK_EQ(ed.active().cursor.line, 0);             // cursor intacto
+    CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 1);
-    CHECK(ed.active().modified);                      // pegar siempre marca modified_
-    CHECK_EQ(ed.active().undoStack.size(), undoBefore + 1); // pegar siempre es undoable
-    CHECK_EQ(ed.statusMessage_, "Pegado.");
+    CHECK(!ed.active().modified);
+    CHECK_EQ(ed.active().undoStack.size(), undoBefore);
+    CHECK_EQ(ed.statusMessage_, "Nada para pegar.");
 }
 
 // ---------------------------------------------------------------------------
@@ -1202,7 +1197,7 @@ TEST(clipboard_p_at_document_start) {
     ed.active().document.restore({"abcdef"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
-    ed.clipboard_ = {"XY"};
+    ed.setClipboardBlock({"XY"});
 
     ed.handleEvent(insert('p'));
 
@@ -1220,7 +1215,7 @@ TEST(clipboard_p_at_document_middle) {
     ed.active().document.restore({"abcdef"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 3;
-    ed.clipboard_ = {"XY"};
+    ed.setClipboardBlock({"XY"});
 
     ed.handleEvent(insert('p'));
 
@@ -1238,7 +1233,7 @@ TEST(clipboard_p_at_document_end) {
     ed.active().document.restore({"abcdef"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 6;                       // final de linea
-    ed.clipboard_ = {"XY"};
+    ed.setClipboardBlock({"XY"});
 
     ed.handleEvent(insert('p'));
 
@@ -1256,7 +1251,7 @@ TEST(clipboard_p_on_empty_line) {
     ed.active().document.restore({""});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
-    ed.clipboard_ = {"XY"};
+    ed.setClipboardBlock({"XY"});
 
     ed.handleEvent(insert('p'));
 
@@ -1276,7 +1271,7 @@ TEST(clipboard_p_on_second_line_single_line_block) {
     ed.active().document.restore({"aaaa", "bbbb", "cccc"});
     ed.active().cursor.line = 1;              // segunda linea (0-based)
     ed.active().cursor.col = 1;
-    ed.clipboard_ = {"XY"};
+    ed.setClipboardBlock({"XY"});
 
     ed.handleEvent(insert('p'));
 
@@ -1298,7 +1293,7 @@ TEST(clipboard_p_on_third_line_multiline_block) {
     ed.active().document.restore({"aaaa", "bbbb", "cccc", "dddd"});
     ed.active().cursor.line = 2;              // tercera linea (0-based)
     ed.active().cursor.col = 1;
-    ed.clipboard_ = {"X", "Y", "Z"};
+    ed.setClipboardBlock({"X", "Y", "Z"});
 
     ed.handleEvent(insert('p'));
 
@@ -1329,7 +1324,7 @@ TEST(clipboard_paste_undo_removes_paste) {
     ed.active().document.restore({"abcdef"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 3;
-    ed.clipboard_ = {"XYZ"};
+    ed.setClipboardBlock({"XYZ"});
     const size_t undoBefore = ed.active().undoStack.size();
 
     ed.handleEvent(insert('p'));     // "abcXYZdef", cursor (0,6)
@@ -1342,7 +1337,7 @@ TEST(clipboard_paste_undo_removes_paste) {
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().cursor.line, 0);                // cursor como antes de pegar
     CHECK_EQ(ed.active().cursor.col, 3);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"XYZ"})); // buffer intacto
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"XYZ"})); // buffer intacto
 }
 
 TEST(clipboard_paste_redo_restores_paste) {
@@ -1351,7 +1346,7 @@ TEST(clipboard_paste_redo_restores_paste) {
     ed.active().document.restore({"abcdef"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 3;
-    ed.clipboard_ = {"XYZ"};
+    ed.setClipboardBlock({"XYZ"});
 
     ed.handleEvent(insert('p'));     // "abcXYZdef"
     press(ed, EventType::Undo);      // -> "abcdef"
@@ -1362,7 +1357,7 @@ TEST(clipboard_paste_redo_restores_paste) {
     CHECK_EQ(ed.active().document.lineAt(0), "abcXYZdef");
     CHECK_EQ(ed.active().cursor.line, 0);    // cursor al final del bloque pegado
     CHECK_EQ(ed.active().cursor.col, 6);
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"XYZ"})); // buffer intacto
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"XYZ"})); // buffer intacto
     CHECK(ed.active().redoStack.empty());    // el redo se consumio
 }
 
@@ -1372,14 +1367,14 @@ TEST(clipboard_paste_undo_redo_clipboard_stays_constant) {
     ed.active().document.restore({"hola"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 2;
-    ed.clipboard_ = {"abc"};
+    ed.setClipboardBlock({"abc"});
 
     ed.handleEvent(insert('p'));     // "hoabcla"
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"abc"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"abc"}));
     press(ed, EventType::Undo);      // -> "hola"
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"abc"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"abc"}));
     press(ed, EventType::Redo);      // -> "hoabcla"
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"abc"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"abc"}));
 
     CHECK_EQ(ed.active().document.lineAt(0), "hoabcla");
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -1394,11 +1389,11 @@ TEST(clipboard_cut_then_undo_keeps_buffer) {
     selectChars(ed, 2);             // [ho]
     ed.handleEvent(insert('x'));    // corta "ho": doc "la", buffer ["ho"]
     CHECK_EQ(ed.active().document.lineAt(0), "la");
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ho"}));
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ho"}));
 
     press(ed, EventType::Undo);     // deshace el corte
     CHECK_EQ(ed.active().document.lineAt(0), "hola");        // el documento SI se restaura
-    CHECK(ed.clipboard_ == (std::vector<std::string>{"ho"})); // el buffer NO
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ho"})); // el buffer NO
 }
 
 // ---------------------------------------------------------------------------
@@ -1948,7 +1943,7 @@ TEST(prefix_letters_inside_prefix_do_not_leak) {
     ed.handleEvent(insert('c'));
     press(ed, EventType::Escape);          // Navegacion, doc "abc"
     size_t undoBefore = ed.active().undoStack.size();
-    CHECK(ed.clipboard_.empty());
+    CHECK(ed.getClipboardBlock().empty());
 
     press(ed, EventType::MoveHome);
     ed.handleEvent(insert('s'));           // seleccionar "abc"
@@ -1959,7 +1954,7 @@ TEST(prefix_letters_inside_prefix_do_not_leak) {
     // 'c' en Prefix: no copia.
     press(ed, EventType::Prefix);
     ed.handleEvent(insert('c'));
-    CHECK(ed.clipboard_.empty());
+    CHECK(ed.getClipboardBlock().empty());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     // 'x' en Prefix: no corta.
