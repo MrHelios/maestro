@@ -1,13 +1,54 @@
 #include "clipboard/X11Clipboard.h"
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#include <algorithm>
 #include <chrono>
 #include <sys/select.h>
 #include <unistd.h>
 
+namespace {
+
+// Instalado una sola vez para todo el proceso: Xlib no tiene un error
+// handler "por Display", es global. Ignora los errores esperables cuando
+// se opera sobre una ventana ajena que puede haber desaparecido
+// (BadWindow, BadDrawable) o un atomo/valor invalido, y cualquier otro
+// error se reporta a stderr pero TAMPOCO aborta: el handler default de
+// Xlib mata el proceso entero, y un editor de texto no debe crashear por
+// un problema de otro proceso en el intercambio del clipboard.
+int x11ClipboardErrorHandler(Display* display, XErrorEvent* error) {
+    char buf[256];
+    XGetErrorText(display, error->error_code, buf, sizeof(buf));
+    std::fprintf(stderr, "X11Clipboard: X error ignorado: %s (code=%d)\n",
+                 buf, error->error_code);
+    return 0; // el valor de retorno de un error handler de Xlib se ignora
+}
+
+} // namespace
+
 X11Clipboard::X11Clipboard() {
+    // Se instala ANTES de abrir el display: cualquier llamada X11 que
+    // hagamos de aca en adelante queda protegida. Si el resto del editor
+    // ya instala su propio handler en algun otro lado, esto lo pisa
+    // (Xlib solo permite uno activo); si eso llega a importar, encadenar
+    // guardando el valor de retorno de XSetErrorHandler y llamandolo aqui
+    // dentro para los codigos no manejados.
+    XSetErrorHandler(x11ClipboardErrorHandler);
+
     display_ = XOpenDisplay(nullptr);
     if (!display_) return;
+
+    // XMaxRequestSize devuelve el limite en UNIDADES DE 4 BYTES (words de
+    // 32 bits) que el servidor X acepta en una sola request. Se convierte
+    // a bytes y se deja un margen generoso (1/4 del maximo) para el resto
+    // del payload de XChangeProperty, en vez de usar el limite exacto;
+    // es la practica habitual de otros clientes de clipboard (xclip/xsel
+    // hacen algo equivalente). INCR arranca cuando el contenido no entra
+    // en una sola request (incrThreshold_ == incrChunkSize_).
+    long maxReqWords = XMaxRequestSize(display_);
+    size_t maxReqBytes = static_cast<size_t>(maxReqWords) * 4;
+    incrChunkSize_ = std::max<size_t>(4096, maxReqBytes / 4);
+    incrThreshold_ = incrChunkSize_;
+
     int screen = DefaultScreen(display_);
     Window root = RootWindow(display_, screen);
     window_ = XCreateSimpleWindow(display_, root, 0, 0, 1, 1, 0, 0, 0);
@@ -67,7 +108,7 @@ void X11Clipboard::handleSelectionRequest(void* evPtr) {
         XChangeProperty(display_, req->requestor, req->property, XA_ATOM, 32, PropModeReplace,
                         reinterpret_cast<unsigned char*>(supported), n);
     } else if (req->target == (Atom)utf8Atom_ || req->target == (Atom)textAtom_ || req->target == (Atom)stringAtom_ || req->target == XA_STRING) {
-        if (ownedText_.size() > INCR_THRESHOLD) {
+        if (ownedText_.size() > incrThreshold_) {
             long total = static_cast<long>(ownedText_.size());
             XSelectInput(display_, req->requestor, PropertyChangeMask);
 
@@ -79,6 +120,7 @@ void X11Clipboard::handleSelectionRequest(void* evPtr) {
             s.target = req->target;
             s.data = ownedText_;
             s.offset = 0;
+            s.lastActivity = std::chrono::steady_clock::now();
             incrSends_.push_back(std::move(s));
         } else {
             Atom propType = req->target;
@@ -102,7 +144,7 @@ void X11Clipboard::handlePropertyNotify(void* evPtr) {
         if (ev->atom != static_cast<Atom>(it->property))
             continue;
         if (it->offset < it->data.size()) {
-            size_t chunk = std::min(INCR_CHUNK_SIZE, it->data.size() - it->offset);
+            size_t chunk = std::min(incrChunkSize_, it->data.size() - it->offset);
             XChangeProperty(
                 display_,
                 static_cast<Window>(it->requestor),
@@ -114,6 +156,7 @@ void X11Clipboard::handlePropertyNotify(void* evPtr) {
                 static_cast<int>(chunk));
             XFlush(display_);
             it->offset += chunk;
+            it->lastActivity = std::chrono::steady_clock::now();
         } else {
             XChangeProperty(
                 display_,
@@ -136,6 +179,17 @@ int X11Clipboard::fd() const {
     return ConnectionNumber(display_);
 }
 
+void X11Clipboard::purgeStaleIncrSends() {
+    auto now = std::chrono::steady_clock::now();
+    for (auto it = incrSends_.begin(); it != incrSends_.end(); ) {
+        if (now - it->lastActivity > kIncrStaleTimeout) {
+            it = incrSends_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 void X11Clipboard::processEvents() {
     if (!display_) return;
     while (XPending(display_)) {
@@ -152,6 +206,7 @@ void X11Clipboard::processEvents() {
             handlePropertyNotify(&ev.xproperty);
         }
     }
+    purgeStaleIncrSends();
 }
 
 std::optional<std::string> X11Clipboard::readProperty(unsigned long win, unsigned long prop) {

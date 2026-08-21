@@ -3,17 +3,15 @@
 #include <string>
 #include <optional>
 #include <vector>
-
+#include <chrono>
 struct _XDisplay;
 using Display = struct _XDisplay;
-
 class X11Clipboard : public SystemClipboard {
 public:
     X11Clipboard();
     ~X11Clipboard() override;
     X11Clipboard(const X11Clipboard&) = delete;
     X11Clipboard& operator=(const X11Clipboard&) = delete;
-
     bool copy(const std::string& text) override;
     std::optional<std::string> paste() override;
     bool ownsClipboard() const override;
@@ -29,14 +27,38 @@ private:
     std::optional<std::string> readIncrProperty(unsigned long win, unsigned long prop);
     bool waitForSelectionNotify(unsigned long target, unsigned long property, int timeoutMs);
     void handlePropertyNotify(void* ev);
-    static constexpr size_t INCR_CHUNK_SIZE = 4096;
-    static constexpr size_t INCR_THRESHOLD = 65536;
+    // Descarta transferencias INCR que dejaron de recibir actividad hace
+    // mas de kIncrStaleTimeout: el requestor puede desaparecer o dejar de
+    // continuar el protocolo (no borra la propiedad para pedir el
+    // siguiente chunk) y sin esto la entrada en incrSends_ (con una copia
+    // completa del texto copiado) quedaria viva para siempre. Se llama
+    // desde processEvents(), asi que corre cada vez que se drena la cola
+    // de eventos X11.
+    void purgeStaleIncrSends();
+
+    // Tamano de chunk/umbral de INCR: se calculan en runtime a partir de
+    // XMaxRequestSize() del servidor conectado (ver ctor), en vez de una
+    // constante fija que podria exceder lo que ese servidor acepta en una
+    // sola request (XChangeProperty fallaria con BadLength).
+    size_t incrChunkSize_ = 0;
+    size_t incrThreshold_ = 0;
+
+    // Un requestor que no continua el protocolo INCR (no dispara el
+    // PropertyNotify/PropertyDelete esperado) durante mas de este tiempo
+    // se considera abandonado. ICCCM no fija un numero; 5s es holgado
+    // frente a clientes lentos y acota la vida de una transferencia
+    // fantasma.
+    static constexpr std::chrono::seconds kIncrStaleTimeout{5};
+
     struct IncrSend {
         unsigned long requestor = 0;
         unsigned long property = 0;
         unsigned long target = 0;
         std::string data;
         size_t offset = 0;
+        // Momento del ultimo chunk servido (o de creacion, si todavia no
+        // se sirvio ninguno). Usado por purgeStaleIncrSends().
+        std::chrono::steady_clock::time_point lastActivity;
     };
     std::vector<IncrSend> incrSends_;
     Display* display_ = nullptr;
