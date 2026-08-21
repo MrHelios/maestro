@@ -989,6 +989,28 @@ void Editor::handleSelectAllEvent(const Event& event) {
             setActionMessage("Seleccion cancelada.");
             break;
 
+        // Backspace/Delete: borra el archivo entero (la seleccion total es
+        // un rango real) y vuelve a Navegacion, igual que en Seleccion
+        // normal. deleteSelection() ya empuja historial y deja el cursor
+        // al inicio. Si el rango es degenerado (archivo vacio) no hay
+        // nada que borrar: no-op, el prefijo sigue activo.
+        case EventType::Delete:
+        case EventType::Backspace:
+            // Si el archivo está vacío, no hay nada que borrar.
+            if (b.document.lineCount() == 1 && b.document.lineAt(0).empty()) {
+                // No-op: el prefijo sigue activo, no cambiamos estado.
+                setActionMessage("Archivo vacío.");
+                break;
+            }
+
+            if (deleteSelection()) {
+                b.selectAllPrevious.reset();
+                b.selectAllActive = false;
+                state_ = State::Navegacion;
+                setActionMessage("Borrado.");
+            }
+            break;
+
         // Resto (incl. teclas desconocidas): no-op.
         default:
             break;

@@ -1506,6 +1506,7 @@ TEST(normalize_end_both_directions) {
 //   a -> flecha (Left/Up):   cursor == anchor == BOF, sin seleccion.
 //   a -> c   : copia el archivo entero.
 //   a -> x   : corta el archivo entero.
+//   a -> Backspace/Delete : borra el archivo entero y vuelve a Navegacion.
 //   a -> ESC : cancela la seleccion total y vuelve a Navegacion.
 //   a -> tecla desconocida: no pasa nada (el prefijo sigue activo).
 static void enterSelectAll(Editor& ed) {
@@ -1733,6 +1734,64 @@ TEST(select_all_x_cuts_whole_file) {
     CHECK(ed.active().modified);
     // Cortar es una edicion: agrega historial.
     CHECK_EQ(ed.active().undoStack.size(), undoBefore + 1);
+}
+
+TEST(select_all_backspace_deletes_whole_file) {
+    // s -> a -> Backspace: borra el archivo entero (sin tocar el
+    // portapapeles) y vuelve a Navegacion, igual que Delete sobre una
+    // seleccion normal.
+    Editor ed;
+    editorOfLines({"linea1", "linea2"}, 1, 0, ed);
+    const size_t undoBefore = ed.active().undoStack.size();
+    const auto clipboardBefore = ed.getClipboardBlock();
+    enterSelectAll(ed);
+
+    press(ed, EventType::Backspace);
+    CHECK(!ed.active().selectAllActive);
+    CHECK(!ed.hasSelection());
+    CHECK(!ed.active().selectAllPrevious.has_value());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.active().document.lineCount(), 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "");
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
+    CHECK(ed.active().modified);
+    CHECK_EQ(ed.active().undoStack.size(), undoBefore + 1);
+    CHECK(ed.getClipboardBlock() == clipboardBefore);
+}
+
+TEST(select_all_delete_deletes_whole_file) {
+    // Paridad con Backspace: Delete sobre seleccion total tambien borra
+    // el archivo entero y vuelve a Navegacion.
+    Editor ed;
+    editorOfLines({"aaa", "bbb", "ccc"}, 1, 1, ed);
+    enterSelectAll(ed);
+
+    press(ed, EventType::Delete);
+    CHECK(!ed.active().selectAllActive);
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.active().document.lineCount(), 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "");
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0);
+    CHECK(ed.active().modified);
+}
+
+TEST(select_all_backspace_on_empty_is_noop) {
+    // Archivo vacio: el rango [0,0]..[0,0] es degenerado, no hay nada que
+    // borrar. Backspace no cambia el documento ni sale del prefijo.
+    Editor ed;
+    ed.active().document.restore({""});
+    enterSeleccion(ed);
+    ed.handleEvent(insert('a'));
+    CHECK(ed.active().selectAllActive);
+
+    press(ed, EventType::Backspace);
+    CHECK(ed.active().selectAllActive);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+    CHECK_EQ(ed.active().document.lineCount(), 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "");
 }
 
 TEST(select_all_not_active_cursor_and_selection_agree) {
