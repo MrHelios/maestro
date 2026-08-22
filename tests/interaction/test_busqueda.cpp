@@ -6,7 +6,6 @@
 #undef private
 
 static Event ins(char c){ Event e; e.type=EventType::InsertChar; e.text=std::string(1,c); return e; }
-static Event insStr(const std::string& s){ Event e; e.type=EventType::InsertChar; e.text=s; return e; }
 static Event ev(EventType t){ Event e; e.type=t; return e; }
 static void typeQ(Editor& ed, const std::string& s){ for(unsigned char c: s) ed.handleEvent(ins(c)); }
 
