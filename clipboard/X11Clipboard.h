@@ -46,6 +46,7 @@ private:
     // activeRequestors_ debería derivarse del estado real de transferencias y
     // su timeout ser solo protección contra estados abandonados. No blocker ahora.
     static std::unordered_map<unsigned long, RequestorInfo> activeRequestors_;
+    static int absorbedErrorCount_;
     static int handleX11Error(Display* display, XErrorEvent* error);
     static bool isExpectedClipboardError(const XErrorEvent& error);
     static void registerRequestor(unsigned long win);

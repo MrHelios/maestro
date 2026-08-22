@@ -3,6 +3,7 @@
 #include "clipboard/X11Clipboard.h"
 #undef private
 #include <X11/Xlib.h>
+#include <X11/Xproto.h>
 #include <unistd.h>
 #include <thread>
 #include <atomic>
@@ -218,6 +219,8 @@ TEST(clipboard_survives_other_instance_destruction) {
 }
 
 TEST(clipboard_error_not_from_requestor_delegates) {
+    CHECK_EQ(X11Clipboard::refCount_, 0);
+    CHECK(X11Clipboard::activeRequestors_.empty());
     XErrorHandler orig = XSetErrorHandler(testOrigHandler);
     auto* cb = new X11Clipboard();
     g_origCalled = false;
@@ -237,32 +240,33 @@ TEST(clipboard_error_not_from_requestor_delegates) {
 }
 
 TEST(clipboard_error_from_requestor_absorbed) {
+    CHECK_EQ(X11Clipboard::refCount_, 0);
     XErrorHandler orig = XSetErrorHandler(testOrigHandler);
     auto* cb = new X11Clipboard();
     X11Clipboard::registerRequestor(0xdeadbeef);
     g_origCalled = false;
     XErrorEvent ev{};
     ev.error_code = BadWindow;
-    ev.request_code = 18;
+    ev.request_code = X_ChangeProperty;
     ev.resourceid = 0xdeadbeef;
-    Display* d = XOpenDisplay(nullptr);
-    CHECK(d != nullptr);
-    X11Clipboard::handleX11Error(d, &ev);
+    X11Clipboard::handleX11Error(nullptr, &ev);
     CHECK(!g_origCalled);
     X11Clipboard::unregisterRequestor(0xdeadbeef);
-    XCloseDisplay(d);
     delete cb;
     XSetErrorHandler(orig);
 }
 
 TEST(clipboard_requestor_disappears_during_response_does_not_crash) {
+    CHECK_EQ(X11Clipboard::refCount_, 0);
     g_origCalled = false;
     XErrorHandler orig = XSetErrorHandler(testOrigHandler);
     X11Clipboard cb;
     if (!cb.isAvailable()) { XSetErrorHandler(orig); return; }
     Display* d2 = XOpenDisplay(nullptr);
     if (!d2) { XSetErrorHandler(orig); return; }
-    CHECK(cb.copy("hello for requestor"));
+    std::string large(cb.incrThreshold_ + 8192, 'x');
+    if (large.size() <= cb.incrChunkSize_) large.resize(cb.incrChunkSize_ + 4096);
+    CHECK(cb.copy(large));
     Window req = XCreateSimpleWindow(d2, RootWindow(d2, DefaultScreen(d2)), 0, 0, 10, 10, 0, 0, 0);
     Atom clip = XInternAtom(d2, "CLIPBOARD", False);
     Atom utf8 = XInternAtom(d2, "UTF8_STRING", False);
@@ -270,18 +274,35 @@ TEST(clipboard_requestor_disappears_during_response_does_not_crash) {
     XConvertSelection(d2, clip, utf8, prop, req, CurrentTime);
     XFlush(d2);
     XSync(d2, False);
-    for (int i=0; i<50 && X11Clipboard::activeRequestors_.find(req)==X11Clipboard::activeRequestors_.end(); ++i) {
+    for (int i = 0; i < 100 && (X11Clipboard::activeRequestors_.find(req) == X11Clipboard::activeRequestors_.end() || cb.incrSends_.empty()); ++i) {
         cb.processEvents();
         usleep(5000);
     }
-    CHECK(X11Clipboard::activeRequestors_.find(req)!=X11Clipboard::activeRequestors_.end());
+    CHECK(X11Clipboard::activeRequestors_.find(req) != X11Clipboard::activeRequestors_.end());
+    CHECK(!cb.incrSends_.empty());
     XDestroyWindow(d2, req);
     XFlush(d2);
     XSync(d2, False);
-    cb.processEvents();
-    // BadWindow from XChangeProperty/XSendEvent to dead window should be absorbed
+    XPropertyEvent pe{};
+    pe.type = PropertyNotify;
+    pe.display = cb.display_;
+    pe.window = req;
+    pe.atom = prop;
+    pe.state = PropertyDelete;
+    pe.time = CurrentTime;
+    g_origCalled = false;
+    int absorbedBefore = X11Clipboard::absorbedErrorCount_;
+    cb.handlePropertyNotify(&pe);
+    XSync(cb.display_, False);
     CHECK(!g_origCalled);
+    CHECK(X11Clipboard::absorbedErrorCount_ > absorbedBefore);
     CHECK(cb.copy("still alive"));
+    auto reqIt = X11Clipboard::activeRequestors_.find(req);
+    if (reqIt != X11Clipboard::activeRequestors_.end()) X11Clipboard::activeRequestors_.erase(reqIt);
+    for (auto it = cb.incrSends_.begin(); it != cb.incrSends_.end(); ) {
+        if (it->requestor == req) it = cb.incrSends_.erase(it);
+        else ++it;
+    }
     XCloseDisplay(d2);
     XSetErrorHandler(orig);
     CHECK(!g_origCalled);

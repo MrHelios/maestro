@@ -1,5 +1,6 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#include <X11/Xproto.h>
 #include "clipboard/X11Clipboard.h"
 #include <algorithm>
 #include <cassert>
@@ -10,17 +11,26 @@
 XErrorHandler X11Clipboard::previousHandler_ = nullptr;
 int X11Clipboard::refCount_ = 0;
 std::unordered_map<unsigned long, X11Clipboard::RequestorInfo> X11Clipboard::activeRequestors_;
+int X11Clipboard::absorbedErrorCount_ = 0;
 
 bool X11Clipboard::isExpectedClipboardError(const XErrorEvent& error) {
     if (activeRequestors_.find(error.resourceid) == activeRequestors_.end()) return false;
+    // NOTA: resourceid no siempre es una ventana. Para BadWindow/BadDrawable
+    // si es el ID de la ventana; para BadAtom es el atomo que fallo y para
+    // BadValue es un valor arbitrario segun el request. El filtro por
+    // resourceid solo es preciso para BadWindow/BadDrawable/BadMatch;
+    // BadAtom/BadValue rara vez matchean por diseno de XErrorEvent, se dejan
+    // en la lista a modo defensivo pero no hay que confiar en que se absorban.
+    // En esos casos el error se delega al handler previo (fail open, lado
+    // seguro: delegar de mas, no absorber de menos).
     bool bad = error.error_code == BadWindow || error.error_code == BadAtom ||
                error.error_code == BadValue || error.error_code == BadMatch ||
                error.error_code == BadDrawable;
     if (!bad) return false;
     switch (error.request_code) {
-        case 2:  // X_ChangeWindowAttributes (XSelectInput)
-        case 18: // X_ChangeProperty
-        case 25: // X_SendEvent
+        case X_ChangeWindowAttributes:
+        case X_ChangeProperty:
+        case X_SendEvent:
             return true;
         default:
             return false;
@@ -47,7 +57,10 @@ void X11Clipboard::purgeStaleRequestors() {
 }
 
 int X11Clipboard::handleX11Error(Display* display, XErrorEvent* error) {
-    if (isExpectedClipboardError(*error)) return 0;
+    if (isExpectedClipboardError(*error)) {
+        ++absorbedErrorCount_;
+        return 0;
+    }
     if (previousHandler_) return previousHandler_(display, error);
     if (display) {
         char buf[256];
@@ -130,6 +143,7 @@ bool X11Clipboard::copy(const std::string& text) {
 void X11Clipboard::handleSelectionRequest(void* evPtr) {
     auto* req = static_cast<XSelectionRequestEvent*>(evPtr);
     registerRequestor(req->requestor);
+    bool keepRegistered = false;
     XSelectionEvent ev{};
     ev.type = SelectionNotify;
     ev.display = req->display;
@@ -162,6 +176,7 @@ void X11Clipboard::handleSelectionRequest(void* evPtr) {
             s.offset = 0;
             s.lastActivity = std::chrono::steady_clock::now();
             incrSends_.push_back(std::move(s));
+            keepRegistered = true;
         } else {
             Atom propType = req->target;
             XChangeProperty(display_, req->requestor, req->property, propType, 8, PropModeReplace,
@@ -172,6 +187,7 @@ void X11Clipboard::handleSelectionRequest(void* evPtr) {
     }
     XSendEvent(display_, req->requestor, False, 0, reinterpret_cast<XEvent*>(&ev));
     XFlush(display_);
+    if (!keepRegistered) unregisterRequestor(req->requestor);
 }
 
 void X11Clipboard::handlePropertyNotify(void* evPtr) {
