@@ -1,7 +1,8 @@
-#include "clipboard/X11Clipboard.h"
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
+#include "clipboard/X11Clipboard.h"
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <sys/select.h>
 #include <unistd.h>
@@ -25,14 +26,14 @@ int x11ClipboardErrorHandler(Display* display, XErrorEvent* error) {
 
 } // namespace
 
+XErrorHandler X11Clipboard::previousHandler_ = nullptr;
+int X11Clipboard::refCount_ = 0;
+
 X11Clipboard::X11Clipboard() {
-    // Se instala ANTES de abrir el display: cualquier llamada X11 que
-    // hagamos de aca en adelante queda protegida. Si el resto del editor
-    // ya instala su propio handler en algun otro lado, esto lo pisa
-    // (Xlib solo permite uno activo); si eso llega a importar, encadenar
-    // guardando el valor de retorno de XSetErrorHandler y llamandolo aqui
-    // dentro para los codigos no manejados.
-    XSetErrorHandler(x11ClipboardErrorHandler);
+    if (refCount_ == 0) {
+        previousHandler_ = XSetErrorHandler(x11ClipboardErrorHandler);
+    }
+    ++refCount_;
 
     display_ = XOpenDisplay(nullptr);
     if (!display_) return;
@@ -66,6 +67,15 @@ X11Clipboard::~X11Clipboard() {
     if (display_) {
         if (window_) XDestroyWindow(display_, (Window)window_);
         XCloseDisplay(display_);
+    }
+    // Xlib mantiene el error handler a nivel global de proceso.
+    // Este contador asume que la creación/destrucción de X11Clipboard
+    // ocurre desde un único thread.
+    assert(refCount_ > 0);
+    --refCount_;
+    if (refCount_ == 0) {
+        XSetErrorHandler(previousHandler_);
+        previousHandler_ = nullptr;
     }
 }
 

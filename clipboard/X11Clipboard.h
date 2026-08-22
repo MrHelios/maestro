@@ -1,17 +1,25 @@
 #pragma once
 #include "clipboard/SystemClipboard.h"
+#pragma push_macro("Cursor")
+#pragma push_macro("Success")
+#pragma push_macro("None")
+#define Cursor X11Cursor
+#include <X11/Xlib.h>
+#pragma pop_macro("None")
+#pragma pop_macro("Success")
+#pragma pop_macro("Cursor")
 #include <string>
 #include <optional>
 #include <vector>
 #include <chrono>
-struct _XDisplay;
-using Display = struct _XDisplay;
 class X11Clipboard : public SystemClipboard {
 public:
     X11Clipboard();
     ~X11Clipboard() override;
     X11Clipboard(const X11Clipboard&) = delete;
     X11Clipboard& operator=(const X11Clipboard&) = delete;
+    X11Clipboard(X11Clipboard&&) = delete;
+    X11Clipboard& operator=(X11Clipboard&&) = delete;
     bool copy(const std::string& text) override;
     std::optional<std::string> paste() override;
     bool ownsClipboard() const override;
@@ -20,6 +28,11 @@ public:
     bool hasPending() const override { return !incrSends_.empty(); }
     bool isAvailable() const { return display_ != nullptr; }
 private:
+    // Xlib mantiene el error handler a nivel global de proceso.
+    // Este contador asume que la creación/destrucción de X11Clipboard
+    // ocurre desde un único thread.
+    static int refCount_;
+    static XErrorHandler previousHandler_;
     void handleSelectionRequest(void* ev);
     std::optional<std::string> readProperty(unsigned long win, unsigned long prop);
     void deleteProperty(unsigned long win, unsigned long prop);
