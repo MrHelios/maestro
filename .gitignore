@@ -6,6 +6,7 @@ edit_tests
 # Objetos
 *.o
 *.obj
+*.temp
 
 # Dependencias generadas
 *.d

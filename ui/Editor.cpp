@@ -22,6 +22,7 @@ namespace {
 constexpr const char* kHelpBufferSelector =
     "ENTER: open | ESC: cancel | \u2191/\u2193: move";
 constexpr const char* kHelpSaveAsPrompt = "Save file: ";
+constexpr const char* kHelpBusqueda = "Find word: ";
 constexpr const char* kHelpNavegacion =
     "NAVEGACION: i escribir | s seleccionar | c/x copiar/cortar | p pegar | "
     "Ctrl+K buffer/guardar/salir | Ctrl+U/Y deshacer/rehacer";
@@ -248,6 +249,9 @@ void Editor::registerCommands() {
     });
     commands_.registerCommand("buffer.abrir", [this] {
         startFileBrowser();
+    });
+    commands_.registerCommand("navegacion.buscar", [this] {
+        startSearch();
     });
 }
 
@@ -614,6 +618,11 @@ void Editor::handleEvent(const Event& event) {
         return;
     }
 
+    if (state_ == State::Busqueda) {
+        handleBusquedaEvent(event);
+        return;
+    }
+
     // Undo/Redo y la entrada al prefijo estan disponibles en los 3 modos
     // y no dependen de state_, asi que se evaluan ANTES del despacho por
     // modo. Nota: Ctrl+S (Save) SOLO tiene efecto tras el prefijo (lo
@@ -678,6 +687,8 @@ void Editor::handleNavegacionEvent(const Event& event) {
                 commands_.execute("navegacion.palabra.adelante");
             } else if (event.text == "a") {
                 commands_.execute("seleccion.total");
+            } else if (event.text == "f") {
+                commands_.execute("navegacion.buscar");
             }
             break;
 
@@ -1139,6 +1150,129 @@ void Editor::commitSaveAs() {
         state_ = priorState_;
     } else {
         setActionMessage("Error al guardar: " + path, MessageKind::Error);
+    }
+}
+
+void Editor::startSearch() {
+    searchQuery_.clear();
+    searchOrigin_ = {active().cursor.line, active().cursor.col};
+    state_ = State::Busqueda;
+    setStatusMessage(std::string(kHelpBusqueda), MessageKind::Prompt);
+}
+
+std::vector<Position> Editor::collectMatches(const std::string& query) const {
+    std::vector<Position> out;
+    if (query.empty()) return out;
+    const Document& doc = active().document;
+    for (int l = 0; l < doc.lineCount(); ++l) {
+        const std::string& line = doc.lineAt(l);
+        size_t pos = 0;
+        while (true) {
+            pos = line.find(query, pos);
+            if (pos == std::string::npos) break;
+            out.push_back({l, static_cast<int>(pos)});
+            pos += 1;
+            if (pos >= line.size()) break;
+        }
+    }
+    return out;
+}
+
+void Editor::updateSearchMessage(bool found) {
+    std::string msg = std::string(kHelpBusqueda) + searchQuery_;
+    if (!found && !searchQuery_.empty()) msg += " - not found";
+    setStatusMessage(msg, MessageKind::Prompt);
+}
+
+void Editor::updateSearch() {
+    Buffer& b = active();
+    if (searchQuery_.empty()) {
+        b.cursor.line = searchOrigin_.line;
+        b.cursor.col = searchOrigin_.col;
+        b.cursor.clampToLine(b.document);
+        updateSearchMessage(true);
+        return;
+    }
+    auto matches = collectMatches(searchQuery_);
+    if (matches.empty()) {
+        updateSearchMessage(false);
+        return;
+    }
+    auto it = std::find_if(matches.begin(), matches.end(), [&](const Position& p) {
+        return !(p < searchOrigin_);
+    });
+    Position target = (it != matches.end()) ? *it : matches.front();
+    b.cursor.line = target.line;
+    b.cursor.col = target.col;
+    updateSearchMessage(true);
+}
+
+void Editor::navigateSearch(int dir) {
+    if (searchQuery_.empty()) return;
+    auto matches = collectMatches(searchQuery_);
+    if (matches.empty()) {
+        updateSearchMessage(false);
+        return;
+    }
+    if (matches.size() == 1) {
+        active().cursor.line = matches[0].line;
+        active().cursor.col = matches[0].col;
+        updateSearchMessage(true);
+        return;
+    }
+    Buffer& b = active();
+    Position cur{b.cursor.line, b.cursor.col};
+    int idx = -1;
+    for (int i = 0; i < static_cast<int>(matches.size()); ++i) {
+        if (matches[i] == cur) { idx = i; break; }
+    }
+    if (idx == -1) {
+        updateSearch();
+        return;
+    }
+    int next = (dir > 0) ? (idx + 1) % static_cast<int>(matches.size())
+                         : (idx - 1 + static_cast<int>(matches.size())) % static_cast<int>(matches.size());
+    b.cursor.line = matches[next].line;
+    b.cursor.col = matches[next].col;
+    updateSearchMessage(true);
+}
+
+void Editor::handleBusquedaEvent(const Event& event) {
+    switch (event.type) {
+        case EventType::InsertChar:
+            searchQuery_ += event.text;
+            updateSearch();
+            break;
+        case EventType::Backspace:
+            if (!searchQuery_.empty()) {
+                int cols = utf8::columnOf(searchQuery_, static_cast<int>(searchQuery_.size()));
+                searchQuery_ = utf8::truncate(searchQuery_, cols - 1);
+            }
+            updateSearch();
+            break;
+        case EventType::MoveDown:
+            navigateSearch(+1);
+            break;
+        case EventType::MoveUp:
+            navigateSearch(-1);
+            break;
+        case EventType::InsertNewline:
+            state_ = State::Navegacion;
+            searchQuery_.clear();
+            setStatusMessage("", MessageKind::Info);
+            break;
+        case EventType::Escape: {
+            Buffer& b = active();
+            b.cursor.line = searchOrigin_.line;
+            b.cursor.col = searchOrigin_.col;
+            b.cursor.clampToLine(b.document);
+            searchQuery_.clear();
+            state_ = State::Navegacion;
+            setStatusMessage("", MessageKind::Info);
+            break;
+        }
+        default:
+            break;
     }
 }
 

@@ -179,6 +179,16 @@ private:
     // SaveAs). Relativa o absoluta; se resuelve contra cwd() al confirmar.
     std::string saveAsPath_;
 
+    // ---- Busqueda (v0.8 / feature f) ----
+    std::string searchQuery_;
+    Position searchOrigin_{0, 0};
+    void startSearch();
+    void handleBusquedaEvent(const Event& event);
+    void updateSearch();
+    void navigateSearch(int dir);
+    void updateSearchMessage(bool found);
+    std::vector<Position> collectMatches(const std::string& query) const;
+
     // ---- Seleccion total ('a') ----
     // Nota: selectAllActive_/selectAllPrevious_ viven en el Buffer (cada
     // buffer tiene su propio estado de seleccion total). Los helpers de

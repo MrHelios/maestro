@@ -25,6 +25,7 @@ std::string stateLabel(State state) {
         case State::BufferSelector: return "BUFFERS";
         case State::SaveAs: return "GUARDAR";
         case State::FileBrowser: return "ABRIR";
+        case State::Busqueda: return "BUSQUEDA";
     }
     return "";
 }
@@ -41,6 +42,7 @@ std::string stateAccent(const Theme& T, State state) {
         case State::BufferSelector: return T.accentBuffers;
         case State::SaveAs:        return T.accentGuardar;
         case State::FileBrowser:   return T.accentAbrir;
+        case State::Busqueda:      return T.accentGuardar;
     }
     return T.statusBarAccent;
 }

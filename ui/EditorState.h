@@ -49,4 +49,5 @@ enum class State {
     BufferSelector,
     SaveAs,
     FileBrowser,
+    Busqueda,
 };
