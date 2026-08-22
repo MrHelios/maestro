@@ -7,31 +7,60 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-namespace {
-
-// Instalado una sola vez para todo el proceso: Xlib no tiene un error
-// handler "por Display", es global. Ignora los errores esperables cuando
-// se opera sobre una ventana ajena que puede haber desaparecido
-// (BadWindow, BadDrawable) o un atomo/valor invalido, y cualquier otro
-// error se reporta a stderr pero TAMPOCO aborta: el handler default de
-// Xlib mata el proceso entero, y un editor de texto no debe crashear por
-// un problema de otro proceso en el intercambio del clipboard.
-int x11ClipboardErrorHandler(Display* display, XErrorEvent* error) {
-    char buf[256];
-    XGetErrorText(display, error->error_code, buf, sizeof(buf));
-    std::fprintf(stderr, "X11Clipboard: X error ignorado: %s (code=%d)\n",
-                 buf, error->error_code);
-    return 0; // el valor de retorno de un error handler de Xlib se ignora
-}
-
-} // namespace
-
 XErrorHandler X11Clipboard::previousHandler_ = nullptr;
 int X11Clipboard::refCount_ = 0;
+std::unordered_map<unsigned long, X11Clipboard::RequestorInfo> X11Clipboard::activeRequestors_;
+
+bool X11Clipboard::isExpectedClipboardError(const XErrorEvent& error) {
+    if (activeRequestors_.find(error.resourceid) == activeRequestors_.end()) return false;
+    bool bad = error.error_code == BadWindow || error.error_code == BadAtom ||
+               error.error_code == BadValue || error.error_code == BadMatch ||
+               error.error_code == BadDrawable;
+    if (!bad) return false;
+    switch (error.request_code) {
+        case 2:  // X_ChangeWindowAttributes (XSelectInput)
+        case 18: // X_ChangeProperty
+        case 25: // X_SendEvent
+            return true;
+        default:
+            return false;
+    }
+}
+
+void X11Clipboard::registerRequestor(unsigned long win) {
+    auto &info = activeRequestors_[win];
+    ++info.count;
+    info.last = std::chrono::steady_clock::now();
+}
+void X11Clipboard::unregisterRequestor(unsigned long win) {
+    auto it = activeRequestors_.find(win);
+    if (it == activeRequestors_.end()) return;
+    if (--it->second.count <= 0) activeRequestors_.erase(it);
+    else it->second.last = std::chrono::steady_clock::now();
+}
+void X11Clipboard::purgeStaleRequestors() {
+    auto now = std::chrono::steady_clock::now();
+    for (auto it = activeRequestors_.begin(); it != activeRequestors_.end(); ) {
+        if (now - it->second.last > kIncrStaleTimeout) it = activeRequestors_.erase(it);
+        else ++it;
+    }
+}
+
+int X11Clipboard::handleX11Error(Display* display, XErrorEvent* error) {
+    if (isExpectedClipboardError(*error)) return 0;
+    if (previousHandler_) return previousHandler_(display, error);
+    if (display) {
+        char buf[256];
+        XGetErrorText(display, error->error_code, buf, sizeof(buf));
+        std::fprintf(stderr, "X11Clipboard: X error no esperado: %s (code=%d) req=%d\n",
+                     buf, error->error_code, error->request_code);
+    }
+    return 0;
+}
 
 X11Clipboard::X11Clipboard() {
     if (refCount_ == 0) {
-        previousHandler_ = XSetErrorHandler(x11ClipboardErrorHandler);
+        previousHandler_ = XSetErrorHandler(handleX11Error);
     }
     ++refCount_;
 
@@ -100,6 +129,7 @@ bool X11Clipboard::copy(const std::string& text) {
 
 void X11Clipboard::handleSelectionRequest(void* evPtr) {
     auto* req = static_cast<XSelectionRequestEvent*>(evPtr);
+    registerRequestor(req->requestor);
     XSelectionEvent ev{};
     ev.type = SelectionNotify;
     ev.display = req->display;
@@ -167,6 +197,8 @@ void X11Clipboard::handlePropertyNotify(void* evPtr) {
             XFlush(display_);
             it->offset += chunk;
             it->lastActivity = std::chrono::steady_clock::now();
+            auto it2 = activeRequestors_.find(it->requestor);
+            if (it2 != activeRequestors_.end()) it2->second.last = it->lastActivity;
         } else {
             XChangeProperty(
                 display_,
@@ -178,6 +210,7 @@ void X11Clipboard::handlePropertyNotify(void* evPtr) {
                 nullptr,
                 0);
             XFlush(display_);
+            unregisterRequestor(it->requestor);
             incrSends_.erase(it);
         }
         return;
@@ -193,11 +226,13 @@ void X11Clipboard::purgeStaleIncrSends() {
     auto now = std::chrono::steady_clock::now();
     for (auto it = incrSends_.begin(); it != incrSends_.end(); ) {
         if (now - it->lastActivity > kIncrStaleTimeout) {
+            unregisterRequestor(it->requestor);
             it = incrSends_.erase(it);
         } else {
             ++it;
         }
     }
+    purgeStaleRequestors();
 }
 
 void X11Clipboard::processEvents() {

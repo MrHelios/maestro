@@ -216,3 +216,73 @@ TEST(clipboard_survives_other_instance_destruction) {
     CHECK_EQ(*p, "hello");
     delete b;
 }
+
+TEST(clipboard_error_not_from_requestor_delegates) {
+    XErrorHandler orig = XSetErrorHandler(testOrigHandler);
+    auto* cb = new X11Clipboard();
+    g_origCalled = false;
+    XErrorEvent ev{};
+    ev.error_code = BadWindow;
+    ev.request_code = 18;
+    ev.resourceid = 0x12345678;
+    // not registered, should delegate
+    X11Clipboard::handleX11Error(nullptr, &ev);
+    // isExpected should be false, so previous handler not called via our mock? Actually handleX11Error will call previousHandler_ which is testOrigHandler
+    // Since we set orig to previous system, and clipboard saved orig as previousHandler_ = testOrigHandler,
+    // handleX11Error with unexpected should call testOrigHandler
+    CHECK(g_origCalled);
+    delete cb;
+    XSetErrorHandler(orig);
+    g_origCalled = false;
+}
+
+TEST(clipboard_error_from_requestor_absorbed) {
+    XErrorHandler orig = XSetErrorHandler(testOrigHandler);
+    auto* cb = new X11Clipboard();
+    X11Clipboard::registerRequestor(0xdeadbeef);
+    g_origCalled = false;
+    XErrorEvent ev{};
+    ev.error_code = BadWindow;
+    ev.request_code = 18;
+    ev.resourceid = 0xdeadbeef;
+    Display* d = XOpenDisplay(nullptr);
+    CHECK(d != nullptr);
+    X11Clipboard::handleX11Error(d, &ev);
+    CHECK(!g_origCalled);
+    X11Clipboard::unregisterRequestor(0xdeadbeef);
+    XCloseDisplay(d);
+    delete cb;
+    XSetErrorHandler(orig);
+}
+
+TEST(clipboard_requestor_disappears_during_response_does_not_crash) {
+    g_origCalled = false;
+    XErrorHandler orig = XSetErrorHandler(testOrigHandler);
+    X11Clipboard cb;
+    if (!cb.isAvailable()) { XSetErrorHandler(orig); return; }
+    Display* d2 = XOpenDisplay(nullptr);
+    if (!d2) { XSetErrorHandler(orig); return; }
+    CHECK(cb.copy("hello for requestor"));
+    Window req = XCreateSimpleWindow(d2, RootWindow(d2, DefaultScreen(d2)), 0, 0, 10, 10, 0, 0, 0);
+    Atom clip = XInternAtom(d2, "CLIPBOARD", False);
+    Atom utf8 = XInternAtom(d2, "UTF8_STRING", False);
+    Atom prop = XInternAtom(d2, "TEST_PROP_DISAPPEAR", False);
+    XConvertSelection(d2, clip, utf8, prop, req, CurrentTime);
+    XFlush(d2);
+    XSync(d2, False);
+    for (int i=0; i<50 && X11Clipboard::activeRequestors_.find(req)==X11Clipboard::activeRequestors_.end(); ++i) {
+        cb.processEvents();
+        usleep(5000);
+    }
+    CHECK(X11Clipboard::activeRequestors_.find(req)!=X11Clipboard::activeRequestors_.end());
+    XDestroyWindow(d2, req);
+    XFlush(d2);
+    XSync(d2, False);
+    cb.processEvents();
+    // BadWindow from XChangeProperty/XSendEvent to dead window should be absorbed
+    CHECK(!g_origCalled);
+    CHECK(cb.copy("still alive"));
+    XCloseDisplay(d2);
+    XSetErrorHandler(orig);
+    CHECK(!g_origCalled);
+}

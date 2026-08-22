@@ -11,6 +11,7 @@
 #include <string>
 #include <optional>
 #include <vector>
+#include <unordered_map>
 #include <chrono>
 class X11Clipboard : public SystemClipboard {
 public:
@@ -31,8 +32,25 @@ private:
     // Xlib mantiene el error handler a nivel global de proceso.
     // Este contador asume que la creación/destrucción de X11Clipboard
     // ocurre desde un único thread.
+    struct RequestorInfo {
+        int count = 0;
+        std::chrono::steady_clock::time_point last;
+    };
     static int refCount_;
     static XErrorHandler previousHandler_;
+    // Rastrea requestors activos (ventanas), no transferencias individuales.
+    // Si una misma ventana hace múltiples solicitudes simultáneas, se cuenta
+    // como una sola entrada con contador. No eliminar demasiado pronto: una
+    // transferencia INCR mantiene el requestor hasta completar/expirar.
+    // NOTA: existe duplicación de estado con incrSends_ (timeout). Idealmente
+    // activeRequestors_ debería derivarse del estado real de transferencias y
+    // su timeout ser solo protección contra estados abandonados. No blocker ahora.
+    static std::unordered_map<unsigned long, RequestorInfo> activeRequestors_;
+    static int handleX11Error(Display* display, XErrorEvent* error);
+    static bool isExpectedClipboardError(const XErrorEvent& error);
+    static void registerRequestor(unsigned long win);
+    static void unregisterRequestor(unsigned long win);
+    static void purgeStaleRequestors();
     void handleSelectionRequest(void* ev);
     std::optional<std::string> readProperty(unsigned long win, unsigned long prop);
     void deleteProperty(unsigned long win, unsigned long prop);
