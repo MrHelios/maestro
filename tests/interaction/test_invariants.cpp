@@ -51,7 +51,7 @@ static void type(Editor& ed, const std::string& s) {
 // v0.5: guardar pasa por el prefijo (Ctrl+K + Ctrl+S); un Save suelto no-op.
 static void save(Editor& ed) {
     ed.handleEvent(ev(EventType::Prefix));
-    Event e; e.type = EventType::Save; ed.handleEvent(e);
+    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e);
 }
 
 // ---------------------------------------------------------------------------

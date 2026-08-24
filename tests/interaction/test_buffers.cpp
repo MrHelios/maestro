@@ -30,6 +30,11 @@ static void press(Editor& ed, EventType type) {
 static void pressEvent(Editor& ed, const Event& ev) {
     ed.handleEvent(ev);
 }
+static void saveViaS(Editor& ed) {
+    press(ed, EventType::Prefix);
+    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e);
+}
+
 
 static void type(Editor& ed, const std::string& s) {
     if (s.empty()) return;
@@ -732,8 +737,7 @@ TEST(ctrl_k_w_modified_blocked_until_save) {
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK(ed.active().modified);
 
-    press(ed, EventType::Prefix);          // guardar
-    press(ed, EventType::Save);
+    saveViaS(ed);
     CHECK(!ed.active().modified);
 
     closeBuffer(ed);                       // ahora si (ultimo buffer -> reset)
@@ -834,10 +838,10 @@ TEST(save_as_enter_saves_file) {
                         std::istreambuf_iterator<char>());
     CHECK_EQ(content, "hola");
 
-    // A partir de aqui el buffer tiene nombre: Ctrl+K Ctrl+S guarda normal.
+    // A partir de aqui el buffer tiene nombre: Ctrl+K s guarda normal.
     type(ed, "!");
     press(ed, EventType::Escape);
-    openSaveAs(ed);
+    saveViaS(ed);
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.statusMessage_, "Guardado.");
 }
@@ -866,11 +870,11 @@ TEST(save_as_on_new_buffer_updates_name_and_display) {
     CHECK_EQ(ed.active().displayName(), base);    // SinNombre desaparece de la UI
     CHECK(!ed.active().modified);                 // modified == false
 
-    // Ctrl+K Ctrl+S ya no abre el prompt: guarda normal en el mismo path.
+    // Ctrl+K s ya no abre el prompt: guarda normal en el mismo path.
     type(ed, "!");
     press(ed, EventType::Escape);
     CHECK(ed.active().modified);
-    openSaveAs(ed);
+    saveViaS(ed);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Navegacion));
     CHECK(!ed.active().modified);
 

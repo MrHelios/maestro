@@ -1040,16 +1040,8 @@ std::optional<Selection> Editor::selectAllSelection() const {
 
 void Editor::handlePrefixKey(const Event& event) {
     switch (event.type) {
-        case EventType::Save: // Ctrl+S tras Ctrl+K = guardar archivo
-            if (active().filename.empty()) {
-                // v0.7: un buffer sin nombre (p.ej. creado con Ctrl+K n)
-                // no se puede guardar tal cual: se abre el prompt "Guardar
-                // archivo:" para elegir la ruta de destino.
-                startSaveAs();
-                break;
-            }
-            save();
-            state_ = priorState_;
+        case EventType::Save: // Ctrl+S tras Ctrl+K = guardar en otra ubicacion
+            startSaveAsCopy();
             break;
 
         case EventType::Quit:
@@ -1073,6 +1065,15 @@ void Editor::handlePrefixKey(const Event& event) {
             }
             if (event.text == "o") {           // Ctrl+K o: explorador de archivos
                 commands_.execute("buffer.abrir");
+                break;
+            }
+            if (event.text == "s") {           // Ctrl+K s: guardar archivo
+                if (active().filename.empty()) {
+                    startSaveAs();
+                    break;
+                }
+                save();
+                state_ = priorState_;
                 break;
             }
             if (event.text == "q") {           // Ctrl+K q: salida segura
@@ -1104,13 +1105,19 @@ void Editor::handlePrefixKey(const Event& event) {
 }
 
 void Editor::startSaveAs() {
-    // Ctrl+K Ctrl+S sobre un buffer sin nombre: en vez de fallar, se abre
-    // el prompt "Guardar archivo:". El usuario escribe la ruta en la fila
-    // de mensajes; Enter confirma, ESC cancela. priorState_ ya guarda el
-    // modo desde el que se abrio el prefijo (aqui no se toca).
     saveAsPath_.clear();
     state_ = State::SaveAs;
     setStatusMessage(kHelpSaveAsPrompt, MessageKind::Prompt);
+}
+
+void Editor::startSaveAsCopy() {
+    if (active().filename.empty()) {
+        saveAsPath_.clear();
+    } else {
+        saveAsPath_ = active().filename;
+    }
+    state_ = State::SaveAs;
+    setStatusMessage(kHelpSaveAsPrompt + saveAsPath_, MessageKind::Prompt);
 }
 
 void Editor::handleSaveAsEvent(const Event& event) {

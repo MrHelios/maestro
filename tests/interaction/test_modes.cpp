@@ -44,6 +44,11 @@ static void press(Editor& ed, EventType type) {
     e.type = type;
     ed.handleEvent(e);
 }
+static void saveViaS(Editor& ed) {
+    press(ed, EventType::Prefix);
+    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e);
+}
+
 
 // Entra al modo seleccion con la letra 's' (desde Navegacion).
 static void enterSeleccion(Editor& ed) {
@@ -518,7 +523,7 @@ TEST(prefix_save_saves_file) {
     ed.openFile(f.path);
     type(ed, "hola");
     CHECK(ed.active().modified);
-    prefix(ed, EventType::Prefix, EventType::Save); // Ctrl+K, Ctrl+S
+    saveViaS(ed); // Ctrl+K, Ctrl+S
     CHECK(!ed.active().modified);
     CHECK_EQ(fileContent(f.path), "hola");
 }
@@ -529,7 +534,7 @@ TEST(prefix_save_returns_to_navegacion) {
     ed.openFile(f.path);
     type(ed, "abc");
     press(ed, EventType::Escape); // -> Navegacion
-    prefix(ed, EventType::Prefix, EventType::Save);
+    saveViaS(ed);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
@@ -540,7 +545,7 @@ TEST(prefix_save_keeps_interaction_mode) {
     Editor ed;
     ed.openFile(f.path);
     type(ed, "abc");              // Interaccion
-    prefix(ed, EventType::Prefix, EventType::Save);
+    saveViaS(ed);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
 }
 
@@ -602,7 +607,7 @@ TEST(prefix_save_from_selection_keeps_mode) {
     CHECK(ed.hasSelection());
     CHECK(ed.active().modified);
 
-    prefix(ed, EventType::Prefix, EventType::Save); // Ctrl+K, Ctrl+S
+    saveViaS(ed); // Ctrl+K, Ctrl+S
     CHECK(!ed.active().modified);
     CHECK_EQ(fileContent(f.path), "hello");
     CHECK(ed.hasSelection());
@@ -767,7 +772,7 @@ TEST(initial_state_after_save_is_navegacion) {
     ed.openFile(f.path);
     type(ed, "hola");                    // Interaccion
     press(ed, EventType::Escape);        // -> Navegacion
-    prefix(ed, EventType::Prefix, EventType::Save); // guarda -> vuelve
+    saveViaS(ed); // guarda -> vuelve
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(!ed.active().modified);
     CHECK(ed.getClipboardBlock().empty()); // sin portapapeles
@@ -1609,9 +1614,7 @@ TEST(prefix_from_navegacion_returns_to_navegacion) {
     press(ed, EventType::Prefix);          // Ctrl+K
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Prefix));
 
-    Event e;
-    e.type = EventType::Save;
-    ed.handleEvent(e);                     // Ctrl+S
+    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e); // Ctrl+K s
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
@@ -1627,9 +1630,7 @@ TEST(prefix_from_interaccion_returns_to_interaccion) {
     press(ed, EventType::Prefix);          // Ctrl+K
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Prefix));
 
-    Event e;
-    e.type = EventType::Save;
-    ed.handleEvent(e);                     // Ctrl+S
+    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e); // Ctrl+K s
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
 }
 
@@ -1646,9 +1647,7 @@ TEST(prefix_from_seleccion_returns_to_seleccion) {
     press(ed, EventType::Prefix);          // Ctrl+K
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Prefix));
 
-    Event e;
-    e.type = EventType::Save;
-    ed.handleEvent(e);                     // Ctrl+S
+    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e); // Ctrl+K s
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());              // la seleccion se conserva
 }
@@ -1841,8 +1840,7 @@ TEST(prefix_valid_save_command_returns_to_prior_state) {
     ed.active().cursor.col = 0;
 
     press(ed, EventType::Prefix);
-    Event s;
-    s.type = EventType::Save;
+    Event s; s.type = EventType::InsertChar; s.text = "s";
     ed.handleEvent(s);
 
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -1976,9 +1974,9 @@ TEST(prefix_letters_inside_prefix_do_not_leak) {
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().document.lineAt(0), "abc");   // no inserto 'i'
 
-    // 's' en Prefix: no entra a Seleccion.
+    // 'z' en Prefix: no entra a Seleccion.
     press(ed, EventType::Prefix);
-    ed.handleEvent(insert('s'));
+    ed.handleEvent(insert('z'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(!ed.hasSelection());
 }

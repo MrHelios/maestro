@@ -2,9 +2,11 @@
 
 #include <atomic>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <set>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -42,6 +44,10 @@ struct Registrar {
 inline int runAll() {
     const int total = static_cast<int>(registry().size());
     for (const Test& t : registry()) {
+        std::set<std::string> beforeFiles;
+        try {
+            for (auto& e : std::filesystem::directory_iterator(".")) beforeFiles.insert(e.path().string());
+        } catch (...) {}
         const int before = failureCount();
         std::cout << "[RUN] " << t.name << "\n";
         try {
@@ -53,6 +59,12 @@ inline int runAll() {
             std::cout << "  [EXCEPTION] unknown\n";
             failureCount()++;
         }
+        try {
+            for (auto& e : std::filesystem::directory_iterator(".")) {
+                auto p = e.path().string();
+                if (beforeFiles.find(p) == beforeFiles.end()) std::filesystem::remove(p);
+            }
+        } catch (...) {}
         if (failureCount() == before)
             std::cout << "  ok\n";
     }

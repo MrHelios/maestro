@@ -38,7 +38,7 @@ Genera `build/maestro`. Requiere `g++` C++17, `libX11` y `pthread`.
 ./build/maestro /ruta/absoluta/archivo.txt
 ```
 
-Si el archivo no existe se crea en memoria (guardar con `Ctrl+K Ctrl+S`). Las carpetas no se abren como archivo.
+Si el archivo no existe se crea en memoria (guardar con `Ctrl+K s`). Las carpetas no se abren como archivo.
 Wrapper opcional `./maestro` (si existe en la raíz) delega en `make`/`build/maestro`.
 
 ## Instalación
@@ -85,9 +85,9 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 | **Navegación**        | por defecto                   | No se escribe. Comandos `i`/`s`/`j`/`k`/`c`/`x`/`p`. Flechas mueven sin seleccionar
 | **Interacción**       | `i` en Navegación             | Edición libre, todo inserta. `Esc` vuelve a Navegación
 | **Selección**         | `s` en Navegación             | Flechas/`j`/`k`/RePag/AvPag extienden selección (anchor fijo). `c`/`x`/`Esc` salen
-| **Prefijo**           | `Ctrl+K`                      | Siguiente tecla decide: `Ctrl+S` guardar, `q` salir verificando guardado, `Ctrl+Q` salir forzado, `n`/`t`/`w`/`o` buffers/archivos
+| **Prefijo**           | `Ctrl+K`                      | Siguiente tecla decide: `s` guardar, `Ctrl+S` guardar en otra ubicación, `q` salir verificando guardado, `Ctrl+Q` salir forzado, `n`/`t`/`w`/`o` buffers/archivos
 | **BufferSelector**    | `Ctrl+K t`                    | Lista modal de buffers (`↑`/`↓`, `Enter`, `Esc`)
-| **SaveAs**            | `Ctrl+K Ctrl+S` sin nombre    | Prompt `Guardar archivo:` (`Enter`/`Esc`)
+| **SaveAs**            | `Ctrl+K s` sin nombre / `Ctrl+K Ctrl+S` | Prompt `Guardar archivo:` (`Enter` guarda, `Esc` cancela; en `Ctrl+K Ctrl+S` la ruta inicial es editable)
 | **FileBrowser**       | `Ctrl+K o`                    | Explorador modal (`↑`/`↓`, `Enter` carpeta/archivo, `Esc`)
 | **Búsqueda**          | `Ctrl+K f` / `/`              | Búsqueda incremental, `Enter`/`Esc`
 
@@ -105,7 +105,8 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 | `}` / `{` (en Selección)  | Indentar / desindentar selección
 | `p`                       | Pegar
 | `Ctrl+U` / `Ctrl+Y`       | Deshacer / Rehacer
-| `Ctrl+K Ctrl+S`           | Guardar (abre SaveAs si sin nombre)
+| `Ctrl+K s`                | Guardar (abre SaveAs si sin nombre)
+| `Ctrl+K Ctrl+S`           | Guardar en otra ubicación (prompt con ruta editable; `Enter` crea y mueve, `Esc` cancela)
 | `Ctrl+K q`                | Salir verificando guardado (bloquea si hay archivos sin guardar)
 | `Ctrl+K Ctrl+Q`           | Salir forzado (sin comprobar guardado)
 | `Ctrl+K n`                | Buffer nuevo sin nombre

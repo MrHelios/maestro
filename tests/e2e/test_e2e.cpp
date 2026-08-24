@@ -63,6 +63,11 @@ void prefix(Editor& ed, EventType first, EventType second) {
     press(ed, second);
 }
 
+static void saveViaS(Editor& ed) {
+    press(ed, EventType::Prefix);
+    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e);
+}
+
 // Lee el archivo fuera del editor como bytes crudos (verificacion externa).
 std::string readBytes(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
@@ -146,7 +151,7 @@ TEST(e2e_01_edit_and_save_byte_exact) {
     CHECK_EQ(ed.active().document.lineAt(1), "X");
 
     // save: Ctrl+K Ctrl+S.
-    prefix(ed, EventType::Prefix, EventType::Save);
+    saveViaS(ed);
     CHECK(!ed.active().modified);
 
     // quit: Ctrl+K Ctrl+Q.
@@ -218,7 +223,7 @@ TEST(e2e_02_undo_redo_full_byte_exact) {
     CHECK_EQ(ed.active().redoStack.size(), 0u);
 
     // save + quit
-    prefix(ed, EventType::Prefix, EventType::Save);
+    saveViaS(ed);
     CHECK(!ed.active().modified);
     prefix(ed, EventType::Prefix, EventType::Quit);
     CHECK(!ed.running_);
@@ -298,7 +303,7 @@ TEST(e2e_03_selection_replacement_byte_exact) {
     CHECK(!ed.hasSelection());
 
     // save + quit.
-    prefix(ed, EventType::Prefix, EventType::Save);
+    saveViaS(ed);
     CHECK(!ed.active().modified);
     prefix(ed, EventType::Prefix, EventType::Quit);
     CHECK(!ed.running_);
@@ -385,7 +390,7 @@ TEST(e2e_04_multiline_selection_delete_undo_redo_byte_exact) {
     CHECK_EQ(ed.active().cursor.col, 0);
 
     // save + quit.
-    prefix(ed, EventType::Prefix, EventType::Save);
+    saveViaS(ed);
     CHECK(!ed.active().modified);
     prefix(ed, EventType::Prefix, EventType::Quit);
     CHECK(!ed.running_);
@@ -533,7 +538,7 @@ TEST(e2e_05_utf8_workflow_byte_exact) {
     CHECK(ed.active().modified);
 
     // save + quit.
-    prefix(ed, EventType::Prefix, EventType::Save);
+    saveViaS(ed);
     CHECK(!ed.active().modified);
     prefix(ed, EventType::Prefix, EventType::Quit);
     CHECK(!ed.running_);
@@ -632,7 +637,7 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     press(ed, EventType::MoveUp);               // 1 -> 0 (A)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "AAAA2");
-    prefix(ed, EventType::Prefix, EventType::Save);
+    saveViaS(ed);
     CHECK(!ed.active().modified);               // A guardado
 
     // save B: volver a B y Ctrl+K Ctrl+S -> prompt Guardar archivo.
@@ -859,7 +864,7 @@ TEST(e2e_08_filebrowser_open_edit_save_switch) {
     CHECK(ed.active().modified);
 
     // save: Ctrl+K Ctrl+S (B tiene nombre -> guardado directo).
-    prefix(ed, EventType::Prefix, EventType::Save);
+    saveViaS(ed);
     CHECK(!ed.active().modified);
     CHECK_EQ(readBytes(pathB), "BBBX\n");       // conservo el '\n' final de B
 
@@ -1189,7 +1194,7 @@ TEST(e2e_12_binary_bytes_00_to_ff_roundtrip) {
     CHECK_EQ(serialize(), content);
 
     // save: guardar y releer en disco byte a byte.
-    prefix(ed, EventType::Prefix, EventType::Save);
+    saveViaS(ed);
     CHECK(!b.modified);
     CHECK_EQ(readBytes(f.path), content);
 }
@@ -1409,7 +1414,7 @@ TEST(e2e_15_indent_selection_save_byte_exact) {
     CHECK_EQ(ed.active().document.lineAt(2), "ccc");   // fuera del rango
 
     press(ed, EventType::Escape);              // -> Navegacion
-    prefix(ed, EventType::Prefix, EventType::Save);
+    saveViaS(ed);
 
     CHECK_EQ(readBytes(f.path), "    aaa\n    bbb\nccc\n");
 }

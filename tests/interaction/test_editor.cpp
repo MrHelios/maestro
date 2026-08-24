@@ -71,7 +71,7 @@ static void press(Editor& ed, EventType type) {
 // obligatoriamente por Ctrl+K -> Ctrl+S (Prefix -> Save).
 static void save(Editor& ed) {
     press(ed, EventType::Prefix);
-    Event e; e.type = EventType::Save; ed.handleEvent(e);
+    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e);
 }
 
 static std::string fileContent(const std::string& p) {

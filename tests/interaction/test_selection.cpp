@@ -68,10 +68,10 @@ static void selectPress(Editor& ed, EventType type) {
     press(ed, type);
 }
 
-// v0.5: guardar pasa por el prefijo (Ctrl+K + Ctrl+S); un Save suelto no-op.
+// guardar pasa por el prefijo (Ctrl+K s); un Save suelto no-op.
 static void save(Editor& ed) {
     press(ed, EventType::Prefix);
-    Event e; e.type = EventType::Save; ed.handleEvent(e);
+    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e);
 }
 
 // ---------------------------------------------------------------------------

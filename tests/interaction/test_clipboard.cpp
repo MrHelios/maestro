@@ -1318,11 +1318,11 @@ static void markSaved(Editor& ed) {
     ed.active().modified = false;
 }
 
-// Guarda en disco de verdad (Ctrl+K, Ctrl+S), como en test_editor.cpp.
+// Guarda en disco de verdad (Ctrl+K s), como en test_editor.cpp.
 static void saveForReal(Editor& ed) {
     press(ed, EventType::Prefix);
     Event e;
-    e.type = EventType::Save;
+    e.type = EventType::InsertChar; e.text = "s";
     ed.handleEvent(e);
 }
 
