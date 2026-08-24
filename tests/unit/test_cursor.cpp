@@ -14,7 +14,7 @@ static Document docOf(const std::vector<const char*>& lines) {
     return d;
 }
 
-// Comprueba los invariantes del cursor siempre (grupo 14).
+// Comprueba los invariantes del cursor siempre.
 static void assertCursorConsistent(const Cursor& c, const Document& d) {
     CHECK(c.line >= 0);
     CHECK(c.col >= 0);
@@ -36,7 +36,7 @@ static void assertCursorValidUtf8(const Cursor& c, const Document& d) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. MoveLeft
+// MoveLeft
 // ---------------------------------------------------------------------------
 TEST(cursor_left_mid_line) {
     Document d = docOf({"abc"});
@@ -104,7 +104,7 @@ TEST(cursor_left_wraps_to_empty_line) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. MoveRight
+// MoveRight
 // ---------------------------------------------------------------------------
 TEST(cursor_right_mid_line) {
     Document d = docOf({"abc"});
@@ -172,7 +172,7 @@ TEST(cursor_right_last_char_noop) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. MoveUp / MoveDown
+// MoveUp / MoveDown
 // ---------------------------------------------------------------------------
 TEST(cursor_up_middle) {
     Document d = docOf({"aaaa", "bb", "cccc"});
@@ -324,7 +324,7 @@ TEST(cursor_end_updates_preferred_column) {
 }
 
 // ---------------------------------------------------------------------------
-// 6. MoveHome
+// MoveHome
 // ---------------------------------------------------------------------------
 TEST(cursor_home_empty_line) {
     Document d = docOf({"", "abc"});
@@ -359,7 +359,7 @@ TEST(cursor_home_at_end_line) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. MoveEnd
+// MoveEnd
 // ---------------------------------------------------------------------------
 TEST(cursor_end_empty_line) {
     Document d = docOf({"", "abc"});
@@ -394,7 +394,7 @@ TEST(cursor_end_already_end) {
 }
 
 // ---------------------------------------------------------------------------
-// 14. Consistencia tras muchas operaciones
+// Consistencia tras muchas operaciones
 // ---------------------------------------------------------------------------
 TEST(cursor_consistent_after_navigation) {
     Document d = docOf({"hola", "mundo", "cruel"});
@@ -437,6 +437,8 @@ TEST(cursor_navigation_roundtrip) {
 }
 
 TEST(cursor_clamp_after_backspace) {
+    // Simula el efecto de un backspace sobre el Document vía deleteCharAt
+    // directo (no vía Editor/Buffer); lo relevante es el clamp posterior.
     Document d = docOf({"abcdef"});
     Cursor c;
     c.col = 6;
@@ -647,24 +649,21 @@ TEST(cursor_k_from_inside_empty_line_backward) {
 }
 
 TEST(cursor_jk_utf8_no_split) {
-    // "hola café mundo": la 'é' es multibyte; j/k deben saltar bloques sin
-    // aterrizar en medio de un caracter.
     Document d = docOf({"hola café mundo"});
     Cursor c;
     c.line = 0;
     c.col = 0;
-    c.moveToNextWord(d);    // fin de "hola" -> col 4
-    CHECK_EQ(c.col, 4);
-    c.moveToNextWord(d);    // fin de "café" -> cae justo tras la é
-    CHECK_EQ(c.col, static_cast<int>(static_cast<std::string>("hola café").size()));
-    c.moveToNextWord(d);    // fin de "mundo" -> fin de linea
-    CHECK_EQ(c.col, static_cast<int>(static_cast<std::string>("hola café mundo").size()));
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("hola").size()));
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("hola café").size()));
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("hola café mundo").size()));
 
-    // k hacia atras desde el fin: cae en limites de caracter.
-    c.moveToPreviousWord(d); // inicio de "mundo" -> 11
-    CHECK_EQ(c.col, 11);
-    c.moveToPreviousWord(d); // inicio de "café" -> 5
-    CHECK_EQ(c.col, 5);
+    c.moveToPreviousWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("hola café ").size()));
+    c.moveToPreviousWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("hola ").size()));
     assertCursorConsistent(c, d);
 }
 
@@ -689,22 +688,27 @@ TEST(cursor_jk_tab_is_separator) {
 // anterior ("abc|   def") como desde el inicio de la siguiente
 // ("abc   |def").
 //   "abc   def   ghi": a0b1c2 ' '3 ' '4 ' '5 d6e7f8 ' '9 ' '10 ' '11 g12h13i14
-TEST(cursor_j_skips_groups_of_separators) {
+TEST(cursor_j_skips_groups_from_separator) {
     Document d = docOf({"abc   def   ghi"});
     Cursor c;
     c.line = 0;
-    // Desde justo despues de "abc" (primer separador del grupo).
-    c.col = 3;
+    c.col = 3;              // primer separador tras "abc"
     c.moveToNextWord(d);
     CHECK_EQ(c.col, 9);     // fin de "def" -> cruzo el grupo 3-5
     c.moveToNextWord(d);
     CHECK_EQ(c.col, 15);    // fin de "ghi" -> cruzo el grupo 9-11
     c.moveToNextWord(d);    // EOF: se queda
     CHECK_EQ(c.col, 15);
-    // Desde el inicio de "def" (delante del muro de espacios).
-    c.col = 6;
+    assertCursorConsistent(c, d);
+}
+
+TEST(cursor_j_skips_groups_from_word_start) {
+    Document d = docOf({"abc   def   ghi"});
+    Cursor c;
+    c.line = 0;
+    c.col = 6;              // inicio de "def"
     c.moveToNextWord(d);
-    CHECK_EQ(c.col, 9);     // fin de "def" (no hay que saltar nada delante)
+    CHECK_EQ(c.col, 9);     // fin de "def"
     assertCursorConsistent(c, d);
 }
 
@@ -759,76 +763,73 @@ TEST(cursor_jk_utf8_em_dash) {
     Cursor c;
     c.line = 0;
     c.col = 0;
-    c.moveToNextWord(d);    // fin de "uno" -> 3
-    CHECK_EQ(c.col, 3);
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("uno").size()));
     assertCursorValidUtf8(c, d);
-    c.moveToNextWord(d);    // fin de "—" -> 7 (tras los 3 bytes)
-    CHECK_EQ(c.col, 7);
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("uno —").size()));
     assertCursorValidUtf8(c, d);
-    c.moveToNextWord(d);    // fin de "dos" -> 11
-    CHECK_EQ(c.col, 11);
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("uno — dos").size()));
     assertCursorValidUtf8(c, d);
 
-    c.moveToPreviousWord(d); // inicio de "dos" -> 8
-    CHECK_EQ(c.col, 8);
+    c.moveToPreviousWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("uno — ").size()));
     assertCursorValidUtf8(c, d);
-    c.moveToPreviousWord(d); // inicio de "—" -> 4 (lead byte)
-    CHECK_EQ(c.col, 4);
+    c.moveToPreviousWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("uno ").size()));
     assertCursorValidUtf8(c, d);
-    c.moveToPreviousWord(d); // inicio de "uno" -> 0
+    c.moveToPreviousWord(d);
     CHECK_EQ(c.col, 0);
     assertCursorValidUtf8(c, d);
 }
 
-// "áéíóú": TODO es multibyte y no hay separadores -> un unico bloque.
-// El bloque entero va de 0 a 10 bytes; j/k saltan al inicio/fin sin nunca
-// aterrizar en medio de una vocal.
+// "áéíóú": todo es multibyte y no hay separadores -> un unico bloque.
 TEST(cursor_jk_utf8_all_multibyte_single_block) {
     Document d = docOf({"áéíóú"});
     Cursor c;
     c.line = 0;
     c.col = 0;
-    c.moveToNextWord(d);    // fin del unico bloque -> 10
-    CHECK_EQ(c.col, 10);    // == lineLength (todos los bytes de las 5 vocales)
+    const int len = static_cast<int>(std::string("áéíóú").size());
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, len);
     assertCursorValidUtf8(c, d);
-    c.moveToPreviousWord(d); // inicio -> 0
+    c.moveToPreviousWord(d);
     CHECK_EQ(c.col, 0);
     assertCursorValidUtf8(c, d);
-    c.moveToPreviousWord(d); // no hay previo: se queda en 0
+    c.moveToPreviousWord(d);
     CHECK_EQ(c.col, 0);
     assertCursorValidUtf8(c, d);
 }
 
-// Combinacion MoveLeft/MoveRight + j/k: todas las paradas caen en limites
-// de caracter validos.
 TEST(cursor_jk_utf8_mixed_character_moves) {
     Document d = docOf({"hola café mundo"});
     Cursor c;
     c.line = 0;
     c.col = 0;
-    c.moveToNextWord(d);    // fin de "hola" -> 4
-    CHECK_EQ(c.col, 4);
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("hola").size()));
     assertCursorValidUtf8(c, d);
 
-    c.moveLeft(d);          // -> 3 (lead del ultimo char de "hola")
-    CHECK_EQ(c.col, 3);
+    c.moveLeft(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("hol").size()));
     assertCursorValidUtf8(c, d);
-    c.moveRight(d);         // -> 4
-    CHECK_EQ(c.col, 4);
-    assertCursorValidUtf8(c, d);
-
-    c.moveToNextWord(d);    // fin de "café" -> 10 (tras la é)
-    CHECK_EQ(c.col, 10);
+    c.moveRight(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("hola").size()));
     assertCursorValidUtf8(c, d);
 
-    c.moveRight(d);         // -> 11 (el espacio tras "café")
-    CHECK_EQ(c.col, 11);
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("hola café").size()));
     assertCursorValidUtf8(c, d);
 
-    c.moveToPreviousWord(d); // inicio de "café" -> 5
-    CHECK_EQ(c.col, 5);
+    c.moveRight(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("hola café ").size()));
     assertCursorValidUtf8(c, d);
-    c.moveToNextWord(d);    // fin de "café" -> 10
-    CHECK_EQ(c.col, 10);
+
+    c.moveToPreviousWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("hola ").size()));
+    assertCursorValidUtf8(c, d);
+    c.moveToNextWord(d);
+    CHECK_EQ(c.col, static_cast<int>(std::string("hola café").size()));
     assertCursorValidUtf8(c, d);
 }

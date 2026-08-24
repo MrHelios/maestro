@@ -113,6 +113,19 @@ TEST(terminal_ctrl_modifier_ignored) {
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveRight));
 }
 
+TEST(terminal_remapped_modified_arrow_via_keymap) {
+    // Integración Terminal+Keymap: remapear "[1;2D" (la clave real que
+    // Terminal pasa a Keymap) debe cambiar el evento end-to-end. Sin
+    // remapeo, "[1;2D" cae por fallback a MoveLeft; con binding explícito
+    // debe dar el evento remapeado.
+    PipedStdin p;
+    p.feed("\x1b[1;2D");
+    Terminal t;
+    t.keymap().bindSequence("[1;2D", EventType::PageDown);
+    Event e = t.readEvent();
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::PageDown));
+}
+
 TEST(terminal_plain_home_via_bracket) {
     Event e = parse("\x1b[H");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MoveHome));

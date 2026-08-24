@@ -41,6 +41,8 @@ TEST(layout_terminal_120x40) {
 
 // El contenido jamas baja de 1 fila y nunca produce coordenadas invalidas,
 // por muy chica que sea la terminal (row >= 0, col == 0, width fiel).
+// En terminales degeneradas (rows <= kStatusBarRows) la barra se recorta
+// para no exceder el rango visible.
 TEST(layout_very_small_no_invalid_geometry) {
     for (int rows : {1, 2, 3}) {
         for (int cols : {1, 5, 80}) {
@@ -49,10 +51,12 @@ TEST(layout_very_small_no_invalid_geometry) {
             CHECK(l.content.row == 0);
             CHECK(l.content.col == 0);
             CHECK(l.content.width == cols);
-            // La barra arranca justo donde termina el contenido.
             CHECK(l.statusBar.row == l.content.height);
             CHECK(l.statusBar.col == 0);
             CHECK(l.statusBar.width == cols);
+            CHECK(l.statusBar.row + l.statusBar.height <= rows);
+            CHECK(l.statusBar.height >= 0);
+            CHECK(l.statusBar.height <= kStatusBarRows);
         }
     }
 }

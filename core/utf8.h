@@ -23,6 +23,7 @@ namespace utf8 {
 // y ninguna celda "se traga" bytes que no le pertenecen (un byte de
 // continuacion huerfano es una celda propia, no se pega al vecino).
 inline bool isCellStart(const std::string& line, int i) {
+    if (i < 0 || i >= static_cast<int>(line.size())) return false;
     unsigned char c = static_cast<unsigned char>(line[i]);
     if (c < 0x80) return true;               // ASCII
     if ((c & 0xC0) != 0x80) return true;     // lead (valido o invalido)

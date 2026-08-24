@@ -37,12 +37,18 @@ inline constexpr int kStatusBarRows = 2;
 //   80 x 24  -> content 80 x 22 ; statusBar filas 23-24
 //   120 x 40 -> content 120 x 38 ; statusBar filas 39-40
 //
-// En terminales muy chicas el contenido nunca baja de 1 fila (el chrome se
-// reserva siempre kStatusBarRows filas).
+// En terminales muy chicas (rows <= kStatusBarRows) el contenido nunca baja
+// de 1 fila y la barra se recorta para no escribir fuera del rango visible:
+// rows=1 -> content 1 + status 0; rows=2 -> content 1 + status 1;
+// rows=3 -> content 1 + status 2. Asi siempre content.row+height <=
+// statusBar.row y statusBar.row+height <= rows.
 inline Layout computeLayout(int rows, int cols) {
     Layout layout;
     const int contentRows = rows > kStatusBarRows ? rows - kStatusBarRows : 1;
-    layout.content   = Rect{0, 0, cols, contentRows};
-    layout.statusBar = Rect{contentRows, 0, cols, kStatusBarRows};
+    int statusRows = rows - contentRows;
+    if (statusRows < 0) statusRows = 0;
+    if (statusRows > kStatusBarRows) statusRows = kStatusBarRows;
+    layout.content = Rect{0, 0, cols, contentRows};
+    layout.statusBar = Rect{contentRows, 0, cols, statusRows};
     return layout;
 }

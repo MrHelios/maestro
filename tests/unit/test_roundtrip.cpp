@@ -86,7 +86,11 @@ static void assertRoundTripTable(const std::vector<RtCase>& cases) {
         if (d1.snapshot() != d2.snapshot())
             std::cout << "    [" << c.name << "] snapshot difiere tras reload\n";
         CHECK(d1.endsWithNewline() == d2.endsWithNewline());
+        if (d1.endsWithNewline() != d2.endsWithNewline())
+            std::cout << "    [" << c.name << "] endsWithNewline difiere tras reload\n";
         CHECK_EQ(d1.lineEnding(), d2.lineEnding());
+        if (d1.lineEnding() != d2.lineEnding())
+            std::cout << "    [" << c.name << "] lineEnding difiere tras reload\n";
     }
 }
 
@@ -177,5 +181,6 @@ TEST(roundtrip_huge_file) {
     CHECK_EQ(readBytes(f.path), big);
     CHECK(d1.snapshot() == d2.snapshot());
     CHECK(d1.endsWithNewline() == d2.endsWithNewline());
+    CHECK_EQ(d1.lineEnding(), d2.lineEnding());
     CHECK_EQ(d1.lineCount(), d2.lineCount());
 }

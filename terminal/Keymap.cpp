@@ -78,6 +78,16 @@ void Keymap::bindSequence(const std::string& contents, EventType type) {
 
 std::optional<EventType> Keymap::sequence(const std::string& contents) const {
     auto it = sequences_.find(contents);
-    return it == sequences_.end() ? std::nullopt
-                                  : std::optional<EventType>(it->second);
+    if (it != sequences_.end()) return it->second;
+    if (contents.size() >= 3) {
+        const char final = contents.back();
+        if (final != '~') {
+            std::string simple;
+            simple.push_back(contents[0]);
+            simple.push_back(final);
+            auto it2 = sequences_.find(simple);
+            if (it2 != sequences_.end()) return it2->second;
+        }
+    }
+    return std::nullopt;
 }

@@ -1144,8 +1144,10 @@ TEST(doc_repeated_edit_consistency) {
 // 22. Stress: fuzzer deterministico sobre Document
 // ---------------------------------------------------------------------------
 // Elige operaciones (y lineas/columnas, algunas fuera de rango) al azar y
-// comprueba los invariantes tras cada paso: nunca 0 lineas y que la longitud
-// que reporta lineLength sea exactamente el tamano del string de la linea.
+// comprueba los invariantes tras cada paso: nunca 0 lineas, lineLength
+// consistente y flag endsWithNewline normalizado. Incluye primitivas nuevas
+// (insertBlock, deleteRange, extractRange, indentLine) para ejercitar
+// interacciones entre operaciones que los tests dirigidos no cubren.
 // El numero de lineas se topa para que la comprobacion siga siendo O(1) por
 // linea y el test corra rapido.
 TEST(doc_stress_random_operations) {
@@ -1156,23 +1158,26 @@ TEST(doc_stress_random_operations) {
         std::uniform_int_distribution<int> dist(lo, hi);
         return dist(rng);
     };
+    auto randomString = [&](int maxLen) {
+        int len = rnd(0, maxLen);
+        std::string s;
+        s.reserve(len);
+        for (int i = 0; i < len; ++i) s.push_back(static_cast<char>('a' + rnd(0, 25)));
+        return s;
+    };
 
     const int maxLines = 400;
     const int totalOps = 100000;
 
     for (int step = 0; step < totalOps; ++step) {
-        // Linea valida o un poco fuera de rango, para ejercitar los clamps.
         const int line = rnd(0, d.lineCount() + 5);
-
-        // Si la linea es valida, la columna se genera respecto a esa linea
-        // (valida o apenas fuera de rango). Si la linea no existe, col arbitraria.
         int col;
         if (line < d.lineCount())
             col = rnd(0, d.lineLength(line) + 5);
         else
             col = rnd(0, 5);
 
-        switch (rnd(0, 3)) {
+        switch (rnd(0, 7)) {
             case 0:
                 d.insertChar(line, col, static_cast<char>('a' + rnd(0, 25)));
                 break;
@@ -1183,15 +1188,55 @@ TEST(doc_stress_random_operations) {
             case 2:
                 d.deleteCharAt(line, col);
                 break;
-            default:
+            case 3:
                 d.deleteCharBefore(line, col);
                 break;
+            case 4: {
+                int n = rnd(0, 4);
+                std::vector<std::string> blk;
+                blk.reserve(n);
+                for (int i = 0; i < n; ++i) blk.push_back(randomString(6));
+                if (d.lineCount() + (int)blk.size() <= maxLines + 5)
+                    d.insertBlock(line, col, blk);
+                break;
+            }
+            case 5: {
+                int sl = rnd(0, d.lineCount() + 2);
+                int el = rnd(0, d.lineCount() + 2);
+                if (sl < d.lineCount() && el < d.lineCount() && sl > el && rnd(0, 1) == 0) std::swap(sl, el);
+                int sc = (sl < d.lineCount()) ? rnd(0, d.lineLength(sl) + 3) : rnd(0, 5);
+                int ec = (el < d.lineCount()) ? rnd(0, d.lineLength(el) + 3) : rnd(0, 5);
+                if (sl == el && sc > ec && rnd(0, 1) == 0) std::swap(sc, ec);
+                d.deleteRange(sl, sc, el, ec);
+                break;
+            }
+            case 6: {
+                int sl = rnd(0, d.lineCount() + 2);
+                int el = rnd(0, d.lineCount() + 2);
+                if (sl < d.lineCount() && el < d.lineCount() && sl > el && rnd(0, 1) == 0) std::swap(sl, el);
+                int sc = (sl < d.lineCount()) ? rnd(0, d.lineLength(sl) + 3) : rnd(0, 5);
+                int ec = (el < d.lineCount()) ? rnd(0, d.lineLength(el) + 3) : rnd(0, 5);
+                if (sl == el && sc > ec && rnd(0, 1) == 0) std::swap(sc, ec);
+                auto before = d.snapshot();
+                auto out = d.extractRange(sl, sc, el, ec);
+                (void)out;
+                CHECK(d.snapshot() == before);
+                break;
+            }
+            default: {
+                int l = rnd(-2, d.lineCount() + 2);
+                bool indent = rnd(0, 1);
+                int len = rnd(-1, 8);
+                d.indentLine(l, indent, len);
+                break;
+            }
         }
 
-        // Invariantes: nunca 0 lineas y lineLength == string::size().
         CHECK(d.lineCount() >= 1);
         for (int i = 0; i < d.lineCount(); ++i)
             CHECK_EQ(d.lineLength(i), static_cast<int>(d.lineAt(i).size()));
+        if (d.lineCount() > 1 && d.lineAt(d.lineCount() - 1).empty())
+            CHECK(!d.endsWithNewline());
     }
 }
 
@@ -1217,14 +1262,32 @@ TEST(doc_crlf_round_trip_preserved) {
 }
 
 TEST(doc_crlf_no_trailing_newline_preserved) {
-    // CRLF sin una nueva linea final: el ultimo '\r\n' no es trailing.
     TempFile src;
-    src.write("x\r\n"); // solo una linea con salto final
+    src.write("x\r\ny");
     TempFile dst;
 
     Document d;
     CHECK_EQ(d.loadFromFile(src.path), LoadResult::Success);
     CHECK_EQ(d.lineEnding(), Document::LineEnding::CRLF);
+    CHECK_EQ(d.lineCount(), 2);
+    CHECK_EQ(d.lineAt(0), "x");
+    CHECK_EQ(d.lineAt(1), "y");
+    CHECK(!d.endsWithNewline());
+    CHECK(d.saveToFile(dst.path));
+    CHECK_EQ(fileContent(dst.path), "x\r\ny");
+}
+
+TEST(doc_crlf_single_line_with_trailing_newline_preserved) {
+    TempFile src;
+    src.write("x\r\n");
+    TempFile dst;
+
+    Document d;
+    CHECK_EQ(d.loadFromFile(src.path), LoadResult::Success);
+    CHECK_EQ(d.lineEnding(), Document::LineEnding::CRLF);
+    CHECK_EQ(d.lineCount(), 1);
+    CHECK_EQ(d.lineAt(0), "x");
+    CHECK(d.endsWithNewline());
     CHECK(d.saveToFile(dst.path));
     CHECK_EQ(fileContent(dst.path), "x\r\n");
 }
@@ -1273,6 +1336,39 @@ TEST(doc_crlf_edit_then_save_preserves) {
     d.insertChar(0, 1, 'Z'); // "aZ"
     CHECK(d.saveToFile(dst.path));
     CHECK_EQ(fileContent(dst.path), "aZ\r\nb\r\n");
+}
+
+TEST(doc_mixed_line_endings_converts_all_to_crlf) {
+    TempFile src;
+    src.write("a\nb\r\nc");
+    TempFile dst;
+
+    Document d;
+    CHECK_EQ(d.loadFromFile(src.path), LoadResult::Success);
+    CHECK_EQ(d.lineEnding(), Document::LineEnding::CRLF);
+    CHECK_EQ(d.lineCount(), 3);
+    CHECK_EQ(d.lineAt(0), "a");
+    CHECK_EQ(d.lineAt(1), "b");
+    CHECK_EQ(d.lineAt(2), "c");
+    CHECK(!d.endsWithNewline());
+    CHECK(d.saveToFile(dst.path));
+    CHECK_EQ(fileContent(dst.path), "a\r\nb\r\nc");
+}
+
+TEST(doc_trailing_legacy_cr_is_lost_on_save) {
+    TempFile src;
+    src.write("abc\ndef\r");
+    TempFile dst;
+
+    Document d;
+    CHECK_EQ(d.loadFromFile(src.path), LoadResult::Success);
+    CHECK_EQ(d.lineEnding(), Document::LineEnding::LF);
+    CHECK_EQ(d.lineCount(), 2);
+    CHECK_EQ(d.lineAt(0), "abc");
+    CHECK_EQ(d.lineAt(1), "def");
+    CHECK(!d.endsWithNewline());
+    CHECK(d.saveToFile(dst.path));
+    CHECK_EQ(fileContent(dst.path), "abc\ndef");
 }
 
 TEST(doc_indent_line_adds_spaces_at_start) {

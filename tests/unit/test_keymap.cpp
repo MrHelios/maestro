@@ -73,6 +73,18 @@ TEST(keymap_seq_delete_pages) {
     checkSequence("[6~", EventType::PageDown);
 }
 
+TEST(keymap_seq_arrow_with_modifier_falls_back) {
+    // Los modificadores de las secuencias de escape se ignoran (ver
+    // Terminal.cpp: simpleEscapeForm): una flecha con Shift/Alt/Ctrl
+    // (formato xterm "[1;2A") debe resolver igual que la flecha sin modificador.
+    checkSequence("[1;2A", EventType::MoveUp);
+    checkSequence("[1;5D", EventType::MoveLeft);
+    checkSequence("[1;2B", EventType::MoveDown);
+    checkSequence("[1;3C", EventType::MoveRight);
+    checkSequence("[1;2H", EventType::MoveHome);
+    checkSequence("[1;6F", EventType::MoveEnd);
+}
+
 // --- Rebindeo en tiempo de ejecucion ---
 TEST(keymap_remap_control) {
     Keymap km;
@@ -85,9 +97,15 @@ TEST(keymap_remap_control) {
 TEST(keymap_remap_sequence) {
     Keymap km;
     // El Editor no depende de las teclas fisicas: le da igual que MoveLeft
-    // venga de la flecha o de otra secuencia remapeada.
-    km.bindSequence("1;2D", EventType::MoveLeft);
-    CHECK_EQ(static_cast<int>(*km.sequence("1;2D")),
+    // venga de la flecha o de otra secuencia remapeada. La clave es la que
+    // realmente pasa Terminal (con '[' y modificador), no "1;2D" pelado.
+    km.bindSequence("[1;2D", EventType::PageDown);
+    CHECK_EQ(static_cast<int>(*km.sequence("[1;2D")),
+             static_cast<int>(EventType::PageDown));
+    // Sin binding explicito, el fallback de modificadores resuelve "[1;2D"
+    // como "[D" (MoveLeft); con binding, gana el valor remapeado.
+    Keymap km2;
+    CHECK_EQ(static_cast<int>(*km2.sequence("[1;2D")),
              static_cast<int>(EventType::MoveLeft));
 }
 

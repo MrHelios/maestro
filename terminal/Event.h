@@ -6,6 +6,11 @@
 // terminos de EVENTOS. Esto hace que Editor sea completamente
 // reutilizable: podria alimentarse desde un teclado real, desde un
 // test automatizado, desde una macro grabada, etc.
+// Diseño: Event transporta un único EventType, sin campo "shift".
+// Desde v0.5 la selección se activa con la letra 's' en modo Navegación
+// (un InsertChar que el Editor interpreta), no con un evento propio ni
+// con modificador Shift. No existe EventType::Select; Prefix (Ctrl+K) y
+// Save (Ctrl+S) modelan el guardado con prefijo.
 enum class EventType {
     None,
     InsertChar,

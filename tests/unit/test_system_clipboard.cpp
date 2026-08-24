@@ -1,3 +1,6 @@
+#include <cstdlib>
+#include <string>
+
 #include "test_framework.h"
 #include "clipboard/FakeClipboard.h"
 #include "clipboard/SystemClipboard.h"
@@ -106,6 +109,7 @@ TEST(system_clipboard_fake_paste_error) {
 }
 
 TEST(system_clipboard_fake_processEvents_noop) {
+    FakeClipboard::resetGlobal();
     FakeClipboard cb;
     cb.copy("x");
     cb.processEvents();
@@ -238,8 +242,14 @@ TEST(system_clipboard_editor_external_is_source_of_truth) {
 }
 
 TEST(system_clipboard_x11_fallback_no_display) {
+    const char* oldDisplay = std::getenv("DISPLAY");
+    std::string saved = oldDisplay ? oldDisplay : "";
+    bool hadDisplay = oldDisplay != nullptr;
+    ::unsetenv("DISPLAY");
     X11Clipboard cb;
-    if (cb.isAvailable()) return;
+    if (hadDisplay) ::setenv("DISPLAY", saved.c_str(), 1);
+    else ::unsetenv("DISPLAY");
+    CHECK(!cb.isAvailable());
     CHECK(cb.copy("fallback"));
     CHECK(cb.ownsClipboard());
     auto p = cb.paste();

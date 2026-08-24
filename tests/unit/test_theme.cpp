@@ -20,6 +20,17 @@
 
 namespace {
 
+constexpr const char* kTestBgMagenta = "\x1b[45m";
+constexpr const char* kTestBgRed = "\x1b[41m";
+constexpr const char* kTestBgBlue = "\x1b[44m";
+constexpr const char* kTestBgGreen = "\x1b[42m";
+constexpr const char* kTestFgRed = "\x1b[31m";
+constexpr const char* kTestFgMagenta = "\x1b[35m";
+constexpr const char* kTestFgYellow = "\x1b[33m";
+constexpr const char* kTestFgWhite = "\x1b[37m";
+constexpr const char* kTestFgBlack = "\x1b[30m";
+constexpr const char* kTestReset = "\x1b[0m";
+
 // Monta un frame del editor de una unica linea con seleccion (para ejercitar
 // currentLine + selection) y devuelve el ANSI crudo.
 std::string editorFrameWithSelection(const Theme& theme, int width = 200) {
@@ -47,6 +58,12 @@ std::string bufferFrameWithSelection(const Theme& theme, int width = 200) {
     Renderer r;
     r.setTheme(theme);
     return r.buildBufferListScreen({"aa.txt", "bb.txt"}, 0, width, 5);
+}
+
+std::string fileFrameWithSelection(const Theme& theme, int width = 200) {
+    Renderer r;
+    r.setTheme(theme);
+    return r.buildFileListScreen({"aa.txt", "bb.txt"}, 0, 0, "/tmp", Message{}, width, 5);
 }
 
 } // namespace
@@ -100,11 +117,10 @@ TEST(theme_defaults_new_visual_language) {
 // constantes. Un Theme con colores BIZARROS debe verse en el output.
 // ---------------------------------------------------------------------------
 TEST(theme_renderer_uses_theme_for_selection_and_currentline) {
-    // Fondo gris de fila actual y seleccion roja reconocibles.
     Theme t = defaultTheme();
-    t.currentLine = "\x1b[45m";      // fondo magenta
-    t.selection = "\x1b[41m";        // fondo rojo
-    t.reset = "\x1b[0m";
+    t.currentLine = kTestBgMagenta;
+    t.selection = kTestBgRed;
+    t.reset = kTestReset;
 
     const std::string frame = editorFrameWithSelection(t);
     // La fila del cursor (linea 0) lleva el estilo de fila del tema: el
@@ -127,16 +143,23 @@ TEST(theme_renderer_uses_theme_for_selection_and_currentline) {
 // ---------------------------------------------------------------------------
 TEST(theme_lists_use_listselected_not_selection) {
     const std::string base = bufferFrameWithSelection(defaultTheme());
-    // Un cambio en selection (video inverso -> fondo rojo) NO altera la
-    // lista: la lista no lee selection.
     Theme t1 = defaultTheme();
-    t1.selection = "\x1b[41m";
+    t1.selection = kTestBgRed;
     CHECK_EQ(bufferFrameWithSelection(t1), base);
-    // Un cambio en listSelected SI altera la lista.
     Theme t2 = defaultTheme();
-    t2.listSelected = "\x1b[41m";
+    t2.listSelected = kTestBgRed;
     CHECK(bufferFrameWithSelection(t2) != base);
-    // Por defecto el item activo lleva el mismo gris que la fila del cursor.
+    CHECK(base.find(defaultTheme().listSelected) != std::string::npos);
+}
+
+TEST(theme_file_lists_use_listselected_not_selection) {
+    const std::string base = fileFrameWithSelection(defaultTheme());
+    Theme t1 = defaultTheme();
+    t1.selection = kTestBgRed;
+    CHECK_EQ(fileFrameWithSelection(t1), base);
+    Theme t2 = defaultTheme();
+    t2.listSelected = kTestBgRed;
+    CHECK(fileFrameWithSelection(t2) != base);
     CHECK(base.find(defaultTheme().listSelected) != std::string::npos);
 }
 
@@ -146,11 +169,11 @@ TEST(theme_lists_use_listselected_not_selection) {
 // ---------------------------------------------------------------------------
 TEST(theme_statusbar_uses_theme_for_colors) {
     Theme t = defaultTheme();
-    t.statusBar = "\x1b[44m";       // fondo azul para la base
-    t.statusBarName = "\x1b[31m";   // nombre rojo
-    t.statusBarAccent = "\x1b[35m"; // comando magenta
-    t.error = "\x1b[41m";           // errores con fondo rojo
-    t.reset = "\x1b[0m";
+    t.statusBar = kTestBgBlue;
+    t.statusBarName = kTestFgRed;
+    t.statusBarAccent = kTestFgMagenta;
+    t.error = kTestBgRed;
+    t.reset = kTestReset;
 
     StatusBar bar;
     bar.setTheme(t);
@@ -180,9 +203,9 @@ TEST(theme_statusbar_uses_theme_for_colors) {
 // ---------------------------------------------------------------------------
 TEST(theme_renderer_propagates_to_statusbar) {
     Theme t = defaultTheme();
-    t.statusBar = "\x1b[42m";       // fondo verde para la barra
-    t.statusBarAccent = "\x1b[31m"; // comando rojo
-    t.reset = "\x1b[0m";
+    t.statusBar = kTestBgGreen;
+    t.statusBarAccent = kTestFgRed;
+    t.reset = kTestReset;
 
     // Editor: la barra del frame usa el Theme del Renderer.
     Renderer r;
@@ -212,4 +235,49 @@ TEST(theme_renderer_propagates_to_statusbar) {
                                            State::Navegacion, std::nullopt);
     CHECK(edDefault.find(defaultTheme().statusBar) != std::string::npos);
     CHECK(ed != edDefault);
+}
+
+TEST(theme_statusbar_background_covers_full_width) {
+    Theme t = defaultTheme();
+    t.statusBar = kTestBgBlue;
+    t.statusBarName = kTestFgWhite;
+    t.statusBarPath = kTestFgBlack;
+    t.statusBarAccent = kTestFgMagenta;
+    t.statusBarModified = kTestFgYellow;
+    t.reset = kTestReset;
+
+    StatusBar bar;
+    bar.setTheme(t);
+    Rect area;
+    area.row = 0;
+    area.col = 0;
+    area.width = 60;
+    area.height = 2;
+    StatusBarData d;
+    d.name = "archivo.txt";
+    d.path = "/ruta/larga/que/fuerza/varios/segmentos";
+    d.estado = "NAVEGACION";
+    d.totalLines = 100;
+    d.cursorLine = 10;
+    d.cursorCol = 5;
+
+    const std::string out = bar.render(area, d);
+    size_t nl = out.find("\r\n");
+    std::string row = (nl == std::string::npos) ? out : out.substr(0, nl);
+    CHECK(row.find(t.statusBar) != std::string::npos);
+    size_t pos = 0;
+    int resets = 0;
+    while (true) {
+        size_t f = row.find(t.reset, pos);
+        if (f == std::string::npos) break;
+        ++resets;
+        size_t nxt = row.find(t.reset, f + t.reset.size());
+        if (nxt == std::string::npos) {
+            CHECK(f + t.reset.size() == row.size());
+            break;
+        }
+        CHECK(row.compare(f + t.reset.size(), t.statusBar.size(), t.statusBar) == 0);
+        pos = f + t.reset.size();
+    }
+    CHECK(resets >= 4);
 }
