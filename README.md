@@ -85,7 +85,7 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 | **Navegación**        | por defecto                   | No se escribe. Comandos `i`/`s`/`j`/`k`/`c`/`x`/`p`. Flechas mueven sin seleccionar
 | **Interacción**       | `i` en Navegación             | Edición libre, todo inserta. `Esc` vuelve a Navegación
 | **Selección**         | `s` en Navegación             | Flechas/`j`/`k`/RePag/AvPag extienden selección (anchor fijo). `c`/`x`/`Esc` salen
-| **Prefijo**           | `Ctrl+K`                      | Siguiente tecla decide: `Ctrl+S` guardar, `Ctrl+Q` salir, `n`/`t`/`w`/`o` buffers/archivos
+| **Prefijo**           | `Ctrl+K`                      | Siguiente tecla decide: `Ctrl+S` guardar, `q` salir verificando guardado, `Ctrl+Q` salir forzado, `n`/`t`/`w`/`o` buffers/archivos
 | **BufferSelector**    | `Ctrl+K t`                    | Lista modal de buffers (`↑`/`↓`, `Enter`, `Esc`)
 | **SaveAs**            | `Ctrl+K Ctrl+S` sin nombre    | Prompt `Guardar archivo:` (`Enter`/`Esc`)
 | **FileBrowser**       | `Ctrl+K o`                    | Explorador modal (`↑`/`↓`, `Enter` carpeta/archivo, `Esc`)
@@ -106,7 +106,8 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 | `p`                       | Pegar
 | `Ctrl+U` / `Ctrl+Y`       | Deshacer / Rehacer
 | `Ctrl+K Ctrl+S`           | Guardar (abre SaveAs si sin nombre)
-| `Ctrl+K Ctrl+Q`           | Salir
+| `Ctrl+K q`                | Salir verificando guardado (bloquea si hay archivos sin guardar)
+| `Ctrl+K Ctrl+Q`           | Salir forzado (sin comprobar guardado)
 | `Ctrl+K n`                | Buffer nuevo sin nombre
 | `Ctrl+K o`                | Explorador de archivos
 | `Ctrl+K t`                | Selector de buffers

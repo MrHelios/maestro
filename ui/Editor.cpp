@@ -1075,6 +1075,19 @@ void Editor::handlePrefixKey(const Event& event) {
                 commands_.execute("buffer.abrir");
                 break;
             }
+            if (event.text == "q") {           // Ctrl+K q: salida segura
+                bool anyModified = false;
+                for (int i = 0; i < buffers.count(); ++i) {
+                    if (buffers.at(i).modified) { anyModified = true; break; }
+                }
+                if (anyModified) {
+                    state_ = priorState_;
+                    setActionMessage("Hay archivos sin guardar", MessageKind::Warning);
+                } else {
+                    running_ = false;
+                }
+                break;
+            }
             // Cualquier otra letra: cae en el cancel del default.
             state_ = priorState_;
             setActionMessage("Comando cancelado.");
