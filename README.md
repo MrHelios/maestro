@@ -41,6 +41,34 @@ Genera `build/maestro`. Requiere `g++` C++17, `libX11` y `pthread`.
 Si el archivo no existe se crea en memoria (guardar con `Ctrl+K Ctrl+S`). Las carpetas no se abren como archivo.
 Wrapper opcional `./maestro` (si existe en la raíz) delega en `make`/`build/maestro`.
 
+## Instalación
+
+Instalación local sin privilegios de administrador (no modifica archivos fuera del home del usuario):
+
+```bash
+make install
+```
+
+* Compila Maestro si es necesario.
+* Crea `~/.local/bin` si no existe.
+* Instala el ejecutable en `~/.local/bin/maestro` con permisos de ejecución.
+* No requiere `sudo` ni escribe en `/usr/bin` o `/usr/local/bin`.
+
+Ejecución tras instalar (agregar `~/.local/bin` al `PATH` si se desea invocarlo como `maestro`):
+
+```bash
+~/.local/bin/maestro
+~/.local/bin/maestro archivo.txt
+```
+
+## Desinstalación
+
+```bash
+make uninstall
+```
+
+Elimina únicamente `~/.local/bin/maestro` y conserva `~/.local/bin` para no afectar otros binarios del usuario.
+
 ## Tests
 
 ```bash

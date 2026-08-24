@@ -158,9 +158,23 @@ test: $(TEST_BIN)
 test-sanitize: test-san
 	./$(SAN_TEST_BIN)
 
+INSTALL_DIR := $(HOME)/.local/bin
+INSTALL_BIN := $(INSTALL_DIR)/maestro
+
+install: $(BIN)
+	@mkdir -p $(INSTALL_DIR)
+	@install -m 755 $(BIN) $(INSTALL_BIN)
+	@echo "Installed to $(INSTALL_BIN)"
+
+# uninstall elimina solo $(INSTALL_BIN); no borra $(INSTALL_DIR) para
+# no afectar otros binarios del usuario en ~/.local/bin
+uninstall:
+	@rm -f $(INSTALL_BIN)
+	@echo "Uninstalled $(INSTALL_BIN)"
+
 clean:
 	rm -rf build build-san
 
 -include $(OBJ:.o=.d) $(TEST_OBJ:.o=.d) $(SAN_OBJ:.o=.d) $(SAN_TEST_OBJ:.o=.d)
 
-.PHONY: all test sanitize test-sanitize clean edit-san test-san
+.PHONY: all test sanitize test-sanitize clean edit-san test-san install uninstall
