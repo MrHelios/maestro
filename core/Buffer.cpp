@@ -99,8 +99,8 @@ void Buffer::applyBackward(const Edit& e) {
     }
 }
 
-HistoryEntry Buffer::undoStep() {
-    assert(!undoStack.empty());
+bool Buffer::undo() {
+    if (undoStack.empty()) return false;
     HistoryEntry entry = undoStack.back();
 
     // El lado "despues" se REFRESCA con el estado vigente al momento del
@@ -124,11 +124,15 @@ HistoryEntry Buffer::undoStep() {
     restoreSelection(entry.selectionBefore);
 
     modified = (document.snapshot() != savedLines);
-    return entry;
+
+    // La misma entrada describe la operacion hacia adelante: queda
+    // pendiente en redoStack.
+    redoStack.push_back(std::move(entry));
+    return true;
 }
 
-HistoryEntry Buffer::redoStep() {
-    assert(!redoStack.empty());
+bool Buffer::redo() {
+    if (redoStack.empty()) return false;
     HistoryEntry entry = redoStack.back();
 
     // Simetrico al undo: el lado "antes" se refresca con el estado vigente,
@@ -150,7 +154,10 @@ HistoryEntry Buffer::redoStep() {
     restoreSelection(entry.selectionAfter);
 
     modified = (document.snapshot() != savedLines);
-    return entry;
+
+    // La entrada vuelve al undoStack para poder deshacerla de nuevo.
+    undoStack.push_back(std::move(entry));
+    return true;
 }
 
 void Buffer::restoreSelection(std::optional<Selection> sel) {

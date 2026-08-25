@@ -111,18 +111,19 @@ public:
 
     // Coalescing (grupo de escritura tras un reemplazo de seleccion):
     // agrega una edicion a la ULTIMA entrada del historial en vez de
-    // crear una nueva, refrescando su estado "despues". Si no hubiera
-    // entrada previa, crea una con esta edicion.
+    // crear una nueva, refrescando su estado "despues". Requiere una
+    // entrada previa (contrato del grupo de escritura).
     void extendLastEntry(Edit edit);
 
     // Deshace la ultima entrada: aplica sus edits en reversa, restaura
-    // cursor/seleccion/'\n' del "antes" y recalcula modified. Devuelve la
-    // misma entrada para que el Editor la apile en redoStack.
-    HistoryEntry undoStep();
+    // cursor/seleccion/'\n' del "antes", recalcula modified y mueve la
+    // entrada al redoStack. Devuelve false si no hay nada que deshacer.
+    bool undo();
 
     // Rehace: reaplica forward la entrada tope de redoStack, restaura el
-    // estado "despues" y la devuelve para el undoStack.
-    HistoryEntry redoStep();
+    // estado "despues", recalcula modified y devuelve la entrada al
+    // undoStack. Devuelve false si no hay nada que rehacer.
+    bool redo();
 
 private:
     // Aplica una edit hacia adelante / en reversa sobre el documento.

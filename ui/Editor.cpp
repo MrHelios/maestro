@@ -1557,16 +1557,14 @@ void Editor::indentSelection(bool indent) {
 void Editor::undo() {
     coalescingTyping_ = false;
     Buffer& b = active();
-    if (b.undoStack.empty()) {
+
+    // Buffer::undo aplica las edits en reversa, restaura el estado "antes"
+    // y mueve la entrada al redoStack.
+    if (!b.undo()) {
         setActionMessage("Nada que deshacer.", MessageKind::Warning);
         return;
     }
 
-    // undoStep aplica las edits en reversa y restaura el estado "antes".
-    // La misma entrada describe la operacion hacia adelante: viaja al
-    // redoStack tal cual.
-    HistoryEntry undone = b.undoStep();
-    b.redoStack.push_back(std::move(undone));
     // La seleccion restaurada vuelve a estar VIGENTE. Importante: el modo
     // Seleccion solo debe activarse si el rango restaurado es realmente NO
     // vacio. Compartimos el criterio con hasSelection() (anchor != position).
@@ -1579,15 +1577,14 @@ void Editor::undo() {
 void Editor::redo() {
     coalescingTyping_ = false;
     Buffer& b = active();
-    if (b.redoStack.empty()) {
+
+    // Buffer::redo reaplica las edits, restaura el estado "despues" y
+    // devuelve la entrada al undoStack.
+    if (!b.redo()) {
         setActionMessage("Nada que rehacer.", MessageKind::Warning);
         return;
     }
 
-    // redoStep reaplica las edits y restaura el estado "despues". La
-    // entrada vuelve al undoStack para poder deshacerla de nuevo.
-    HistoryEntry redone = b.redoStep();
-    b.undoStack.push_back(std::move(redone));
     state_ = (b.selection.has_value() && b.selection->anchor != b.selection->position)
            ? State::Seleccion
            : State::Navegacion;
