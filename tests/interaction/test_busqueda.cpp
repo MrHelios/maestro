@@ -377,7 +377,11 @@ TEST(busqueda_no_genera_undo) {
 TEST(busqueda_ctrl_u_no_modifica) {
     Editor ed; ed.active().document.restore({"hello"});
     ed.active().document.insertText(0,5,"x");
-    ed.active().pushHistory();
+    {   // Sembrar el historial a la manera nueva: una entrada con la edit.
+        HistoryEntry e = ed.active().beginHistoryEntry();
+        e.edits.push_back({EditType::Insert, {0, 5}, {0, 6}, "x"});
+        ed.active().commitHistoryEntry(std::move(e));
+    }
     auto before = ed.active().document.snapshot();
     size_t undoBefore = ed.active().undoStack.size();
     ed.handleEvent(ins('f')); typeQ(ed,"hello");

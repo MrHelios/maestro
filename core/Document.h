@@ -107,19 +107,40 @@ public:
     void setEndsWithNewline(bool ends);
 
     // --- Mutaciones ---
+    // NOTA sobre posiciones: las mutaciones que INSERTAN devuelven la
+    // posicion final logica resultante (la que debe tomar el cursor). El
+    // calculo de esa posicion es responsabilidad de Document (que conoce
+    // el modelo de celdas byte-safe y los '\n'), nunca del llamador: asi
+    // UTF-8 multibyte y texto multilinea se resuelven en un unico lugar.
+
     // Inserta el caracter c en (line, col). col puede ser igual a
     // lineLength(line) (insertar al final de la linea).
     void insertChar(int line, int col, char c);
 
-    // Inserta una secuencia de BYTES UTF-8 en (line, col). `text` es un
-    // caracter UTF-8 completo (1-4 bytes): ASCII o un codepoint multibyte.
-    // col puede ser igual a lineLength(line).
-    void insertText(int line, int col, const std::string& text);
+    // Inserta una secuencia de BYTES en (line, col). `text` puede ser un
+    // caracter UTF-8 completo (1-4 bytes), una corrida de ellos o texto
+    // MULTILINEA ('\n' como separador): en ese caso parte lineas igual
+    // que insertBlock. Devuelve la posicion final tras la insercion.
+    Position insertText(int line, int col, const std::string& text);
 
     // Parte la linea `line` en la posicion `col` en dos lineas.
-    // Se usa para la tecla Enter (no forma parte de v0.1, pero el
-    // Documento ya queda preparado para soportarlo).
-    void insertNewline(int line, int col);
+    // Se usa para la tecla Enter. Es la mitad positiva del par
+    // simetrico splitLine <-> mergeLine.
+    void splitLine(int line, int col);
+
+    // Inversa de splitLine: funde la linea `line` con la SIGUIENTE
+    // (borra el '\n' que las separa). Devuelve true si fusiono algo;
+    // false si `line` es la ultima o es invalida.
+    bool mergeLine(int line);
+
+    // --- Consultas de celdas (modelo byte-safe, ver utf8.h) ---
+    // Bytes de la celda ANTERIOR a (line, col) y de la celda QUE COMIENZA
+    // en (line, col). Espejo de solo-lectura de lo que borran
+    // deleteCharBefore/deleteCharAt respectivamente: permiten capturar el
+    // texto borrado ANTES de borrarlo sin duplicar el recorrido de celdas
+    // en la capa de edicion. Devuelven "" si no hay tal celda.
+    std::string cellTextBefore(int line, int col) const;
+    std::string cellTextAt(int line, int col) const;
 
     // Borra el caracter ANTERIOR a (line, col) -- comportamiento de Backspace.
     // Si col == 0 y hay una linea anterior, funde la linea actual con la anterior.

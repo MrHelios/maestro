@@ -165,16 +165,76 @@ void Document::insertChar(int line, int col, char c) {
     normalizeEndsWithNewline();
 }
 
-void Document::insertText(int line, int col, const std::string& text) {
-    if (line < 0 || line >= lineCount() || text.empty()) return;
+namespace {
+
+// Recorridos de celdas byte-safe (ver utf8.h): compartidos por las
+// consultas cellTextBefore/cellTextAt y por las mutaciones de borrado,
+// de modo que capturar el texto y borrarlo NUNCA pueden desincronizarse.
+int cellStartBefore(const std::string& s, int col) {
+    int start = col - 1;
+    while (start > 0 && !utf8::isCellStart(s, start)) {
+        start--;
+    }
+    return start;
+}
+
+int cellEndAt(const std::string& s, int col) {
+    int end = col + 1;
+    while (end < static_cast<int>(s.size()) && !utf8::isCellStart(s, end)) {
+        end++;
+    }
+    return end;
+}
+
+} // namespace
+
+std::string Document::cellTextBefore(int line, int col) const {
+    if (line < 0 || line >= lineCount()) return "";
+    const int len = lineLength(line);
+    if (col <= 0 || col > len) return "";
+    const std::string& target = lines_[line];
+    int start = cellStartBefore(target, col);
+    return target.substr(static_cast<size_t>(start),
+                         static_cast<size_t>(col - start));
+}
+
+std::string Document::cellTextAt(int line, int col) const {
+    if (line < 0 || line >= lineCount()) return "";
+    const std::string& target = lines_[line];
+    if (col < 0 || col >= static_cast<int>(target.size())) return "";
+    int end = cellEndAt(target, col);
+    return target.substr(static_cast<size_t>(col),
+                         static_cast<size_t>(end - col));
+}
+
+Position Document::insertText(int line, int col, const std::string& text) {
+    if (line < 0 || line >= lineCount() || text.empty()) return {line, col};
+
+    // Texto multilinea: mismo modelo que insertBlock ('\n' separa lineas;
+    // un '\n' final equivale a una ultima linea vacia). La insercion y la
+    // posicion final resultante son responsabilidad de Document, no del
+    // llamador.
+    if (text.find('\n') != std::string::npos) {
+        std::vector<std::string> block;
+        size_t start = 0;
+        for (size_t i = 0; i <= text.size(); ++i) {
+            if (i == text.size() || text[i] == '\n') {
+                block.emplace_back(text.substr(start, i - start));
+                start = i + 1;
+            }
+        }
+        return insertBlock(line, col, block);
+    }
+
     std::string& target = lines_[line];
     if (col < 0) col = 0;
     if (col > static_cast<int>(target.size())) col = static_cast<int>(target.size());
     target.insert(col, text);
     normalizeEndsWithNewline();
+    return {line, col + static_cast<int>(text.size())};
 }
 
-void Document::insertNewline(int line, int col) {
+void Document::splitLine(int line, int col) {
     if (line < 0 || line >= lineCount()) return;
     std::string& target = lines_[line];
     if (col < 0) col = 0;
@@ -184,6 +244,16 @@ void Document::insertNewline(int line, int col) {
     target.erase(col);
     lines_.insert(lines_.begin() + line + 1, rest);
     normalizeEndsWithNewline();
+}
+
+bool Document::mergeLine(int line) {
+    if (line < 0 || line + 1 >= lineCount()) return false;
+
+    std::string next = lines_[line + 1];
+    lines_.erase(lines_.begin() + line + 1);
+    lines_[line] += next;
+    normalizeEndsWithNewline();
+    return true;
 }
 
 int Document::deleteCharBefore(int line, int col) {
@@ -200,10 +270,8 @@ int Document::deleteCharBefore(int line, int col) {
         // desde col-1 hasta el inicio de esa celda, para no dejar un byte
         // suelto si era una secuencia UTF-8 valida. Con utf8::isCellStart,
         // una continuacion huerfana es su propia celda (modelo byte-safe).
-        int start = col - 1;
-        while (start > 0 && !utf8::isCellStart(target, start)) {
-            start--;
-        }
+        // Mismo recorrido que cellTextBefore (ver comentario ahi).
+        int start = cellStartBefore(target, col);
         int bytes = col - start;
         target.erase(start, static_cast<size_t>(bytes));
         return bytes;
@@ -232,10 +300,8 @@ int Document::deleteCharAt(int line, int col) {
         // secuencia UTF-8 valida borra todos sus bytes; si es un byte
         // suelto (lead invalido o continuacion huerfana), borra solo ese
         // byte (modelo byte-safe: no se traga bytes que no le pertenecen).
-        int end = col + 1;
-        while (end < len && !utf8::isCellStart(target, end)) {
-            end++;
-        }
+        // Mismo recorrido que cellTextAt (ver comentario ahi).
+        int end = cellEndAt(target, col);
         int bytes = end - col;
         target.erase(col, static_cast<size_t>(bytes));
         return bytes;
@@ -244,10 +310,7 @@ int Document::deleteCharAt(int line, int col) {
     // col == len: fundir con la siguiente linea, si existe.
     if (line + 1 >= lineCount()) return 0;
 
-    std::string next = lines_[line + 1];
-    lines_.erase(lines_.begin() + line + 1);
-    lines_[line] += next;
-    normalizeEndsWithNewline();
+    mergeLine(line);
     return 0;
 }
 
@@ -324,7 +387,7 @@ Position Document::insertBlock(int line, int col, const std::vector<std::string>
         return {line, col + static_cast<int>(block[0].size())};
     }
 
-    // Multilinea: partimos la linea actual en col (igual que insertNewline),
+    // Multilinea: partimos la linea actual en col (igual que splitLine),
     // la primera linea del bloque se pega a la cola izquierda, las
     // intermedias se insertan como lineas nuevas completas, y la ultima se
     // une con la cola derecha de la linea original (lo que quedaba tras col).

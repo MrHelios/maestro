@@ -9,20 +9,50 @@
 #include "core/Selection.h"
 #include "core/Viewport.h"
 
-// Estado guardado en cada entrada de undo/redo de un buffer: el
-// contenido completo, el cursor y la seleccion vigente en ese momento.
-struct HistoryState {
-    std::vector<std::string> lines;
-    int line = 0;
-    int col = 0;
-    // Estado del '\n' final en ese momento. El flag no se puede deducir
-    // del vector de lineas (restore no lo sabe), asi que se guarda junto
-    // con el contenido para que undo/redo no lo desincronice.
-    bool endsWithNewline = false;
-    // Seleccion vigente en ese momento (si habia). Se restaura en
-    // undo/redo para que una seleccion borrada/reemplazada regrese
-    // a su estado original.
-    std::optional<Selection> selection;
+// Tipo de operacion atomica registrada en una entrada de historial. Cada
+// Edit es REVERSIBLE: guarda que hacer y como deshacerlo, sin copiar el
+// documento (el texto afectado viaja en `text`, nunca el contenido entero).
+//
+//   Insert    : se inserto `text` en [start, end)
+//   Delete    : se borro `text` de [start, end)
+//   SplitLine : Enter partio la linea en `start` ('\n' insertado ahi)
+//   MergeLine : se fundio start.line con la linea siguiente ('\n' borrado)
+//
+// No existe Replace: un reemplazo es un Delete del texto viejo seguido de
+// un Insert del nuevo, ambos dentro de la MISMA HistoryEntry, de modo que
+// se deshace/rehace como una sola operacion.
+enum class EditType {
+    Insert,
+    Delete,
+    SplitLine,
+    MergeLine,
+};
+
+struct Edit {
+    EditType type;
+    Position start;
+    Position end;
+    std::string text;
+};
+
+// Una operacion de undo/redo: la lista de edits aplicadas (en orden) mas
+// el estado de cursor/seleccion/'\n' final ANTES y DESPUES del grupo.
+// Undo aplica las edits en reversa y restaura el "antes"; redo las reaplica
+// y restaura el "despues".
+struct HistoryEntry {
+    std::vector<Edit> edits;
+
+    Position cursorBefore{0, 0};
+    Position cursorAfter{0, 0};
+
+    std::optional<Selection> selectionBefore;
+    std::optional<Selection> selectionAfter;
+
+    // Estado del '\n' final antes/despues. El flag no se puede deducir
+    // del vector de lineas, asi que viaja junto a las edits para que
+    // undo/redo no lo desincronice.
+    bool endsWithNewlineBefore = false;
+    bool endsWithNewlineAfter = false;
 };
 
 // Buffer representa el estado completo y AUTOCONTENIDO de un archivo
@@ -60,20 +90,47 @@ public:
     // modified = (contenido actual != savedLines).
     std::vector<std::string> savedLines;
 
-    std::vector<HistoryState> undoStack;
-    std::vector<HistoryState> redoStack;
+    std::vector<HistoryEntry> undoStack;
+    std::vector<HistoryEntry> redoStack;
 
     // Nombre visible del buffer para la barra de estado y el selector:
     // el nombre del archivo (sin directorio) si tiene uno, o el nombre
     // de buffer sin nombre (p.ej. "SinNombre2").
     std::string displayName() const;
 
-    // Empuja el estado ACTUAL a la pila de undo (antes de una mutacion)
-    // y limpia el redo. Respeta MAX_UNDO descartando la entrada mas vieja.
-    void pushHistory();
+    // --- Historial por operaciones reversibles ---
+    // Captura el estado ANTES de una mutacion (cursor, seleccion y '\n'
+    // final). Se llama ANTES de tocar el documento; las edits se agregan
+    // al entry devuelto mientras se muta.
+    HistoryEntry beginHistoryEntry() const;
 
-    // Restaura el documento, el cursor y la seleccion de un HistoryState.
-    // La seleccion restaurada se descarta si quedo fuera de rango, y
-    // modified se recalcula contra savedLines.
-    void applyState(const HistoryState& state);
+    // Completa el estado DESPUES de la mutacion y apila la entrada en
+    // undoStack (limpiando el redo, respetando MAX_UNDO). Una entrada
+    // sin edits (mutacion no-op) se descarta: nunca hay entradas vacias.
+    void commitHistoryEntry(HistoryEntry entry);
+
+    // Coalescing (grupo de escritura tras un reemplazo de seleccion):
+    // agrega una edicion a la ULTIMA entrada del historial en vez de
+    // crear una nueva, refrescando su estado "despues". Si no hubiera
+    // entrada previa, crea una con esta edicion.
+    void extendLastEntry(Edit edit);
+
+    // Deshace la ultima entrada: aplica sus edits en reversa, restaura
+    // cursor/seleccion/'\n' del "antes" y recalcula modified. Devuelve la
+    // misma entrada para que el Editor la apile en redoStack.
+    HistoryEntry undoStep();
+
+    // Rehace: reaplica forward la entrada tope de redoStack, restaura el
+    // estado "despues" y la devuelve para el undoStack.
+    HistoryEntry redoStep();
+
+private:
+    // Aplica una edit hacia adelante / en reversa sobre el documento.
+    void applyForward(const Edit& e);
+    void applyBackward(const Edit& e);
+
+    // Restaura una seleccion descartandola SOLO si quedo fuera de rango
+    // tras el undo/redo. Una seleccion degenerada dentro de rango se
+    // conserva tal cual (simetria undo/redo).
+    void restoreSelection(std::optional<Selection> sel);
 };

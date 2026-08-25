@@ -1,5 +1,9 @@
 #include "core/Buffer.h"
 
+#include <cassert>
+
+#include "core/utf8.h"
+
 Buffer::Buffer() {
     unnamedName = "SinNombre";
     savedLines = document.snapshot();
@@ -14,34 +18,143 @@ std::string Buffer::displayName() const {
     return unnamedName;
 }
 
-void Buffer::pushHistory() {
-    HistoryState state;
-    state.lines = document.snapshot();
-    state.endsWithNewline = document.endsWithNewline();
-    state.line = cursor.line;
-    state.col = cursor.col;
-    state.selection = selection;
-    undoStack.push_back(state);
+HistoryEntry Buffer::beginHistoryEntry() const {
+    HistoryEntry e;
+    e.cursorBefore = {cursor.line, cursor.col};
+    e.selectionBefore = selection;
+    e.endsWithNewlineBefore = document.endsWithNewline();
+    return e;
+}
+
+void Buffer::commitHistoryEntry(HistoryEntry entry) {
+    // Sin edits no hubo mutacion real: descartar la entrada para no
+    // dejar pasos de undo "fantasma" (ni limpiar el redo en vano).
+    if (entry.edits.empty()) return;
+
+    entry.cursorAfter = {cursor.line, cursor.col};
+    entry.selectionAfter = selection;
+    entry.endsWithNewlineAfter = document.endsWithNewline();
+
+    undoStack.push_back(std::move(entry));
     if (undoStack.size() > MAX_UNDO) {
         undoStack.erase(undoStack.begin());
     }
     redoStack.clear();
 }
 
-void Buffer::applyState(const HistoryState& state) {
-    document.restore(state.lines);
-    document.setEndsWithNewline(state.endsWithNewline);
-    cursor.line = state.line;
-    cursor.col = state.col;
+void Buffer::extendLastEntry(Edit edit) {
+    // Contrato: esta edit pertenece al grupo ya presente en el historial
+    // (solo se llama con coalescingTyping_ activo, tras un commit). Si no
+    // hay entrada, es un bug de logica en el llamador, no algo a reparar
+    // aqui creando una entrada magica.
+    assert(!undoStack.empty() &&
+           "extendLastEntry sin grupo activo: bug de coalescingTyping_");
+
+    HistoryEntry& e = undoStack.back();
+    e.edits.push_back(std::move(edit));
+    e.cursorAfter = {cursor.line, cursor.col};
+    e.selectionAfter = selection;
+    e.endsWithNewlineAfter = document.endsWithNewline();
+}
+
+void Buffer::applyForward(const Edit& e) {
+    switch (e.type) {
+        case EditType::Insert:
+            // La posicion final la calcula Document (celdas + '\n'); el
+            // `end` de la Edit ya fue registrado por quien la emitio.
+            document.insertText(e.start.line, e.start.col, e.text);
+            break;
+        case EditType::SplitLine:
+            document.splitLine(e.start.line, e.start.col);
+            break;
+        case EditType::Delete:
+            document.deleteRange(e.start.line, e.start.col,
+                                 e.end.line, e.end.col);
+            break;
+        case EditType::MergeLine:
+            // Fundir: borrar el '\n' que separaba las dos lineas.
+            document.mergeLine(e.start.line);
+            break;
+    }
+}
+
+void Buffer::applyBackward(const Edit& e) {
+    switch (e.type) {
+        case EditType::Insert:
+            document.deleteRange(e.start.line, e.start.col,
+                                 e.end.line, e.end.col);
+            break;
+        case EditType::SplitLine:
+            // Deshacer Enter: fundir la linea partida con su siguiente.
+            document.mergeLine(e.start.line);
+            break;
+        case EditType::Delete:
+            document.insertText(e.start.line, e.start.col, e.text);
+            break;
+        case EditType::MergeLine:
+            // Deshacer la fusion: re-partir en la columna donde estaba
+            // el '\n' eliminado.
+            document.splitLine(e.start.line, e.start.col);
+            break;
+    }
+}
+
+HistoryEntry Buffer::undoStep() {
+    assert(!undoStack.empty());
+    HistoryEntry entry = undoStack.back();
+
+    // El lado "despues" se REFRESCA con el estado vigente al momento del
+    // undo: eso es exactamente lo que el redo debera restaurar (el estado
+    // tal como estaba cuando se deshizo, incluido cualquier movimiento de
+    // cursor posterior a la edicion).
+    entry.cursorAfter = {cursor.line, cursor.col};
+    entry.selectionAfter = selection;
+    entry.endsWithNewlineAfter = document.endsWithNewline();
+
+    undoStack.pop_back();
+
+    for (auto it = entry.edits.rbegin(); it != entry.edits.rend(); ++it) {
+        applyBackward(*it);
+    }
+
+    document.setEndsWithNewline(entry.endsWithNewlineBefore);
+    cursor.line = entry.cursorBefore.line;
+    cursor.col = entry.cursorBefore.col;
     cursor.clampToLine(document);
-    // Restauramos la seleccion del momento. La descartamos SOLO si quedo
-    // fuera de rango tras el undo/redo (p.ej. por restauration de un
-    // documento distinto). Una seleccion DEGENERADA (anchor == position)
-    // dentro de rango se CONSERVA tal cual, para que undo/redo sean
-    // simetricos: una seleccion vacia que existia al momento de la edicion
-    // tambien debe restablecerse (tiene hasSelection() == false, como la
-    // original, asi que no cambia el modo).
-    selection = state.selection;
+    restoreSelection(entry.selectionBefore);
+
+    modified = (document.snapshot() != savedLines);
+    return entry;
+}
+
+HistoryEntry Buffer::redoStep() {
+    assert(!redoStack.empty());
+    HistoryEntry entry = redoStack.back();
+
+    // Simetrico al undo: el lado "antes" se refresca con el estado vigente,
+    // de modo que re-deshacer vuelva a este mismo punto.
+    entry.cursorBefore = {cursor.line, cursor.col};
+    entry.selectionBefore = selection;
+    entry.endsWithNewlineBefore = document.endsWithNewline();
+
+    redoStack.pop_back();
+
+    for (const Edit& e : entry.edits) {
+        applyForward(e);
+    }
+
+    document.setEndsWithNewline(entry.endsWithNewlineAfter);
+    cursor.line = entry.cursorAfter.line;
+    cursor.col = entry.cursorAfter.col;
+    cursor.clampToLine(document);
+    restoreSelection(entry.selectionAfter);
+
+    modified = (document.snapshot() != savedLines);
+    return entry;
+}
+
+void Buffer::restoreSelection(std::optional<Selection> sel) {
+    selection = std::move(sel);
     if (selection.has_value()) {
         bool outOfRange =
             selection->anchor.line >= document.lineCount() ||
@@ -50,6 +163,4 @@ void Buffer::applyState(const HistoryState& state) {
             selection->position.col > document.lineLength(selection->position.line);
         if (outOfRange) selection.reset();
     }
-    // modified = "¿el contenido difiere del ultimo guardado?"
-    modified = (document.snapshot() != savedLines);
 }

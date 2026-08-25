@@ -139,20 +139,27 @@ void Editor::registerCommands() {
             return;
         }
         auto sel = selection();
-        b.pushHistory();
+        HistoryEntry e = b.beginHistoryEntry();
         if (sel.has_value()) {
+            auto removed = b.document.extractRange(sel->start.line, sel->start.col,
+                                                   sel->end.line, sel->end.col);
             b.document.deleteRange(sel->start.line, sel->start.col,
                                    sel->end.line, sel->end.col);
+            e.edits.push_back({EditType::Delete, sel->start, sel->end,
+                               blockToString(removed)});
             b.cursor.line = sel->start.line;
             b.cursor.col = sel->start.col;
         }
-        Position end = b.document.insertBlock(b.cursor.line, b.cursor.col, block);
+        int insLine = b.cursor.line, insCol = b.cursor.col;
+        Position end = b.document.insertBlock(insLine, insCol, block);
+        e.edits.push_back({EditType::Insert, {insLine, insCol}, end, *maybe});
         b.cursor.line = end.line;
         b.cursor.col = end.col;
         b.modified = true;
         clearSelection();
         state_ = State::Navegacion;
         setActionMessage("Pegado.", MessageKind::Success);
+        b.commitHistoryEntry(std::move(e));
     });
     commands_.registerCommand("navegacion.palabra.atras", [this] {
         active().cursor.moveToPreviousWord(active().document);
@@ -208,12 +215,14 @@ void Editor::registerCommands() {
                 setActionMessage("Error al copiar al portapapeles.", MessageKind::Error);
                 return;
             }
-            b.pushHistory();
+            HistoryEntry e = b.beginHistoryEntry();
             b.document.deleteRange(sel->start.line, sel->start.col,
                                    sel->end.line, sel->end.col);
+            e.edits.push_back({EditType::Delete, sel->start, sel->end, text});
             b.cursor.line = sel->start.line;
             b.cursor.col = sel->start.col;
             b.modified = true;
+            b.commitHistoryEntry(std::move(e));
         }
         clearSelection();
         state_ = State::Navegacion;
@@ -726,55 +735,98 @@ void Editor::handleInteraccionEvent(const Event& event) {
             // Edicion libre real: cualquier letra (incluida i/s/p/c/x)
             // se inserta como texto. Aqui no son comandos de modo.
             // P0 interaction: si venimos de un reemplazo de seleccion
-            // (coalescingTyping_ ya ha empujado el historial una vez para
-            // todo el grupo), NO empujamos de nuevo: el texto consecutivo
-            // se absorbe en la MISMA entrada de undo.
+            // (la entrada del grupo ya esta en el historial), NO creamos
+            // una nueva: el texto consecutivo se absorbe en la MISMA
+            // entrada de undo via extendLastEntry.
             if (!coalescingTyping_) {
-                b.pushHistory();
+                HistoryEntry e = b.beginHistoryEntry();
+                Position start{b.cursor.line, b.cursor.col};
+                // La posicion final la calcula Document (UTF-8, '\n').
+                Position end = b.document.insertText(start.line, start.col,
+                                                     event.text);
+                e.edits.push_back({EditType::Insert, start, end, event.text});
+                b.cursor.line = end.line;
+                b.cursor.col = end.col;
+                b.modified = true;
+                b.commitHistoryEntry(std::move(e));
+            } else {
+                Position start{b.cursor.line, b.cursor.col};
+                Position end = b.document.insertText(start.line, start.col,
+                                                     event.text);
+                b.extendLastEntry({EditType::Insert, start, end, event.text});
+                b.cursor.line = end.line;
+                b.cursor.col = end.col;
+                b.modified = true;
             }
-            b.document.insertText(b.cursor.line, b.cursor.col, event.text);
-            b.cursor.col += static_cast<int>(event.text.size());
-            b.modified = true;
             break;
 
-        case EventType::InsertNewline:
-            b.pushHistory();
-            b.document.insertNewline(b.cursor.line, b.cursor.col);
+        case EventType::InsertNewline: {
+            HistoryEntry e = b.beginHistoryEntry();
+            Position at{b.cursor.line, b.cursor.col};
+            b.document.splitLine(at.line, at.col);
+            e.edits.push_back({EditType::SplitLine, at,
+                               {at.line + 1, 0}, ""});
             b.cursor.line++;
             b.cursor.col = 0;
             b.modified = true;
+            b.commitHistoryEntry(std::move(e));
             break;
+        }
 
         case EventType::Backspace:
         case EventType::Delete: {
             // interaction P0: si hay una seleccion vigente (p.ej. por entrar
             // a edicion sin cancelarla antes), Backspace/Delete borran el
             // rango entero en vez de un solo caracter. deleteSelection()
-            // ya empuja historial.
+            // ya registra su propia entrada de historial.
             if (deleteSelection()) break;
-            b.pushHistory();
+            HistoryEntry e = b.beginHistoryEntry();
             if (event.type == EventType::Backspace) {
                 bool willMergeLines = (b.cursor.col == 0 && b.cursor.line > 0);
-                int prevLineLen = willMergeLines
-                    ? b.document.lineLength(b.cursor.line - 1) : 0;
-
-                // deleteCharBefore devuelve cuantos bytes borro dentro de la
-                // linea (el largo del caracter UTF-8 completo), asi el cursor
-                // se reposiciona sin recalcular el limite del caracter aqui.
-                int deleted = b.document.deleteCharBefore(b.cursor.line,
-                                                          b.cursor.col);
-                if (deleted > 0 || willMergeLines) {
-                    if (willMergeLines) {
-                        b.cursor.line--;
-                        b.cursor.col = prevLineLen;
-                    } else {
+                if (willMergeLines) {
+                    int prevLineLen = b.document.lineLength(b.cursor.line - 1);
+                    Position nl{b.cursor.line - 1, prevLineLen};
+                    b.document.mergeLine(nl.line);
+                    e.edits.push_back({EditType::MergeLine, nl,
+                                       {b.cursor.line, 0}, ""});
+                    b.cursor.line--;
+                    b.cursor.col = prevLineLen;
+                    b.modified = true;
+                } else {
+                    int line = b.cursor.line, col = b.cursor.col;
+                    std::string removed =
+                        b.document.cellTextBefore(line, col);
+                    // deleteCharBefore devuelve cuantos bytes borro dentro
+                    // de la linea (el largo del caracter UTF-8 completo).
+                    int deleted = b.document.deleteCharBefore(line, col);
+                    if (deleted > 0) {
+                        e.edits.push_back({EditType::Delete, {line, col - deleted},
+                                           {line, col}, removed});
                         b.cursor.col -= deleted;
+                        b.modified = true;
                     }
+                }
+            } else {
+                int line = b.cursor.line, col = b.cursor.col;
+                int len = b.document.lineLength(line);
+                if (col < len) {
+                    std::string removed =
+                        b.document.cellTextAt(line, col);
+                    int deleted = b.document.deleteCharAt(line, col);
+                    if (deleted > 0) {
+                        e.edits.push_back({EditType::Delete, {line, col},
+                                           {line, col + deleted}, removed});
+                        b.modified = true;
+                    }
+                } else if (line + 1 < b.document.lineCount()) {
+                    // Delete al final de linea: funde la linea siguiente.
+                    b.document.mergeLine(line);
+                    e.edits.push_back({EditType::MergeLine, {line, col},
+                                       {line + 1, 0}, ""});
                     b.modified = true;
                 }
-            } else if (b.document.deleteCharAt(b.cursor.line, b.cursor.col)) {
-                b.modified = true;
             }
+            b.commitHistoryEntry(std::move(e));
             break;
         }
 
@@ -873,21 +925,40 @@ void Editor::handleSeleccionEvent(const Event& event) {
                 // Si el rango es vacio (solo se entro al modo), no hay nada
                 // que reemplazar: se inserta igual pero el grupo NO coalesce
                 // (escritura normal, por caracter).
+                // P0 interaction: escribir una letra que NO es comando de
+                // Seleccion REEMPLAZA el rango marcado por esa letra y entra
+                // a Interaccion, abriendo un "grupo de escritura": se crea
+                // UNA entrada de historial aqui (Delete del rango + Insert
+                // de la letra) y la escritura consecutiva posterior se
+                // absorbe en la misma entrada via extendLastEntry, de modo
+                // que "reemplazo + tecleo" se deshace en una sola operacion.
+                // Si el rango es vacio (solo se entro al modo), no hay nada
+                // que reemplazar: se inserta igual pero el grupo NO coalesce
+                // (escritura normal, por caracter).
                 bool hadSel = hasSelection();
                 auto sel = selection();
-                b.pushHistory();                 // UNA entrada para el grupo
+                HistoryEntry e = b.beginHistoryEntry();   // UNA entrada para el grupo
                 if (hadSel) {
+                    auto removed = b.document.extractRange(sel->start.line, sel->start.col,
+                                                           sel->end.line, sel->end.col);
                     b.document.deleteRange(sel->start.line, sel->start.col,
                                            sel->end.line, sel->end.col);
+                    e.edits.push_back({EditType::Delete, sel->start, sel->end,
+                                       blockToString(removed)});
                     b.cursor.line = sel->start.line;
                     b.cursor.col = sel->start.col;
                 }
-                b.document.insertText(b.cursor.line, b.cursor.col, event.text);
-                b.cursor.col += static_cast<int>(event.text.size());
+                Position start{b.cursor.line, b.cursor.col};
+                Position end = b.document.insertText(start.line, start.col,
+                                                     event.text);
+                e.edits.push_back({EditType::Insert, start, end, event.text});
+                b.cursor.line = end.line;
+                b.cursor.col = end.col;
                 b.modified = true;
                 clearSelection();
                 state_ = State::Interaccion;
                 coalescingTyping_ = hadSel;      // solo el reemplazo coalesce
+                b.commitHistoryEntry(std::move(e));
                 setActionMessage("Reemplazando seleccion...");
             }
             break;
@@ -943,12 +1014,15 @@ void Editor::handleSelectAllEvent(const Event& event) {
                         return;
                     }
                     if (event.text == "x") {
-                        b.pushHistory();
+                        HistoryEntry e = b.beginHistoryEntry();
                         b.document.deleteRange(sel->start.line, sel->start.col,
                                                sel->end.line, sel->end.col);
+                        e.edits.push_back({EditType::Delete, sel->start, sel->end,
+                                           text});
                         b.cursor.line = sel->start.line;
                         b.cursor.col = sel->start.col;
                         b.modified = true;
+                        b.commitHistoryEntry(std::move(e));
                     }
                 }
                 clearSelection();
@@ -1381,13 +1455,18 @@ bool Editor::deleteSelection() {
     Buffer& b = active();
     if (!hasSelection()) return false;
     auto sel = selection();
-    b.pushHistory();
+    HistoryEntry e = b.beginHistoryEntry();
+    auto removed = b.document.extractRange(sel->start.line, sel->start.col,
+                                           sel->end.line, sel->end.col);
     b.document.deleteRange(sel->start.line, sel->start.col,
                            sel->end.line, sel->end.col);
+    e.edits.push_back({EditType::Delete, sel->start, sel->end,
+                       blockToString(removed)});
     b.cursor.line = sel->start.line;
     b.cursor.col = sel->start.col;
     b.modified = true;
     clearSelection();
+    b.commitHistoryEntry(std::move(e));
     return true;
 }
 
@@ -1418,7 +1497,7 @@ void Editor::indentSelection(bool indent) {
         --lastLine;
     }
 
-    // Hacer un solo pushHistory cubre el rango entero, de modo que el
+    // Una sola entrada de historial cubre el rango entero, de modo que el
     // '}' / '{' se deshace en UNA sola operacion. Para no dejar entradas
     // de undo vacias (p.ej. des-indentar algo que ya no tiene margen),
     // primero miramos si ALGUNA linea del rango va a cambiar realmente.
@@ -1442,10 +1521,18 @@ void Editor::indentSelection(bool indent) {
         return;
     }
 
-    b.pushHistory();
+    HistoryEntry e = b.beginHistoryEntry();
     for (int l = firstLine; l <= lastLine; ++l) {
+        std::string before = b.document.lineAt(l);
         int delta = b.document.indentLine(l, indent, kIndentLen);
         if (delta == 0) continue;
+        if (delta > 0) {
+            e.edits.push_back({EditType::Insert, {l, 0}, {l, delta},
+                               std::string(static_cast<size_t>(delta), ' ')});
+        } else {
+            e.edits.push_back({EditType::Delete, {l, 0}, {l, -delta},
+                               before.substr(0, static_cast<size_t>(-delta))});
+        }
         // Desplazar el cursor y los extremos de la seleccion sobre ESTA
         // linea por el delta que el cambio movio su comienzo (positivo al
         // indentar, negativo al desindentar). Asi la tabulacion no deja
@@ -1462,6 +1549,7 @@ void Editor::indentSelection(bool indent) {
         }
     }
     b.modified = true;
+    b.commitHistoryEntry(std::move(e));
     setActionMessage(indent ? "Tabulado." : "Tabulacion quitada.",
                      MessageKind::Success);
 }
@@ -1474,17 +1562,11 @@ void Editor::undo() {
         return;
     }
 
-    // Guardamos el estado actual para poder rehacer.
-    HistoryState current;
-    current.lines = b.document.snapshot();
-    current.line = b.cursor.line;
-    current.col = b.cursor.col;
-    current.selection = b.selection;
-    current.endsWithNewline = b.document.endsWithNewline();
-    b.redoStack.push_back(current);
-
-    b.applyState(b.undoStack.back());
-    b.undoStack.pop_back();
+    // undoStep aplica las edits en reversa y restaura el estado "antes".
+    // La misma entrada describe la operacion hacia adelante: viaja al
+    // redoStack tal cual.
+    HistoryEntry undone = b.undoStep();
+    b.redoStack.push_back(std::move(undone));
     // La seleccion restaurada vuelve a estar VIGENTE. Importante: el modo
     // Seleccion solo debe activarse si el rango restaurado es realmente NO
     // vacio. Compartimos el criterio con hasSelection() (anchor != position).
@@ -1502,17 +1584,10 @@ void Editor::redo() {
         return;
     }
 
-    // Guardamos el estado actual en el historial de deshacer.
-    HistoryState current;
-    current.lines = b.document.snapshot();
-    current.line = b.cursor.line;
-    current.col = b.cursor.col;
-    current.selection = b.selection;
-    current.endsWithNewline = b.document.endsWithNewline();
-    b.undoStack.push_back(current);
-
-    b.applyState(b.redoStack.back());
-    b.redoStack.pop_back();
+    // redoStep reaplica las edits y restaura el estado "despues". La
+    // entrada vuelve al undoStack para poder deshacerla de nuevo.
+    HistoryEntry redone = b.redoStep();
+    b.undoStack.push_back(std::move(redone));
     state_ = (b.selection.has_value() && b.selection->anchor != b.selection->position)
            ? State::Seleccion
            : State::Navegacion;

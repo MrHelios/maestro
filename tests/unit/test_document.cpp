@@ -240,7 +240,7 @@ TEST(doc_insert_special_chars) {
 // ---------------------------------------------------------------------------
 TEST(doc_newline_empty) {
     Document d;
-    d.insertNewline(0, 0);
+    d.splitLine(0, 0);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "");
     CHECK_EQ(d.lineAt(1), "");
@@ -248,7 +248,7 @@ TEST(doc_newline_empty) {
 
 TEST(doc_newline_start) {
     Document d = makeDoc({"abc"});
-    d.insertNewline(0, 0);
+    d.splitLine(0, 0);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "");
     CHECK_EQ(d.lineAt(1), "abc");
@@ -256,7 +256,7 @@ TEST(doc_newline_start) {
 
 TEST(doc_newline_middle) {
     Document d = makeDoc({"abcd"});
-    d.insertNewline(0, 2);
+    d.splitLine(0, 2);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "ab");
     CHECK_EQ(d.lineAt(1), "cd");
@@ -264,7 +264,7 @@ TEST(doc_newline_middle) {
 
 TEST(doc_newline_end) {
     Document d = makeDoc({"abc"});
-    d.insertNewline(0, 3);
+    d.splitLine(0, 3);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "abc");
     CHECK_EQ(d.lineAt(1), "");
@@ -273,21 +273,21 @@ TEST(doc_newline_end) {
 TEST(doc_newline_repeated) {
     Document d;
     for (int i = 0; i < 5; ++i)
-        d.insertNewline(0, 0);
+        d.splitLine(0, 0);
     CHECK_EQ(d.lineCount(), 6);
 }
 
 TEST(doc_newline_many_lines) {
     Document d = makeDoc({"texto"});
     for (int i = 0; i < 100; ++i)
-        d.insertNewline(0, 0);
+        d.splitLine(0, 0);
     CHECK_EQ(d.lineCount(), 101);
     CHECK_EQ(d.lineAt(100), "texto");
 }
 
 TEST(doc_newline_oob_line_ignored) {
     Document d = makeDoc({"abc"});
-    d.insertNewline(5, 0); // indice de linea invalido: no hace nada
+    d.splitLine(5, 0); // indice de linea invalido: no hace nada
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "abc");
 }
@@ -295,7 +295,7 @@ TEST(doc_newline_oob_line_ignored) {
 TEST(doc_newline_col_beyond_clamps_to_end) {
     // col fuera de rango se recorta al final de la linea: crea nueva linea vacia.
     Document d = makeDoc({"abc"});
-    d.insertNewline(0, 1000);
+    d.splitLine(0, 1000);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "abc");
     CHECK_EQ(d.lineAt(1), "");
@@ -303,7 +303,7 @@ TEST(doc_newline_col_beyond_clamps_to_end) {
 
 TEST(doc_newline_col_negative_clamps_to_start) {
     Document d = makeDoc({"abc"});
-    d.insertNewline(0, -1);
+    d.splitLine(0, -1);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "");
     CHECK_EQ(d.lineAt(1), "abc");
@@ -407,7 +407,7 @@ TEST(doc_delete_end_joins_next) {
 
 TEST(doc_delete_last_line_noop) {
     Document d = makeDoc({"ab"});
-    d.insertNewline(0, 2);
+    d.splitLine(0, 2);
     CHECK(!d.deleteCharAt(1, 2));
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(1), "");
@@ -556,7 +556,7 @@ TEST(doc_enter_at_end_of_newline_file_does_not_double) {
     Document d;
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK(d.endsWithNewline());
-    d.insertNewline(0, 1); // Enter al final de "a"
+    d.splitLine(0, 1); // Enter al final de "a"
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(1), "");
     CHECK(!d.endsWithNewline());
@@ -1028,7 +1028,7 @@ TEST(doc_invariants_after_ops) {
     Document d = makeDoc({"ab", "def"});
 
     d.insertChar(0, 1, 'X');   // line0: "aXb"
-    d.insertNewline(0, 2);       // line0 "aX", line1 "b", line2 "def"
+    d.splitLine(0, 2);       // line0 "aX", line1 "b", line2 "def"
     d.deleteCharAt(1, 0);        // line1 "b" -> ""
     d.insertChar(1, 0, 'Z');     // line1 "Z"
 
@@ -1100,7 +1100,7 @@ TEST(doc_large_10mb_roundtrip) {
 
 TEST(doc_large_newline_split) {
     Document d = makeDoc({std::string(2000000, 'm')});
-    d.insertNewline(0, 1000000);
+    d.splitLine(0, 1000000);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineLength(0), 1000000);
     CHECK_EQ(d.lineLength(1), 1000000);
@@ -1122,7 +1122,7 @@ TEST(doc_repeated_insert_delete) {
 TEST(doc_repeated_newline_merge) {
     Document d;
     for (int i = 0; i < 1000; ++i)
-        d.insertNewline(0, 0);
+        d.splitLine(0, 0);
     for (int i = 0; i < 1000; ++i)
         d.deleteCharBefore(1, 0);
     CHECK_EQ(d.lineCount(), 1);
@@ -1183,7 +1183,7 @@ TEST(doc_stress_random_operations) {
                 break;
             case 1:
                 if (d.lineCount() < maxLines)
-                    d.insertNewline(line, col);
+                    d.splitLine(line, col);
                 break;
             case 2:
                 d.deleteCharAt(line, col);
