@@ -7,6 +7,7 @@
 #include "core/Document.h"
 #include "core/Cursor.h"
 #include "core/Selection.h"
+#include "core/SmallVec.h"
 #include "core/Viewport.h"
 
 // Tipo de operacion atomica registrada en una entrada de historial. Cada
@@ -40,7 +41,11 @@ struct Edit {
 // Undo aplica las edits en reversa y restaura el "antes"; redo las reaplica
 // y restaura el "despues".
 struct HistoryEntry {
-    std::vector<Edit> edits;
+    // El caso dominante es UNA edit por entrada (cada tecla): el primer
+    // Edit vive INLINE en la propia entrada y solo las operaciones
+    // multi-edit (reemplazo de seleccion, indentacion, pegado sobre
+    // seleccion, ...) piden memoria al heap.
+    SmallVec<Edit, 1> edits;
 
     Position cursorBefore{0, 0};
     Position cursorAfter{0, 0};

@@ -25,6 +25,7 @@ TEST_INC := -I$(TEST_DIR) -I$(TEST_DIR)/helpers
 TEST_SRC := $(TEST_DIR)/test_main.cpp \
             $(wildcard $(TEST_DIR)/unit/*.cpp) \
             $(wildcard $(TEST_DIR)/interaction/*.cpp) \
+            $(wildcard $(TEST_DIR)/performance/*.cpp) \
             $(wildcard $(TEST_DIR)/e2e/*.cpp) \
             $(wildcard $(TEST_DIR)/integration/*.cpp) \
             $(wildcard $(TEST_DIR)/integration/x11_clipboard/*.cpp)
@@ -93,6 +94,9 @@ build/%.o: tests/interaction/%.cpp | build
 build/%.o: tests/e2e/%.cpp | build
 	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
 
+build/%.o: tests/performance/%.cpp | build
+	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
+
 build/%.o: tests/integration/%.cpp | build
 	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
 
@@ -121,6 +125,9 @@ build-san/%.o: tests/interaction/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
 
 build-san/%.o: tests/e2e/%.cpp | build-san
+	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
+
+build-san/%.o: tests/performance/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
 
 build-san/%.o: tests/integration/%.cpp | build-san
