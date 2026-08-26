@@ -1,5 +1,7 @@
 #include "ui/Renderer.h"
 
+#include <cassert>
+#include <cerrno>
 #include <cstdlib>
 #include <unistd.h>
 #include <algorithm>
@@ -243,56 +245,56 @@ std::string Renderer::buildScreen(const Document& doc,
                                    const Message& message,
                                    State state,
                                    const std::optional<Selection>& selection) {
-    // Armamos todo en un unico string y lo escribimos de una sola vez
-    // para evitar parpadeo.
     std::string out;
-
-    // Ciclo de vida del frame global (ocultar cursor / home / limpiar).
     beginFrame(out);
+    out += buildEditorBody(doc, cursor, viewport, filename, modified, message,
+                           state, selection);
+    int curRow = 1, curCol = 1;
+    editorCursorPos(doc, cursor, viewport, curRow, curCol);
+    moveCursorTo(out, curRow, curCol);
+    endFrame(out);
+    return out;
+}
 
-    // Si hay seleccion, la normalizamos una vez para conocer los limites.
+Renderer::EditorGeometry Renderer::editorGeometry(const Document& doc,
+                                                    const Viewport& viewport) const {
+    EditorGeometry g;
+    g.layout = calculateLayout(viewport.height, viewport.width);
+    g.gutterW = std::min(gutterWidth(doc.lineCount()), viewport.width);
+    return g;
+}
+
+std::string Renderer::buildEditorBody(const Document& doc,
+                                       const Cursor& cursor,
+                                       const Viewport& viewport,
+                                       const std::string& filename,
+                                       bool modified,
+                                       const Message& message,
+                                       State state,
+                                       const std::optional<Selection>& selection) const {
+    std::string out;
     std::optional<Normalized> sel = selection.has_value() ? normalize(*selection)
                                                           : std::nullopt;
-
-    // El Renderer calcula el Layout UNA vez: el contenido arriba y la barra
-    // comun (fila fija + mensajes) en las 2 filas finales. Ninguna pantalla
-    // vuelve a decidir donde termina el contenido.
-    Layout layout = calculateLayout(viewport.height, viewport.width);
-
-    // Gutter de numeros de linea (solo el area del documento): se resta del
-    // ancho total para el texto. Solo lo usa el contenido; el StatusBar
-    // trabaja sobre viewport.width tal cual.
-    //
-    // Cota de ancho (v1.1, regresion): en una terminal ultra-chica el gutter
-    // RARO se recorta al ancho disponible para que ninguna fila del contenido
-    // escriba fuera de la terminal (renderGutterCell/Blank ya no la exceden).
-    int gutterW = std::min(gutterWidth(doc.lineCount()), viewport.width);
-
-    renderEditorContent(out, doc, cursor, viewport, sel, layout.content,
-                        gutterW);
-
-    // La etiqueta de estado lleva el accent del modo activo (v1.3).
+    const EditorGeometry g = editorGeometry(doc, viewport);
+    renderEditorContent(out, doc, cursor, viewport, sel, g.layout.content,
+                        g.gutterW);
     StatusBarData data =
         editorBarData(filename, modified, stateLabel(state), message, cursor,
                       doc.lineCount());
     data.estadoAccent = stateAccent(theme_, state);
-    renderStatusBar(out, layout.statusBar, data);
-
-    // Posicionar el cursor real de la terminal donde corresponde (v1.0,
-    // paso 9: un unico lugar decide la coordenada terminal del cursor).
-    // La cadena completo es:
-    //   Document cursor.col (BYTES)
-    //     -> utf8::columnOf -> columna VISUAL
-    //     -> + gutterW      -> + gutter de numeros
-    //     -> + layout.content.col + 1 -> + origen del contenido + 1 (1-indexada)
-    int visualCol = utf8::columnOf(doc.lineAt(cursor.line), cursor.col);
-    int screenRow = cursor.line - viewport.top + 1; // +1: terminal es 1-indexada
-    int screenCol = gutterW + visualCol + 1 + layout.content.col;
-    moveCursorTo(out, screenRow, screenCol);
-
-    endFrame(out);
-
+    renderStatusBar(out, g.layout.statusBar, data);
     return out;
+}
+
+void Renderer::editorCursorPos(const Document& doc,
+                               const Cursor& cursor,
+                               const Viewport& viewport,
+                               int& outRow, int& outCol) const {
+    const EditorGeometry g = editorGeometry(doc, viewport);
+    outRow = cursor.line - viewport.top + 1;
+    outCol = g.gutterW +
+             utf8::columnOf(doc.lineAt(cursor.line), cursor.col) + 1 +
+             g.layout.content.col;
 }
 
 // Posiciona el cursor real de la terminal en la fila/columna 1-indexadas.
@@ -306,19 +308,17 @@ void Renderer::moveCursorTo(std::string& out, int row, int col) const {
     out += "H";
 }
 
+void Renderer::hideCursor(std::string& out) const { out += "\x1b[?25l"; }
+void Renderer::showCursor(std::string& out) const { out += "\x1b[?25h"; }
+
 void Renderer::beginFrame(std::string& out) const {
-    // Oculta el cursor mientras dibujamos el frame completo (evita parpadeo),
-    // va a home y limpia lo que quede de la pantalla anterior. Es identico
-    // para las tres pantallas: el contenido se redibuja entero despues.
-    out += "\x1b[?25l";
+    hideCursor(out);
     out += "\x1b[H";
     out += "\x1b[J";
 }
 
 void Renderer::endFrame(std::string& out) const {
-    // Vuelve a mostrar el cursor real de la terminal ya posicionado sobre
-    // la coordenada que la pantalla eligio (moveCursorTo).
-    out += "\x1b[?25h";
+    showCursor(out);
 }
 
 Layout Renderer::calculateLayout(int contentRows, int width) const {
@@ -407,17 +407,114 @@ void Renderer::renderStatusBar(std::string& out,
     out += bar.render(area, data);
 }
 
+static bool writeAll(int fd, const std::string& s) {
+    const char* p = s.c_str();
+    std::size_t remaining = s.size();
+    while (remaining > 0) {
+        ssize_t n = ::write(fd, p, remaining);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return false;
+        }
+        if (n == 0) return false;
+        p += static_cast<std::size_t>(n);
+        remaining -= static_cast<std::size_t>(n);
+    }
+    return true;
+}
+
 void Renderer::renderScreen(const Document& doc,
-                            const Cursor& cursor,
-                            const Viewport& viewport,
-                            const std::string& filename,
-                            bool modified,
-                            const Message& message,
-                            State state,
-                            const std::optional<Selection>& selection) {
+                             const Cursor& cursor,
+                             const Viewport& viewport,
+                             const std::string& filename,
+                             bool modified,
+                             const Message& message,
+                             State state,
+                             const std::optional<Selection>& selection) {
     std::string buffer = buildScreen(doc, cursor, viewport, filename,
                                      modified, message, state, selection);
-    write(STDOUT_FILENO, buffer.c_str(), buffer.size());
+    writeAll(STDOUT_FILENO, buffer);
+}
+
+static void splitRows(const std::string& body, std::vector<std::string>* rows) {
+    rows->clear();
+    std::size_t start = 0;
+    while (start <= body.size()) {
+        std::size_t sep = body.find("\r\n", start);
+        if (sep == std::string::npos) {
+            rows->push_back(body.substr(start));
+            break;
+        }
+        rows->push_back(body.substr(start, sep - start));
+        start = sep + 2;
+    }
+}
+
+void Renderer::renderScreenDiff(const Document& doc,
+                                 const Cursor& cursor,
+                                 const Viewport& viewport,
+                                 const std::string& filename,
+                                 bool modified,
+                                 const Message& message,
+                                 State state,
+                                 const std::optional<Selection>& selection) {
+    const std::string out = buildDiffFrame(doc, cursor, viewport, filename,
+                                            modified, message, state, selection);
+    if (!writeAll(STDOUT_FILENO, out)) hasLastEditorBody_ = false;
+}
+
+std::string Renderer::buildDiffFrame(const Document& doc,
+                                      const Cursor& cursor,
+                                      const Viewport& viewport,
+                                      const std::string& filename,
+                                      bool modified,
+                                      const Message& message,
+                                      State state,
+                                      const std::optional<Selection>& selection) {
+    if (!hasLastEditorBody_ || viewport.width != lastViewportW_ ||
+        viewport.height != lastViewportH_) {
+        lastEditorBody_ = buildEditorBody(doc, cursor, viewport, filename,
+                                          modified, message, state, selection);
+        hasLastEditorBody_ = true;
+        lastViewportW_ = viewport.width;
+        lastViewportH_ = viewport.height;
+        std::string out;
+        beginFrame(out);
+        out += lastEditorBody_;
+        int curRow = 1, curCol = 1;
+        editorCursorPos(doc, cursor, viewport, curRow, curCol);
+        moveCursorTo(out, curRow, curCol);
+        endFrame(out);
+        return out;
+    }
+
+    const std::string fresh = buildEditorBody(doc, cursor, viewport, filename,
+                                              modified, message, state,
+                                              selection);
+
+    std::vector<std::string> oldRows, newRows;
+    splitRows(lastEditorBody_, &oldRows);
+    splitRows(fresh, &newRows);
+
+    assert(oldRows.size() == newRows.size());
+    std::string out;
+    hideCursor(out);
+    for (int i = 0; i < static_cast<int>(oldRows.size()); ++i) {
+        if (oldRows[static_cast<size_t>(i)] ==
+            newRows[static_cast<size_t>(i)]) continue;
+        moveCursorTo(out, i + 1, 1);
+        out += theme_.reset;
+        out += "\x1b[K";
+        out += newRows[static_cast<size_t>(i)];
+    }
+
+    int curRow = 1, curCol = 1;
+    editorCursorPos(doc, cursor, viewport, curRow, curCol);
+    moveCursorTo(out, curRow, curCol);
+    showCursor(out);
+
+    lastEditorBody_ = fresh;
+    return out;
 }
 
 // v0.6.3: pantalla del selector de buffers. Mantiene el aspecto del editor
@@ -488,8 +585,9 @@ void Renderer::renderBufferList(const std::vector<std::string>& names,
                                 int selected,
                                 int width,
                                 int height) {
+    hasLastEditorBody_ = false;
     std::string buffer = buildBufferListScreen(names, selected, width, height);
-    write(STDOUT_FILENO, buffer.c_str(), buffer.size());
+    writeAll(STDOUT_FILENO, buffer);
 }
 
 // v0.6.4: pantalla del explorador de archivos. Mismo contenido que el
@@ -568,7 +666,8 @@ void Renderer::renderFileList(const std::vector<std::string>& names,
                               const Message& message,
                               int width,
                               int height) {
+    hasLastEditorBody_ = false;
     std::string buffer = buildFileListScreen(names, selected, scroll,
                                              path, message, width, height);
-    write(STDOUT_FILENO, buffer.c_str(), buffer.size());
+    writeAll(STDOUT_FILENO, buffer);
 }

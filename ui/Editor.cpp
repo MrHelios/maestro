@@ -511,9 +511,11 @@ void Editor::run() {
     {
         Buffer& b = active();
         b.viewport.scrollToCursor(b.cursor);
-        renderer_.renderScreen(b.document, b.cursor, b.viewport,
-                               b.filename, b.modified, statusMessage_,
-                               state_, b.selection);
+        // Render diferencial: el primer frame sale completo (cache vacio)
+        // y los siguientes solo emiten las filas que cambien.
+        renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
+                                   b.filename, b.modified, statusMessage_,
+                                   state_, b.selection);
     }
 
     while (running_) {
@@ -592,9 +594,11 @@ void Editor::renderFrame() {
                                  b.viewport.width, b.viewport.height);
     } else {
         b.viewport.scrollToCursor(b.cursor);
-        renderer_.renderScreen(b.document, b.cursor, b.viewport,
-                               b.filename, b.modified, statusMessage_,
-                               state_, b.selection);
+        // Render diferencial: solo las filas que cambiaron desde el frame
+        // anterior (ver Renderer::renderScreenDiff).
+        renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
+                                   b.filename, b.modified, statusMessage_,
+                                   state_, b.selection);
     }
 }
 
