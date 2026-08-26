@@ -1,6 +1,7 @@
 #include <string>
 #include <vector>
 #include "test_framework.h"
+#include "core/utf8.h"
 #define private public
 #include "ui/Editor.h"
 #undef private
@@ -16,7 +17,7 @@ TEST(busqueda_f_entra) {
     ed.handleEvent(ins('f'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Busqueda));
     CHECK_EQ(ed.searchQuery_, "");
-    CHECK_EQ(ed.statusMessage_.text, "Find word: ");
+    CHECK_EQ(ed.statusMessage_.text, "Find: ");
 }
 TEST(busqueda_esc_vacia) {
     Editor ed; ed.active().document.restore({"abc"});
@@ -87,7 +88,7 @@ TEST(busqueda_query_vacia_vuelve_origen) {
     CHECK_EQ(ed.searchQuery_, "");
     CHECK_EQ(ed.active().cursor.line, orig.line);
     CHECK_EQ(ed.active().cursor.col, orig.col);
-    CHECK_EQ(ed.statusMessage_.text, "Find word: ");
+    CHECK_EQ(ed.statusMessage_.text, "Find: ");
 }
 
 // 3 Navegación
@@ -144,6 +145,75 @@ TEST(busqueda_varias_misma_linea) {
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.col, 5);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.col, 10);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.col, 0);
+}
+TEST(busqueda_navegacion_tres_matches_wrap) {
+    Editor ed; ed.active().document.restore({"hello","abc","hello","abc","hello"});
+    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK(ed.statusMessage_.text.find("(1/3)") != std::string::npos);
+    CHECK(ed.searchHighlight_.has_value());
+    CHECK_EQ(ed.searchHighlight_->anchor.line, 0);
+    ed.handleEvent(ev(EventType::MoveDown));
+    CHECK_EQ(ed.active().cursor.line, 2);
+    CHECK(ed.statusMessage_.text.find("(2/3)") != std::string::npos);
+    CHECK_EQ(ed.searchHighlight_->anchor.line, 2);
+    ed.handleEvent(ev(EventType::MoveDown));
+    CHECK_EQ(ed.active().cursor.line, 4);
+    CHECK(ed.statusMessage_.text.find("(3/3)") != std::string::npos);
+    CHECK_EQ(ed.searchHighlight_->anchor.line, 4);
+    ed.handleEvent(ev(EventType::MoveDown));
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK(ed.statusMessage_.text.find("(1/3)") != std::string::npos);
+    CHECK_EQ(ed.searchHighlight_->anchor.line, 0);
+    ed.handleEvent(ev(EventType::MoveUp));
+    CHECK_EQ(ed.active().cursor.line, 4);
+    CHECK(ed.statusMessage_.text.find("(3/3)") != std::string::npos);
+    CHECK_EQ(ed.searchHighlight_->anchor.line, 4);
+}
+
+TEST(busqueda_contador_1) {
+    Editor ed; ed.active().document.restore({"ola"});
+    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    CHECK(ed.statusMessage_.text.find("(1/1)") != std::string::npos);
+}
+TEST(busqueda_contador_2) {
+    Editor ed; ed.active().document.restore({"ola","ola"});
+    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    CHECK(ed.statusMessage_.text.find("(1/2)") != std::string::npos);
+    ed.handleEvent(ev(EventType::MoveDown));
+    CHECK(ed.statusMessage_.text.find("(2/2)") != std::string::npos);
+}
+TEST(busqueda_contador_12) {
+    std::vector<std::string> lines(12,"ola");
+    Editor ed; ed.active().document.restore(lines);
+    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    CHECK(ed.statusMessage_.text.find("(1/12)") != std::string::npos);
+    CHECK(ed.statusMessage_.text.find("(100+)") == std::string::npos);
+}
+TEST(busqueda_contador_100) {
+    std::vector<std::string> lines(100,"ola");
+    Editor ed; ed.active().document.restore(lines);
+    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    CHECK(ed.statusMessage_.text.find("(1/100)") != std::string::npos);
+    CHECK(ed.statusMessage_.text.find("(100+)") == std::string::npos);
+}
+TEST(busqueda_contador_101) {
+    std::vector<std::string> lines(101,"ola");
+    Editor ed; ed.active().document.restore(lines);
+    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    CHECK(ed.statusMessage_.text.find("(100+)") != std::string::npos);
+    CHECK(ed.statusMessage_.text.find("(1/101)") == std::string::npos);
+}
+TEST(busqueda_contador_101_navega) {
+    std::vector<std::string> lines(101,"ola");
+    Editor ed; ed.active().document.restore(lines);
+    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    CHECK(ed.statusMessage_.text.find("(100+)") != std::string::npos);
+    for (int i = 0; i < 100; ++i) ed.handleEvent(ev(EventType::MoveDown));
+    CHECK_EQ(ed.active().cursor.line, 100);
+    CHECK(ed.statusMessage_.text.find("(100+)") != std::string::npos);
+    CHECK(ed.searchHighlight_.has_value());
+    CHECK_EQ(ed.searchHighlight_->anchor.line, 100);
 }
 
 // 4 Actualización incremental
@@ -498,6 +568,89 @@ TEST(busqueda_muchas_lineas_circular) {
     ed.handleEvent(ev(EventType::MoveUp)); CHECK_EQ(ed.active().cursor.line, 99);
 }
 
+TEST(busqueda_cambio_query_recalcula) {
+    std::vector<std::string> lines(30,"xxx");
+    lines[5]="ola"; lines[10]="ol"; lines[15]="ola ol"; lines[20]="ol";
+    Editor ed; ed.active().document.restore(lines);
+    ed.active().viewport.height = 10;
+    ed.active().viewport.top = 0;
+    ed.active().cursor.line = 0; ed.active().cursor.col = 0;
+    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    CHECK(ed.searchHighlight_.has_value());
+    CHECK_EQ(ed.active().cursor.line, 5);
+    CHECK(ed.statusMessage_.text.find("(1/2)") != std::string::npos);
+    {
+        auto hl = *ed.searchHighlight_;
+        CHECK_EQ(hl.anchor.line, 5); CHECK_EQ(hl.position.line, 5);
+        CHECK_EQ(hl.anchor.col, 0); CHECK_EQ(hl.position.col, 3);
+    }
+    CHECK_EQ(ed.active().viewport.top, 0);
+    ed.handleEvent(ev(EventType::Backspace));
+    CHECK_EQ(ed.searchQuery_, "ol");
+    CHECK(ed.searchHighlight_.has_value());
+    CHECK_EQ(ed.active().cursor.line, 5);
+    CHECK(ed.statusMessage_.text.find("(1/5)") != std::string::npos);
+    {
+        auto hl = *ed.searchHighlight_;
+        CHECK_EQ(hl.anchor.col, 0); CHECK_EQ(hl.position.col, 2);
+    }
+    ed.handleEvent(ins('a'));
+    CHECK_EQ(ed.searchQuery_, "ola");
+    CHECK_EQ(ed.active().cursor.line, 5);
+    CHECK(ed.statusMessage_.text.find("(1/2)") != std::string::npos);
+    ed.handleEvent(ev(EventType::MoveDown));
+    CHECK_EQ(ed.active().cursor.line, 15);
+    CHECK(ed.statusMessage_.text.find("(2/2)") != std::string::npos);
+    CHECK_EQ(ed.active().viewport.top, 10);
+    ed.handleEvent(ev(EventType::Backspace));
+    ed.handleEvent(ev(EventType::Backspace));
+    ed.handleEvent(ev(EventType::Backspace));
+    CHECK_EQ(ed.searchQuery_, "");
+    CHECK(!ed.searchHighlight_.has_value());
+    CHECK_EQ(ed.statusMessage_.text, "Find: ");
+    CHECK_EQ(ed.active().cursor.line, 0);
+}
+
+TEST(busqueda_cafe_cafe_dos_matches_highlight) {
+    Editor ed; ed.active().document.restore({"café café"});
+    ed.handleEvent(ins('f')); typeQ(ed,"café");
+    auto m = ed.collectMatches("café");
+    CHECK_EQ((int)m.size(), 2);
+    CHECK_EQ(m[0].line, 0); CHECK_EQ(m[0].col, 0);
+    CHECK_EQ(m[1].line, 0); CHECK_EQ(m[1].col, 6);
+    CHECK(ed.searchHighlight_.has_value());
+    {
+        auto hl = *ed.searchHighlight_;
+        CHECK_EQ(hl.anchor.line, 0); CHECK_EQ(hl.anchor.col, 0);
+        CHECK_EQ(hl.position.line, 0); CHECK_EQ(hl.position.col, 5);
+    }
+    CHECK(ed.statusMessage_.text.find("(1/2)") != std::string::npos);
+    ed.handleEvent(ev(EventType::MoveDown));
+    CHECK_EQ(ed.active().cursor.col, 6);
+    CHECK(ed.statusMessage_.text.find("(2/2)") != std::string::npos);
+    {
+        auto hl = *ed.searchHighlight_;
+        CHECK_EQ(hl.anchor.col, 6); CHECK_EQ(hl.position.col, 11);
+    }
+}
+TEST(busqueda_cafe_e_un_columna_highlight) {
+    Editor ed; ed.active().document.restore({"café"});
+    ed.handleEvent(ins('f')); typeQ(ed,"é");
+    auto m = ed.collectMatches("é");
+    CHECK_EQ((int)m.size(), 1);
+    CHECK_EQ(m[0].col, 3);
+    CHECK(ed.searchHighlight_.has_value());
+    {
+        auto hl = *ed.searchHighlight_;
+        CHECK_EQ(hl.anchor.line, 0); CHECK_EQ(hl.anchor.col, 3);
+        CHECK_EQ(hl.position.line, 0); CHECK_EQ(hl.position.col, 5);
+        int sc = utf8::columnOf(ed.active().document.lineAt(0), hl.anchor.col);
+        int ec = utf8::columnOf(ed.active().document.lineAt(0), hl.position.col);
+        CHECK_EQ(ec - sc, 1);
+    }
+    CHECK(ed.statusMessage_.text.find("(1/1)") != std::string::npos);
+}
+
 static bool validUtf8Busq(const std::string& s){ size_t i=0; while(i<s.size()){ unsigned char c=(unsigned char)s[i]; int need; if((c&0x80)==0) need=0; else if((c&0xE0)==0xC0) need=1; else if((c&0xF0)==0xE0) need=2; else if((c&0xF8)==0xF0) need=3; else return false; if(i+need>=s.size()) return false; for(int k=1;k<=need;++k) if(((unsigned char)s[i+k]&0xC0)!=0x80) return false; i+=need+1;} return true; }
 static void assertConsistentBusq(Editor& ed){
     const Document& d=ed.active().document;
@@ -531,6 +684,58 @@ TEST(busqueda_invariant_up) { Editor ed; ed.active().document.restore({"hello","
 TEST(busqueda_invariant_down) { Editor ed; ed.active().document.restore({"hello","hello"}); ed.handleEvent(ins('f')); typeQ(ed,"hello"); assertConsistentBusq(ed); ed.handleEvent(ev(EventType::MoveDown)); assertConsistentBusq(ed); }
 TEST(busqueda_invariant_esc) { Editor ed; ed.active().document.restore({"hello","hello"}); ed.handleEvent(ins('f')); typeQ(ed,"hello"); ed.handleEvent(ev(EventType::MoveDown)); assertConsistentBusq(ed); ed.handleEvent(ev(EventType::Escape)); assertConsistentBusq(ed); }
 TEST(busqueda_invariant_enter) { Editor ed; ed.active().document.restore({"hello","hello"}); ed.handleEvent(ins('f')); typeQ(ed,"hello"); ed.handleEvent(ev(EventType::MoveDown)); assertConsistentBusq(ed); ed.handleEvent(ev(EventType::InsertNewline)); assertConsistentBusq(ed); }
+
+TEST(busqueda_match_hola_ola) {
+    Editor ed; ed.active().document.restore({"hola"});
+    auto m = ed.collectMatches("ola");
+    CHECK_EQ((int)m.size(), 1);
+    CHECK_EQ(m[0].line, 0); CHECK_EQ(m[0].col, 1);
+}
+TEST(busqueda_match_ola_ola_dos) {
+    Editor ed; ed.active().document.restore({"ola ola"});
+    auto m = ed.collectMatches("ola");
+    CHECK_EQ((int)m.size(), 2);
+    CHECK_EQ(m[0].col, 0); CHECK_EQ(m[1].col, 4);
+}
+TEST(busqueda_match_olaola_dos) {
+    Editor ed; ed.active().document.restore({"olaola"});
+    auto m = ed.collectMatches("ola");
+    CHECK_EQ((int)m.size(), 2);
+    CHECK_EQ(m[0].col, 0); CHECK_EQ(m[1].col, 3);
+}
+TEST(busqueda_match_sin_coincidencia) {
+    Editor ed; ed.active().document.restore({"abc"});
+    auto m = ed.collectMatches("xyz");
+    CHECK_EQ((int)m.size(), 0);
+}
+TEST(busqueda_match_multilineas) {
+    Editor ed; ed.active().document.restore({"ola","xxx","ola","ola"});
+    auto m = ed.collectMatches("ola");
+    CHECK_EQ((int)m.size(), 3);
+    CHECK_EQ(m[0].line, 0); CHECK_EQ(m[1].line, 2); CHECK_EQ(m[2].line, 3);
+}
+TEST(busqueda_match_query_vacio) {
+    Editor ed; ed.active().document.restore({"hola"});
+    auto m = ed.collectMatches("");
+    CHECK_EQ((int)m.size(), 0);
+}
+TEST(busqueda_match_query_mas_largo) {
+    Editor ed; ed.active().document.restore({"hi"});
+    auto m = ed.collectMatches("hello");
+    CHECK_EQ((int)m.size(), 0);
+}
+TEST(busqueda_match_inicio) {
+    Editor ed; ed.active().document.restore({"olamundo"});
+    auto m = ed.collectMatches("ola");
+    CHECK_EQ((int)m.size(), 1);
+    CHECK_EQ(m[0].col, 0);
+}
+TEST(busqueda_match_final) {
+    Editor ed; ed.active().document.restore({"mundoola"});
+    auto m = ed.collectMatches("ola");
+    CHECK_EQ((int)m.size(), 1);
+    CHECK_EQ(m[0].col, 5);
+}
 
 TEST(busqueda_property_random) {
     Editor ed; ed.active().document.restore({"hello","world","hello world","abc"});

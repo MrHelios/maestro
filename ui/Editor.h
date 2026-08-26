@@ -183,12 +183,16 @@ private:
     // ---- Busqueda (v0.8 / feature f) ----
     std::string searchQuery_;
     Position searchOrigin_{0, 0};
+    std::optional<Selection> searchHighlight_;
     void startSearch();
     void handleBusquedaEvent(const Event& event);
     void updateSearch();
     void navigateSearch(int dir);
-    void updateSearchMessage(bool found);
+    void updateSearchMessage(bool found, int current, int total);
     std::vector<Position> collectMatches(const std::string& query) const;
+    void setSearchHighlight(const Position& pos, int len);
+    void clearSearchHighlight();
+    void centerViewportOnCursor();
 
     // ---- Seleccion total ('a') ----
     // Nota: selectAllActive_/selectAllPrevious_ viven en el Buffer (cada

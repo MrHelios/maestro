@@ -244,11 +244,12 @@ std::string Renderer::buildScreen(const Document& doc,
                                    bool modified,
                                    const Message& message,
                                    State state,
-                                   const std::optional<Selection>& selection) {
+                                   const std::optional<Selection>& selection,
+                                   const std::optional<Selection>& searchHighlight) {
     std::string out;
     beginFrame(out);
     out += buildEditorBody(doc, cursor, viewport, filename, modified, message,
-                           state, selection);
+                           state, selection, searchHighlight);
     int curRow = 1, curCol = 1;
     editorCursorPos(doc, cursor, viewport, curRow, curCol);
     moveCursorTo(out, curRow, curCol);
@@ -271,12 +272,15 @@ std::string Renderer::buildEditorBody(const Document& doc,
                                        bool modified,
                                        const Message& message,
                                        State state,
-                                       const std::optional<Selection>& selection) const {
+                                       const std::optional<Selection>& selection,
+                                       const std::optional<Selection>& searchHighlight) const {
     std::string out;
     std::optional<Normalized> sel = selection.has_value() ? normalize(*selection)
                                                           : std::nullopt;
+    std::optional<Normalized> searchSel = searchHighlight.has_value() ? normalize(*searchHighlight)
+                                                                      : std::nullopt;
     const EditorGeometry g = editorGeometry(doc, viewport);
-    renderEditorContent(out, doc, cursor, viewport, sel, g.layout.content,
+    renderEditorContent(out, doc, cursor, viewport, sel, searchSel, g.layout.content,
                         g.gutterW);
     StatusBarData data =
         editorBarData(filename, modified, stateLabel(state), message, cursor,
@@ -336,63 +340,144 @@ void Renderer::renderEditorContent(std::string& out,
                              const std::optional<Normalized>& sel,
                              const Rect& area,
                              int gutterW) const {
+    renderEditorContent(out, doc, cursor, viewport, sel, std::nullopt, area, gutterW);
+}
+
+void Renderer::renderEditorContent(std::string& out,
+                             const Document& doc,
+                             const Cursor& cursor,
+                             const Viewport& viewport,
+                             const std::optional<Normalized>& sel,
+                             const std::optional<Normalized>& searchSel,
+                             const Rect& area,
+                             int gutterW) const {
     int textWidth = std::max(0, area.width - gutterW);
 
     for (int row = 0; row < area.height; ++row) {
         int docLine = viewport.top + row;
-        out += "\x1b[K"; // limpiar la linea actual
+        out += "\x1b[K";
 
         if (docLine < doc.lineCount()) {
             const std::string& line = doc.lineAt(docLine);
             bool isCurrentLine = (docLine == cursor.line);
-            int selStart = -1, selEnd = -1;
+
+            std::vector<std::pair<int,int>> byteIntervals;
             bool lineBreakSelected = false;
 
-            if (sel.has_value() && docLine >= sel->start.line && docLine <= sel->end.line) {
-                if (sel->start.line == sel->end.line) {
-                    // Seleccion en una sola linea.
-                    selStart = sel->start.col;
-                    selEnd = sel->end.col;
-                } else if (docLine == sel->start.line) {
-                    // Primera linea: desde la seleccion hasta el final.
-                    selStart = sel->start.col;
-                    selEnd = static_cast<int>(line.size());
-                } else if (docLine == sel->end.line) {
-                    // Ultima linea: hasta la seleccion.
-                    selStart = 0;
-                    selEnd = sel->end.col;
+            auto addInterval = [&](const std::optional<Normalized>& n) {
+                if (!n.has_value()) return;
+                if (docLine < n->start.line || docLine > n->end.line) return;
+                if (n->start.line == n->end.line) {
+                    byteIntervals.emplace_back(n->start.col, n->end.col);
+                } else if (docLine == n->start.line) {
+                    byteIntervals.emplace_back(n->start.col, static_cast<int>(line.size()));
+                } else if (docLine == n->end.line) {
+                    byteIntervals.emplace_back(0, n->end.col);
                 } else {
-                    // Linea intermedia: toda la linea.
-                    selStart = 0;
-                    selEnd = static_cast<int>(line.size());
+                    byteIntervals.emplace_back(0, static_cast<int>(line.size()));
                 }
+            };
+            addInterval(sel);
+            addInterval(searchSel);
+
+            auto isLineBreak = [&](const std::optional<Normalized>& n) -> bool {
+                if (!n.has_value() || !line.empty()) return false;
+                if (docLine < n->start.line || docLine > n->end.line) return false;
+                bool singleLine = (n->start.line == n->end.line);
+                bool endsAtStart = (docLine == n->end.line && n->end.col == 0);
+                return !singleLine && !endsAtStart;
+            };
+            if (isLineBreak(sel) || isLineBreak(searchSel)) lineBreakSelected = true;
+
+            if (line.empty() && lineBreakSelected) {
+                out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
+                out += theme_.selection;
+                for (int i = 0; i < textWidth; ++i) out += ' ';
+                out += theme_.reset;
+                out += "\r\n";
+                continue;
             }
 
-            // Una fila VACIA dentro de la seleccion "toma" su salto de linea:
-            // se marca para que se vea que quedo seleccionada. No se marca
-            // cuando la seleccion es de una sola linea colapsada (nada
-            // seleccionado) ni cuando termina exactamente en el inicio de esa
-            // fila (su salto no quedo incluido).
-            if (line.empty() && sel.has_value() && docLine >= sel->start.line &&
-                docLine <= sel->end.line) {
-                bool singleLine = (sel->start.line == sel->end.line);
-                bool endsAtStart =
-                    (docLine == sel->end.line && sel->end.col == 0);
-                lineBreakSelected = !singleLine && !endsAtStart;
+            std::sort(byteIntervals.begin(), byteIntervals.end());
+            std::vector<std::pair<int,int>> merged;
+            for (auto &p : byteIntervals) {
+                if (p.first >= p.second) continue;
+                if (merged.empty() || p.first > merged.back().second) merged.push_back(p);
+                else merged.back().second = std::max(merged.back().second, p.second);
             }
 
             out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
-            renderLine(out, theme_, line, textWidth, isCurrentLine, selStart,
-                       selEnd, lineBreakSelected);
+
+            if (merged.empty()) {
+                renderLine(out, theme_, line, textWidth, isCurrentLine, -1, -1, false);
+                out += "\r\n";
+                continue;
+            }
+
+            std::vector<std::pair<int,int>> colIntervals;
+            for (auto &p : merged) {
+                int sc = utf8::columnOf(line, p.first);
+                int ec = utf8::columnOf(line, p.second);
+                sc = std::min(sc, textWidth);
+                ec = std::min(ec, textWidth);
+                if (sc < ec) colIntervals.emplace_back(sc, ec);
+            }
+            if (colIntervals.empty()) {
+                renderLine(out, theme_, line, textWidth, isCurrentLine, -1, -1, false);
+                out += "\r\n";
+                continue;
+            }
+
+            int curCol = 0;
+            int used = 0;
+            for (size_t i = 0; i < colIntervals.size(); ++i) {
+                int sc = colIntervals[i].first;
+                int ec = colIntervals[i].second;
+                if (curCol < sc) {
+                    std::string seg = utf8::range(line, curCol, sc);
+                    if (isCurrentLine) out += theme_.currentLine;
+                    out += seg;
+                    if (isCurrentLine) out += theme_.reset;
+                    used += colCount(seg);
+                }
+                {
+                    std::string seg = utf8::range(line, sc, ec);
+                    out += theme_.selection;
+                    out += seg;
+                    out += theme_.reset;
+                    used += colCount(seg);
+                }
+                curCol = ec;
+                if (i + 1 < colIntervals.size() && curCol < colIntervals[i+1].first) {
+                    // gap will be handled at next iteration's before
+                }
+            }
+            if (curCol < textWidth) {
+                std::string tail = utf8::range(line, curCol, textWidth);
+                if (isCurrentLine) out += theme_.currentLine;
+                out += tail;
+                if (isCurrentLine) {
+                    used += colCount(tail);
+                    for (int c = used; c < textWidth; ++c) out += ' ';
+                    out += theme_.reset;
+                }
+            } else if (isCurrentLine) {
+                for (int c = used; c < textWidth; ++c) out += ' ';
+                if (used < textWidth) { /* already in currentLine */ }
+                out += theme_.reset;
+                // ensure reset even if no tail
+                if (curCol >= textWidth) {
+                    // we already closed selection, need to ensure currentLine is not left open
+                }
+            }
+            out += "\r\n";
         } else {
             out += renderGutterBlank(gutterW);
-            // Fila fuera del documento: marcador "~" con el estilo del Theme
-            // (dim), mas tenue que los numeros de linea.
             out += theme_.marker;
             out += "~";
             out += theme_.reset;
+            out += "\r\n";
         }
-        out += "\r\n";
     }
 }
 
@@ -430,9 +515,10 @@ void Renderer::renderScreen(const Document& doc,
                              bool modified,
                              const Message& message,
                              State state,
-                             const std::optional<Selection>& selection) {
+                             const std::optional<Selection>& selection,
+                             const std::optional<Selection>& searchHighlight) {
     std::string buffer = buildScreen(doc, cursor, viewport, filename,
-                                     modified, message, state, selection);
+                                     modified, message, state, selection, searchHighlight);
     writeAll(STDOUT_FILENO, buffer);
 }
 
@@ -457,9 +543,10 @@ void Renderer::renderScreenDiff(const Document& doc,
                                  bool modified,
                                  const Message& message,
                                  State state,
-                                 const std::optional<Selection>& selection) {
+                                 const std::optional<Selection>& selection,
+                                 const std::optional<Selection>& searchHighlight) {
     const std::string out = buildDiffFrame(doc, cursor, viewport, filename,
-                                            modified, message, state, selection);
+                                            modified, message, state, selection, searchHighlight);
     if (!writeAll(STDOUT_FILENO, out)) hasLastEditorBody_ = false;
 }
 
@@ -470,11 +557,12 @@ std::string Renderer::buildDiffFrame(const Document& doc,
                                       bool modified,
                                       const Message& message,
                                       State state,
-                                      const std::optional<Selection>& selection) {
+                                      const std::optional<Selection>& selection,
+                                      const std::optional<Selection>& searchHighlight) {
     if (!hasLastEditorBody_ || viewport.width != lastViewportW_ ||
         viewport.height != lastViewportH_) {
         lastEditorBody_ = buildEditorBody(doc, cursor, viewport, filename,
-                                          modified, message, state, selection);
+                                          modified, message, state, selection, searchHighlight);
         hasLastEditorBody_ = true;
         lastViewportW_ = viewport.width;
         lastViewportH_ = viewport.height;
@@ -490,7 +578,7 @@ std::string Renderer::buildDiffFrame(const Document& doc,
 
     const std::string fresh = buildEditorBody(doc, cursor, viewport, filename,
                                               modified, message, state,
-                                              selection);
+                                              selection, searchHighlight);
 
     std::vector<std::string> oldRows, newRows;
     splitRows(lastEditorBody_, &oldRows);

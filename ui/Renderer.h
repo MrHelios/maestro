@@ -19,13 +19,14 @@ public:
     const Theme& theme() const { return theme_; }
 
     std::string buildScreen(const Document& doc,
-                            const Cursor& cursor,
-                            const Viewport& viewport,
-                            const std::string& filename,
-                            bool modified,
-                            const Message& message,
-                            State state,
-                            const std::optional<Selection>& selection = std::nullopt);
+                             const Cursor& cursor,
+                             const Viewport& viewport,
+                             const std::string& filename,
+                             bool modified,
+                             const Message& message,
+                             State state,
+                             const std::optional<Selection>& selection = std::nullopt,
+                             const std::optional<Selection>& searchHighlight = std::nullopt);
 
     void renderScreen(const Document& doc,
                       const Cursor& cursor,
@@ -34,7 +35,8 @@ public:
                       bool modified,
                       const Message& message,
                       State state,
-                      const std::optional<Selection>& selection = std::nullopt);
+                      const std::optional<Selection>& selection = std::nullopt,
+                      const std::optional<Selection>& searchHighlight = std::nullopt);
 
     void renderScreenDiff(const Document& doc,
                           const Cursor& cursor,
@@ -43,7 +45,8 @@ public:
                           bool modified,
                           const Message& message,
                           State state,
-                          const std::optional<Selection>& selection = std::nullopt);
+                          const std::optional<Selection>& selection = std::nullopt,
+                          const std::optional<Selection>& searchHighlight = std::nullopt);
 
     std::string buildDiffFrame(const Document& doc,
                                const Cursor& cursor,
@@ -52,7 +55,8 @@ public:
                                bool modified,
                                const Message& message,
                                State state,
-                               const std::optional<Selection>& selection = std::nullopt);
+                               const std::optional<Selection>& selection = std::nullopt,
+                               const std::optional<Selection>& searchHighlight = std::nullopt);
 
     std::string buildBufferListScreen(const std::vector<std::string>& names,
                                        int selected,
@@ -97,6 +101,14 @@ private:
                               const std::optional<Normalized>& sel,
                               const Rect& area,
                               int gutterW) const;
+    void renderEditorContent(std::string& out,
+                              const Document& doc,
+                              const Cursor& cursor,
+                              const Viewport& viewport,
+                              const std::optional<Normalized>& sel,
+                              const std::optional<Normalized>& searchSel,
+                              const Rect& area,
+                              int gutterW) const;
 
     void renderBufferListContent(std::string& out,
                                   const std::vector<std::string>& names,
@@ -127,7 +139,8 @@ private:
                                  bool modified,
                                  const Message& message,
                                  State state,
-                                 const std::optional<Selection>& selection) const;
+                                 const std::optional<Selection>& selection,
+                                 const std::optional<Selection>& searchHighlight = std::nullopt) const;
 
     void editorCursorPos(const Document& doc,
                           const Cursor& cursor,

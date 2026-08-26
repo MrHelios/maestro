@@ -23,7 +23,7 @@ namespace {
 constexpr const char* kHelpBufferSelector =
     "ENTER: open | ESC: cancel | \u2191/\u2193: move";
 constexpr const char* kHelpSaveAsPrompt = "Save file: ";
-constexpr const char* kHelpBusqueda = "Find word: ";
+constexpr const char* kHelpBusqueda = "Find: ";
 constexpr const char* kHelpNavegacion =
     "NAVEGACION: i escribir | s seleccionar | c/x copiar/cortar | p pegar | "
     "Ctrl+K buffer/guardar/salir | Ctrl+U/Y deshacer/rehacer";
@@ -521,7 +521,7 @@ void Editor::run() {
         b.viewport.scrollToCursor(b.cursor);
         renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
                                    b.filename, b.modified, statusMessage_,
-                                   state_, b.selection);
+                                   state_, b.selection, searchHighlight_);
     }
 
     while (running_) {
@@ -620,7 +620,7 @@ void Editor::renderFrame() {
         // anterior (ver Renderer::renderScreenDiff).
         renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
                                    b.filename, b.modified, statusMessage_,
-                                   state_, b.selection);
+                                   state_, b.selection, searchHighlight_);
     }
 }
 
@@ -1276,6 +1276,7 @@ void Editor::commitSaveAs() {
 void Editor::startSearch() {
     searchQuery_.clear();
     searchOrigin_ = {active().cursor.line, active().cursor.col};
+    clearSearchHighlight();
     state_ = State::Busqueda;
     setStatusMessage(std::string(kHelpBusqueda), MessageKind::Prompt);
 }
@@ -1291,17 +1292,44 @@ std::vector<Position> Editor::collectMatches(const std::string& query) const {
             pos = line.find(query, pos);
             if (pos == std::string::npos) break;
             out.push_back({l, static_cast<int>(pos)});
-            pos += 1;
+            pos += query.size();
             if (pos >= line.size()) break;
         }
     }
     return out;
 }
 
-void Editor::updateSearchMessage(bool found) {
+void Editor::updateSearchMessage(bool found, int current, int total) {
     std::string msg = std::string(kHelpBusqueda) + searchQuery_;
     if (!found && !searchQuery_.empty()) msg += " - not found";
+    else if (found && !searchQuery_.empty() && total > 0) {
+        if (total > 100) msg += " (100+)";
+        else msg += " (" + std::to_string(current) + "/" + std::to_string(total) + ")";
+    }
     setStatusMessage(msg, MessageKind::Prompt);
+}
+
+void Editor::setSearchHighlight(const Position& pos, int len) {
+    Buffer& b = active();
+    Position end{pos.line, pos.col + len};
+    int lineLen = b.document.lineLength(pos.line);
+    if (end.col > lineLen) end.col = lineLen;
+    searchHighlight_ = Selection{pos, end};
+}
+
+void Editor::clearSearchHighlight() {
+    searchHighlight_.reset();
+}
+
+void Editor::centerViewportOnCursor() {
+    Buffer& b = active();
+    int h = b.viewport.height;
+    if (h <= 0) return;
+    int totalLines = b.document.lineCount();
+    int maxTop = std::max(0, totalLines - h);
+    int desiredTop = b.cursor.line - h / 2;
+    desiredTop = std::max(0, std::min(desiredTop, maxTop));
+    b.viewport.top = desiredTop;
 }
 
 void Editor::updateSearch() {
@@ -1310,34 +1338,43 @@ void Editor::updateSearch() {
         b.cursor.line = searchOrigin_.line;
         b.cursor.col = searchOrigin_.col;
         b.cursor.clampToLine(b.document);
-        updateSearchMessage(true);
+        clearSearchHighlight();
+        centerViewportOnCursor();
+        updateSearchMessage(true, 0, 0);
         return;
     }
     auto matches = collectMatches(searchQuery_);
     if (matches.empty()) {
-        updateSearchMessage(false);
+        clearSearchHighlight();
+        updateSearchMessage(false, 0, 0);
         return;
     }
     auto it = std::find_if(matches.begin(), matches.end(), [&](const Position& p) {
         return !(p < searchOrigin_);
     });
+    int idx = (it != matches.end()) ? static_cast<int>(it - matches.begin()) : 0;
     Position target = (it != matches.end()) ? *it : matches.front();
     b.cursor.line = target.line;
     b.cursor.col = target.col;
-    updateSearchMessage(true);
+    setSearchHighlight(target, static_cast<int>(searchQuery_.size()));
+    centerViewportOnCursor();
+    updateSearchMessage(true, idx + 1, static_cast<int>(matches.size()));
 }
 
 void Editor::navigateSearch(int dir) {
     if (searchQuery_.empty()) return;
     auto matches = collectMatches(searchQuery_);
     if (matches.empty()) {
-        updateSearchMessage(false);
+        clearSearchHighlight();
+        updateSearchMessage(false, 0, 0);
         return;
     }
     if (matches.size() == 1) {
         active().cursor.line = matches[0].line;
         active().cursor.col = matches[0].col;
-        updateSearchMessage(true);
+        setSearchHighlight(matches[0], static_cast<int>(searchQuery_.size()));
+        centerViewportOnCursor();
+        updateSearchMessage(true, 1, static_cast<int>(matches.size()));
         return;
     }
     Buffer& b = active();
@@ -1354,7 +1391,9 @@ void Editor::navigateSearch(int dir) {
                          : (idx - 1 + static_cast<int>(matches.size())) % static_cast<int>(matches.size());
     b.cursor.line = matches[next].line;
     b.cursor.col = matches[next].col;
-    updateSearchMessage(true);
+    setSearchHighlight(matches[next], static_cast<int>(searchQuery_.size()));
+    centerViewportOnCursor();
+    updateSearchMessage(true, next + 1, static_cast<int>(matches.size()));
 }
 
 void Editor::handleBusquedaEvent(const Event& event) {
@@ -1377,6 +1416,7 @@ void Editor::handleBusquedaEvent(const Event& event) {
             navigateSearch(-1);
             break;
         case EventType::InsertNewline:
+            clearSearchHighlight();
             state_ = State::Navegacion;
             searchQuery_.clear();
             setStatusMessage("", MessageKind::Info);
@@ -1386,6 +1426,8 @@ void Editor::handleBusquedaEvent(const Event& event) {
             b.cursor.line = searchOrigin_.line;
             b.cursor.col = searchOrigin_.col;
             b.cursor.clampToLine(b.document);
+            clearSearchHighlight();
+            centerViewportOnCursor();
             searchQuery_.clear();
             state_ = State::Navegacion;
             setStatusMessage("", MessageKind::Info);
