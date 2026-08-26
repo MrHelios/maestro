@@ -40,6 +40,14 @@ constexpr int kFatalSignalCount = static_cast<int>(sizeof(kFatalSignals) / sizeo
 termios* g_origTermios = nullptr;
 volatile sig_atomic_t g_rawActive = 0;
 
+volatile sig_atomic_t g_resized = 0;
+struct sigaction g_oldWinchAction;
+bool g_winchInstalled = false;
+
+void sigwinchHandler(int) {
+    g_resized = 1;
+}
+
 struct SavedAction {
     int sig = 0;
     struct sigaction old;
@@ -103,6 +111,7 @@ Terminal::~Terminal() {
 }
 
 void Terminal::enableRawMode() {
+    if (rawModeEnabled_) return;
     termios* orig = static_cast<termios*>(origTermios_);
 
     // Leer el estado actual. Falla con ENOTTY si stdin no es un TTY, o si
@@ -135,12 +144,40 @@ void Terminal::enableRawMode() {
     write(STDOUT_FILENO, "\x1b[2 q", 5);
 
     // Raw mode activo: instalar el handler de restauracion de senales.
+    // enable/disable deben llamarse en pares estrictos; guard contra
+    // reentrancia: si ya esta en raw, no pisar g_oldWinchAction (perderia
+    // el original del sistema y disable restauraria el propio handler).
+    // Mismo patron que kFatalSignals — ver g_winchInstalled.
     g_origTermios = orig;
     g_rawActive = 1;
-    installFatalSignalHandlers();
+    if (!g_winchInstalled) {
+        installFatalSignalHandlers();
+    }
+
+    if (!g_winchInstalled) {
+        struct sigaction sa;
+        std::memset(&sa, 0, sizeof(sa));
+        sa.sa_handler = sigwinchHandler;
+        sigemptyset(&sa.sa_mask);
+        // INTENCIONAL: sa_flags = 0 sin SA_RESTART. ppoll()/poll() debe
+        // interrumpirse con EINTR ante SIGWINCH para que el bucle principal
+        // detecte el resize via hasResized() sin latencia. No agregar
+        // SA_RESTART aqui: haria que poll se reinicie automaticamente y el
+        // resize quedaria bloqueado hasta la proxima tecla (ventana de carrera
+        // con waitMs=-1). Ver Editor::run() ppoll(..., &origMask).
+        sa.sa_flags = 0;
+        sigaction(SIGWINCH, &sa, &g_oldWinchAction);
+        g_winchInstalled = true;
+    }
 }
 
 void Terminal::disableRawMode() {
+    if (!rawModeEnabled_) return;
+    if (g_winchInstalled) {
+        sigaction(SIGWINCH, &g_oldWinchAction, nullptr);
+        g_winchInstalled = false;
+    }
+
     // Apagar los handlers ANTES de restaurar: una senal que caiga sobre una
     // terminal que ya no esta en raw mode no debe intentar restaurarla.
     restoreFatalSignalHandlers();
@@ -156,6 +193,14 @@ void Terminal::disableRawMode() {
     rawModeEnabled_ = false;
     g_rawActive = 0;
     g_origTermios = nullptr;
+}
+
+bool Terminal::hasResized() {
+    if (g_resized) {
+        g_resized = 0;
+        return true;
+    }
+    return false;
 }
 
 void Terminal::getWindowSize(int& rows, int& cols) {

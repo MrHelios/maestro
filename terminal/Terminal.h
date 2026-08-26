@@ -39,6 +39,8 @@ public:
     // Tamano actual de la terminal.
     void getWindowSize(int& rows, int& cols);
 
+    bool hasResized();
+
     // Tabla tecla -> Evento que readEvent() consulta. El usuario puede
     // rebindear las teclas en tiempo de ejecucion (keymap().bindSequence(...)
     // / keymap().bindControl(...)) sin tocar la logica del Editor.

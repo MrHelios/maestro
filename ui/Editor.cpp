@@ -5,6 +5,7 @@
 #include <climits>
 #include <filesystem>
 #include <poll.h>
+#include <signal.h>
 #include <cerrno>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -317,6 +318,13 @@ bool Editor::openFile(const std::string& path) {
     return result == LoadResult::Success;
 }
 
+void Editor::handleResize() {
+    for (int i = 0; i < buffers.count(); ++i) {
+        syncViewportSize(buffers.at(i));
+        buffers.at(i).cursor.clampToLine(buffers.at(i).document);
+    }
+}
+
 void Editor::syncViewportSize(Buffer& b) {
     int rows, cols;
     terminal_.getWindowSize(rows, cols);
@@ -497,28 +505,32 @@ void Editor::openFileToBuffer(const std::string& path) {
 }
 
 void Editor::run() {
-    // La barra de estado ocupa las ultimas DOS filas: la fila fija (en
-    // video inverso) y la fila de mensajes. El viewport usa el resto.
-    // v0.6.3: el viewport es POR BUFFER, pero las dimensiones las fija
-    // la terminal y valen para todos.
     for (int i = 0; i < buffers.count(); ++i) {
         syncViewportSize(buffers.at(i));
     }
 
     terminal_.enableRawMode();
 
-    // Primer render antes de esperar el primer evento.
+    sigset_t blockMask, origMask;
+    sigemptyset(&blockMask);
+    sigaddset(&blockMask, SIGWINCH);
+    sigprocmask(SIG_BLOCK, &blockMask, &origMask);
+
     {
         Buffer& b = active();
         b.viewport.scrollToCursor(b.cursor);
-        // Render diferencial: el primer frame sale completo (cache vacio)
-        // y los siguientes solo emiten las filas que cambien.
         renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
                                    b.filename, b.modified, statusMessage_,
                                    state_, b.selection);
     }
 
     while (running_) {
+        if (terminal_.hasResized()) {
+            handleResize();
+            renderFrame();
+            continue;
+        }
+
         int waitMs = -1;
         if (clipboard_ && clipboard_->hasPending()) {
             waitMs = 20;
@@ -545,9 +557,19 @@ void Editor::run() {
             pfds[1].revents = 0;
             nfds = 2;
         }
-        int pr = poll(pfds, nfds, waitMs);
+        struct timespec ts;
+        struct timespec* tsp = nullptr;
+        if (waitMs >= 0) {
+            ts.tv_sec = waitMs / 1000;
+            ts.tv_nsec = (waitMs % 1000) * 1000000L;
+            tsp = &ts;
+        }
+        int pr = ppoll(pfds, nfds, tsp, &origMask);
         if (pr < 0) {
-            if (errno == EINTR) continue;
+            if (errno == EINTR && terminal_.hasResized()) {
+                handleResize();
+                renderFrame();
+            }
             continue;
         }
         if (pr == 0) {
@@ -573,8 +595,8 @@ void Editor::run() {
         }
     }
 
+    sigprocmask(SIG_SETMASK, &origMask, nullptr);
     terminal_.disableRawMode();
-    // Limpiamos pantalla al salir para dejar la terminal prolija.
     write(STDOUT_FILENO, "\x1b[2J\x1b[H\x1b[0 q", 12);
 }
 

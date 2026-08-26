@@ -98,6 +98,7 @@ private:
     // defecto (24x80) y no redibujaria toda la pantalla si la terminal
     // es mas grande. Este helper le da sus dimensiones reales.
     void syncViewportSize(Buffer& b);
+    void handleResize();
     // v0.6.3: Ctrl+K w -> cierra el buffer activo.
     //   - modificado: NO cierra; muestra aviso (hay que guardar o restaurar).
     //   - ultimo buffer: no se elimina; se convierte en vacio sin nombre.
