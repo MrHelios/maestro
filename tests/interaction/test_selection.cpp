@@ -2023,7 +2023,7 @@ TEST(page_avpag_bottom_scroll_glued_to_eof) {
     runLoopScroll(ed);
 
     CHECK_EQ(ed.active().viewport.top, 30);         // sigue pegado a EOF
-    CHECK_EQ(ed.active().cursor.line, 45);
+    CHECK_EQ(ed.active().cursor.line, 49);          // ya abajo: AvPag -> ultima linea
     CHECK(ed.active().viewport.top + ed.active().viewport.height - 1 <= ed.active().document.lineCount() - 1);
     CHECK(ed.active().cursor.line <= ed.active().document.lineCount() - 1);
     // El cursor queda visible dentro del viewport.
@@ -2045,6 +2045,101 @@ TEST(page_repag_top_scroll_keeps_top_zero) {
     CHECK_EQ(ed.active().viewport.top, 0);
     CHECK_EQ(ed.active().cursor.line, 5);
     CHECK(ed.active().cursor.line >= ed.active().viewport.top);
+}
+
+TEST(page_repag_at_absolute_top_moves_cursor_to_first_line) {
+    // El viewport YA esta en el tope absoluto (top == 0). RePag no puede
+    // retroceder mas, asi que el cursor se imanta a la primera linea
+    // (acceso rapido al inicio), sin importar su posicion relativa.
+    Editor ed;
+    editorOfLines(linesOf(100), 0, 0, ed); // cursor en linea 0 == top
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 0;
+
+    press(ed, EventType::PageUp);
+    runLoopScroll(ed);
+
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().cursor.line, 0);
+}
+
+TEST(page_repag_at_absolute_top_from_intermediate_line) {
+    // Cursor en una linea intermedia del viewport (relativo 8), viewport
+    // top == 0. RePag -> cursor a la primera linea.
+    Editor ed;
+    editorOfLines(linesOf(100), 8, 0, ed);
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 0;
+
+    press(ed, EventType::PageUp);
+    runLoopScroll(ed);
+
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().cursor.line, 0);
+}
+
+TEST(page_repag_at_absolute_top_from_last_visible_line) {
+    // Cursor en la ULTIMA fila visible (rel == height - 1), viewport
+    // top == 0. RePag -> cursor a la primera linea.
+    Editor ed;
+    editorOfLines(linesOf(100), 19, 0, ed);
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 0;
+
+    press(ed, EventType::PageUp);
+    runLoopScroll(ed);
+
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().cursor.line, 0);
+}
+
+TEST(page_avpag_at_absolute_bottom_from_first_visible_line) {
+    // Viewport YA en el fondo absoluto (top == maxTop), cursor en la
+    // primera fila visible. AvPag -> cursor a la ultima linea.
+    Editor ed;
+    editorOfLines(linesOf(100), 80, 0, ed); // cursor en top == maxTop
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 80;            // maxTop = 100 - 20
+
+    press(ed, EventType::PageDown);
+    runLoopScroll(ed);
+
+    CHECK_EQ(ed.active().viewport.top, 80);
+    CHECK_EQ(ed.active().cursor.line, 99);
+}
+
+TEST(page_preserves_relative_cursor_when_viewport_moves_up) {
+    // Viewport NO esta arriba: RePag mueve el viewport y el cursor conserva
+    // su posicion relativa (cursor.line - viewport.top invariante).
+    Editor ed;
+    editorOfLines(linesOf(100), 67, 2, ed);
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 60; // relativo 7
+
+    const int relBefore = ed.active().cursor.line - ed.active().viewport.top;
+    press(ed, EventType::PageUp);
+    runLoopScroll(ed);
+
+    CHECK_EQ(ed.active().viewport.top, 40);
+    CHECK_EQ(ed.active().cursor.line, 47);
+    CHECK_EQ(ed.active().cursor.line - ed.active().viewport.top, relBefore);
+}
+
+TEST(page_preserves_relative_cursor_when_viewport_moves_down) {
+    // Viewport NO esta abajo: AvPag mueve el viewport y el cursor conserva
+    // su posicion relativa (cursor.line - viewport.top invariante).
+    Editor ed;
+    editorOfLines(linesOf(100), 47, 0, ed);
+    ed.active().viewport.height = 20;
+    ed.active().viewport.top = 40; // relativo 7
+
+    const int relBefore = ed.active().cursor.line - ed.active().viewport.top;
+    press(ed, EventType::PageDown);
+    runLoopScroll(ed);
+
+    CHECK_EQ(ed.active().viewport.top, 60);
+    CHECK_EQ(ed.active().cursor.line, 67);
+    CHECK_EQ(ed.active().cursor.line - ed.active().viewport.top, relBefore);
 }
 
 TEST(page_multiple_avpag_at_bottom_stays_glued) {
@@ -2105,7 +2200,7 @@ TEST(page_avpag_at_absolute_bottom_does_not_overshoot) {
     CHECK_EQ(ed.active().viewport.top, 80);
     CHECK_EQ(ed.active().viewport.top + ed.active().viewport.height - 1, 99); // fondo pegado a EOF
     // El cursor no supero el archivo y sigue dentro del viewport.
-    CHECK_EQ(ed.active().cursor.line, 87);
+    CHECK_EQ(ed.active().cursor.line, 99);
     CHECK(ed.active().cursor.line <= 99);
     CHECK(ed.active().cursor.line >= ed.active().viewport.top);
     CHECK(ed.active().cursor.line < ed.active().viewport.top + ed.active().viewport.height);
@@ -2206,9 +2301,11 @@ TEST(page_exact_multiple_of_viewport) {
     CHECK_EQ(ed.active().cursor.line, 40);
 
     // Pagina 3 -> top 60 (== count), ya no hay; se pega al EOF (maxTop 40).
+    // Como el viewport YA estaba en maxTop, AvPag mueve el cursor a la
+    // ultima linea (59), acceso rapido al final.
     press(ed, EventType::PageDown);
     CHECK_EQ(ed.active().viewport.top, 40); // maxTop = 60 - 20
-    CHECK_EQ(ed.active().cursor.line, 40);
+    CHECK_EQ(ed.active().cursor.line, 59);
     CHECK(ed.active().viewport.top + ed.active().viewport.height - 1 <= ed.active().document.lineCount() - 1);
 }
 

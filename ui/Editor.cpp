@@ -1639,8 +1639,8 @@ void Editor::applyPage(int dir) {
     const int count = b.document.lineCount(); // >= 1: siempre hay una linea
     const int h = b.viewport.height;
 
-    // Archivo pequeno: cabe entero en una pagina. RePag -> inicio, AvPag
-    // -> final, sin nunca quedar fuera del documento.
+    // Caso 1: Archivo pequeno (cabe entero en una pagina). RePag -> inicio,
+    // AvPag -> final, sin nunca quedar fuera del documento.
     if (h >= count) {
         b.viewport.top = 0;
         b.cursor.line = (dir < 0) ? 0 : count - 1;
@@ -1648,19 +1648,32 @@ void Editor::applyPage(int dir) {
         return;
     }
 
-    // Conservamos la posicion relativa del cursor dentro del viewport: el
-    // viewport y el cursor se desplazan la misma cantidad. En los bordes
-    // el viewport se clampa para que nunca muestre mas alla del documento:
-    //   - Arriba:  top >= 0 (la primera linea visible es la del archivo).
-    //   - Abajo:   top <= maxTop (la ultima fila visible llega a EOF).
+    // Caso 2: Archivo mas grande que la pantalla. Conservamos la posicion
+    // relativa del cursor, PERO si el viewport YA estaba pegado al borde (no
+    // puede moverse mas), el cursor se imanta a ese borde (acceso rapido al
+    // inicio/final). Si el viewport si se movio, se conserva la posicion
+    // relativa.
     const int rel = b.cursor.line - b.viewport.top; // posicion relativa (0..h-1)
     const int maxTop = count - h;
-    if (dir < 0) {
+    if (dir < 0) { // RePag (Subir)
+        const bool alreadyAtTop = (b.viewport.top == 0);
         b.viewport.top = std::max(0, b.viewport.top - h);
-    } else {
+        if (alreadyAtTop) {
+            b.cursor.line = 0; // ya estaba arriba: cursor al principio
+        } else {
+            b.cursor.line = b.viewport.top + rel;
+        }
+    } else { // AvPag (Bajar)
+        const bool alreadyAtBottom = (b.viewport.top == maxTop);
         b.viewport.top = std::min(maxTop, b.viewport.top + h);
+        if (alreadyAtBottom) {
+            b.cursor.line = count - 1; // ya estaba abajo: cursor al final
+        } else {
+            b.cursor.line = b.viewport.top + rel;
+        }
     }
-    b.cursor.line = b.viewport.top + rel;
+
+    // Clamp final de seguridad: el cursor nunca queda fuera de los limites.
     b.cursor.line = std::min(std::max(b.cursor.line, 0), count - 1);
     b.cursor.clampToLine(b.document);
 }
