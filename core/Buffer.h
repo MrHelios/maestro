@@ -2,6 +2,8 @@
 
 #include <optional>
 #include <string>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <vector>
 
 #include "core/Document.h"
@@ -97,6 +99,21 @@ public:
 
     std::vector<HistoryEntry> undoStack;
     std::vector<HistoryEntry> redoStack;
+
+    struct FileIdentity {
+        bool valid = false;
+        dev_t dev = 0;
+        ino_t ino = 0;
+        off_t size = 0;
+        struct timespec mtime = {0, 0};
+        bool operator==(const FileIdentity& o) const {
+            if (valid != o.valid) return false;
+            if (!valid) return true;
+            return dev == o.dev && ino == o.ino && size == o.size &&
+                   mtime.tv_sec == o.mtime.tv_sec && mtime.tv_nsec == o.mtime.tv_nsec;
+        }
+        bool operator!=(const FileIdentity& o) const { return !(*this == o); }
+    } savedIdentity;
 
     // Nombre visible del buffer para la barra de estado y el selector:
     // el nombre del archivo (sin directorio) si tiene uno, o el nombre

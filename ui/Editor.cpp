@@ -13,6 +13,8 @@
 #include "core/utf8.h"
 #include "clipboard/FakeClipboard.h"
 #include "clipboard/X11Clipboard.h"
+#include "filesystem/InotifyFileWatcher.h"
+#include "filesystem/NullFileWatcher.h"
 
 namespace {
 
@@ -48,14 +50,118 @@ std::string resolveAbsolutePath(const std::string& path) {
     return std::filesystem::absolute(path, ec).lexically_normal().string();
 }
 
+static Buffer::FileIdentity captureIdentity(const std::string& path) {
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) return Buffer::FileIdentity{};
+    Buffer::FileIdentity id;
+    id.valid = true;
+    id.dev = st.st_dev;
+    id.ino = st.st_ino;
+    id.size = st.st_size;
+    id.mtime = st.st_mtim;
+    return id;
+}
+
 } // namespace
 
 Editor::Editor() : Editor(std::make_unique<X11Clipboard>()) {}
 
-Editor::Editor(std::unique_ptr<SystemClipboard> clipboard) : clipboard_(std::move(clipboard)) {
+Editor::Editor(std::unique_ptr<SystemClipboard> clipboard)
+    : Editor(std::move(clipboard), std::make_unique<InotifyFileWatcher>()) {}
+
+Editor::Editor(std::unique_ptr<SystemClipboard> clipboard, std::unique_ptr<FileWatcher> watcher)
+    : clipboard_(std::move(clipboard)), watcher_(std::move(watcher)) {
     if (!clipboard_) clipboard_ = std::make_unique<FakeClipboard>();
+    if (!watcher_) watcher_ = std::make_unique<NullFileWatcher>();
     setStatusMessage(kHelpPrefix);
     registerCommands();
+}
+
+Editor::~Editor() = default;
+
+void Editor::watchFile(const std::string& path) {
+    if (path.empty() || !watcher_) return;
+    if (watchedFiles_.find(path) != watchedFiles_.end()) return;
+    watcher_->watch(path);
+    watchedFiles_.insert(path);
+}
+
+void Editor::unwatchFile(const std::string& path) {
+    if (path.empty() || !watcher_) return;
+    if (watchedFiles_.find(path) == watchedFiles_.end()) return;
+    for (int i = 0; i < buffers.count(); ++i) {
+        if (buffers.at(i).filename == path) return;
+    }
+    watcher_->unwatch(path);
+    watchedFiles_.erase(path);
+}
+
+void Editor::handleFileChange(const FileChangeEvent& ev) {
+    bool any = false;
+    for (int i = 0; i < buffers.count(); ++i) {
+        Buffer& b = buffers.at(i);
+        if (b.filename != ev.path) continue;
+        auto cur = captureIdentity(b.filename);
+        if (cur == b.savedIdentity) continue;
+        if (ev.kind == FileChangeKind::Deleted) {
+            if (b.modified) {
+                setActionMessage("¡ALERTA! '" + b.filename + "' cambió en disco. Tus cambios locales tienen prioridad.", MessageKind::Warning);
+            } else {
+                if (!cur.valid) {
+                    setActionMessage("El archivo '" + b.filename + "' fue eliminado del disco.", MessageKind::Error);
+                    b.savedIdentity = Buffer::FileIdentity{};
+                } else {
+                    watchFile(b.filename);
+                    LoadResult res = b.document.loadFromFile(b.filename);
+                    if (res == LoadResult::Success) {
+                        b.savedLines = b.document.snapshot();
+                        b.modified = false;
+                        b.savedIdentity = captureIdentity(b.filename);
+                        if (b.cursor.line >= b.document.lineCount()) b.cursor.line = b.document.lineCount() - 1;
+                        if (b.cursor.line < 0) b.cursor.line = 0;
+                        b.cursor.clampToLine(b.document);
+                        setActionMessage("Archivo recargado desde disco.", MessageKind::Success);
+                    } else if (res == LoadResult::NotFound) {
+                        setActionMessage("El archivo '" + b.filename + "' fue eliminado del disco.", MessageKind::Error);
+                        b.savedIdentity = Buffer::FileIdentity{};
+                    } else if (res == LoadResult::PermissionDenied) {
+                        setActionMessage("Sin permisos de lectura: " + b.filename, MessageKind::Error);
+                    } else {
+                        setActionMessage("No se pudo recargar: " + b.filename, MessageKind::Error);
+                    }
+                }
+            }
+            any = true;
+            continue;
+        }
+        if (ev.kind == FileChangeKind::Created) {
+            watchFile(b.filename);
+        }
+        if (b.modified) {
+            setActionMessage("¡ALERTA! '" + b.filename + "' cambió en disco. Tus cambios locales tienen prioridad.", MessageKind::Warning);
+            any = true;
+            continue;
+        }
+        LoadResult res = b.document.loadFromFile(b.filename);
+        if (res == LoadResult::Success) {
+            b.savedLines = b.document.snapshot();
+            b.modified = false;
+            b.savedIdentity = captureIdentity(b.filename);
+            if (b.cursor.line >= b.document.lineCount()) b.cursor.line = b.document.lineCount() - 1;
+            if (b.cursor.line < 0) b.cursor.line = 0;
+            b.cursor.clampToLine(b.document);
+            setActionMessage("Archivo recargado desde disco.", MessageKind::Success);
+        } else if (res == LoadResult::NotFound) {
+            setActionMessage("El archivo '" + b.filename + "' fue eliminado del disco.", MessageKind::Error);
+            b.savedIdentity = Buffer::FileIdentity{};
+        } else if (res == LoadResult::PermissionDenied) {
+            setActionMessage("Sin permisos de lectura: " + b.filename, MessageKind::Error);
+        } else {
+            setActionMessage("No se pudo recargar: " + b.filename, MessageKind::Error);
+        }
+        any = true;
+    }
+    if (any) renderFrame();
 }
 
 std::string Editor::blockToString(const std::vector<std::string>& block) {
@@ -305,11 +411,24 @@ bool Editor::openFile(const std::string& path) {
     }
     b.modified = false;
     b.savedLines = b.document.snapshot();
+    b.savedIdentity = (result == LoadResult::Success) ? captureIdentity(b.filename) : Buffer::FileIdentity{};
     b.cursor.line = 0;
     b.cursor.col = 0;
     b.selection.reset();
     b.selectAllActive = false;
     b.selectAllPrevious.reset();
+    if (oldFilename != b.filename && !oldFilename.empty()) {
+        bool stillNeeded = false;
+        for (int i = 0; i < buffers.count(); ++i) {
+            if (&buffers.at(i) == &b) continue;
+            if (buffers.at(i).filename == oldFilename) { stillNeeded = true; break; }
+        }
+        if (!stillNeeded) {
+            watchedFiles_.erase(oldFilename);
+            if (watcher_) watcher_->unwatch(oldFilename);
+        }
+    }
+    watchFile(b.filename);
     state_ = State::Navegacion;
     setStatusMessage("");
     if (result == LoadResult::NotFound) {
@@ -339,9 +458,22 @@ void Editor::createBuffer() {
 }
 
 void Editor::closeActiveBuffer() {
+    Buffer& cur = active();
+    std::string oldPath = cur.filename;
     int rows, cols;
     terminal_.getWindowSize(rows, cols);
-    switch (buffers.closeActive(rows, cols)) {
+    auto cr = buffers.closeActive(rows, cols);
+    if (cr != CloseResult::ModifiedBlocked && !oldPath.empty()) {
+        bool stillNeeded = false;
+        for (int i = 0; i < buffers.count(); ++i) {
+            if (buffers.at(i).filename == oldPath) { stillNeeded = true; break; }
+        }
+        if (!stillNeeded) {
+            watchedFiles_.erase(oldPath);
+            if (watcher_) watcher_->unwatch(oldPath);
+        }
+    }
+    switch (cr) {
         case CloseResult::ModifiedBlocked:
             setActionMessage("Buffer modificado: guarda con Ctrl+K s o restaura.", MessageKind::Warning);
             state_ = priorState_;
@@ -490,11 +622,13 @@ void Editor::openFileToBuffer(const std::string& path) {
     }
     nuevo.modified = false;
     nuevo.savedLines = nuevo.document.snapshot();
+    nuevo.savedIdentity = (result == LoadResult::Success) ? captureIdentity(filePath) : Buffer::FileIdentity{};
     nuevo.cursor.line = 0;
     nuevo.cursor.col = 0;
     nuevo.selection.reset();
     nuevo.selectAllActive = false;
     nuevo.selectAllPrevious.reset();
+    watchFile(nuevo.filename);
     buffers.push(std::move(nuevo));
     state_ = priorState_; // se sale del explorador al modo previo
     if (result == LoadResult::Success) {
@@ -546,16 +680,27 @@ void Editor::run() {
         }
         if (clipboard_) clipboard_->processEvents();
         int cfd = clipboard_ ? clipboard_->fd() : -1;
-        struct pollfd pfds[2];
+        struct pollfd pfds[3];
         pfds[0].fd = STDIN_FILENO;
         pfds[0].events = POLLIN;
         pfds[0].revents = 0;
         int nfds = 1;
+        int clipboardIdx = -1;
         if (cfd >= 0) {
-            pfds[1].fd = cfd;
-            pfds[1].events = POLLIN;
-            pfds[1].revents = 0;
-            nfds = 2;
+            clipboardIdx = nfds;
+            pfds[nfds].fd = cfd;
+            pfds[nfds].events = POLLIN;
+            pfds[nfds].revents = 0;
+            nfds++;
+        }
+        int watcherIdx = -1;
+        int wfd = watcher_ ? watcher_->fd() : -1;
+        if (wfd >= 0) {
+            watcherIdx = nfds;
+            pfds[nfds].fd = wfd;
+            pfds[nfds].events = POLLIN;
+            pfds[nfds].revents = 0;
+            nfds++;
         }
         struct timespec ts;
         struct timespec* tsp = nullptr;
@@ -577,20 +722,26 @@ void Editor::run() {
             renderFrame();
             continue;
         }
-        bool xReady = (nfds == 2 && (pfds[1].revents & POLLIN));
+        bool xReady = (clipboardIdx >= 0 && (pfds[clipboardIdx].revents & POLLIN));
         bool inReady = (pfds[0].revents & POLLIN);
+        bool watcherReady = (watcherIdx >= 0 && (pfds[watcherIdx].revents & POLLIN));
         if (xReady) clipboard_->processEvents();
+        if (watcherReady && watcher_) {
+            watcher_->pollEvents([this](const FileChangeEvent& ev) {
+                handleFileChange(ev);
+            });
+        }
         if (inReady) {
             Event event;
             if (!terminal_.readEvent(event, 0)) {
-                if (xReady) continue;
+                if (xReady || watcherReady) continue;
             } else {
                 handleEvent(event);
                 if (!running_) break;
                 clearExpiredActionMessage();
                 renderFrame();
             }
-        } else if (xReady) {
+        } else if (xReady || watcherReady) {
             clearExpiredActionMessage();
         }
     }
@@ -1262,10 +1413,28 @@ void Editor::commitSaveAs() {
         setActionMessage("Es una carpeta: " + path, MessageKind::Error);
         return;
     }
+    bool isNew = b.filename != path;
+    std::string oldPath = b.filename;
     if (b.document.saveToFile(path)) {
+        if (isNew && !oldPath.empty()) {
+            bool stillNeeded = false;
+            for (int i = 0; i < buffers.count(); ++i) {
+                if (&buffers.at(i) == &b) continue;
+                if (buffers.at(i).filename == oldPath) { stillNeeded = true; break; }
+            }
+            if (!stillNeeded) {
+                watchedFiles_.erase(oldPath);
+                if (watcher_) watcher_->unwatch(oldPath);
+            }
+        }
         b.filename = path;
         b.modified = false;
         b.savedLines = b.document.snapshot();
+        b.savedIdentity = captureIdentity(path);
+        if (watchedFiles_.find(b.filename) == watchedFiles_.end()) {
+            watcher_->watch(b.filename);
+            watchedFiles_.insert(b.filename);
+        }
         setActionMessage("Guardado: " + path, MessageKind::Success);
         state_ = priorState_;
     } else {
@@ -1513,6 +1682,8 @@ void Editor::save() {
     if (b.document.saveToFile(b.filename)) {
         b.modified = false;
         b.savedLines = b.document.snapshot();
+        b.savedIdentity = captureIdentity(b.filename);
+        watchFile(b.filename);
         setActionMessage("Guardado.", MessageKind::Success);
     } else {
         setActionMessage("Error al guardar.", MessageKind::Error);

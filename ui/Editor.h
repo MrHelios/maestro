@@ -4,10 +4,12 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 #include "core/Buffer.h"
 #include "core/BufferManager.h"
 #include "clipboard/SystemClipboard.h"
+#include "filesystem/FileWatcher.h"
 #include "ui/CommandMap.h"
 #include "ui/EditorState.h"
 #include "ui/FileBrowser.h"
@@ -27,6 +29,8 @@ class Editor {
 public:
     Editor();
     explicit Editor(std::unique_ptr<SystemClipboard> clipboard);
+    Editor(std::unique_ptr<SystemClipboard> clipboard, std::unique_ptr<FileWatcher> watcher);
+    ~Editor();
 
     // v0.6.2: true si `path` existe y es una carpeta (absoluta o relativa).
     // Las carpetas no se pueden abrir todavia: solo archivos. Delega en
@@ -265,4 +269,10 @@ private:
 
     void undo();
     void redo();
+
+    std::unique_ptr<FileWatcher> watcher_;
+    std::unordered_set<std::string> watchedFiles_;
+    void watchFile(const std::string& path);
+    void unwatchFile(const std::string& path);
+    void handleFileChange(const FileChangeEvent& ev);
 };

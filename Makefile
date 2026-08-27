@@ -13,8 +13,8 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -I. -MMD -MP -pthread
 # `make test` / `make test-sanitize` / `make clean`. Compilar el binario
 # DENTRO de build/ evita que colisione en el filesystem con ese script.
 BIN := build/maestro
-# Program sources por capa (modelo / ui / terminal / clipboard).
-SRC := $(wildcard core/*.cpp ui/*.cpp terminal/*.cpp clipboard/*.cpp)
+# Program sources por capa (modelo / ui / terminal / clipboard / filesystem).
+SRC := $(wildcard core/*.cpp ui/*.cpp terminal/*.cpp clipboard/*.cpp filesystem/*.cpp)
 
 # --- Tests ---
 # Los tests se agrupan por nivel: unit/ (core puro), interaction/ (usan
@@ -82,6 +82,9 @@ build/%.o: clipboard/%.cpp | build
 build/%.o: terminal/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+build/%.o: filesystem/%.cpp | build
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
 build/%.o: tests/%.cpp | build
 	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
 
@@ -113,6 +116,9 @@ build-san/%.o: clipboard/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
 build-san/%.o: terminal/%.cpp | build-san
+	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
+
+build-san/%.o: filesystem/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
 build-san/%.o: tests/%.cpp | build-san
