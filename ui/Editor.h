@@ -233,7 +233,6 @@ private:
     // "Guardar archivo:" en la fila de mensajes, donde se escribe la ruta
     // destino. Enter confirma (commitSaveAs), ESC cancela.
     void startSaveAs();
-    void startSaveAsCopy();
     // Maneja los eventos mientras state_ == State::SaveAs.
     void handleSaveAsEvent(const Event& event);
     // Resuelve la ruta escrita (relativa -> absoluta contra cwd), rechaza

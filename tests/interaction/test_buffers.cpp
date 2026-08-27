@@ -67,6 +67,11 @@ static void typePrompt(Editor& ed, const std::string& s) {
         pressEvent(ed, insert(c));
 }
 
+static void clearPrompt(Editor& ed) {
+    while (!ed.saveAsPath_.empty())
+        press(ed, EventType::Backspace);
+}
+
 static void openSelector(Editor& ed) {
     press(ed, EventType::Prefix);
     pressEvent(ed, insert('t'));
@@ -769,7 +774,10 @@ TEST(save_unnamed_buffer_opens_save_as_prompt) {
     press(ed, EventType::Escape);
     openSaveAs(ed);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
-    CHECK_EQ(ed.statusMessage_, "Save file: ");
+    std::string cwd = FileBrowser::getCwd();
+    std::string expected = cwd.empty() ? "" : cwd + "/";
+    CHECK_EQ(ed.saveAsPath_, expected);
+    CHECK_EQ(ed.statusMessage_, "Save file: " + expected);
     CHECK(ed.active().modified);
     CHECK(ed.active().filename.empty());
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
@@ -780,17 +788,19 @@ TEST(save_as_prompt_collects_typed_path) {
     type(ed, "hola");
     press(ed, EventType::Escape);
     openSaveAs(ed);
+    clearPrompt(ed);
     typePrompt(ed, "/tmp/nuevo.txt");
     CHECK_EQ(ed.saveAsPath_, "/tmp/nuevo.txt");
     CHECK_EQ(ed.statusMessage_, "Save file: /tmp/nuevo.txt");
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
-    CHECK(ed.active().filename.empty()); // aun no se confirma
+    CHECK(ed.active().filename.empty());
     CHECK(ed.active().modified);
 }
 
 TEST(save_as_prompt_backspace_removes_characters) {
     Editor ed;
     openSaveAs(ed);
+    clearPrompt(ed);
     typePrompt(ed, "abc");
     press(ed, EventType::Backspace);
     CHECK_EQ(ed.saveAsPath_, "ab");
@@ -804,18 +814,19 @@ TEST(save_as_prompt_backspace_removes_characters) {
 TEST(save_as_prompt_backspace_on_empty_is_noop) {
     Editor ed;
     openSaveAs(ed);
+    clearPrompt(ed);
     press(ed, EventType::Backspace);
     CHECK_EQ(ed.saveAsPath_, "");
     CHECK_EQ(ed.statusMessage_, "Save file: ");
 }
 
 TEST(save_as_prompt_ignores_other_keys) {
-    // El prompt es modal: una flecha no cancela ni se filtra.
     Editor ed;
     openSaveAs(ed);
+    clearPrompt(ed);
     typePrompt(ed, "abc");
     press(ed, EventType::MoveRight);
-    press(ed, EventType::Prefix);           // Ctrl+K tampoco filtra
+    press(ed, EventType::Prefix);
     CHECK_EQ(ed.saveAsPath_, "abc");
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
 }
@@ -826,8 +837,9 @@ TEST(save_as_enter_saves_file) {
     type(ed, "hola");
     press(ed, EventType::Escape);
     openSaveAs(ed);
+    clearPrompt(ed);
     typePrompt(ed, f.path);
-    press(ed, EventType::InsertNewline);    // Enter: confirmar
+    press(ed, EventType::InsertNewline);
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().filename, f.path);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Navegacion));
@@ -838,7 +850,6 @@ TEST(save_as_enter_saves_file) {
                         std::istreambuf_iterator<char>());
     CHECK_EQ(content, "hola");
 
-    // A partir de aqui el buffer tiene nombre: Ctrl+K s guarda normal.
     type(ed, "!");
     press(ed, EventType::Escape);
     saveViaS(ed);
@@ -852,25 +863,25 @@ TEST(save_as_enter_saves_file) {
 TEST(save_as_on_new_buffer_updates_name_and_display) {
     TempFile f;
     Editor ed;
-    newBuffer(ed);                       // B = SinNombre1
+    newBuffer(ed);
     CHECK_EQ(ed.active().unnamedName, "SinNombre1");
     type(ed, "hello");
     press(ed, EventType::Escape);
-    CHECK(ed.active().filename.empty());          // aun sin nombre
+    CHECK(ed.active().filename.empty());
     CHECK_EQ(ed.active().displayName(), "SinNombre1");
 
-    openSaveAs(ed);                      // Ctrl+K Ctrl+S -> prompt
+    openSaveAs(ed);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
+    clearPrompt(ed);
     typePrompt(ed, f.path);
-    press(ed, EventType::InsertNewline);          // Enter: guardar
+    press(ed, EventType::InsertNewline);
 
-    CHECK(!ed.active().filename.empty());         // filename actualizado
+    CHECK(!ed.active().filename.empty());
     CHECK_EQ(ed.active().filename, f.path);
     const std::string base = f.path.substr(f.path.find_last_of('/') + 1);
-    CHECK_EQ(ed.active().displayName(), base);    // SinNombre desaparece de la UI
-    CHECK(!ed.active().modified);                 // modified == false
+    CHECK_EQ(ed.active().displayName(), base);
+    CHECK(!ed.active().modified);
 
-    // Ctrl+K s ya no abre el prompt: guarda normal en el mismo path.
     type(ed, "!");
     press(ed, EventType::Escape);
     CHECK(ed.active().modified);
@@ -881,7 +892,7 @@ TEST(save_as_on_new_buffer_updates_name_and_display) {
     std::ifstream in(f.path);
     std::string content((std::istreambuf_iterator<char>(in)),
                         std::istreambuf_iterator<char>());
-    CHECK_EQ(content, "hello!");                  // guardado en el nuevo path
+    CHECK_EQ(content, "hello!");
 }
 
 // Ctrl+K n -> escribir -> Ctrl+K Save As -> Esc: se cancela sin perder nada.
@@ -890,25 +901,26 @@ TEST(save_as_on_new_buffer_updates_name_and_display) {
 TEST(save_as_cancel_keeps_new_buffer_untouched) {
     TempFile f;
     Editor ed;
-    newBuffer(ed);                       // B = SinNombre1
+    newBuffer(ed);
     type(ed, "hello");
     press(ed, EventType::Escape);
     CHECK_EQ(ed.active().document.lineAt(0), "hello");
     CHECK(ed.active().modified);
     const size_t undoSize = ed.active().undoStack.size();
 
-    openSaveAs(ed);                      // Ctrl+K Ctrl+S -> prompt
+    openSaveAs(ed);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
-    typePrompt(ed, f.path);              // se escribe una ruta...
-    press(ed, EventType::Escape);        // ...pero se cancela con ESC
+    clearPrompt(ed);
+    typePrompt(ed, f.path);
+    press(ed, EventType::Escape);
 
-    CHECK_EQ(ed.active().filename, std::string());        // sigue sin nombre
-    CHECK_EQ(ed.active().unnamedName, "SinNombre1");      // sigue SinNombre
+    CHECK_EQ(ed.active().filename, std::string());
+    CHECK_EQ(ed.active().unnamedName, "SinNombre1");
     CHECK_EQ(ed.active().displayName(), "SinNombre1");
-    CHECK_EQ(ed.active().document.lineAt(0), "hello");    // contenido intacto
-    CHECK(ed.active().modified);                          // modified sigue true
-    CHECK_EQ(ed.active().undoStack.size(), undoSize);      // historial intacto
-    CHECK(!std::ifstream(f.path).good());                  // no se creo archivo
+    CHECK_EQ(ed.active().document.lineAt(0), "hello");
+    CHECK(ed.active().modified);
+    CHECK_EQ(ed.active().undoStack.size(), undoSize);
+    CHECK(!std::ifstream(f.path).good());
 }
 
 TEST(save_as_cancel_with_escape) {
@@ -917,14 +929,14 @@ TEST(save_as_cancel_with_escape) {
     type(ed, "hola");
     press(ed, EventType::Escape);
     openSaveAs(ed);
+    clearPrompt(ed);
     typePrompt(ed, f.path);
-    press(ed, EventType::Escape);           // cancelar
+    press(ed, EventType::Escape);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Navegacion));
     CHECK(ed.active().filename.empty());
     CHECK(ed.active().modified);
     CHECK_EQ(ed.statusMessage_, "Guardado cancelado.");
 
-    // No se creo el archivo.
     std::ifstream in(f.path);
     CHECK(!in.is_open());
 }
@@ -942,7 +954,8 @@ TEST(save_as_cancel_returns_to_prior_mode) {
 TEST(save_as_enter_empty_path_stays_in_prompt) {
     Editor ed;
     openSaveAs(ed);
-    press(ed, EventType::InsertNewline);    // Enter sin ruta
+    clearPrompt(ed);
+    press(ed, EventType::InsertNewline);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
     CHECK(ed.active().filename.empty());
     CHECK_EQ(ed.statusMessage_, "Save file: ");
@@ -953,6 +966,7 @@ TEST(save_as_directory_rejected) {
     type(ed, "hola");
     press(ed, EventType::Escape);
     openSaveAs(ed);
+    clearPrompt(ed);
     typePrompt(ed, "/tmp");
     press(ed, EventType::InsertNewline);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
@@ -962,7 +976,6 @@ TEST(save_as_directory_rejected) {
 }
 
 TEST(save_as_resolves_relative_path_against_cwd) {
-    // Directorio temporal bajo /tmp para no ensuciar el repo.
     char dirTemplate[] = "/tmp/edit_saveas_XXXXXX";
     char* dir = mkdtemp(dirTemplate);
     CHECK(dir != nullptr);
@@ -975,6 +988,7 @@ TEST(save_as_resolves_relative_path_against_cwd) {
     type(ed, "rel");
     press(ed, EventType::Escape);
     openSaveAs(ed);
+    clearPrompt(ed);
     typePrompt(ed, "notas.txt");
     press(ed, EventType::InsertNewline);
     CHECK(!ed.active().modified);
@@ -985,9 +999,91 @@ TEST(save_as_resolves_relative_path_against_cwd) {
                         std::istreambuf_iterator<char>());
     CHECK_EQ(content, "rel");
 
-    // Restaurar cwd y limpiar el directorio temporal.
     chdir(cwdOld.c_str());
     std::remove((std::string(dir) + "/notas.txt").c_str());
+    rmdir(dir);
+}
+
+TEST(save_as_unnamed_prefills_cwd_slash) {
+    Editor ed;
+    openSaveAs(ed);
+    std::string cwd = FileBrowser::getCwd();
+    std::string expected = cwd.empty() ? "" : cwd + "/";
+    CHECK_EQ(ed.saveAsPath_, expected);
+    CHECK_EQ(ed.statusMessage_, "Save file: " + expected);
+}
+
+TEST(save_as_unnamed_editable_full_path) {
+    TempFile f;
+    Editor ed;
+    type(ed, "hi");
+    press(ed, EventType::Escape);
+    openSaveAs(ed);
+    std::string cwd = FileBrowser::getCwd();
+    std::string prefix = cwd.empty() ? "" : cwd + "/";
+    CHECK_EQ(ed.saveAsPath_, prefix);
+    clearPrompt(ed);
+    typePrompt(ed, f.path);
+    press(ed, EventType::InsertNewline);
+    CHECK_EQ(ed.active().filename, f.path);
+    CHECK(!ed.active().modified);
+}
+
+TEST(save_as_copy_prefills_current_file) {
+    TempFile f;
+    f.write("x");
+    Editor ed;
+    CHECK(ed.openFile(f.path));
+    openSaveAs(ed);
+    CHECK_EQ(ed.saveAsPath_, f.path);
+    CHECK_EQ(ed.statusMessage_, "Save file: " + f.path);
+}
+
+TEST(save_as_copy_allows_editing_directory) {
+    TempFile f;
+    f.write("x");
+    char dirTemplate[] = "/tmp/edit_saveascopy_XXXXXX";
+    char* dir = mkdtemp(dirTemplate);
+    CHECK(dir != nullptr);
+    Editor ed;
+    CHECK(ed.openFile(f.path));
+    openSaveAs(ed);
+    CHECK_EQ(ed.saveAsPath_, f.path);
+    clearPrompt(ed);
+    std::string newPath = std::string(dir) + "/copia.txt";
+    typePrompt(ed, newPath);
+    press(ed, EventType::InsertNewline);
+    CHECK_EQ(ed.active().filename, newPath);
+    CHECK(!ed.active().modified);
+    std::remove(newPath.c_str());
+    rmdir(dir);
+}
+
+TEST(save_as_unnamed_user_can_change_directory) {
+    char dirTemplate[] = "/tmp/edit_saveas_chdir_XXXXXX";
+    char* dir = mkdtemp(dirTemplate);
+    CHECK(dir != nullptr);
+    char cwdBuf[4096];
+    CHECK(getcwd(cwdBuf, sizeof cwdBuf) != nullptr);
+    std::string cwdOld = cwdBuf;
+    CHECK_EQ(chdir(dir), 0);
+
+    Editor ed;
+    type(ed, "data");
+    press(ed, EventType::Escape);
+    openSaveAs(ed);
+    CHECK_EQ(ed.saveAsPath_, std::string(dir) + "/");
+    clearPrompt(ed);
+    std::string other = std::string(dir) + "/sub.txt";
+    typePrompt(ed, other);
+    press(ed, EventType::InsertNewline);
+    CHECK_EQ(ed.active().filename, other);
+    std::ifstream in(other);
+    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK_EQ(content, "data");
+
+    chdir(cwdOld.c_str());
+    std::remove(other.c_str());
     rmdir(dir);
 }
 

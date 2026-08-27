@@ -1292,8 +1292,8 @@ std::optional<Selection> Editor::selectAllSelection() const {
 
 void Editor::handlePrefixKey(const Event& event) {
     switch (event.type) {
-        case EventType::Save: // Ctrl+S tras Ctrl+K = guardar en otra ubicacion
-            startSaveAsCopy();
+        case EventType::Save:
+            startSaveAs();
             break;
 
         case EventType::Quit:
@@ -1357,14 +1357,14 @@ void Editor::handlePrefixKey(const Event& event) {
 }
 
 void Editor::startSaveAs() {
-    saveAsPath_.clear();
-    state_ = State::SaveAs;
-    setStatusMessage(kHelpSaveAsPrompt, MessageKind::Prompt);
-}
-
-void Editor::startSaveAsCopy() {
     if (active().filename.empty()) {
-        saveAsPath_.clear();
+        std::string cwd = FileBrowser::getCwd();
+        if (!cwd.empty()) {
+            saveAsPath_ = cwd;
+            if (saveAsPath_.back() != '/') saveAsPath_ += '/';
+        } else {
+            saveAsPath_.clear();
+        }
     } else {
         saveAsPath_ = active().filename;
     }

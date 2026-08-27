@@ -648,11 +648,12 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     CHECK_EQ(ed.active().document.lineAt(0), "BBBB2");
     prefix(ed, EventType::Prefix, EventType::Save);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
+    ed.saveAsPath_.clear();
     for (char c : fileB.path)
-        ed.handleEvent(insert(c));              // escribir la ruta destino
-    ed.handleEvent(enter);                      // Enter: guardar en esa ruta
+        ed.handleEvent(insert(c));
+    ed.handleEvent(enter);
     CHECK_EQ(ed.active().filename, fileB.path);
-    CHECK(!ed.active().modified);               // B guardado
+    CHECK(!ed.active().modified);
 
     // quit.
     prefix(ed, EventType::Prefix, EventType::Quit);
@@ -927,6 +928,7 @@ TEST(e2e_09_new_buffer_save_as_byte_exact) {
     // Save As: Ctrl+K Ctrl+S -> prompt (buffer sin nombre).
     prefix(ed, EventType::Prefix, EventType::Save);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
+    ed.saveAsPath_.clear();
 
     // elegir path: escribir la ruta destino y Enter.
     for (char c : f.path)
@@ -1237,6 +1239,7 @@ TEST(e2e_13_save_error_invalid_path) {
     // Save As a una ruta invalida: Ctrl+K Ctrl+S -> escribir path -> Enter.
     prefix(ed, EventType::Prefix, EventType::Save);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
+    ed.saveAsPath_.clear();
     for (char c : badPath)
         ed.handleEvent(insert(c));
     ed.handleEvent(nl);                          // Enter: intenta guardar
@@ -1260,6 +1263,7 @@ TEST(e2e_13_save_error_invalid_path) {
     // ...y un Save As a una ruta VALIDA termina en disco ya sin error.
     prefix(ed, EventType::Prefix, EventType::Save);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
+    ed.saveAsPath_.clear();
     for (char c : f.path)
         ed.handleEvent(insert(c));
     ed.handleEvent(nl);
