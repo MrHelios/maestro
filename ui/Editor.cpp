@@ -599,8 +599,9 @@ void Editor::openFileToBuffer(const std::string& path) {
     // crear otro (v0.6.4: no duplicar archivos abiertos).
     for (int i = 0; i < buffers.count(); ++i) {
         if (buffers.at(i).filename == filePath) {
-            activateBuffer(i);
-            state_ = priorState_; // se sale del explorador al modo previo
+            buffers.activate(i);
+            state_ = State::Navegacion;
+            setStatusMessage("");
             return;
         }
     }
@@ -630,7 +631,7 @@ void Editor::openFileToBuffer(const std::string& path) {
     nuevo.selectAllPrevious.reset();
     watchFile(nuevo.filename);
     buffers.push(std::move(nuevo));
-    state_ = priorState_; // se sale del explorador al modo previo
+    state_ = State::Navegacion;
     if (result == LoadResult::Success) {
         setStatusMessage("");
     } else {

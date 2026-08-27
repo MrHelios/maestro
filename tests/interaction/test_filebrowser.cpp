@@ -778,8 +778,6 @@ TEST(browser_opened_file_name_is_basename) {
 }
 
 TEST(browser_open_restores_prior_state) {
-    // (43) Tras abrir un archivo se sale del explorador y se restaura el
-    // modo desde el que se abrio (Navegacion, Interaccion o Seleccion).
     TempDir t;
     t.file("a.txt");
     CwdGuard g;
@@ -792,16 +790,16 @@ TEST(browser_open_restores_prior_state) {
         press(ed, EventType::InsertNewline);
         CHECK(ed.state_ == State::Navegacion);
     }
-    {   // desde Interaccion
+    {   // desde Interaccion -> al enfocar archivo vuelve a Navegacion
         Editor ed;
         type(ed, "hola");
         openFileBrowser(ed);
         press(ed, EventType::MoveDown);
         press(ed, EventType::InsertNewline);
-        CHECK(ed.state_ == State::Interaccion);
-        CHECK_EQ(ed.active().document.lineAt(0), "a.txt"); // el archivo activo
+        CHECK(ed.state_ == State::Navegacion);
+        CHECK_EQ(ed.active().document.lineAt(0), "a.txt");
     }
-    {   // desde Seleccion
+    {   // desde Seleccion -> al enfocar archivo nuevo (sin seleccion) vuelve a Navegacion
         Editor ed;
         type(ed, "abcdef");
         press(ed, EventType::Escape);
@@ -810,8 +808,38 @@ TEST(browser_open_restores_prior_state) {
         openFileBrowser(ed);
         press(ed, EventType::MoveDown);
         press(ed, EventType::InsertNewline);
-        CHECK(ed.state_ == State::Seleccion);
+        CHECK(ed.state_ == State::Navegacion);
     }
+}
+
+TEST(browser_open_focus_resets_mode_to_navegacion) {
+    TempDir t;
+    t.file("a.txt");
+    t.file("b.txt");
+    CwdGuard g;
+    g.enter(t.path);
+    Editor ed;
+    type(ed, "hola");
+    CHECK(ed.state_ == State::Interaccion);
+    openFileBrowser(ed);
+    press(ed, EventType::MoveDown);
+    press(ed, EventType::InsertNewline);
+    CHECK(ed.state_ == State::Navegacion);
+    CHECK_EQ(ed.active().filename, t.path + "/a.txt");
+    type(ed, "mundo");
+    CHECK(ed.state_ == State::Interaccion);
+    openFileBrowser(ed);
+    press(ed, EventType::MoveDown);
+    press(ed, EventType::MoveDown);
+    press(ed, EventType::InsertNewline);
+    CHECK(ed.state_ == State::Navegacion);
+    CHECK_EQ(ed.active().filename, t.path + "/b.txt");
+    ed.activateBuffer(0);
+    CHECK(ed.state_ == State::Navegacion);
+    openFileBrowser(ed);
+    press(ed, EventType::MoveDown);
+    press(ed, EventType::InsertNewline);
+    CHECK(ed.state_ == State::Navegacion);
 }
 
 TEST(browser_open_does_not_touch_other_buffers) {
