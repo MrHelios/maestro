@@ -111,6 +111,13 @@ private:
     // v0.6.3: activa el buffer `idx` y reconcilia el modo con el estado
     // de su seleccion (Seleccion si tiene rango no vacio, si no Navegacion).
     void activateBuffer(int idx);
+    // Cambia al buffer anterior (para Ctrl+K b).
+    void switchToPreviousBuffer();
+
+private:
+    // Helper: guarda el buffer actual como "anterior" y activa `idx`.
+    // Centraliza la logica de actualizacion de previousBuffer_.
+    void doActivateBuffer(int idx);
     // Nombres visibles de todos los buffers, para el selector. Los buffers
     // modificados se marcan con " *" al final.
     std::vector<std::string> bufferNames() const;
@@ -173,6 +180,17 @@ private:
 
     // Indice seleccionado en la pantalla del selector de buffers.
     int bufferSelectorIndex_ = 0;
+
+    // Identidad del buffer anterior (para Ctrl+K b: volver al buffer previo).
+    // Usamos FileIdentity (dev/inode) + filename para detectar si el buffer
+    // fue cerrado/eliminado y ya no existe.
+    struct PreviousBufferInfo {
+        bool valid = false;
+        Buffer::FileIdentity identity;
+        std::string filename;  // ruta absoluta, para mostrar en mensaje
+        std::string unnamedName; // para buffers sin nombre (SinNombre, SinNombre1...)
+    };
+    PreviousBufferInfo previousBuffer_;
 
     // ---- Explorador de archivos (v0.6.4) ----
     // Estado y navegacion del explorador (ruta actual, entradas, indice y

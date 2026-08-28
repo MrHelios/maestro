@@ -386,6 +386,9 @@ void Editor::registerCommands() {
     commands_.registerCommand("buffer.abrir", [this] {
         startFileBrowser();
     });
+    commands_.registerCommand("buffer.anterior", [this] {
+        switchToPreviousBuffer();
+    });
     commands_.registerCommand("navegacion.buscar", [this] {
         startSearch();
     });
@@ -473,12 +476,26 @@ void Editor::syncViewportSize(Buffer& b) {
 void Editor::createBuffer() {
     int rows, cols;
     terminal_.getWindowSize(rows, cols);
+    // Guardar buffer actual como anterior ANTES de crear el nuevo (el nuevo
+    // se vuelve activo automaticamente en BufferManager::createBuffer).
+    if (buffers.count() > 0) {
+        const Buffer& cur = active();
+        previousBuffer_.valid = true;
+        previousBuffer_.identity = cur.savedIdentity;
+        previousBuffer_.filename = cur.filename;
+        previousBuffer_.unnamedName = cur.unnamedName;
+    }
     const int idx = buffers.createBuffer(rows, cols);
     setActionMessage("Buffer nuevo: " + buffers.at(idx).unnamedName, MessageKind::Success);
 }
 
 void Editor::closeActiveBuffer() {
     Buffer& cur = active();
+    // Guardar el buffer que se va a cerrar como "anterior" para el toggle
+    Buffer::FileIdentity closedIdentity = cur.savedIdentity;
+    std::string closedFilename = cur.filename;
+    std::string closedUnnamedName = cur.unnamedName;
+
     std::string oldPath = cur.filename;
     int rows, cols;
     terminal_.getWindowSize(rows, cols);
@@ -501,11 +518,19 @@ void Editor::closeActiveBuffer() {
         case CloseResult::ResetLast:
             setActionMessage("Buffer reiniciado: " + active().unnamedName);
             state_ = State::Navegacion;
+            // No hay buffer anterior válido tras reiniciar el único buffer
+            previousBuffer_.valid = false;
             break;
         case CloseResult::Removed: {
             // UX (v0.8): cerrar NO abre el selector. El buffer que heredo
             // la ranura (misma posicion, clamp al final) queda activo de
             // inmediato. Para elegir deliberadamente existe Ctrl+K t.
+            // El buffer cerrado se convierte en el "anterior" para Ctrl+K b.
+            previousBuffer_.valid = true;
+            previousBuffer_.identity = closedIdentity;
+            previousBuffer_.filename = closedFilename;
+            previousBuffer_.unnamedName = closedUnnamedName;
+
             const bool hasSelection = buffers.activate(buffers.activeIndex());
             state_ = hasSelection ? State::Seleccion : State::Navegacion;
             setActionMessage("Buffer cerrado. Activo: " + active().displayName());
@@ -514,14 +539,78 @@ void Editor::closeActiveBuffer() {
     }
 }
 
-void Editor::activateBuffer(int idx) {
+void Editor::doActivateBuffer(int idx) {
+    // Contrato: cada activación de buffer guarda el actual como "anterior",
+    // permitiendo togglear con Ctrl+K b.
+    if (idx >= 0 && idx < buffers.count() && idx != buffers.activeIndex()) {
+        const Buffer& cur = buffers.at(buffers.activeIndex());
+        previousBuffer_.valid = true;
+        previousBuffer_.identity = cur.savedIdentity;
+        previousBuffer_.filename = cur.filename;
+        previousBuffer_.unnamedName = cur.unnamedName;
+    }
     const bool hasSelection = buffers.activate(idx);
-    // Reconciliar el modo global con el estado del buffer activado: un
-    // buffer con rango seleccionado deja el editor en Seleccion; sin
-    // rango, en Navegacion. (La seleccion y los demas estados son del
-    // buffer, no del Editor.)
     state_ = hasSelection ? State::Seleccion : State::Navegacion;
     setStatusMessage("");
+}
+
+void Editor::activateBuffer(int idx) {
+    doActivateBuffer(idx);
+}
+
+void Editor::switchToPreviousBuffer() {
+    if (!previousBuffer_.valid) {
+        setActionMessage("No hay buffer anterior.", MessageKind::Warning);
+        state_ = priorState_;  // Restaurar estado previo al entrar en Prefix
+        return;
+    }
+
+    // Buscar el buffer anterior por identidad.
+    // Para buffers con archivo: coinciden dev/inode + filename.
+    // Para buffers sin nombre: coinciden unnamedName (ya que no hay archivo).
+    int targetIdx = -1;
+    for (int i = 0; i < buffers.count(); ++i) {
+        const Buffer& b = buffers.at(i);
+        bool match = false;
+        if (!b.filename.empty()) {
+            // Buffer con archivo: comparar identidad + filename
+            match = (b.savedIdentity == previousBuffer_.identity
+                     && b.filename == previousBuffer_.filename);
+        } else {
+            // Buffer sin nombre: comparar unnamedName
+            match = (b.unnamedName == previousBuffer_.unnamedName);
+        }
+        if (match) {
+            targetIdx = i;
+            break;
+        }
+    }
+
+    if (targetIdx == -1) {
+        std::string display = previousBuffer_.filename.empty()
+            ? previousBuffer_.unnamedName
+            : previousBuffer_.filename;
+        std::string msg = "El buffer anterior '" + display + "' ya no existe (fue cerrado).";
+        setActionMessage(msg, MessageKind::Warning);
+        previousBuffer_.valid = false;
+        return;
+    }
+
+    // Toggle: el buffer actual se convierte en el "anterior" para la próxima vez.
+    const Buffer& cur = active();
+    Buffer::FileIdentity curIdentity = cur.savedIdentity;
+    std::string curFilename = cur.filename;
+    std::string curUnnamedName = cur.unnamedName;
+
+    activateBuffer(targetIdx);
+
+    // Restaurar previousBuffer_ al buffer del que venimos (toggle explícito).
+    previousBuffer_.valid = true;
+    previousBuffer_.identity = curIdentity;
+    previousBuffer_.filename = curFilename;
+    previousBuffer_.unnamedName = curUnnamedName;
+
+    setActionMessage("Buffer anterior: " + active().displayName());
 }
 
 std::vector<std::string> Editor::bufferNames() const {
@@ -630,9 +719,7 @@ void Editor::openFileToBuffer(const std::string& path) {
     // crear otro (v0.6.4: no duplicar archivos abiertos).
     for (int i = 0; i < buffers.count(); ++i) {
         if (buffers.at(i).filename == filePath) {
-            buffers.activate(i);
-            state_ = State::Navegacion;
-            setStatusMessage("");
+            doActivateBuffer(i);
             return;
         }
     }
@@ -661,8 +748,8 @@ void Editor::openFileToBuffer(const std::string& path) {
     nuevo.selectAllActive = false;
     nuevo.selectAllPrevious.reset();
     watchFile(nuevo.filename);
-    buffers.push(std::move(nuevo));
-    state_ = State::Navegacion;
+    const int idx = buffers.push(std::move(nuevo));
+    doActivateBuffer(idx);
     if (result == LoadResult::Success) {
         setStatusMessage("");
     } else {
@@ -1368,6 +1455,10 @@ void Editor::handlePrefixKey(const Event& event) {
                 } else {
                     running_ = false;
                 }
+                break;
+            }
+            if (event.text == "b") {           // Ctrl+K b: buffer anterior
+                commands_.execute("buffer.anterior");
                 break;
             }
             // Cualquier otra letra: cae en el cancel del default.

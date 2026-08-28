@@ -1295,3 +1295,199 @@ TEST(buffer_names_include_modified_marker) {
     CHECK_EQ(names[0], "SinNombre *");
     CHECK_EQ(names[1], "SinNombre1");
 }
+
+// ---------------------------------------------------------------------------
+// Ctrl+K b : buffer anterior (toggle)
+// ---------------------------------------------------------------------------
+
+static void previousBuffer(Editor& ed) {
+    press(ed, EventType::Prefix);
+    pressEvent(ed, insert('b'));
+}
+
+TEST(ctrl_k_b_single_buffer_no_change) {
+    Editor ed;
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK(ed.state_ == State::Navegacion);
+    // Mensaje de advertencia
+    CHECK(ed.statusMessage_ == "No hay buffer anterior.");
+}
+
+TEST(ctrl_k_b_two_buffers_toggle) {
+    Editor ed;
+    type(ed, "A");                       // B0
+    press(ed, EventType::Escape);
+    newBuffer(ed);                       // B1 activo
+    type(ed, "B");
+    press(ed, EventType::Escape);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "B");
+
+    previousBuffer(ed);                  // Ctrl+K b -> B0
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK_EQ(ed.active().document.lineAt(0), "A");
+
+    previousBuffer(ed);                  // Ctrl+K b -> B1 (toggle)
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "B");
+}
+
+TEST(ctrl_k_b_three_buffers_last_activated) {
+    Editor ed;
+    type(ed, "A");                       // B0
+    press(ed, EventType::Escape);
+    newBuffer(ed);                       // B1
+    type(ed, "B");
+    press(ed, EventType::Escape);
+    newBuffer(ed);                       // B2 activo
+    type(ed, "C");
+    press(ed, EventType::Escape);
+
+    previousBuffer(ed);                  // Ctrl+K b -> B1 (ultimo activado)
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "B");
+}
+
+TEST(ctrl_k_b_via_selector_updates_history) {
+    Editor ed;
+    type(ed, "A");                       // B0
+    press(ed, EventType::Escape);
+    newBuffer(ed);                       // B1
+    type(ed, "B");
+    press(ed, EventType::Escape);
+    newBuffer(ed);                       // B2 activo
+    type(ed, "C");
+    press(ed, EventType::Escape);
+
+    // Via selector: ir a B1
+    openSelector(ed);
+    press(ed, EventType::MoveUp);        // B1
+    press(ed, EventType::InsertNewline);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+
+    // Ctrl+K b -> B2 (el buffer anterior era B2)
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 2);
+    CHECK_EQ(ed.active().document.lineAt(0), "C");
+
+    // Toggle -> B1
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "B");
+}
+
+TEST(ctrl_k_b_previous_buffer_closed) {
+    Editor ed;
+    type(ed, "A");                       // B0
+    press(ed, EventType::Escape);
+    newBuffer(ed);                       // B1 activo
+    type(ed, "B");
+    press(ed, EventType::Escape);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+
+    // Cerrar B0 (el anterior) - necesita estar sin modificar
+    ed.activateBuffer(0);
+    ed.active().modified = false;
+    ed.active().savedLines = ed.active().document.snapshot();
+    closeBuffer(ed);                     // B0 cerrado
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.activeBuffer_, 0); // B1 hereda ranura 0
+
+    // Ctrl+K b: B0 ya no existe
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0); // se queda en B1
+    CHECK(ed.statusMessage_.find("ya no existe") != std::string::npos);
+    CHECK(ed.statusMessage_.find("fue cerrado") != std::string::npos);
+}
+
+TEST(ctrl_k_b_previous_buffer_closed_via_selector) {
+    Editor ed;
+    type(ed, "A");                       // B0
+    press(ed, EventType::Escape);
+    newBuffer(ed);                       // B1
+    type(ed, "B");
+    press(ed, EventType::Escape);
+    newBuffer(ed);                       // B2 activo
+    type(ed, "C");
+    press(ed, EventType::Escape);
+
+    // Ir a B1 via selector
+    openSelector(ed);
+    press(ed, EventType::MoveUp);        // B1
+    press(ed, EventType::InsertNewline);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+
+    // Cerrar B2 (el "anterior") - necesita estar sin modificar
+    ed.activateBuffer(2);
+    ed.active().modified = false;
+    ed.active().savedLines = ed.active().document.snapshot();
+    closeBuffer(ed);                     // cierra B2
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
+    // Activo ahora es B1 (indice 1, que era B1 antes)
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+
+    // Ctrl+K b: el anterior era B2, que fue cerrado
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1); // se queda en B1
+    CHECK(ed.statusMessage_.find("ya no existe") != std::string::npos);
+    CHECK(ed.statusMessage_.find("fue cerrado") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Ctrl+K b : mode reconciliation with buffer state
+// ---------------------------------------------------------------------------
+
+TEST(ctrl_k_b_reconciles_mode_selection) {
+    Editor ed;
+    type(ed, "hello world");             // B0
+    press(ed, EventType::Escape);
+    press(ed, EventType::MoveHome);
+    for (int i = 0; i < 6; ++i) press(ed, EventType::MoveRight); // col 6
+    pressEvent(ed, insert('s'));         // modo seleccion en B0
+    for (int i = 0; i < 5; ++i) press(ed, EventType::MoveRight); // seleccion "world"
+    CHECK(ed.state_ == State::Seleccion);
+    CHECK(ed.hasSelection());
+
+    newBuffer(ed);                       // B1 activo, sin seleccion
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK(ed.state_ == State::Navegacion);
+    CHECK(!ed.hasSelection());
+
+    // Ctrl+K b -> B0, modo se reconcilia a Seleccion
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK(ed.state_ == State::Seleccion);
+    CHECK(ed.hasSelection());
+    // seleccion intacta
+    auto sel = ed.selection();
+    CHECK(sel.has_value());
+    CHECK_EQ(ed.active().document.lineAt(sel->start.line)
+                 .substr(sel->start.col, sel->end.col - sel->start.col),
+             "world");
+}
+
+TEST(ctrl_k_b_reconciles_mode_interaction) {
+    Editor ed;
+    type(ed, "hello");                   // B0 en Interaccion
+    CHECK(ed.state_ == State::Interaccion);
+    CHECK_EQ(ed.active().document.lineAt(0), "hello");
+
+    newBuffer(ed);                       // B1
+    type(ed, "xyz");                     // B1 con contenido
+    press(ed, EventType::Escape);        // -> Navegacion, cursor al final
+    press(ed, EventType::MoveLeft);      // cursor a 'z'
+    pressEvent(ed, insert('s'));         // B1 en Seleccion, anchor en 'z'
+    press(ed, EventType::MoveRight);     // extiende seleccion
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK(ed.state_ == State::Seleccion);
+    CHECK(ed.hasSelection());
+
+    // Ctrl+K b -> B0, modo se reconcilia a Navegacion (sin seleccion)
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK(ed.state_ == State::Navegacion);  // sin seleccion = Navegacion
+    CHECK_EQ(ed.active().document.lineAt(0), "hello");
+    CHECK(!ed.hasSelection());
+}
