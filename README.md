@@ -98,7 +98,7 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 | **Prefijo**           | `Ctrl+K`                      | Siguiente tecla decide: `s` guardar, `Ctrl+S` guardar en otra ubicación, `q` salir verificando guardado, `Ctrl+Q` salir forzado, `n`/`t`/`w`/`o` buffers/archivos
 | **BufferSelector**    | `Ctrl+K t`                    | Lista modal de buffers (`↑`/`↓`, `Enter`, `Esc`)
 | **SaveAs**            | `Ctrl+K s` sin nombre / `Ctrl+K Ctrl+S` | Prompt `Guardar archivo:` (`Enter` guarda, `Esc` cancela; en `Ctrl+K Ctrl+S` la ruta inicial es editable)
-| **FileBrowser**       | `Ctrl+K o`                    | Explorador modal (`↑`/`↓`, `Enter` carpeta/archivo, `Esc`)
+| **FileBrowser**       | `Ctrl+K o`                    | Explorador modal (`↑`/`↓`, `Enter` carpeta/archivo, `Esc`); arranca en el directorio del archivo activo o en el directorio de trabajo si el buffer no tiene ruta
 | **Búsqueda**          | `Ctrl+K f` / `/`              | Búsqueda incremental, `Enter`/`Esc`
 
 ## Atajos principales
@@ -120,7 +120,7 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 | `Ctrl+K q`                | Salir verificando guardado (bloquea si hay archivos sin guardar)
 | `Ctrl+K Ctrl+Q`           | Salir forzado (sin comprobar guardado)
 | `Ctrl+K n`                | Buffer nuevo sin nombre
-| `Ctrl+K o`                | Explorador de archivos
+| `Ctrl+K o`                | Explorador de archivos (directorio del archivo activo, o cwd si sin ruta)
 | `Ctrl+K t`                | Selector de buffers
 | `Ctrl+K w`                | Cerrar buffer activo
 | `Esc`                     | Salir de Interacción/Selección/Busqueda

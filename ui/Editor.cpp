@@ -554,7 +554,18 @@ void Editor::handleBufferSelectorEvent(const Event& event) {
 }
 
 void Editor::startFileBrowser() {
-    fileBrowser.start();
+    const std::string& fn = active().filename;
+    if (!fn.empty()) {
+        const std::filesystem::path dir =
+            std::filesystem::path(fn).parent_path();
+        if (!dir.empty() && FileBrowser::isDirectory(dir.string())) {
+            fileBrowser.startAt(dir.string());
+        } else {
+            fileBrowser.start();
+        }
+    } else {
+        fileBrowser.start();
+    }
     const std::string err = fileBrowser.reload();
     if (!err.empty()) {
         setActionMessage(err, MessageKind::Error);

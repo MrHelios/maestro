@@ -84,6 +84,13 @@ void FileBrowser::start() {
     scroll_ = 0;
 }
 
+void FileBrowser::startAt(const std::string& path) {
+    if (path.empty()) { start(); return; }
+    path_ = path;
+    index_ = 0;
+    scroll_ = 0;
+}
+
 std::string FileBrowser::reload() {
     std::string err;
     entries_ = listDirectory(path_, err);

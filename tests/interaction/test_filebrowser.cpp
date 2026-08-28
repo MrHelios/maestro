@@ -1597,3 +1597,79 @@ TEST(renderer_file_list_scroll_hides_off_window) {
     CHECK(!contains(out, "  a.txt"));
     CHECK(!contains(out, "  .."));
 }
+
+TEST(browser_starts_at_active_file_directory_absolute) {
+    TempDir t;
+    t.dir("docs");
+    t.file("docs/file.cpp");
+    CwdGuard g;
+    g.enter(t.path);
+    Editor ed;
+    ed.active().filename = t.path + "/docs/file.cpp";
+    openFileBrowser(ed);
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/docs");
+}
+
+TEST(browser_starts_at_active_file_directory_other_dir) {
+    TempDir t;
+    t.dir("docs");
+    t.dir("work");
+    t.file("work/main.cpp");
+    CwdGuard g;
+    g.enter(t.path);
+    Editor ed;
+    ed.active().filename = t.path + "/work/main.cpp";
+    openFileBrowser(ed);
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/work");
+}
+
+TEST(browser_starts_at_active_buffer_directory_after_switch) {
+    TempDir t;
+    std::string docs = t.dir("docs");
+    std::string work = t.dir("work");
+    std::ofstream(docs + "/a.cpp") << "a";
+    std::ofstream(work + "/b.cpp") << "b";
+    CwdGuard g;
+    g.enter(t.path);
+    Editor ed;
+    ed.active().filename = docs + "/a.cpp";
+    newBuffer(ed);
+    ed.active().filename = work + "/b.cpp";
+    ed.activateBuffer(0);
+    openFileBrowser(ed);
+    CHECK_EQ(ed.fileBrowser.path_, docs);
+    press(ed, EventType::Escape);
+    ed.activateBuffer(1);
+    openFileBrowser(ed);
+    CHECK_EQ(ed.fileBrowser.path_, work);
+}
+
+TEST(browser_starts_at_cwd_when_unnamed_buffer) {
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    Editor ed;
+    CHECK(ed.active().filename.empty());
+    openFileBrowser(ed);
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
+}
+
+TEST(browser_starts_at_cwd_when_relative_filename) {
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    Editor ed;
+    ed.active().filename = "foo.cpp";
+    openFileBrowser(ed);
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
+}
+
+TEST(browser_falls_back_to_cwd_when_parent_missing) {
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    Editor ed;
+    ed.active().filename = "/tmp/no_such_dir_xyz_maestro_test_123/file.cpp";
+    openFileBrowser(ed);
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
+}

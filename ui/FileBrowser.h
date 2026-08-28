@@ -36,6 +36,7 @@ public:
 
     // Empieza en el directorio de trabajo con la seleccion al inicio.
     void start();
+    void startAt(const std::string& path);
 
     // (Re)lista path_ en entries_/displayNames_. Devuelve un mensaje de
     // error si no se pudo leer el directorio ("" si fue bien).
