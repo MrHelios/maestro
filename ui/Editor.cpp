@@ -48,6 +48,10 @@ inline int textWidthFor(const Viewport& vp, int totalLines) {
     return w < 0 ? 0 : w;
 }
 
+inline void updateModified(Buffer& b) {
+    b.modified = (b.document.snapshot() != b.savedLines);
+}
+
 } // namespace
 
 namespace {
@@ -278,7 +282,7 @@ void Editor::registerCommands() {
         e.edits.push_back({EditType::Insert, {insLine, insCol}, end, *maybe});
         b.cursor.line = end.line;
         b.cursor.col = end.col;
-        b.modified = true;
+        updateModified(b);
         clearSelection();
         state_ = State::Navegacion;
         setActionMessage("Pegado.", MessageKind::Success);
@@ -344,7 +348,7 @@ void Editor::registerCommands() {
             e.edits.push_back({EditType::Delete, sel->start, sel->end, text});
             b.cursor.line = sel->start.line;
             b.cursor.col = sel->start.col;
-            b.modified = true;
+            updateModified(b);
             b.commitHistoryEntry(std::move(e));
         }
         clearSelection();
@@ -939,7 +943,7 @@ void Editor::handleInteraccionEvent(const Event& event) {
                 e.edits.push_back({EditType::Insert, start, end, event.text});
                 b.cursor.line = end.line;
                 b.cursor.col = end.col;
-                b.modified = true;
+                updateModified(b);
                 b.commitHistoryEntry(std::move(e));
             } else {
                 Position start{b.cursor.line, b.cursor.col};
@@ -948,7 +952,7 @@ void Editor::handleInteraccionEvent(const Event& event) {
                 b.extendLastEntry({EditType::Insert, start, end, event.text});
                 b.cursor.line = end.line;
                 b.cursor.col = end.col;
-                b.modified = true;
+                updateModified(b);
             }
             break;
 
@@ -960,7 +964,7 @@ void Editor::handleInteraccionEvent(const Event& event) {
                                {at.line + 1, 0}, ""});
             b.cursor.line++;
             b.cursor.col = 0;
-            b.modified = true;
+            updateModified(b);
             b.commitHistoryEntry(std::move(e));
             break;
         }
@@ -983,7 +987,7 @@ void Editor::handleInteraccionEvent(const Event& event) {
                                        {b.cursor.line, 0}, ""});
                     b.cursor.line--;
                     b.cursor.col = prevLineLen;
-                    b.modified = true;
+                    updateModified(b);
                 } else {
                     int line = b.cursor.line, col = b.cursor.col;
                     std::string removed =
@@ -995,7 +999,7 @@ void Editor::handleInteraccionEvent(const Event& event) {
                         e.edits.push_back({EditType::Delete, {line, col - deleted},
                                            {line, col}, removed});
                         b.cursor.col -= deleted;
-                        b.modified = true;
+                        updateModified(b);
                     }
                 }
             } else {
@@ -1008,14 +1012,14 @@ void Editor::handleInteraccionEvent(const Event& event) {
                     if (deleted > 0) {
                         e.edits.push_back({EditType::Delete, {line, col},
                                            {line, col + deleted}, removed});
-                        b.modified = true;
+                        updateModified(b);
                     }
                 } else if (line + 1 < b.document.lineCount()) {
                     // Delete al final de linea: funde la linea siguiente.
                     b.document.mergeLine(line);
                     e.edits.push_back({EditType::MergeLine, {line, col},
                                        {line + 1, 0}, ""});
-                    b.modified = true;
+                    updateModified(b);
                 }
             }
             b.commitHistoryEntry(std::move(e));
@@ -1146,7 +1150,7 @@ void Editor::handleSeleccionEvent(const Event& event) {
                 e.edits.push_back({EditType::Insert, start, end, event.text});
                 b.cursor.line = end.line;
                 b.cursor.col = end.col;
-                b.modified = true;
+                updateModified(b);
                 clearSelection();
                 state_ = State::Interaccion;
                 coalescingTyping_ = hadSel;      // solo el reemplazo coalesce
@@ -1213,7 +1217,7 @@ void Editor::handleSelectAllEvent(const Event& event) {
                                            text});
                         b.cursor.line = sel->start.line;
                         b.cursor.col = sel->start.col;
-                        b.modified = true;
+                        updateModified(b);
                         b.commitHistoryEntry(std::move(e));
                     }
                 }
@@ -1741,7 +1745,7 @@ bool Editor::deleteSelection() {
                        blockToString(removed)});
     b.cursor.line = sel->start.line;
     b.cursor.col = sel->start.col;
-    b.modified = true;
+    updateModified(b);
     clearSelection();
     b.commitHistoryEntry(std::move(e));
     return true;
@@ -1825,7 +1829,7 @@ void Editor::indentSelection(bool indent) {
             if (b.selection->position.line == l) b.selection->position.col = shift(b.selection->position.col);
         }
     }
-    b.modified = true;
+    updateModified(b);
     b.commitHistoryEntry(std::move(e));
     setActionMessage(indent ? "Tabulado." : "Tabulacion quitada.",
                      MessageKind::Success);

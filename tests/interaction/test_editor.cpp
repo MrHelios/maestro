@@ -561,7 +561,7 @@ TEST(editor_undo_backspace) {
     CHECK_EQ(ed.active().document.lineAt(0), "a");
     press(ed, EventType::Backspace); // borra "a"
     CHECK_EQ(ed.active().document.lineAt(0), "");
-    CHECK(ed.active().modified);
+    CHECK(!ed.active().modified);
     press(ed, EventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "a");
 }

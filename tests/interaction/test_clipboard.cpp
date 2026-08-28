@@ -249,7 +249,7 @@ static void assertCut(Editor& ed,
     CHECK_EQ(ed.active().cursor.line, cursorLine);               // cursor -> inicio
     CHECK_EQ(ed.active().cursor.col, cursorCol);
     CHECK(ed.getClipboardBlock() == expectedClipboard);           // seleccion -> clipboard
-    CHECK(ed.active().modified);
+    CHECK(ed.active().modified == (ed.active().document.snapshot() != ed.active().savedLines));
 }
 
 // Documento directo (sin pasar por el teclado) para casos multilinea.

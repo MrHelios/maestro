@@ -1731,7 +1731,7 @@ TEST(select_all_x_cuts_whole_file) {
     // El archivo entero se borro -> queda una unica linea vacia.
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
-    CHECK(ed.active().modified);
+    CHECK(!ed.active().modified);
     // Cortar es una edicion: agrega historial.
     CHECK_EQ(ed.active().undoStack.size(), undoBefore + 1);
 }
@@ -1755,7 +1755,7 @@ TEST(select_all_backspace_deletes_whole_file) {
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
-    CHECK(ed.active().modified);
+    CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().undoStack.size(), undoBefore + 1);
     CHECK(ed.getClipboardBlock() == clipboardBefore);
 }
@@ -1775,7 +1775,7 @@ TEST(select_all_delete_deletes_whole_file) {
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
-    CHECK(ed.active().modified);
+    CHECK(!ed.active().modified);
 }
 
 TEST(select_all_backspace_on_empty_is_noop) {
