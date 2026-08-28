@@ -250,6 +250,9 @@ std::string Renderer::buildScreen(const Document& doc,
     beginFrame(out);
     out += buildEditorBody(doc, cursor, viewport, filename, modified, message,
                            state, selection, searchHighlight);
+    if (state == State::Busqueda) {
+        return out;
+    }
     int curRow = 1, curCol = 1;
     editorCursorPos(doc, cursor, viewport, curRow, curCol);
     moveCursorTo(out, curRow, curCol);
@@ -570,6 +573,9 @@ std::string Renderer::buildDiffFrame(const Document& doc,
         std::string out;
         beginFrame(out);
         out += lastEditorBody_;
+        if (state == State::Busqueda) {
+            return out;
+        }
         int curRow = 1, curCol = 1;
         editorCursorPos(doc, cursor, viewport, curRow, curCol);
         moveCursorTo(out, curRow, curCol);
@@ -597,6 +603,10 @@ std::string Renderer::buildDiffFrame(const Document& doc,
         out += newRows[static_cast<size_t>(i)];
     }
 
+    if (state == State::Busqueda) {
+        lastEditorBody_ = fresh;
+        return out;
+    }
     int curRow = 1, curCol = 1;
     editorCursorPos(doc, cursor, viewport, curRow, curCol);
     moveCursorTo(out, curRow, curCol);
