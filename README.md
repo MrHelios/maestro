@@ -6,9 +6,19 @@ Editor de texto modal, liviano y sin dependencias gráficas — pensado para usa
 
 ## Estado actual
 
-- **Versión:** `v0.7` (alpha)
+- **Versión:** `v0.8` (alpha)
 - **Estado:** en desarrollo activo, API/atajos pueden cambiar
 - **Plataforma:** Linux/Ubuntu X11 (usa `termios` POSIX + X11 para clipboard)
+
+## Cambios: v0.8
+
+- cuando creas un archivo nuevo y lo modificas agregandole contenido, pero despues lo eliminas todo hasta dejarlo vacio, no te deja cerrar el archivo (deberia poder)
+- cuando se usa control+k f el cursor esta visible y entorpece la visibilidad de la seleccion, en estos casos, deshabilitar la vision del cursor y dejar solo los highlight
+- cuando estas en un archivo y usas el comando control+k o, te debe abrir en la direccion que estas
+- cuando vas a guardar un archivo con el comando control+k control+s: debe autocompletar la ruta actual, actualmente solo te deja modificar el nombre.
+     mismo caso cuando se crea un archivo y despues se guarda, solo se permite modificar el nombre.
+- cuando cambias de archivo, el modo se reseat, por lo tanto siempre se vuelva a navegacion.
+- cuando se usa RePag y AvPag y se esta al borde del archivo, no baja hasta la ultima posicion o no sube hasta la primera posicion
 
 ## Características
 
