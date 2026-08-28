@@ -256,6 +256,7 @@ std::string Renderer::buildScreen(const Document& doc,
     int curRow = 1, curCol = 1;
     editorCursorPos(doc, cursor, viewport, curRow, curCol);
     moveCursorTo(out, curRow, curCol);
+    setCursorStyle(out, state);
     endFrame(out);
     return out;
 }
@@ -317,6 +318,10 @@ void Renderer::moveCursorTo(std::string& out, int row, int col) const {
 
 void Renderer::hideCursor(std::string& out) const { out += "\x1b[?25l"; }
 void Renderer::showCursor(std::string& out) const { out += "\x1b[?25h"; }
+void Renderer::setCursorStyle(std::string& out, State state) const {
+    if (state == State::Interaccion) out += "\x1b[1 q";
+    else out += "\x1b[2 q";
+}
 
 void Renderer::beginFrame(std::string& out) const {
     hideCursor(out);
@@ -579,6 +584,7 @@ std::string Renderer::buildDiffFrame(const Document& doc,
         int curRow = 1, curCol = 1;
         editorCursorPos(doc, cursor, viewport, curRow, curCol);
         moveCursorTo(out, curRow, curCol);
+        setCursorStyle(out, state);
         endFrame(out);
         return out;
     }
@@ -610,6 +616,7 @@ std::string Renderer::buildDiffFrame(const Document& doc,
     int curRow = 1, curCol = 1;
     editorCursorPos(doc, cursor, viewport, curRow, curCol);
     moveCursorTo(out, curRow, curCol);
+    setCursorStyle(out, state);
     showCursor(out);
 
     lastEditorBody_ = fresh;

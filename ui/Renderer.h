@@ -153,4 +153,5 @@ private:
     void endFrame(std::string& out) const;
     void hideCursor(std::string& out) const;
     void showCursor(std::string& out) const;
+    void setCursorStyle(std::string& out, State state) const;
 };

@@ -136,3 +136,58 @@ TEST(renderer_busqueda_diff_cache_con_modificacion){
     CHECK(contains(d3, "hola mundo X"));
     CHECK(contains(expected, "hola mundo X"));
 }
+
+TEST(renderer_navegacion_cursor_steady){
+    Document doc; doc.restore({"hola"});
+    Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
+    Cursor cur; cur.line=0; cur.col=0;
+    Renderer r;
+    std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
+    CHECK(contains(f, "\x1b[2 q"));
+    CHECK(!contains(f, "\x1b[1 q"));
+}
+
+TEST(renderer_interaccion_cursor_blinking){
+    Document doc; doc.restore({"hola"});
+    Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
+    Cursor cur; cur.line=0; cur.col=0;
+    Renderer r;
+    std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Interaccion, std::nullopt, std::nullopt);
+    CHECK(contains(f, "\x1b[1 q"));
+    CHECK(!contains(f, "\x1b[2 q"));
+}
+
+TEST(renderer_seleccion_cursor_steady){
+    Document doc; doc.restore({"hola"});
+    Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
+    Cursor cur; cur.line=0; cur.col=0;
+    Renderer r;
+    Selection sel; sel.anchor={0,0}; sel.position={0,2};
+    std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Seleccion, sel, std::nullopt);
+    CHECK(contains(f, "\x1b[2 q"));
+    CHECK(!contains(f, "\x1b[1 q"));
+}
+
+TEST(renderer_interaccion_diff_blinking){
+    Document doc; doc.restore({"hola"});
+    Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
+    Cursor cur; cur.line=0; cur.col=0;
+    Renderer r;
+    std::string f1 = r.buildDiffFrame(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
+    CHECK(contains(f1, "\x1b[2 q"));
+    std::string f2 = r.buildDiffFrame(doc, cur, vp, "t", false, "", State::Interaccion, std::nullopt, std::nullopt);
+    CHECK(contains(f2, "\x1b[1 q"));
+    CHECK(!contains(f2, "\x1b[2 q"));
+}
+
+TEST(renderer_navegacion_diff_steady_after_interaccion){
+    Document doc; doc.restore({"hola"});
+    Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
+    Cursor cur; cur.line=0; cur.col=0;
+    Renderer r;
+    std::string f1 = r.buildDiffFrame(doc, cur, vp, "t", false, "", State::Interaccion, std::nullopt, std::nullopt);
+    CHECK(contains(f1, "\x1b[1 q"));
+    std::string f2 = r.buildDiffFrame(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
+    CHECK(contains(f2, "\x1b[2 q"));
+    CHECK(!contains(f2, "\x1b[1 q"));
+}
