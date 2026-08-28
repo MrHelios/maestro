@@ -36,6 +36,22 @@ constexpr const char* kHelpPrefix =
 
 namespace {
 
+inline int gutterWidthFor(int totalLines) {
+    int digits = 1;
+    for (int n = totalLines; n >= 10; n /= 10) ++digits;
+    return std::max(3, digits + 1);
+}
+
+inline int textWidthFor(const Viewport& vp, int totalLines) {
+    int gutterW = std::min(gutterWidthFor(totalLines), vp.width);
+    int w = vp.width - gutterW;
+    return w < 0 ? 0 : w;
+}
+
+} // namespace
+
+namespace {
+
 // Convierte una ruta a su forma CANONICA-LEXICA: absoluta contra cwd() y
 // con "." / ".." reducidos ("foo/../bar" -> "bar"). Unifica rutas que
 // apuntan al mismo archivo pero se escriben distinto, de modo que el
@@ -653,7 +669,7 @@ void Editor::run() {
 
     {
         Buffer& b = active();
-        b.viewport.scrollToCursor(b.cursor);
+        b.viewport.scrollToCursor(b.cursor, b.document, textWidthFor(b.viewport, b.document.lineCount()));
         renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
                                    b.filename, b.modified, statusMessage_,
                                    state_, b.selection, searchHighlight_);
@@ -767,9 +783,7 @@ void Editor::renderFrame() {
                                  fileBrowser.path_, statusMessage_,
                                  b.viewport.width, b.viewport.height);
     } else {
-        b.viewport.scrollToCursor(b.cursor);
-        // Render diferencial: solo las filas que cambiaron desde el frame
-        // anterior (ver Renderer::renderScreenDiff).
+        b.viewport.scrollToCursor(b.cursor, b.document, textWidthFor(b.viewport, b.document.lineCount()));
         renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
                                    b.filename, b.modified, statusMessage_,
                                    state_, b.selection, searchHighlight_);
@@ -1494,12 +1508,22 @@ void Editor::clearSearchHighlight() {
 void Editor::centerViewportOnCursor() {
     Buffer& b = active();
     int h = b.viewport.height;
-    if (h <= 0) return;
-    int totalLines = b.document.lineCount();
-    int maxTop = std::max(0, totalLines - h);
-    int desiredTop = b.cursor.line - h / 2;
-    desiredTop = std::max(0, std::min(desiredTop, maxTop));
-    b.viewport.top = desiredTop;
+    if (h > 0) {
+        int totalLines = b.document.lineCount();
+        int maxTop = std::max(0, totalLines - h);
+        int desiredTop = b.cursor.line - h / 2;
+        desiredTop = std::max(0, std::min(desiredTop, maxTop));
+        b.viewport.top = desiredTop;
+    }
+    int tw = textWidthFor(b.viewport, b.document.lineCount());
+    if (tw > 0) {
+        int absoluteCol = utf8::columnOf(b.document.lineAt(b.cursor.line), b.cursor.col);
+        int desiredLeft = absoluteCol - tw / 2;
+        if (desiredLeft < 0) desiredLeft = 0;
+        b.viewport.left = desiredLeft;
+    } else {
+        b.viewport.left = 0;
+    }
 }
 
 void Editor::updateSearch() {

@@ -296,9 +296,9 @@ void Renderer::editorCursorPos(const Document& doc,
                                int& outRow, int& outCol) const {
     const EditorGeometry g = editorGeometry(doc, viewport);
     outRow = cursor.line - viewport.top + 1;
-    outCol = g.gutterW +
-             utf8::columnOf(doc.lineAt(cursor.line), cursor.col) + 1 +
-             g.layout.content.col;
+    int absoluteCol = utf8::columnOf(doc.lineAt(cursor.line), cursor.col);
+    int visibleCol = absoluteCol - viewport.left;
+    outCol = g.gutterW + visibleCol + 1 + g.layout.content.col;
 }
 
 // Posiciona el cursor real de la terminal en la fila/columna 1-indexadas.
@@ -408,52 +408,58 @@ void Renderer::renderEditorContent(std::string& out,
 
             out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
 
+            int absoluteVisStart = viewport.left;
+            int absoluteVisEnd = absoluteVisStart + textWidth;
+            std::string visible = utf8::range(line, absoluteVisStart, absoluteVisEnd);
+            // A partir de aquí todo sobre `visible` usa coordenadas visibles:
+            //   absoluteCol = utf8::columnOf(line, byteOff)
+            //   visibleCol  = absoluteCol - viewport.left
+
             if (merged.empty()) {
-                renderLine(out, theme_, line, textWidth, isCurrentLine, -1, -1, false);
+                renderLine(out, theme_, visible, textWidth, isCurrentLine, -1, -1, false);
                 out += "\r\n";
                 continue;
             }
 
-            std::vector<std::pair<int,int>> colIntervals;
+            std::vector<std::pair<int,int>> visibleIntervals;
             for (auto &p : merged) {
-                int sc = utf8::columnOf(line, p.first);
-                int ec = utf8::columnOf(line, p.second);
-                sc = std::min(sc, textWidth);
-                ec = std::min(ec, textWidth);
-                if (sc < ec) colIntervals.emplace_back(sc, ec);
+                int absoluteSc = utf8::columnOf(line, p.first);
+                int absoluteEc = utf8::columnOf(line, p.second);
+                if (absoluteEc <= absoluteVisStart || absoluteSc >= absoluteVisEnd) continue;
+                int visibleSc = std::max(absoluteSc, absoluteVisStart) - absoluteVisStart;
+                int visibleEc = std::min(absoluteEc, absoluteVisEnd) - absoluteVisStart;
+                if (visibleSc < visibleEc) visibleIntervals.emplace_back(visibleSc, visibleEc);
             }
-            if (colIntervals.empty()) {
-                renderLine(out, theme_, line, textWidth, isCurrentLine, -1, -1, false);
+            // visibleIntervals y visibleCur están en coordenadas visibles [0, textWidth)
+            if (visibleIntervals.empty()) {
+                renderLine(out, theme_, visible, textWidth, isCurrentLine, -1, -1, false);
                 out += "\r\n";
                 continue;
             }
 
-            int curCol = 0;
+            int visibleCur = 0;
             int used = 0;
-            for (size_t i = 0; i < colIntervals.size(); ++i) {
-                int sc = colIntervals[i].first;
-                int ec = colIntervals[i].second;
-                if (curCol < sc) {
-                    std::string seg = utf8::range(line, curCol, sc);
+            for (size_t i = 0; i < visibleIntervals.size(); ++i) {
+                int visibleSc = visibleIntervals[i].first;
+                int visibleEc = visibleIntervals[i].second;
+                if (visibleCur < visibleSc) {
+                    std::string seg = utf8::range(visible, visibleCur, visibleSc);
                     if (isCurrentLine) out += theme_.currentLine;
                     out += seg;
                     if (isCurrentLine) out += theme_.reset;
                     used += colCount(seg);
                 }
                 {
-                    std::string seg = utf8::range(line, sc, ec);
+                    std::string seg = utf8::range(visible, visibleSc, visibleEc);
                     out += theme_.selection;
                     out += seg;
                     out += theme_.reset;
                     used += colCount(seg);
                 }
-                curCol = ec;
-                if (i + 1 < colIntervals.size() && curCol < colIntervals[i+1].first) {
-                    // gap will be handled at next iteration's before
-                }
+                visibleCur = visibleEc;
             }
-            if (curCol < textWidth) {
-                std::string tail = utf8::range(line, curCol, textWidth);
+            if (visibleCur < textWidth) {
+                std::string tail = utf8::range(visible, visibleCur, textWidth);
                 if (isCurrentLine) out += theme_.currentLine;
                 out += tail;
                 if (isCurrentLine) {
@@ -463,12 +469,7 @@ void Renderer::renderEditorContent(std::string& out,
                 }
             } else if (isCurrentLine) {
                 for (int c = used; c < textWidth; ++c) out += ' ';
-                if (used < textWidth) { /* already in currentLine */ }
                 out += theme_.reset;
-                // ensure reset even if no tail
-                if (curCol >= textWidth) {
-                    // we already closed selection, need to ensure currentLine is not left open
-                }
             }
             out += "\r\n";
         } else {

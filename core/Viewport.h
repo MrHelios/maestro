@@ -1,20 +1,16 @@
 #pragma once
 
 #include "core/Cursor.h"
+#include "core/Document.h"
+#include "core/utf8.h"
 
-// El Viewport representa que parte del documento es visible en la
-// terminal en un momento dado. No conoce el contenido del documento,
-// solo numeros: cuantas filas/columnas hay disponibles y desde donde
-// se empieza a mostrar.
 class Viewport {
 public:
-    int top = 0;     // primera linea del documento visible en pantalla
-    int height = 24;  // filas disponibles para el texto (sin contar status bar)
-    int width = 80;   // columnas disponibles
+    int top = 0;
+    int left = 0;
+    int height = 24;
+    int width = 80;
 
-    // Ajusta `top` para que el cursor siempre quede visible.
-    // Esta es la unica responsabilidad del viewport: hacer scroll
-    // cuando el cursor se sale de la ventana visible.
     void scrollToCursor(const Cursor& cursor) {
         if (cursor.line < top) {
             top = cursor.line;
@@ -22,5 +18,33 @@ public:
             top = cursor.line - height + 1;
         }
         if (top < 0) top = 0;
+        if (left < 0) left = 0;
+    }
+
+    void scrollToCursor(const Cursor& cursor, int absoluteCol, int textWidth) {
+        if (cursor.line < top) {
+            top = cursor.line;
+        } else if (cursor.line >= top + height) {
+            top = cursor.line - height + 1;
+        }
+        if (top < 0) top = 0;
+        if (textWidth <= 0) {
+            left = 0;
+            return;
+        }
+        if (absoluteCol < left) {
+            left = absoluteCol;
+        } else if (absoluteCol >= left + textWidth) {
+            left = absoluteCol - textWidth + 1;
+        }
+        if (left < 0) left = 0;
+    }
+
+    void scrollToCursor(const Cursor& cursor, const Document& doc, int textWidth) {
+        int absoluteCol = 0;
+        if (cursor.line >= 0 && cursor.line < doc.lineCount()) {
+            absoluteCol = utf8::columnOf(doc.lineAt(cursor.line), cursor.col);
+        }
+        scrollToCursor(cursor, absoluteCol, textWidth);
     }
 };
