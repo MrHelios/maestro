@@ -23,3 +23,6 @@ edit_tests
 
 # Ejecutables y demás
 *.exe
+
+# Artefactos de CTest (se crean si alguien corre `ctest` por error)
+Testing/
