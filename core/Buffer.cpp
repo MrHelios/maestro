@@ -4,10 +4,120 @@
 
 #include "core/utf8.h"
 
+void Buffer::rebindCallback() {
+    document.setTouchedCallback([this](int a,int b){ recordWatch(a,b); });
+}
+
 Buffer::Buffer() {
     unnamedName = "SinNombre";
-    savedLines = document.snapshot();
+    syncSavedState();
+    rebindCallback();
 }
+
+Buffer::Buffer(const Buffer& other)
+    : document(other.document), cursor(other.cursor), viewport(other.viewport),
+      filename(other.filename), unnamedName(other.unnamedName), modified(other.modified),
+      selection(other.selection), selectAllActive(other.selectAllActive),
+      selectAllPrevious(other.selectAllPrevious), originalSnapshot_(other.originalSnapshot_),
+      watcher_(other.watcher_), savedEndsWithNewline(other.savedEndsWithNewline),
+      undoStack(other.undoStack), redoStack(other.redoStack),
+      savedIdentity(other.savedIdentity) {
+    rebindCallback();
+}
+
+Buffer::Buffer(Buffer&& other) noexcept
+    : document(std::move(other.document)), cursor(other.cursor), viewport(other.viewport),
+      filename(std::move(other.filename)), unnamedName(std::move(other.unnamedName)), modified(other.modified),
+      selection(std::move(other.selection)), selectAllActive(other.selectAllActive),
+      selectAllPrevious(std::move(other.selectAllPrevious)), originalSnapshot_(std::move(other.originalSnapshot_)),
+      watcher_(std::move(other.watcher_)), savedEndsWithNewline(other.savedEndsWithNewline),
+      undoStack(std::move(other.undoStack)), redoStack(std::move(other.redoStack)),
+      savedIdentity(other.savedIdentity) {
+    rebindCallback();
+    other.document.setTouchedCallback(nullptr);
+}
+
+Buffer& Buffer::operator=(const Buffer& other) {
+    if (this == &other) return *this;
+    document = other.document;
+    cursor = other.cursor;
+    viewport = other.viewport;
+    filename = other.filename;
+    unnamedName = other.unnamedName;
+    modified = other.modified;
+    selection = other.selection;
+    selectAllActive = other.selectAllActive;
+    selectAllPrevious = other.selectAllPrevious;
+    originalSnapshot_ = other.originalSnapshot_;
+    watcher_ = other.watcher_;
+    savedEndsWithNewline = other.savedEndsWithNewline;
+    undoStack = other.undoStack;
+    redoStack = other.redoStack;
+    savedIdentity = other.savedIdentity;
+    rebindCallback();
+    return *this;
+}
+
+Buffer& Buffer::operator=(Buffer&& other) noexcept {
+    if (this == &other) return *this;
+    document = std::move(other.document);
+    cursor = other.cursor;
+    viewport = other.viewport;
+    filename = std::move(other.filename);
+    unnamedName = std::move(other.unnamedName);
+    modified = other.modified;
+    selection = std::move(other.selection);
+    selectAllActive = other.selectAllActive;
+    selectAllPrevious = std::move(other.selectAllPrevious);
+    originalSnapshot_ = std::move(other.originalSnapshot_);
+    watcher_ = std::move(other.watcher_);
+    savedEndsWithNewline = other.savedEndsWithNewline;
+    undoStack = std::move(other.undoStack);
+    redoStack = std::move(other.redoStack);
+    savedIdentity = other.savedIdentity;
+    rebindCallback();
+    other.document.setTouchedCallback(nullptr);
+    return *this;
+}
+
+void Buffer::syncSavedState() {
+    originalSnapshot_ = document.snapshot();
+    savedEndsWithNewline = document.endsWithNewline();
+    watcher_.clear();
+    modified = false;
+}
+
+void Buffer::recordWatch(int rowStart, int rowEnd) {
+    if (!watcher_.empty()) {
+        auto& last = watcher_.back();
+        if (last.rowStart == rowStart && last.rowEnd == rowEnd) return;
+    }
+    watcher_.push_back({rowStart, rowEnd});
+}
+
+bool Buffer::isModified() const {
+    const auto& orig = originalSnapshot_;
+    int origCount = static_cast<int>(orig.size());
+    int curCount = document.lineCount();
+    if (curCount != origCount) return true;
+    if (watcher_.empty()) return false;
+    std::vector<char> seen(static_cast<size_t>(curCount), 0);
+    for (auto &e : watcher_) {
+        int a = e.rowStart;
+        int b = e.rowEnd;
+        if (a < 0) a = 0;
+        if (b >= curCount) b = curCount - 1;
+        if (a > b) continue;
+        for (int l = a; l <= b; ++l) {
+            if (seen[static_cast<size_t>(l)]) continue;
+            seen[static_cast<size_t>(l)] = 1;
+            if (document.lineAt(l) != orig[static_cast<size_t>(l)]) return true;
+        }
+    }
+    return false;
+}
+
+void Buffer::recalcModified() { modified = isModified(); }
 
 std::string Buffer::displayName() const {
     if (!filename.empty()) {
@@ -123,7 +233,7 @@ bool Buffer::undo() {
     cursor.clampToLine(document);
     restoreSelection(entry.selectionBefore);
 
-    modified = (document.snapshot() != savedLines);
+    recalcModified();
 
     // La misma entrada describe la operacion hacia adelante: queda
     // pendiente en redoStack.
@@ -153,7 +263,7 @@ bool Buffer::redo() {
     cursor.clampToLine(document);
     restoreSelection(entry.selectionAfter);
 
-    modified = (document.snapshot() != savedLines);
+    recalcModified();
 
     // La entrada vuelve al undoStack para poder deshacerla de nuevo.
     undoStack.push_back(std::move(entry));

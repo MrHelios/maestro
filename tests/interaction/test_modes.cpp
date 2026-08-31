@@ -1039,7 +1039,7 @@ TEST(clipboard_p_from_navegacion_empty_buffer_noop) {
     type(ed, "abc");
     press(ed, EventType::Escape);   // -> Navegacion
     ed.active().modified = false;           // simula estado guardado
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     press(ed, EventType::MoveHome);
     press(ed, EventType::MoveRight); // cursor (0,1)
     CHECK_EQ(ed.active().cursor.line, 0);

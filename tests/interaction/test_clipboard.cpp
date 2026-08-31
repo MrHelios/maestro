@@ -249,7 +249,7 @@ static void assertCut(Editor& ed,
     CHECK_EQ(ed.active().cursor.line, cursorLine);               // cursor -> inicio
     CHECK_EQ(ed.active().cursor.col, cursorCol);
     CHECK(ed.getClipboardBlock() == expectedClipboard);           // seleccion -> clipboard
-    CHECK(ed.active().modified == (ed.active().document.snapshot() != ed.active().savedLines));
+    CHECK(ed.active().modified == (ed.active().document.snapshot() != ed.active().originalSnapshot_));
 }
 
 // Documento directo (sin pasar por el teclado) para casos multilinea.
@@ -266,7 +266,7 @@ TEST(selection_x_without_selection_noop) {
     type(ed, "hola");
     press(ed, EventType::Escape);
     ed.active().modified = false;               // simula estado guardado
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);                 // s
     CHECK(!ed.hasSelection());
@@ -293,7 +293,7 @@ TEST(selection_c_without_selection_noop) {
     type(ed, "hola");
     press(ed, EventType::Escape);
     ed.active().modified = false;               // simula estado guardado
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);                 // s
     CHECK(!ed.hasSelection());
@@ -321,7 +321,7 @@ TEST(selection_p_empty_range_pastes_at_cursor) {
     type(ed, "hola");
     press(ed, EventType::Escape);
     ed.active().modified = false;               // simula estado guardado
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.setClipboardBlock(std::vector<std::string>{"XYZ"});
 
     enterSeleccion(ed);                            // s, sin rango
@@ -347,7 +347,7 @@ TEST(selection_p_range_replaces_selection) {
     type(ed, "hola");
     press(ed, EventType::Escape);
     ed.active().modified = false;               // simula estado guardado
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);
     press(ed, EventType::MoveRight);               // [h]
@@ -371,7 +371,7 @@ TEST(selection_p_on_range_replaces_selection) {
     type(ed, "hola");
     press(ed, EventType::Escape);
     ed.active().modified = false;               // simula estado guardado
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);
     press(ed, EventType::MoveRight);               // [h]
@@ -1314,7 +1314,7 @@ TEST(clipboard_select_all_copy_is_side_effect_free) {
 
 // Simula un guardado: marca el contenido actual como el estado persistido.
 static void markSaved(Editor& ed) {
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
 }
 

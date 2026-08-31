@@ -54,7 +54,7 @@ static void prepareScenario(Editor& ed,
                             Position anchor,
                             Position position) {
     ed.active().document.restore(lines);
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
     ed.active().selection = Selection{anchor, position};
     ed.active().cursor.line = position.line;
@@ -68,7 +68,7 @@ static void preparePaste(Editor& ed,
                          const std::vector<std::string>& lines,
                          Position pos) {
     ed.active().document.restore(lines);
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
     ed.active().selection.reset();
     ed.active().cursor.line = pos.line;
@@ -359,7 +359,7 @@ TEST(interaction_delete_selection_undo_restores_selection) {
 TEST(interaction_delete_selection_from_interaccion) {
     Editor ed;
     ed.active().document.restore({"hello world"});
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
     ed.active().selection = Selection{{0, 6}, {0, 11}};
     ed.active().cursor.line = 0;
@@ -762,7 +762,7 @@ TEST(interaction_selection_utf8_boundaries_never_inside_codepoint) {
 TEST(interaction_save_edit_undo_edit_b_clears_redo) {
     Editor ed;
     ed.active().document.restore({"hola"});      // documento guardado
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;                // estado "despues de save"
     // restore deja el cursor en BOF; lo movemos al final de la linea para
     // que la edicion anexe en lugar de anteponer.
@@ -796,7 +796,7 @@ TEST(interaction_save_edit_undo_edit_b_clears_redo) {
 TEST(interaction_save_edit_save_undo_modified_true) {
     Editor ed;
     ed.active().document.restore({"A"});
-    ed.active().savedLines = ed.active().document.snapshot(); // save(A)
+    ed.active().originalSnapshot_ = ed.active().document.snapshot(); // save(A)
     ed.active().modified = false;
 
     // edit -> "AB"
@@ -807,14 +807,14 @@ TEST(interaction_save_edit_save_undo_modified_true) {
     CHECK(ed.active().modified);
 
     // save -> savedLines se ancla a "AB"; modified = false
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
     CHECK(!ed.active().modified);
 
     // undo -> vuelve a "A": el estado actual queda ANTERIOR al ultimo save.
     press(ed, EventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "A");
-    CHECK(ed.active().document.snapshot() != ed.active().savedLines);
+    CHECK(ed.active().document.snapshot() != ed.active().originalSnapshot_);
     CHECK(ed.active().modified);             // A != ultimo save (B)
 }
 
@@ -830,7 +830,7 @@ TEST(interaction_save_edit_save_undo_modified_true) {
 TEST(interaction_save_edit_save_undo_redo_modified_false) {
     Editor ed;
     ed.active().document.restore({"A"});
-    ed.active().savedLines = ed.active().document.snapshot(); // save(A)
+    ed.active().originalSnapshot_ = ed.active().document.snapshot(); // save(A)
     ed.active().modified = false;
 
     // edit: "A" -> "AB"
@@ -840,7 +840,7 @@ TEST(interaction_save_edit_save_undo_redo_modified_false) {
     CHECK_EQ(ed.active().document.lineAt(0), "AB");
 
     // save(B): savedLines se ancla a "AB"
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
 
     press(ed, EventType::Undo);              // -> "A" (anterior al save B)
@@ -849,7 +849,7 @@ TEST(interaction_save_edit_save_undo_redo_modified_false) {
     press(ed, EventType::Redo);              // -> vuelve a "AB" (el save B)
     CHECK_EQ(ed.active().document.lineAt(0), "AB");
     // El estado final coincide con el ultimo guardado -> NO modificado.
-    CHECK(ed.active().document.snapshot() == ed.active().savedLines);
+    CHECK(ed.active().document.snapshot() == ed.active().originalSnapshot_);
     CHECK(!ed.active().modified);
 }
 
@@ -1038,7 +1038,7 @@ TEST(interaction_buffers_independent_modified) {
     Editor ed;
     // A: modificar una linea ("a" -> "ax")-> modified true
     ed.active().document.restore({"a"});
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
     ed.active().cursor.col = ed.active().document.lineLength(0);
     ed.handleEvent(insert('i'));               // -> Interaccion
@@ -1049,7 +1049,7 @@ TEST(interaction_buffers_independent_modified) {
     // B: guardado (modified false)
     ed.createBuffer();
     ed.active().document.restore({"b"});
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
     CHECK(!ed.active().modified);
 
@@ -1075,7 +1075,7 @@ TEST(interaction_undo_switching_buffers_isolated) {
 
     // A edit: "a" -> "ab"
     ed.active().document.restore({"a"});
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
     appendChar(ed, 'b');                       // A = "ab"
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
@@ -1083,7 +1083,7 @@ TEST(interaction_undo_switching_buffers_isolated) {
     // buffer B edit: "x" -> "xy"
     ed.createBuffer();
     ed.active().document.restore({"x"});
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
     appendChar(ed, 'y');                       // B = "xy"
     CHECK_EQ(ed.active().document.lineAt(0), "xy");
@@ -1119,7 +1119,7 @@ TEST(interaction_redo_switching_buffers_isolated) {
 
     // A edit: "a" -> "ab"
     ed.active().document.restore({"a"});
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
     appendChar(ed, 'b');                       // A = "ab"
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
@@ -1132,7 +1132,7 @@ TEST(interaction_redo_switching_buffers_isolated) {
     // buffer B edit: "x" -> "xy". Editar B NO debe tocar el redo de A.
     ed.createBuffer();
     ed.active().document.restore({"x"});
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
     appendChar(ed, 'y');                       // B = "xy"
     CHECK_EQ(ed.active().document.lineAt(0), "xy");
@@ -1189,14 +1189,14 @@ TEST(interaction_save_switching_buffers_isolated_modified) {
     ed.activateBuffer(0);
     ed.save();
     CHECK(!ed.active().modified);                      // A modified=false
-    CHECK(ed.active().document.snapshot() == ed.active().savedLines);
+    CHECK(ed.active().document.snapshot() == ed.active().originalSnapshot_);
     ed.activateBuffer(1);
     CHECK(ed.active().modified);                       // B sigue modificado
 
     // B save: ambos quedan no-modificados.
     ed.save();
     CHECK(!ed.active().modified);                      // B modified=false
-    CHECK(ed.active().document.snapshot() == ed.active().savedLines);
+    CHECK(ed.active().document.snapshot() == ed.active().originalSnapshot_);
     ed.activateBuffer(0);
     CHECK(!ed.active().modified);                      // A sigue sin modificar
 

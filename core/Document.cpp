@@ -163,6 +163,7 @@ void Document::insertChar(int line, int col, char c) {
     if (col > static_cast<int>(target.size())) col = static_cast<int>(target.size());
     target.insert(target.begin() + col, c);
     normalizeEndsWithNewline();
+    notifyTouched(line, line);
 }
 
 namespace {
@@ -231,6 +232,7 @@ Position Document::insertText(int line, int col, const std::string& text) {
     if (col > static_cast<int>(target.size())) col = static_cast<int>(target.size());
     target.insert(col, text);
     normalizeEndsWithNewline();
+    notifyTouched(line, line);
     return {line, col + static_cast<int>(text.size())};
 }
 
@@ -244,6 +246,7 @@ void Document::splitLine(int line, int col) {
     target.erase(col);
     lines_.insert(lines_.begin() + line + 1, rest);
     normalizeEndsWithNewline();
+    notifyTouched(line, line + 1);
 }
 
 bool Document::mergeLine(int line) {
@@ -253,6 +256,7 @@ bool Document::mergeLine(int line) {
     lines_.erase(lines_.begin() + line + 1);
     lines_[line] += next;
     normalizeEndsWithNewline();
+    notifyTouched(line, line);
     return true;
 }
 
@@ -266,14 +270,10 @@ int Document::deleteCharBefore(int line, int col) {
 
     if (col > 0) {
         std::string& target = lines_[line];
-        // Borra la celda COMPLETA que precede a (line, col): retrocede
-        // desde col-1 hasta el inicio de esa celda, para no dejar un byte
-        // suelto si era una secuencia UTF-8 valida. Con utf8::isCellStart,
-        // una continuacion huerfana es su propia celda (modelo byte-safe).
-        // Mismo recorrido que cellTextBefore (ver comentario ahi).
         int start = cellStartBefore(target, col);
         int bytes = col - start;
         target.erase(start, static_cast<size_t>(bytes));
+        notifyTouched(line, line);
         return bytes;
     }
 
@@ -284,6 +284,7 @@ int Document::deleteCharBefore(int line, int col) {
     lines_.erase(lines_.begin() + line);
     lines_[line - 1] += current;
     normalizeEndsWithNewline();
+    notifyTouched(line - 1, line - 1);
     return 0;
 }
 
@@ -296,14 +297,10 @@ int Document::deleteCharAt(int line, int col) {
     int len = lineLength(line);
     if (col < len) {
         std::string& target = lines_[line];
-        // Borra la celda COMPLETA que comienza en (line, col): si es una
-        // secuencia UTF-8 valida borra todos sus bytes; si es un byte
-        // suelto (lead invalido o continuacion huerfana), borra solo ese
-        // byte (modelo byte-safe: no se traga bytes que no le pertenecen).
-        // Mismo recorrido que cellTextAt (ver comentario ahi).
         int end = cellEndAt(target, col);
         int bytes = end - col;
         target.erase(col, static_cast<size_t>(bytes));
+        notifyTouched(line, line);
         return bytes;
     }
 
@@ -333,16 +330,16 @@ bool Document::deleteRange(int sl, int sc, int el, int ec) {
     if (sl == el) {
         lines_[sl].erase(sc, ec - sc);
         normalizeEndsWithNewline();
+        notifyTouched(sl, sl);
         return true;
     }
 
-    // Multilinea: pegamos la cola de la ultima linea al final de la
-    // primera y eliminamos las lineas intermedias.
     std::string tail = lines_[el].substr(ec);
     lines_[sl].erase(sc);
     lines_[sl] += tail;
     lines_.erase(lines_.begin() + sl + 1, lines_.begin() + el + 1);
     normalizeEndsWithNewline();
+    notifyTouched(sl, el);
     return true;
 }
 
@@ -380,10 +377,9 @@ Position Document::insertBlock(int line, int col, const std::vector<std::string>
     if (col > static_cast<int>(target.size())) col = static_cast<int>(target.size());
 
     if (block.size() == 1) {
-        // Una sola linea: insertar el string completo dentro de la linea
-        // existente, sin partirla.
         target.insert(col, block[0]);
         normalizeEndsWithNewline();
+        notifyTouched(line, line);
         return {line, col + static_cast<int>(block[0].size())};
     }
 
@@ -404,8 +400,7 @@ Position Document::insertBlock(int line, int col, const std::vector<std::string>
     lines_.erase(lines_.begin() + line);
     lines_.insert(lines_.begin() + line, newLines.begin(), newLines.end());
     normalizeEndsWithNewline();
-
-    // Cursor al final de la ultima linea insertada del bloque.
+    notifyTouched(line, line + static_cast<int>(block.size()) - 1);
     return {line + static_cast<int>(block.size()) - 1,
             static_cast<int>(block.back().size())};
 }
@@ -416,7 +411,8 @@ int Document::indentLine(int line, bool indent, int indentLen) {
 
     if (indent) {
         s.insert(0, static_cast<size_t>(indentLen), ' ');
-        return indentLen;             // el comienzo se movio +indentLen bytes
+        notifyTouched(line, line);
+        return indentLen;
     }
 
     // Desindentar: quitar UN nivel de indentacion del comienzo. Un
@@ -444,5 +440,6 @@ int Document::indentLine(int line, bool indent, int indentLen) {
 
     if (remove == 0) return 0;
     s.erase(0, static_cast<size_t>(remove));
-    return -remove;                   // el comienzo se movio -remove bytes
+    notifyTouched(line, line);
+    return -remove;
 }

@@ -498,12 +498,12 @@ static void typeE(Editor& ed, const std::string& s){ for(char c: s) ed.handleEve
 TEST(new_file_empty_after_edit_not_modified){
     Editor ed;
     CHECK(!ed.active().modified);
-    CHECK(ed.active().document.snapshot() == ed.active().savedLines);
+    CHECK(ed.active().document.snapshot() == ed.active().originalSnapshot_);
     ed.handleEvent(insE('i'));
     typeE(ed, "contenido");
     pressE(ed, EventType::Escape);
     CHECK(ed.active().modified);
-    CHECK(ed.active().document.snapshot() != ed.active().savedLines);
+    CHECK(ed.active().document.snapshot() != ed.active().originalSnapshot_);
     ed.handleEvent(insE('s'));
     pressE(ed, EventType::Escape);
     // seleccionar todo y borrar
@@ -516,7 +516,7 @@ TEST(new_file_empty_after_edit_not_modified){
     pressE(ed, EventType::Backspace);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
-    CHECK(ed.active().document.snapshot() == ed.active().savedLines);
+    CHECK(ed.active().document.snapshot() == ed.active().originalSnapshot_);
     CHECK(!ed.active().modified);
     // debe permitir cerrar (no bloqueado)
     // simular Ctrl+K q: verificar que no está modificado, por lo tanto close no bloquea
@@ -534,6 +534,6 @@ TEST(new_file_empty_after_edit_not_modified){
     ed2.active().document.restore({""});
     ed2.active().cursor.line=0; ed2.active().cursor.col=0;
     // recalcular modified como hace Editor
-    ed2.active().modified = (ed2.active().document.snapshot() != ed2.active().savedLines);
+    ed2.active().modified = (ed2.active().document.snapshot() != ed2.active().originalSnapshot_);
     CHECK(!ed2.active().modified);
 }

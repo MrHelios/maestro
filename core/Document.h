@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -46,6 +47,8 @@ inline std::ostream& operator<<(std::ostream& os, LoadResult r) {
 // UTF-8) y utf8.h.
 class Document {
 public:
+    void setTouchedCallback(std::function<void(int,int)> cb) { touchedCallback_ = std::move(cb); }
+
     // Terminador de linea detectado al CARGAR un archivo y usado al GUARDAR.
     // Se conserva para que abrir+guardar NO cambie silenciosamente el
     // formato del archivo: un archivo Windows (CRLF) sigue siendo CRLF al
@@ -202,6 +205,8 @@ public:
 
 private:
     std::vector<std::string> lines_;
+    std::function<void(int,int)> touchedCallback_;
+    void notifyTouched(int a,int b) { if (touchedCallback_) touchedCallback_(a,b); }
 
     // Terminador de linea usado al guardar. Se detecta en loadFromFile
     // (LF vs CRLF) y se conserva hasta el siguiente guardado.

@@ -693,7 +693,7 @@ TEST(ctrl_k_w_close_middle_buffer_preserves_others) {
     // activar el buffer del medio (B1)
     ed.activateBuffer(1);
     ed.buffers.buffers_[1].modified = false;                       // limpio para cerrar
-    ed.buffers.buffers_[1].savedLines = ed.buffers.buffers_[1].document.snapshot();
+    ed.buffers.buffers_[1].originalSnapshot_ = ed.buffers.buffers_[1].document.snapshot();
     closeBuffer(ed);
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
     CHECK_EQ(ed.active().document.lineAt(0), "CCC"); // hereda la ranura 1
@@ -706,7 +706,7 @@ TEST(ctrl_k_w_last_buffer_resets_not_removes) {
     type(ed, "contenido");
     press(ed, EventType::Escape);
     ed.active().modified = false;                          // limpio para cerrar
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     closeBuffer(ed);
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
@@ -1390,7 +1390,7 @@ TEST(ctrl_k_b_previous_buffer_closed) {
     // Cerrar B0 (el anterior) - necesita estar sin modificar
     ed.activateBuffer(0);
     ed.active().modified = false;
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     closeBuffer(ed);                     // B0 cerrado
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK_EQ(ed.buffers.activeBuffer_, 0); // B1 hereda ranura 0
@@ -1422,7 +1422,7 @@ TEST(ctrl_k_b_previous_buffer_closed_via_selector) {
     // Cerrar B2 (el "anterior") - necesita estar sin modificar
     ed.activateBuffer(2);
     ed.active().modified = false;
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     closeBuffer(ed);                     // cierra B2
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
     // Activo ahora es B1 (indice 1, que era B1 antes)

@@ -40,7 +40,7 @@ TEST(external_change_reloads_clean_buffer) {
     ed.handleFileChange({f.path, FileChangeKind::Modified});
     CHECK_EQ(ed.active().document.lineAt(0), "new");
     CHECK(!ed.active().modified);
-    CHECK(ed.active().savedLines == ed.active().document.snapshot());
+    CHECK(ed.active().originalSnapshot_ == ed.active().document.snapshot());
 }
 
 TEST(external_change_preserves_modified_buffer) {
@@ -60,11 +60,11 @@ TEST(external_change_updates_saved_lines) {
     TempFile f; f.write("A\n");
     Editor ed = makeNullEditor();
     CHECK(ed.openFile(f.path));
-    auto oldSaved = ed.active().savedLines;
+    auto oldSaved = ed.active().originalSnapshot_;
     writeFile(f.path, "B\n");
     ed.handleFileChange({f.path, FileChangeKind::Modified});
-    CHECK(ed.active().savedLines == ed.active().document.snapshot());
-    CHECK(ed.active().savedLines != oldSaved);
+    CHECK(ed.active().originalSnapshot_ == ed.active().document.snapshot());
+    CHECK(ed.active().originalSnapshot_ != oldSaved);
 }
 
 TEST(external_change_clamps_cursor) {
@@ -239,7 +239,7 @@ TEST(same_file_two_buffers_share_watch) {
     second.unnamedName = "";
     ed.buffers.push(std::move(second));
     ed.buffers.at(1).filename = ed.buffers.at(0).filename;
-    ed.buffers.at(1).savedLines = ed.buffers.at(0).savedLines;
+    ed.buffers.at(1).originalSnapshot_ = ed.buffers.at(0).originalSnapshot_;
     ed.buffers.at(1).savedIdentity = ed.buffers.at(0).savedIdentity;
     ed.buffers.at(1).document.restore({"shared"});
     writeFile(f.path, "ext\n");
@@ -256,7 +256,7 @@ TEST(closing_one_shared_buffer_keeps_watch) {
     second.unnamedName = "";
     ed.buffers.push(std::move(second));
     ed.buffers.at(1).filename = ed.buffers.at(0).filename;
-    ed.buffers.at(1).savedLines = ed.buffers.at(0).savedLines;
+    ed.buffers.at(1).originalSnapshot_ = ed.buffers.at(0).originalSnapshot_;
     ed.buffers.at(1).savedIdentity = ed.buffers.at(0).savedIdentity;
     ed.buffers.at(1).document.restore({"shared"});
     ed.buffers.activeBuffer_ = 0;

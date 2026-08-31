@@ -78,6 +78,10 @@ public:
     static constexpr size_t MAX_UNDO = 1000;
 
     Buffer();
+    Buffer(const Buffer& other);
+    Buffer(Buffer&& other) noexcept;
+    Buffer& operator=(const Buffer& other);
+    Buffer& operator=(Buffer&& other) noexcept;
 
     Document document;
     Cursor cursor;
@@ -93,9 +97,17 @@ public:
     // cursor; selectAllPrevious_ guarda la seleccion previa para el toggle.
     bool selectAllActive = false;
     std::optional<Selection> selectAllPrevious;
+    struct WatcherEntry {
+        int rowStart;
+        int rowEnd;
+    };
+    std::vector<std::string> originalSnapshot_;
+    std::vector<WatcherEntry> watcher_;
+    void recordWatch(int rowStart, int rowEnd);
+
     // Ultimo contenido persistido (o el inicial si nunca se guardo).
-    // modified = (contenido actual != savedLines).
-    std::vector<std::string> savedLines;
+    // modified = (contenido actual != originalSnapshot_).
+    bool savedEndsWithNewline = false;
 
     std::vector<HistoryEntry> undoStack;
     std::vector<HistoryEntry> redoStack;
@@ -114,6 +126,10 @@ public:
         }
         bool operator!=(const FileIdentity& o) const { return !(*this == o); }
     } savedIdentity;
+
+    void syncSavedState();
+    bool isModified() const;
+    void recalcModified();
 
     // Nombre visible del buffer para la barra de estado y el selector:
     // el nombre del archivo (sin directorio) si tiene uno, o el nombre
@@ -148,6 +164,7 @@ public:
     bool redo();
 
 private:
+    void rebindCallback();
     // Aplica una edit hacia adelante / en reversa sobre el documento.
     void applyForward(const Edit& e);
     void applyBackward(const Edit& e);

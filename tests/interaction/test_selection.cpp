@@ -1043,7 +1043,7 @@ TEST(selection_end_grows_shrinks_disappears) {
 // Seleccion es estado del editor, no una edicion al texto.
 // Simulamos un "guardado" fijando savedLines_/modified_ directamente.
 static void markSaved(Editor& ed) {
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
 }
 

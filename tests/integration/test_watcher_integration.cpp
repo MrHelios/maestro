@@ -368,7 +368,7 @@ TEST(editor_two_buffers_same_file_share_watch_real) {
     second.unnamedName = "";
     ed.buffers.push(std::move(second));
     ed.buffers.at(1).filename = ed.buffers.at(0).filename;
-    ed.buffers.at(1).savedLines = ed.buffers.at(0).savedLines;
+    ed.buffers.at(1).originalSnapshot_ = ed.buffers.at(0).originalSnapshot_;
     ed.buffers.at(1).savedIdentity = ed.buffers.at(0).savedIdentity;
     ed.buffers.at(1).document.restore({"shared"});
     ed.watchFile(ed.buffers.at(1).filename);

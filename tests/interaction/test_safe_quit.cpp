@@ -121,7 +121,7 @@ TEST(safe_quit_todos_guardados_despues) {
     newBuffer(ed);
     for (int i = 0; i < 3; ++i) {
         ed.buffers.at(i).modified = true;
-        ed.buffers.at(i).savedLines = ed.buffers.at(i).document.snapshot();
+        ed.buffers.at(i).originalSnapshot_ = ed.buffers.at(i).document.snapshot();
         ed.buffers.at(i).modified = false;
     }
     safeQuit(ed);
@@ -147,7 +147,7 @@ TEST(safe_quit_reintentar_despues_de_guardar) {
     safeQuit(ed);
     CHECK(ed.running_);
     ed.active().modified = false;
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     safeQuit(ed);
     CHECK(!ed.running_);
 }
@@ -197,7 +197,7 @@ TEST(safe_quit_buffer_nuevo_guardado_posterior) {
     type(ed, "contenido");
     press(ed, EventType::Escape);
     ed.active().modified = false;
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     safeQuit(ed);
     CHECK(!ed.running_);
 }

@@ -49,7 +49,7 @@ inline int textWidthFor(const Viewport& vp, int totalLines) {
 }
 
 inline void updateModified(Buffer& b) {
-    b.modified = (b.document.snapshot() != b.savedLines);
+    b.recalcModified();
 }
 
 } // namespace
@@ -134,8 +134,7 @@ void Editor::handleFileChange(const FileChangeEvent& ev) {
                     watchFile(b.filename);
                     LoadResult res = b.document.loadFromFile(b.filename);
                     if (res == LoadResult::Success) {
-                        b.savedLines = b.document.snapshot();
-                        b.modified = false;
+                        b.syncSavedState();
                         b.savedIdentity = captureIdentity(b.filename);
                         if (b.cursor.line >= b.document.lineCount()) b.cursor.line = b.document.lineCount() - 1;
                         if (b.cursor.line < 0) b.cursor.line = 0;
@@ -164,8 +163,7 @@ void Editor::handleFileChange(const FileChangeEvent& ev) {
         }
         LoadResult res = b.document.loadFromFile(b.filename);
         if (res == LoadResult::Success) {
-            b.savedLines = b.document.snapshot();
-            b.modified = false;
+            b.syncSavedState();
             b.savedIdentity = captureIdentity(b.filename);
             if (b.cursor.line >= b.document.lineCount()) b.cursor.line = b.document.lineCount() - 1;
             if (b.cursor.line < 0) b.cursor.line = 0;
@@ -432,8 +430,7 @@ bool Editor::openFile(const std::string& path) {
                          MessageKind::Error);
         return false;
     }
-    b.modified = false;
-    b.savedLines = b.document.snapshot();
+    b.syncSavedState();
     b.savedIdentity = (result == LoadResult::Success) ? captureIdentity(b.filename) : Buffer::FileIdentity{};
     b.cursor.line = 0;
     b.cursor.col = 0;
@@ -739,8 +736,7 @@ void Editor::openFileToBuffer(const std::string& path) {
                          MessageKind::Error);
         return;
     }
-    nuevo.modified = false;
-    nuevo.savedLines = nuevo.document.snapshot();
+    nuevo.syncSavedState();
     nuevo.savedIdentity = (result == LoadResult::Success) ? captureIdentity(filePath) : Buffer::FileIdentity{};
     nuevo.cursor.line = 0;
     nuevo.cursor.col = 0;
@@ -1035,7 +1031,6 @@ void Editor::handleInteraccionEvent(const Event& event) {
             if (!coalescingTyping_) {
                 HistoryEntry e = b.beginHistoryEntry();
                 Position start{b.cursor.line, b.cursor.col};
-                // La posicion final la calcula Document (UTF-8, '\n').
                 Position end = b.document.insertText(start.line, start.col,
                                                      event.text);
                 e.edits.push_back({EditType::Insert, start, end, event.text});
@@ -1090,8 +1085,6 @@ void Editor::handleInteraccionEvent(const Event& event) {
                     int line = b.cursor.line, col = b.cursor.col;
                     std::string removed =
                         b.document.cellTextBefore(line, col);
-                    // deleteCharBefore devuelve cuantos bytes borro dentro
-                    // de la linea (el largo del caracter UTF-8 completo).
                     int deleted = b.document.deleteCharBefore(line, col);
                     if (deleted > 0) {
                         e.edits.push_back({EditType::Delete, {line, col - deleted},
@@ -1113,7 +1106,6 @@ void Editor::handleInteraccionEvent(const Event& event) {
                         updateModified(b);
                     }
                 } else if (line + 1 < b.document.lineCount()) {
-                    // Delete al final de linea: funde la linea siguiente.
                     b.document.mergeLine(line);
                     e.edits.push_back({EditType::MergeLine, {line, col},
                                        {line + 1, 0}, ""});
@@ -1231,7 +1223,7 @@ void Editor::handleSeleccionEvent(const Event& event) {
                 // (escritura normal, por caracter).
                 bool hadSel = hasSelection();
                 auto sel = selection();
-                HistoryEntry e = b.beginHistoryEntry();   // UNA entrada para el grupo
+                HistoryEntry e = b.beginHistoryEntry();
                 if (hadSel) {
                     auto removed = b.document.extractRange(sel->start.line, sel->start.col,
                                                            sel->end.line, sel->end.col);
@@ -1251,7 +1243,7 @@ void Editor::handleSeleccionEvent(const Event& event) {
                 updateModified(b);
                 clearSelection();
                 state_ = State::Interaccion;
-                coalescingTyping_ = hadSel;      // solo el reemplazo coalesce
+                coalescingTyping_ = hadSel;
                 b.commitHistoryEntry(std::move(e));
                 setActionMessage("Reemplazando seleccion...");
             }
@@ -1549,8 +1541,7 @@ void Editor::commitSaveAs() {
             }
         }
         b.filename = path;
-        b.modified = false;
-        b.savedLines = b.document.snapshot();
+        b.syncSavedState();
         b.savedIdentity = captureIdentity(path);
         if (watchedFiles_.find(b.filename) == watchedFiles_.end()) {
             watcher_->watch(b.filename);
@@ -1824,8 +1815,7 @@ void Editor::save() {
         return;
     }
     if (b.document.saveToFile(b.filename)) {
-        b.modified = false;
-        b.savedLines = b.document.snapshot();
+        b.syncSavedState();
         b.savedIdentity = captureIdentity(b.filename);
         watchFile(b.filename);
         setActionMessage("Guardado.", MessageKind::Success);

@@ -54,7 +54,7 @@ void press(Editor& ed, EventType type) { ed.handleEvent(moveEvent(type)); }
 TEST(alloc_fase_teclado_1000_caracteres) {
     Editor ed;
     ed.active().document.restore(makeLines(300, 80));
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().cursor.line = 10;
     ed.state_ = State::Interaccion;
 
@@ -111,7 +111,7 @@ TEST(alloc_desglose_insert_char) {
 TEST(alloc_scroll_bordes_viewport) {
     Editor ed;
     ed.active().document.restore(makeLines(300, 80));
-    ed.active().savedLines = ed.active().document.snapshot();
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.state_ = State::Navegacion;
 
     // Borde superior: cursor arranca en linea 3 y oscila 0<->1.

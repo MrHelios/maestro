@@ -83,11 +83,10 @@ CloseResult BufferManager::closeActive(int rows, int cols) {
         b.filename.clear();
         b.unnamedName = nextUnnamedName();
         unnamedCounter_++;
-        b.modified = false;
+        b.syncSavedState();
         b.selection.reset();
         b.selectAllActive = false;
         b.selectAllPrevious.reset();
-        b.savedLines = b.document.snapshot();
         b.savedIdentity = Buffer::FileIdentity{};
         b.undoStack.clear();
         b.redoStack.clear();
