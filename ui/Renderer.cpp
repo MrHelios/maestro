@@ -351,6 +351,130 @@ void Renderer::renderEditorContent(std::string& out,
     renderEditorContent(out, doc, cursor, viewport, sel, std::nullopt, area, gutterW);
 }
 
+void Renderer::renderEditorRow(std::string& out,
+                             const Document& doc,
+                             const Cursor& cursor,
+                             const Viewport& viewport,
+                             const std::optional<Normalized>& sel,
+                             const std::optional<Normalized>& searchSel,
+                             int docLine,
+                             int gutterW,
+                             int textWidth) const {
+    if (docLine < doc.lineCount()) {
+        const std::string& line = doc.lineAt(docLine);
+        bool isCurrentLine = (docLine == cursor.line);
+
+        std::vector<std::pair<int,int>> byteIntervals;
+        bool lineBreakSelected = false;
+
+        auto addInterval = [&](const std::optional<Normalized>& n) {
+            if (!n.has_value()) return;
+            if (docLine < n->start.line || docLine > n->end.line) return;
+            if (n->start.line == n->end.line) {
+                byteIntervals.emplace_back(n->start.col, n->end.col);
+            } else if (docLine == n->start.line) {
+                byteIntervals.emplace_back(n->start.col, static_cast<int>(line.size()));
+            } else if (docLine == n->end.line) {
+                byteIntervals.emplace_back(0, n->end.col);
+            } else {
+                byteIntervals.emplace_back(0, static_cast<int>(line.size()));
+            }
+        };
+        addInterval(sel);
+        addInterval(searchSel);
+
+        auto isLineBreak = [&](const std::optional<Normalized>& n) -> bool {
+            if (!n.has_value() || !line.empty()) return false;
+            if (docLine < n->start.line || docLine > n->end.line) return false;
+            bool singleLine = (n->start.line == n->end.line);
+            bool endsAtStart = (docLine == n->end.line && n->end.col == 0);
+            return !singleLine && !endsAtStart;
+        };
+        if (isLineBreak(sel) || isLineBreak(searchSel)) lineBreakSelected = true;
+
+        if (line.empty() && lineBreakSelected) {
+            out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
+            out += theme_.selection;
+            for (int i = 0; i < textWidth; ++i) out += ' ';
+            out += theme_.reset;
+            return;
+        }
+
+        std::sort(byteIntervals.begin(), byteIntervals.end());
+        std::vector<std::pair<int,int>> merged;
+        for (auto &p : byteIntervals) {
+            if (p.first >= p.second) continue;
+            if (merged.empty() || p.first > merged.back().second) merged.push_back(p);
+            else merged.back().second = std::max(merged.back().second, p.second);
+        }
+
+        out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
+
+        int absoluteVisStart = viewport.left;
+        int absoluteVisEnd = absoluteVisStart + textWidth;
+        std::string visible = utf8::range(line, absoluteVisStart, absoluteVisEnd);
+
+        if (merged.empty()) {
+            renderLine(out, theme_, visible, textWidth, isCurrentLine, -1, -1, false);
+            return;
+        }
+
+        std::vector<std::pair<int,int>> visibleIntervals;
+        for (auto &p : merged) {
+            int absoluteSc = utf8::columnOf(line, p.first);
+            int absoluteEc = utf8::columnOf(line, p.second);
+            if (absoluteEc <= absoluteVisStart || absoluteSc >= absoluteVisEnd) continue;
+            int visibleSc = std::max(absoluteSc, absoluteVisStart) - absoluteVisStart;
+            int visibleEc = std::min(absoluteEc, absoluteVisEnd) - absoluteVisStart;
+            if (visibleSc < visibleEc) visibleIntervals.emplace_back(visibleSc, visibleEc);
+        }
+        if (visibleIntervals.empty()) {
+            renderLine(out, theme_, visible, textWidth, isCurrentLine, -1, -1, false);
+            return;
+        }
+
+        int visibleCur = 0;
+        int used = 0;
+        for (size_t i = 0; i < visibleIntervals.size(); ++i) {
+            int visibleSc = visibleIntervals[i].first;
+            int visibleEc = visibleIntervals[i].second;
+            if (visibleCur < visibleSc) {
+                std::string seg = utf8::range(visible, visibleCur, visibleSc);
+                if (isCurrentLine) out += theme_.currentLine;
+                out += seg;
+                if (isCurrentLine) out += theme_.reset;
+                used += colCount(seg);
+            }
+            {
+                std::string seg = utf8::range(visible, visibleSc, visibleEc);
+                out += theme_.selection;
+                out += seg;
+                out += theme_.reset;
+                used += colCount(seg);
+            }
+            visibleCur = visibleEc;
+        }
+        if (visibleCur < textWidth) {
+            std::string tail = utf8::range(visible, visibleCur, textWidth);
+            if (isCurrentLine) out += theme_.currentLine;
+            out += tail;
+            if (isCurrentLine) {
+                used += colCount(tail);
+                for (int c = used; c < textWidth; ++c) out += ' ';
+                out += theme_.reset;
+            }
+        } else if (isCurrentLine) {
+            for (int c = used; c < textWidth; ++c) out += ' ';
+            out += theme_.reset;
+        }
+        return;
+    }
+    out += renderGutterBlank(gutterW);
+    out += theme_.marker;
+    out += "~";
+    out += theme_.reset;
+}
+
 void Renderer::renderEditorContent(std::string& out,
                              const Document& doc,
                              const Cursor& cursor,
@@ -360,133 +484,11 @@ void Renderer::renderEditorContent(std::string& out,
                              const Rect& area,
                              int gutterW) const {
     int textWidth = std::max(0, area.width - gutterW);
-
     for (int row = 0; row < area.height; ++row) {
         int docLine = viewport.top + row;
         out += "\x1b[K";
-
-        if (docLine < doc.lineCount()) {
-            const std::string& line = doc.lineAt(docLine);
-            bool isCurrentLine = (docLine == cursor.line);
-
-            std::vector<std::pair<int,int>> byteIntervals;
-            bool lineBreakSelected = false;
-
-            auto addInterval = [&](const std::optional<Normalized>& n) {
-                if (!n.has_value()) return;
-                if (docLine < n->start.line || docLine > n->end.line) return;
-                if (n->start.line == n->end.line) {
-                    byteIntervals.emplace_back(n->start.col, n->end.col);
-                } else if (docLine == n->start.line) {
-                    byteIntervals.emplace_back(n->start.col, static_cast<int>(line.size()));
-                } else if (docLine == n->end.line) {
-                    byteIntervals.emplace_back(0, n->end.col);
-                } else {
-                    byteIntervals.emplace_back(0, static_cast<int>(line.size()));
-                }
-            };
-            addInterval(sel);
-            addInterval(searchSel);
-
-            auto isLineBreak = [&](const std::optional<Normalized>& n) -> bool {
-                if (!n.has_value() || !line.empty()) return false;
-                if (docLine < n->start.line || docLine > n->end.line) return false;
-                bool singleLine = (n->start.line == n->end.line);
-                bool endsAtStart = (docLine == n->end.line && n->end.col == 0);
-                return !singleLine && !endsAtStart;
-            };
-            if (isLineBreak(sel) || isLineBreak(searchSel)) lineBreakSelected = true;
-
-            if (line.empty() && lineBreakSelected) {
-                out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
-                out += theme_.selection;
-                for (int i = 0; i < textWidth; ++i) out += ' ';
-                out += theme_.reset;
-                out += "\r\n";
-                continue;
-            }
-
-            std::sort(byteIntervals.begin(), byteIntervals.end());
-            std::vector<std::pair<int,int>> merged;
-            for (auto &p : byteIntervals) {
-                if (p.first >= p.second) continue;
-                if (merged.empty() || p.first > merged.back().second) merged.push_back(p);
-                else merged.back().second = std::max(merged.back().second, p.second);
-            }
-
-            out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
-
-            int absoluteVisStart = viewport.left;
-            int absoluteVisEnd = absoluteVisStart + textWidth;
-            std::string visible = utf8::range(line, absoluteVisStart, absoluteVisEnd);
-            // A partir de aquí todo sobre `visible` usa coordenadas visibles:
-            //   absoluteCol = utf8::columnOf(line, byteOff)
-            //   visibleCol  = absoluteCol - viewport.left
-
-            if (merged.empty()) {
-                renderLine(out, theme_, visible, textWidth, isCurrentLine, -1, -1, false);
-                out += "\r\n";
-                continue;
-            }
-
-            std::vector<std::pair<int,int>> visibleIntervals;
-            for (auto &p : merged) {
-                int absoluteSc = utf8::columnOf(line, p.first);
-                int absoluteEc = utf8::columnOf(line, p.second);
-                if (absoluteEc <= absoluteVisStart || absoluteSc >= absoluteVisEnd) continue;
-                int visibleSc = std::max(absoluteSc, absoluteVisStart) - absoluteVisStart;
-                int visibleEc = std::min(absoluteEc, absoluteVisEnd) - absoluteVisStart;
-                if (visibleSc < visibleEc) visibleIntervals.emplace_back(visibleSc, visibleEc);
-            }
-            // visibleIntervals y visibleCur están en coordenadas visibles [0, textWidth)
-            if (visibleIntervals.empty()) {
-                renderLine(out, theme_, visible, textWidth, isCurrentLine, -1, -1, false);
-                out += "\r\n";
-                continue;
-            }
-
-            int visibleCur = 0;
-            int used = 0;
-            for (size_t i = 0; i < visibleIntervals.size(); ++i) {
-                int visibleSc = visibleIntervals[i].first;
-                int visibleEc = visibleIntervals[i].second;
-                if (visibleCur < visibleSc) {
-                    std::string seg = utf8::range(visible, visibleCur, visibleSc);
-                    if (isCurrentLine) out += theme_.currentLine;
-                    out += seg;
-                    if (isCurrentLine) out += theme_.reset;
-                    used += colCount(seg);
-                }
-                {
-                    std::string seg = utf8::range(visible, visibleSc, visibleEc);
-                    out += theme_.selection;
-                    out += seg;
-                    out += theme_.reset;
-                    used += colCount(seg);
-                }
-                visibleCur = visibleEc;
-            }
-            if (visibleCur < textWidth) {
-                std::string tail = utf8::range(visible, visibleCur, textWidth);
-                if (isCurrentLine) out += theme_.currentLine;
-                out += tail;
-                if (isCurrentLine) {
-                    used += colCount(tail);
-                    for (int c = used; c < textWidth; ++c) out += ' ';
-                    out += theme_.reset;
-                }
-            } else if (isCurrentLine) {
-                for (int c = used; c < textWidth; ++c) out += ' ';
-                out += theme_.reset;
-            }
-            out += "\r\n";
-        } else {
-            out += renderGutterBlank(gutterW);
-            out += theme_.marker;
-            out += "~";
-            out += theme_.reset;
-            out += "\r\n";
-        }
+        renderEditorRow(out, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth);
+        out += "\r\n";
     }
 }
 
@@ -531,16 +533,16 @@ void Renderer::renderScreen(const Document& doc,
     writeAll(STDOUT_FILENO, buffer);
 }
 
-static void splitRows(const std::string& body, std::vector<std::string>* rows) {
+static void splitRows(const std::string& body, std::vector<std::string_view>* rows) {
     rows->clear();
     std::size_t start = 0;
     while (start <= body.size()) {
         std::size_t sep = body.find("\r\n", start);
         if (sep == std::string::npos) {
-            rows->push_back(body.substr(start));
+            rows->emplace_back(body.data() + start, body.size() - start);
             break;
         }
-        rows->push_back(body.substr(start, sep - start));
+        rows->emplace_back(body.data() + start, sep - start);
         start = sep + 2;
     }
 }
@@ -559,6 +561,135 @@ void Renderer::renderScreenDiff(const Document& doc,
     if (!writeAll(STDOUT_FILENO, out)) hasLastEditorBody_ = false;
 }
 
+std::string Renderer::buildScrollFrame(const Document& doc,
+                                        const Cursor& cursor,
+                                        const Viewport& viewport,
+                                        const std::string& filename,
+                                        bool modified,
+                                        const Message& message,
+                                        State state,
+                                        const std::optional<Selection>& selection,
+                                        const std::optional<Selection>& searchHighlight,
+                                        int deltaTop) {
+    const Layout layout = calculateLayout(viewport.height, viewport.width);
+    const int contentH = layout.content.height;
+    if (contentH <= 0) return "";
+
+    std::vector<std::string_view> oldRows;
+    splitRows(lastEditorBody_, &oldRows);
+    if (static_cast<int>(oldRows.size()) < contentH) return "";
+
+    const EditorGeometry g = editorGeometry(doc, viewport);
+    const int gutterW = g.gutterW;
+    const int textWidth = std::max(0, layout.content.width - gutterW);
+
+    std::optional<Normalized> sel = selection.has_value() ? normalize(*selection) : std::nullopt;
+    std::optional<Normalized> searchSel = searchHighlight.has_value() ? normalize(*searchHighlight) : std::nullopt;
+
+    const int newDocLine = (deltaTop == 1) ? viewport.top + contentH - 1 : viewport.top;
+
+    std::string newRowContent;
+    renderEditorRow(newRowContent, doc, cursor, viewport, sel, searchSel, newDocLine, gutterW, textWidth);
+    const std::string newRowFull = "\x1b[K" + newRowContent;
+
+    StatusBarData data = editorBarData(filename, modified, stateLabel(state), message, cursor, doc.lineCount());
+    data.estadoAccent = stateAccent(theme_, state);
+
+    std::string statusBody;
+    renderStatusBar(statusBody, layout.statusBar, data);
+    std::vector<std::string_view> newStatusRows;
+    splitRows(statusBody, &newStatusRows);
+
+    std::string oldHighlightFix;
+    std::string oldHighlightFull;
+    int oldFixRow = -1;
+    if (lastCursorLine_ != cursor.line) {
+        const int oldDocLine = lastCursorLine_;
+        if (oldDocLine >= viewport.top && oldDocLine < viewport.top + contentH && oldDocLine != newDocLine) {
+            renderEditorRow(oldHighlightFix, doc, cursor, viewport, sel, searchSel, oldDocLine, gutterW, textWidth);
+            oldHighlightFull = "\x1b[K" + oldHighlightFix;
+            oldFixRow = oldDocLine - viewport.top + 1;
+        }
+    }
+
+    // Build new cached body
+    std::string newBody;
+    newBody.reserve(lastEditorBody_.size() + newRowFull.size() + statusBody.size());
+    for (int i = 0; i < contentH; ++i) {
+        const int docLine = viewport.top + i;
+        if (docLine == newDocLine) {
+            newBody += newRowFull;
+        } else if (docLine == lastCursorLine_ && oldFixRow != -1) {
+            newBody += oldHighlightFull;
+        } else {
+            if (deltaTop == 1) {
+                if (i + 1 < contentH) {
+                    auto v = oldRows[static_cast<size_t>(i + 1)];
+                    newBody.append(v.data(), v.size());
+                } else {
+                    newBody += newRowFull;
+                }
+            } else {
+                if (i == 0) newBody += newRowFull;
+                else {
+                    auto v = oldRows[static_cast<size_t>(i - 1)];
+                    newBody.append(v.data(), v.size());
+                }
+            }
+        }
+        newBody += "\r\n";
+    }
+    newBody += statusBody;
+
+    // Emit using terminal scroll (CSI S/T) - test's TinyTerm ignores these
+    // but real terminals handle them correctly
+    std::string out;
+    hideCursor(out);
+    out += "\x1b[1;";
+    out += std::to_string(contentH);
+    out += "r";
+    if (deltaTop == 1) out += "\x1b[1S";
+    else out += "\x1b[1T";
+    out += "\x1b[r";
+
+    const int edgeRow = (deltaTop == 1) ? contentH : 1;
+    moveCursorTo(out, edgeRow, 1);
+    out += theme_.reset;
+    out += "\x1b[K";
+    out += newRowContent;
+
+    if (oldFixRow != -1) {
+        moveCursorTo(out, oldFixRow, 1);
+        out += theme_.reset;
+        out += "\x1b[K";
+        out += oldHighlightFix;
+    }
+
+    for (size_t i = 0; i < newStatusRows.size(); ++i) {
+        const int rowIdx = contentH + static_cast<int>(i);
+        if (rowIdx < static_cast<int>(oldRows.size()) && oldRows[static_cast<size_t>(rowIdx)] == newStatusRows[i]) continue;
+        moveCursorTo(out, rowIdx + 1, 1);
+        out += theme_.reset;
+        out += "\x1b[K";
+        out.append(newStatusRows[i].data(), newStatusRows[i].size());
+    }
+
+    if (state != State::Busqueda) {
+        int curRow = 1, curCol = 1;
+        editorCursorPos(doc, cursor, viewport, curRow, curCol);
+        moveCursorTo(out, curRow, curCol);
+        setCursorStyle(out, state);
+        showCursor(out);
+    }
+
+    lastEditorBody_ = std::move(newBody);
+    lastViewportTop_ = viewport.top;
+    lastViewportLeft_ = viewport.left;
+    lastCursorLine_ = cursor.line;
+    lastCursorCol_ = cursor.col;
+    return out;
+}
+
 std::string Renderer::buildDiffFrame(const Document& doc,
                                       const Cursor& cursor,
                                       const Viewport& viewport,
@@ -575,6 +706,10 @@ std::string Renderer::buildDiffFrame(const Document& doc,
         hasLastEditorBody_ = true;
         lastViewportW_ = viewport.width;
         lastViewportH_ = viewport.height;
+        lastViewportTop_ = viewport.top;
+        lastViewportLeft_ = viewport.left;
+        lastCursorLine_ = cursor.line;
+        lastCursorCol_ = cursor.col;
         std::string out;
         beginFrame(out);
         out += lastEditorBody_;
@@ -589,11 +724,24 @@ std::string Renderer::buildDiffFrame(const Document& doc,
         return out;
     }
 
+    const int deltaTop = viewport.top - lastViewportTop_;
+    const int deltaLeft = viewport.left - lastViewportLeft_;
+
+    const bool canScroll = (deltaTop == 1 || deltaTop == -1) && deltaLeft == 0
+                        && !selection.has_value() && !searchHighlight.has_value();
+    if (canScroll) {
+        const std::string scrollFrame = buildScrollFrame(doc, cursor, viewport, filename,
+                                                         modified, message, state,
+                                                         selection, searchHighlight,
+                                                         deltaTop);
+        if (!scrollFrame.empty()) return scrollFrame;
+    }
+
     const std::string fresh = buildEditorBody(doc, cursor, viewport, filename,
                                               modified, message, state,
                                               selection, searchHighlight);
 
-    std::vector<std::string> oldRows, newRows;
+    std::vector<std::string_view> oldRows, newRows;
     splitRows(lastEditorBody_, &oldRows);
     splitRows(fresh, &newRows);
 
@@ -606,11 +754,15 @@ std::string Renderer::buildDiffFrame(const Document& doc,
         moveCursorTo(out, i + 1, 1);
         out += theme_.reset;
         out += "\x1b[K";
-        out += newRows[static_cast<size_t>(i)];
+        out.append(newRows[static_cast<size_t>(i)].data(), newRows[static_cast<size_t>(i)].size());
     }
 
     if (state == State::Busqueda) {
         lastEditorBody_ = fresh;
+        lastViewportTop_ = viewport.top;
+        lastViewportLeft_ = viewport.left;
+        lastCursorLine_ = cursor.line;
+        lastCursorCol_ = cursor.col;
         return out;
     }
     int curRow = 1, curCol = 1;
@@ -620,6 +772,10 @@ std::string Renderer::buildDiffFrame(const Document& doc,
     showCursor(out);
 
     lastEditorBody_ = fresh;
+    lastViewportTop_ = viewport.top;
+    lastViewportLeft_ = viewport.left;
+    lastCursorLine_ = cursor.line;
+    lastCursorCol_ = cursor.col;
     return out;
 }
 

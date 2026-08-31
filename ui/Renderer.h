@@ -91,6 +91,10 @@ private:
     bool hasLastEditorBody_ = false;
     int lastViewportW_ = -1;
     int lastViewportH_ = -1;
+    int lastViewportTop_ = 0;
+    int lastViewportLeft_ = 0;
+    int lastCursorLine_ = 0;
+    int lastCursorCol_ = 0;
 
     Layout calculateLayout(int contentRows, int width) const;
 
@@ -109,6 +113,16 @@ private:
                               const std::optional<Normalized>& searchSel,
                               const Rect& area,
                               int gutterW) const;
+
+    void renderEditorRow(std::string& out,
+                         const Document& doc,
+                         const Cursor& cursor,
+                         const Viewport& viewport,
+                         const std::optional<Normalized>& sel,
+                         const std::optional<Normalized>& searchSel,
+                         int docLine,
+                         int gutterW,
+                         int textWidth) const;
 
     void renderBufferListContent(std::string& out,
                                   const std::vector<std::string>& names,
@@ -141,6 +155,17 @@ private:
                                  State state,
                                  const std::optional<Selection>& selection,
                                  const std::optional<Selection>& searchHighlight = std::nullopt) const;
+
+    std::string buildScrollFrame(const Document& doc,
+                                 const Cursor& cursor,
+                                 const Viewport& viewport,
+                                 const std::string& filename,
+                                 bool modified,
+                                 const Message& message,
+                                 State state,
+                                 const std::optional<Selection>& selection,
+                                 const std::optional<Selection>& searchHighlight,
+                                 int deltaTop);
 
     void editorCursorPos(const Document& doc,
                           const Cursor& cursor,
