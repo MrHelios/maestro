@@ -478,9 +478,8 @@ void Editor::createBuffer() {
     if (buffers.count() > 0) {
         const Buffer& cur = active();
         previousBuffer_.valid = true;
-        previousBuffer_.identity = cur.savedIdentity;
-        previousBuffer_.filename = cur.filename;
-        previousBuffer_.unnamedName = cur.unnamedName;
+        previousBuffer_.id = cur.id;
+        previousBuffer_.displayName = cur.displayName();
     }
     const int idx = buffers.createBuffer(rows, cols);
     setActionMessage("Buffer nuevo: " + buffers.at(idx).unnamedName, MessageKind::Success);
@@ -489,9 +488,8 @@ void Editor::createBuffer() {
 void Editor::closeActiveBuffer() {
     Buffer& cur = active();
     // Guardar el buffer que se va a cerrar como "anterior" para el toggle
-    Buffer::FileIdentity closedIdentity = cur.savedIdentity;
-    std::string closedFilename = cur.filename;
-    std::string closedUnnamedName = cur.unnamedName;
+    int closedId = cur.id;
+    std::string closedDisplayName = cur.displayName();
 
     std::string oldPath = cur.filename;
     int rows, cols;
@@ -524,9 +522,8 @@ void Editor::closeActiveBuffer() {
             // inmediato. Para elegir deliberadamente existe Ctrl+K t.
             // El buffer cerrado se convierte en el "anterior" para Ctrl+K b.
             previousBuffer_.valid = true;
-            previousBuffer_.identity = closedIdentity;
-            previousBuffer_.filename = closedFilename;
-            previousBuffer_.unnamedName = closedUnnamedName;
+            previousBuffer_.id = closedId;
+            previousBuffer_.displayName = closedDisplayName;
 
             const bool hasSelection = buffers.activate(buffers.activeIndex());
             state_ = hasSelection ? State::Seleccion : State::Navegacion;
@@ -542,9 +539,8 @@ void Editor::doActivateBuffer(int idx) {
     if (idx >= 0 && idx < buffers.count() && idx != buffers.activeIndex()) {
         const Buffer& cur = buffers.at(buffers.activeIndex());
         previousBuffer_.valid = true;
-        previousBuffer_.identity = cur.savedIdentity;
-        previousBuffer_.filename = cur.filename;
-        previousBuffer_.unnamedName = cur.unnamedName;
+        previousBuffer_.id = cur.id;
+        previousBuffer_.displayName = cur.displayName();
     }
     const bool hasSelection = buffers.activate(idx);
     state_ = hasSelection ? State::Seleccion : State::Navegacion;
@@ -562,50 +558,35 @@ void Editor::switchToPreviousBuffer() {
         return;
     }
 
-    // Buscar el buffer anterior por identidad.
-    // Para buffers con archivo: coinciden dev/inode + filename.
-    // Para buffers sin nombre: coinciden unnamedName (ya que no hay archivo).
     int targetIdx = -1;
     for (int i = 0; i < buffers.count(); ++i) {
         const Buffer& b = buffers.at(i);
-        bool match = false;
-        if (!b.filename.empty()) {
-            // Buffer con archivo: comparar identidad + filename
-            match = (b.savedIdentity == previousBuffer_.identity
-                     && b.filename == previousBuffer_.filename);
-        } else {
-            // Buffer sin nombre: comparar unnamedName
-            match = (b.unnamedName == previousBuffer_.unnamedName);
-        }
-        if (match) {
+        if (b.id == previousBuffer_.id) {
             targetIdx = i;
             break;
         }
     }
 
     if (targetIdx == -1) {
-        std::string display = previousBuffer_.filename.empty()
-            ? previousBuffer_.unnamedName
-            : previousBuffer_.filename;
+        std::string display = previousBuffer_.displayName;
         std::string msg = "El buffer anterior '" + display + "' ya no existe (fue cerrado).";
         setActionMessage(msg, MessageKind::Warning);
         previousBuffer_.valid = false;
+        state_ = priorState_;
         return;
     }
 
     // Toggle: el buffer actual se convierte en el "anterior" para la próxima vez.
     const Buffer& cur = active();
-    Buffer::FileIdentity curIdentity = cur.savedIdentity;
-    std::string curFilename = cur.filename;
-    std::string curUnnamedName = cur.unnamedName;
+    int curId = cur.id;
+    std::string curDisplayName = cur.displayName();
 
     activateBuffer(targetIdx);
 
     // Restaurar previousBuffer_ al buffer del que venimos (toggle explícito).
     previousBuffer_.valid = true;
-    previousBuffer_.identity = curIdentity;
-    previousBuffer_.filename = curFilename;
-    previousBuffer_.unnamedName = curUnnamedName;
+    previousBuffer_.id = curId;
+    previousBuffer_.displayName = curDisplayName;
 
     setActionMessage("Buffer anterior: " + active().displayName());
 }
@@ -744,6 +725,12 @@ void Editor::openFileToBuffer(const std::string& path) {
     nuevo.selectAllActive = false;
     nuevo.selectAllPrevious.reset();
     watchFile(nuevo.filename);
+    if (buffers.count() > 0) {
+        const Buffer& cur = active();
+        previousBuffer_.valid = true;
+        previousBuffer_.id = cur.id;
+        previousBuffer_.displayName = cur.displayName();
+    }
     const int idx = buffers.push(std::move(nuevo));
     doActivateBuffer(idx);
     if (result == LoadResult::Success) {

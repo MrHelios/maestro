@@ -1435,6 +1435,77 @@ TEST(ctrl_k_b_previous_buffer_closed_via_selector) {
     CHECK(ed.statusMessage_.find("fue cerrado") != std::string::npos);
 }
 
+TEST(ctrl_k_b_three_new_buffers_toggle_via_b) {
+    Editor ed;
+    type(ed, "A");
+    press(ed, EventType::Escape);
+    newBuffer(ed);
+    type(ed, "B");
+    press(ed, EventType::Escape);
+    newBuffer(ed);
+    type(ed, "C");
+    press(ed, EventType::Escape);
+    CHECK_EQ(ed.buffers.activeBuffer_, 2);
+    CHECK_EQ(ed.active().document.lineAt(0), "C");
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "B");
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 2);
+    CHECK_EQ(ed.active().document.lineAt(0), "C");
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "B");
+}
+
+TEST(ctrl_k_b_selector_open_without_selection_preserves_history) {
+    Editor ed;
+    type(ed, "A");
+    press(ed, EventType::Escape);
+    newBuffer(ed);
+    type(ed, "B");
+    press(ed, EventType::Escape);
+    newBuffer(ed);
+    type(ed, "C");
+    press(ed, EventType::Escape);
+    CHECK_EQ(ed.buffers.activeBuffer_, 2);
+    int prevIdBefore = ed.previousBuffer_.id;
+    CHECK(prevIdBefore != -1);
+    openSelector(ed);
+    CHECK(ed.state_ == State::BufferSelector);
+    press(ed, EventType::Escape);
+    CHECK(ed.state_ == State::Navegacion);
+    CHECK_EQ(ed.buffers.activeBuffer_, 2);
+    CHECK_EQ(ed.previousBuffer_.id, prevIdBefore);
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "B");
+}
+
+TEST(ctrl_k_b_close_active_with_previous_to_third_shows_closed) {
+    Editor ed;
+    type(ed, "A");
+    press(ed, EventType::Escape);
+    newBuffer(ed);
+    type(ed, "B");
+    press(ed, EventType::Escape);
+    newBuffer(ed);
+    type(ed, "C");
+    press(ed, EventType::Escape);
+    CHECK_EQ(ed.buffers.activeBuffer_, 2);
+    ed.active().modified = false;
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
+    closeBuffer(ed);
+    CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK_EQ(ed.active().document.lineAt(0), "B");
+    CHECK(ed.previousBuffer_.valid);
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 1);
+    CHECK(ed.statusMessage_.find("ya no existe") != std::string::npos);
+    CHECK(ed.statusMessage_.find("fue cerrado") != std::string::npos);
+}
+
 // ---------------------------------------------------------------------------
 // Ctrl+K b : mode reconciliation with buffer state
 // ---------------------------------------------------------------------------

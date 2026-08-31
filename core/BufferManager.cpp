@@ -9,6 +9,7 @@ BufferManager::BufferManager() {
     // sin nombre y lo deja activo. unnamedCounter_ arranca en 1 porque el
     // buffer inicial ya consumio "SinNombre".
     buffers_.emplace_back();
+    buffers_.back().id = nextBufferId_++;
     activeBuffer_ = 0;
 }
 
@@ -37,6 +38,7 @@ int BufferManager::activeIndex() const {
 }
 
 int BufferManager::push(Buffer buffer) {
+    buffer.id = nextBufferId_++;
     buffers_.push_back(std::move(buffer));
     activeBuffer_ = static_cast<int>(buffers_.size()) - 1;
     return activeBuffer_;

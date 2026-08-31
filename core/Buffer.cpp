@@ -16,7 +16,7 @@ Buffer::Buffer() {
 
 Buffer::Buffer(const Buffer& other)
     : document(other.document), cursor(other.cursor), viewport(other.viewport),
-      filename(other.filename), unnamedName(other.unnamedName), modified(other.modified),
+      filename(other.filename), unnamedName(other.unnamedName), id(other.id), modified(other.modified),
       selection(other.selection), selectAllActive(other.selectAllActive),
       selectAllPrevious(other.selectAllPrevious), originalSnapshot_(other.originalSnapshot_),
       watcher_(other.watcher_), savedEndsWithNewline(other.savedEndsWithNewline),
@@ -27,7 +27,7 @@ Buffer::Buffer(const Buffer& other)
 
 Buffer::Buffer(Buffer&& other) noexcept
     : document(std::move(other.document)), cursor(other.cursor), viewport(other.viewport),
-      filename(std::move(other.filename)), unnamedName(std::move(other.unnamedName)), modified(other.modified),
+      filename(std::move(other.filename)), unnamedName(std::move(other.unnamedName)), id(other.id), modified(other.modified),
       selection(std::move(other.selection)), selectAllActive(other.selectAllActive),
       selectAllPrevious(std::move(other.selectAllPrevious)), originalSnapshot_(std::move(other.originalSnapshot_)),
       watcher_(std::move(other.watcher_)), savedEndsWithNewline(other.savedEndsWithNewline),
@@ -35,6 +35,7 @@ Buffer::Buffer(Buffer&& other) noexcept
       savedIdentity(other.savedIdentity) {
     rebindCallback();
     other.document.setTouchedCallback(nullptr);
+    other.id = 0;
 }
 
 Buffer& Buffer::operator=(const Buffer& other) {
@@ -44,6 +45,7 @@ Buffer& Buffer::operator=(const Buffer& other) {
     viewport = other.viewport;
     filename = other.filename;
     unnamedName = other.unnamedName;
+    id = other.id;
     modified = other.modified;
     selection = other.selection;
     selectAllActive = other.selectAllActive;
@@ -65,6 +67,7 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
     viewport = other.viewport;
     filename = std::move(other.filename);
     unnamedName = std::move(other.unnamedName);
+    id = other.id;
     modified = other.modified;
     selection = std::move(other.selection);
     selectAllActive = other.selectAllActive;
@@ -77,6 +80,7 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
     savedIdentity = other.savedIdentity;
     rebindCallback();
     other.document.setTouchedCallback(nullptr);
+    other.id = 0;
     return *this;
 }
 

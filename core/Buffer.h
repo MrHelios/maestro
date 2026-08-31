@@ -91,6 +91,7 @@ public:
     // Nombre asignado al buffer sin nombre ("SinNombre", "SinNombre1",
     // "SinNombre2", ...). Solo tiene sentido cuando filename esta vacio.
     std::string unnamedName;
+    int id = 0;
     bool modified = false;
     std::optional<Selection> selection;
     // 'a' (seleccion total): selecciona el archivo entero sin mover el

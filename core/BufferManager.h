@@ -78,6 +78,7 @@ public:
 private:
     std::vector<Buffer> buffers_;
     int activeBuffer_ = 0;
+    int nextBufferId_ = 1;
     // Contador global de la sesion para los nombres de buffer sin nombre.
     int unnamedCounter_ = 1; // el buffer inicial ya gasto "SinNombre"
 };

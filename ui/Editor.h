@@ -181,14 +181,12 @@ private:
     // Indice seleccionado en la pantalla del selector de buffers.
     int bufferSelectorIndex_ = 0;
 
-    // Identidad del buffer anterior (para Ctrl+K b: volver al buffer previo).
-    // Usamos FileIdentity (dev/inode) + filename para detectar si el buffer
-    // fue cerrado/eliminado y ya no existe.
+    // Buffer anterior (para Ctrl+K b: volver al buffer previo).
+    // Usamos id estable del Buffer para detectar si fue cerrado.
     struct PreviousBufferInfo {
         bool valid = false;
-        Buffer::FileIdentity identity;
-        std::string filename;  // ruta absoluta, para mostrar en mensaje
-        std::string unnamedName; // para buffers sin nombre (SinNombre, SinNombre1...)
+        int id = -1;
+        std::string displayName;
     };
     PreviousBufferInfo previousBuffer_;
 
