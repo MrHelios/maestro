@@ -21,6 +21,10 @@ public:
         hasCache_ = false;
         hasLastStatusData_ = false;
     }
+    void invalidateCache() {
+        hasCache_ = false;
+        hasLastStatusData_ = false;
+    }
     const Theme& theme() const { return theme_; }
 
     std::string buildScreen(const Document& doc,

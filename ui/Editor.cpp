@@ -485,6 +485,7 @@ void Editor::createBuffer() {
         previousBuffer_.displayName = cur.displayName();
     }
     const int idx = buffers.createBuffer(rows, cols);
+    renderer_.invalidateCache();
     setActionMessage("Buffer nuevo: " + buffers.at(idx).unnamedName, MessageKind::Success);
 }
 
@@ -516,20 +517,17 @@ void Editor::closeActiveBuffer() {
         case CloseResult::ResetLast:
             setActionMessage("Buffer reiniciado: " + active().unnamedName);
             state_ = State::Navegacion;
-            // No hay buffer anterior válido tras reiniciar el único buffer
             previousBuffer_.valid = false;
+            renderer_.invalidateCache();
             break;
         case CloseResult::Removed: {
-            // UX (v0.8): cerrar NO abre el selector. El buffer que heredo
-            // la ranura (misma posicion, clamp al final) queda activo de
-            // inmediato. Para elegir deliberadamente existe Ctrl+K t.
-            // El buffer cerrado se convierte en el "anterior" para Ctrl+K b.
             previousBuffer_.valid = true;
             previousBuffer_.id = closedId;
             previousBuffer_.displayName = closedDisplayName;
 
             const bool hasSelection = buffers.activate(buffers.activeIndex());
             state_ = hasSelection ? State::Seleccion : State::Navegacion;
+            renderer_.invalidateCache();
             setActionMessage("Buffer cerrado. Activo: " + active().displayName());
             break;
         }
@@ -537,8 +535,6 @@ void Editor::closeActiveBuffer() {
 }
 
 void Editor::doActivateBuffer(int idx) {
-    // Contrato: cada activación de buffer guarda el actual como "anterior",
-    // permitiendo togglear con Ctrl+K b.
     if (idx >= 0 && idx < buffers.count() && idx != buffers.activeIndex()) {
         const Buffer& cur = buffers.at(buffers.activeIndex());
         previousBuffer_.valid = true;
@@ -548,6 +544,7 @@ void Editor::doActivateBuffer(int idx) {
     const bool hasSelection = buffers.activate(idx);
     state_ = hasSelection ? State::Seleccion : State::Navegacion;
     setStatusMessage("");
+    renderer_.invalidateCache();
 }
 
 void Editor::activateBuffer(int idx) {
