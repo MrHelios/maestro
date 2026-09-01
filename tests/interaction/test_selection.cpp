@@ -2993,18 +2993,62 @@ TEST(selection_indent_does_not_change_mode) {
     CHECK_EQ(ed.active().document.lineAt(0), "aaa");
 }
 
-TEST(selection_braces_are_noop_in_navegacion) {
-    // En Navegacion no hay edicion: '}'-'{' no hacen nada (no comando).
+TEST(navegacion_braces_indent_current_line) {
+    // En Navegacion '}'-'{' indenta/desindenta la linea actual (feature:
+    // tabulacion en navegacion sin seleccion).
     Editor ed;
     editorOfLines({"abc"}, 0, 1, ed);
-    const bool modified = ed.active().modified;
     const size_t undo = ed.active().undoStack.size();
     ed.handleEvent(insert('}'));
     ed.handleEvent(insert('{'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    // '}' indenta 4 espacios, '{' quita 4 -> vuelve a "abc"
     CHECK_EQ(ed.active().document.lineAt(0), "abc");
-    CHECK_EQ(ed.active().modified, modified);
-    CHECK_EQ(ed.active().undoStack.size(), undo);
+    // Se crearon 2 entradas de historial (indent + dedent)
+    CHECK_EQ(ed.active().modified, true);
+    CHECK_EQ(ed.active().undoStack.size(), undo + 2);
+}
+
+TEST(navegacion_brace_dedent_partial_indent) {
+    // Linea con solo 2 espacios de indentacion y kIndentLen=4: '{' quita
+    // solo esos 2 (no falla ni deja negativo). Historial/undo coincide
+    // exactamente con lo borrado.
+    Editor ed;
+    editorOfLines({"  abc"}, 0, 2, ed);  // cursor tras los 2 espacios
+    const size_t undo = ed.active().undoStack.size();
+    ed.handleEvent(insert('{'));
+    CHECK_EQ(ed.active().document.lineAt(0), "abc");
+    CHECK_EQ(ed.active().undoStack.size(), undo + 1);
+    // Undo restaura exactamente los 2 espacios
+    press(ed, EventType::Undo);
+    CHECK_EQ(ed.active().document.lineAt(0), "  abc");
+}
+
+TEST(navegacion_brace_undo_redo_roundtrip) {
+    // Roundtrip explicito de undo/redo (no solo '}'+'{' visual).
+    Editor ed;
+    editorOfLines({"abc"}, 0, 3, ed);  // cursor al final de "abc"
+    ed.handleEvent(insert('}'));
+    CHECK_EQ(ed.active().document.lineAt(0), "    abc");
+    CHECK_EQ(ed.active().cursor.col, 7);  // 3 + 4
+    // Undo
+    press(ed, EventType::Undo);
+    CHECK_EQ(ed.active().document.lineAt(0), "abc");
+    CHECK_EQ(ed.active().cursor.col, 3);
+    // Redo
+    press(ed, EventType::Redo);
+    CHECK_EQ(ed.active().document.lineAt(0), "    abc");
+    CHECK_EQ(ed.active().cursor.col, 7);
+}
+
+TEST(navegacion_brace_dedent_cursor_midline) {
+    // Cursor a mitad de linea (col 2) con 4 espacios de indent:
+    // dedent -> col debe quedar max(0, 2-4) = 0.
+    Editor ed;
+    editorOfLines({"    abc"}, 0, 2, ed);  // cursor en col 2 (dentro de indent)
+    ed.handleEvent(insert('{'));
+    CHECK_EQ(ed.active().document.lineAt(0), "abc");
+    CHECK_EQ(ed.active().cursor.col, 0);  // clamp a 0
 }
 
 TEST(selection_braces_are_text_in_interaccion) {

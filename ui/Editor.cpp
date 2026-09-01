@@ -363,6 +363,15 @@ void Editor::registerCommands() {
         indentSelection(false);
     });
 
+    // Navegacion: '}' indenta la linea actual; '{' desindenta la linea actual.
+    // No requieren seleccion; operan sobre la linea donde esta el cursor.
+    commands_.registerCommand("navegacion.indentar", [this] {
+        indentCurrentLine(true);
+    });
+    commands_.registerCommand("navegacion.desindentar", [this] {
+        indentCurrentLine(false);
+    });
+
     // --- Prefijo (Ctrl+K) ---
     commands_.registerCommand("buffer.nuevo", [this] {
         createBuffer();
@@ -975,6 +984,10 @@ void Editor::handleNavegacionEvent(const Event& event) {
                 commands_.execute("seleccion.total");
             } else if (event.text == "f") {
                 commands_.execute("navegacion.buscar");
+            } else if (event.text == "}") {
+                commands_.execute("navegacion.indentar");
+            } else if (event.text == "{") {
+                commands_.execute("navegacion.desindentar");
             }
             break;
 
@@ -1912,6 +1925,47 @@ void Editor::indentSelection(bool indent) {
             if (b.selection->position.line == l) b.selection->position.col = shift(b.selection->position.col);
         }
     }
+    updateModified(b);
+    b.commitHistoryEntry(std::move(e));
+    setActionMessage(indent ? "Tabulado." : "Tabulacion quitada.",
+                     MessageKind::Success);
+}
+
+void Editor::indentCurrentLine(bool indent) {
+    Buffer& b = active();
+    constexpr int kIndentLen = 4;
+    int line = b.cursor.line;
+
+    // Comprobar si la linea va a cambiar realmente
+    const std::string& s = b.document.lineAt(line);
+    bool change = indent || (!s.empty() && (s[0] == '\t' || s[0] == ' '));
+    if (!change) {
+        setActionMessage("Nada que tabular.", MessageKind::Info);
+        return;
+    }
+
+    HistoryEntry e = b.beginHistoryEntry();
+    std::string before = s;
+    int delta = b.document.indentLine(line, indent, kIndentLen);
+    if (delta == 0) {
+        setActionMessage("Nada que tabular.", MessageKind::Info);
+        return;
+    }
+
+    if (delta > 0) {
+        e.edits.push_back({EditType::Insert, {line, 0}, {line, delta},
+                           std::string(static_cast<size_t>(delta), ' ')});
+    } else {
+        e.edits.push_back({EditType::Delete, {line, 0}, {line, -delta},
+                           before.substr(0, static_cast<size_t>(-delta))});
+    }
+
+    // Desplazar cursor (siempre esta en esta linea, ya que line = b.cursor.line)
+    auto shift = [delta](int col) {
+        return delta > 0 ? col + delta : std::max(0, col + delta);
+    };
+    b.cursor.col = shift(b.cursor.col);
+
     updateModified(b);
     b.commitHistoryEntry(std::move(e));
     setActionMessage(indent ? "Tabulado." : "Tabulacion quitada.",

@@ -276,6 +276,12 @@ private:
     // marca modified. No cambia de modo: la seleccion se conserva.
     void indentSelection(bool indent);
 
+    // Indenta / desindenta la linea actual del cursor en modo Navegacion.
+    // `indent` true tabula hacia adentro ('}'), `indent` false quita un nivel
+    // ('{'). No requiere seleccion; opera sobre la linea donde esta el cursor.
+    // Empuja una entrada de historial y marca modified. No cambia de modo.
+    void indentCurrentLine(bool indent);
+
     // Borra el rango seleccionado actual (si hay texto marcado) y deja el
     // cursor en el INICIO del rango. Empuja historial de undo y marca
     // modified como una edicion (igual que cortar, pero SIN tocar el
