@@ -300,7 +300,7 @@ TEST(integration_same_resize_behavior_across_screens) {
 // y el explorador si emitian (ciclo de vida inconsistente).
 // ---------------------------------------------------------------------------
 TEST(integration_frame_lifecycle_shared) {
-    const std::string prelude = "\x1b[?25l\x1b[H\x1b[J";
+    const std::string prelude = "\x1b[?25l\x1b[2J\x1b[H";
     const std::string epilogue = "\x1b[?25h";
     for (const std::string& frame :
          {frameEditor(5, 80), frameBuffer(5, 80), frameFile(5, 80)}) {

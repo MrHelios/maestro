@@ -10,7 +10,7 @@
 #include "ui/Editor.h"
 
 // Secuencias ANSI usadas por el renderer.
-#define ANSI_INV "\x1b[7m"   // video inverso
+#define ANSI_INV "\x1b[48;5;60m"   // seleccion azul grisáceo (kSelectionStyle)
 #define ANSI_RESET "\x1b[0m" // reset de estilo
 
 namespace {

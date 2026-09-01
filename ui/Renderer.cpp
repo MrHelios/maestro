@@ -325,8 +325,10 @@ void Renderer::setCursorStyle(std::string& out, State state) const {
 
 void Renderer::beginFrame(std::string& out) const {
     hideCursor(out);
+    if (!theme_.background.empty()) out += theme_.background;
+    if (!theme_.foreground.empty()) out += theme_.foreground;
+    out += "\x1b[2J";
     out += "\x1b[H";
-    out += "\x1b[J";
 }
 
 void Renderer::endFrame(std::string& out) const {

@@ -144,12 +144,13 @@ private:
     // bloques de switch.
     CommandMap commands_;
 
-    // Registra bajo nombres los handlers de los comandos de modo (i/s/p/
-    // c/x/a/j/k) y de prefijo (n/t/w/o). Los CUERPOS quedan registrados
+     // Registra bajo nombres los handlers de los comandos de modo (i/s/p/
+    // c/x/a/j/k) y de prefijo (n/t/w/o/l). Los CUERPOS quedan registrados
     // como lambdas que capturan este editor.
     void registerCommands();
 
     State state_ = State::Navegacion;
+    bool isDarkTheme_ = true;
     // P0 interaction: grupo de escritura sobre seleccion. Cuando se escribe
     // una letra sobre un rango marcado, el reemplazo se empuja UNA vez y la
     // escritura consecutiva posterior se absorbe en la MISMA entrada de undo,
@@ -284,6 +285,8 @@ private:
 
     void undo();
     void redo();
+
+    void toggleTheme();
 
     std::unique_ptr<FileWatcher> watcher_;
     std::unordered_set<std::string> watchedFiles_;

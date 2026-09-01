@@ -390,6 +390,9 @@ void Editor::registerCommands() {
     commands_.registerCommand("navegacion.buscar", [this] {
         startSearch();
     });
+    commands_.registerCommand("theme.toggle", [this] {
+        toggleTheme();
+    });
 }
 
 bool Editor::isDirectory(const std::string& path) {
@@ -850,7 +853,7 @@ void Editor::run() {
 
     sigprocmask(SIG_SETMASK, &origMask, nullptr);
     terminal_.disableRawMode();
-    write(STDOUT_FILENO, "\x1b[2J\x1b[H\x1b[0 q", 12);
+    write(STDOUT_FILENO, "\x1b[0m\x1b[39m\x1b[49m\x1b[?25h\x1b[2J\x1b[H\x1b[0 q", 32);
 }
 
 void Editor::renderFrame() {
@@ -1440,6 +1443,10 @@ void Editor::handlePrefixKey(const Event& event) {
                 commands_.execute("buffer.anterior");
                 break;
             }
+            if (event.text == "l" || event.text == "L") { // Ctrl+K l: alternar tema claro/oscuro
+                commands_.execute("theme.toggle");
+                break;
+            }
             // Cualquier otra letra: cae en el cancel del default.
             state_ = priorState_;
             setActionMessage("Comando cancelado.");
@@ -1946,7 +1953,15 @@ void Editor::redo() {
     }
 
     state_ = (b.selection.has_value() && b.selection->anchor != b.selection->position)
-           ? State::Seleccion
-           : State::Navegacion;
+            ? State::Seleccion
+            : State::Navegacion;
     setActionMessage("Rehecho.", MessageKind::Success);
+}
+
+void Editor::toggleTheme() {
+    isDarkTheme_ = !isDarkTheme_;
+    Theme t = isDarkTheme_ ? darkTheme() : lightTheme();
+    renderer_.setTheme(t);
+    state_ = priorState_;
+    setActionMessage(isDarkTheme_ ? "Tema oscuro" : "Tema claro", MessageKind::Info);
 }

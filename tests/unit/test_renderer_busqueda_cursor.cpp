@@ -58,7 +58,7 @@ TEST(renderer_busqueda_highlight_sigue_apareciendo){
     Selection sel; sel.anchor={0,0}; sel.position={0,4};
     std::optional<Selection> hl = sel;
     std::string frame = r.buildScreen(doc, cur, vp, "t", false, "", State::Busqueda, std::nullopt, hl);
-    CHECK(contains(frame, "\x1b[7mhola\x1b[0m"));
+    CHECK(contains(frame, "\x1b[48;5;60mhola\x1b[0m"));
 }
 
 TEST(renderer_busqueda_diff_no_posiciona_cursor){
@@ -76,13 +76,13 @@ TEST(renderer_busqueda_diff_no_posiciona_cursor){
     std::string seq = cursorMoveSeq(doc, cur, vp);
     CHECK(!contains(f2, seq));
     CHECK(!contains(f2, "\x1b[?25h"));
-    CHECK(contains(f2, "\x1b[7mhola\x1b[0m"));
+    CHECK(contains(f2, "\x1b[48;5;60mhola\x1b[0m"));
     // also test fresh Busqueda diff (cache miss path)
     Renderer r2;
     std::string f3 = r2.buildDiffFrame(doc, cur, vp, "t", false, "", State::Busqueda, std::nullopt, hl);
     CHECK(!contains(f3, seq));
     CHECK(!contains(f3, "\x1b[?25h"));
-    CHECK(contains(f3, "\x1b[7mhola\x1b[0m"));
+    CHECK(contains(f3, "\x1b[48;5;60mhola\x1b[0m"));
 }
 
 TEST(renderer_busqueda_transicion_oculto_y_visible){
@@ -96,7 +96,7 @@ TEST(renderer_busqueda_transicion_oculto_y_visible){
     CHECK(contains(fNav1, "\x1b[?25h"));
     std::string fBus = r.buildScreen(doc, cur, vp, "t", false, "", State::Busqueda, std::nullopt, hl);
     CHECK(!contains(fBus, "\x1b[?25h"));
-    CHECK(contains(fBus, "\x1b[7mhola\x1b[0m"));
+    CHECK(contains(fBus, "\x1b[48;5;60mhola\x1b[0m"));
     std::string fNav2 = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
     CHECK(contains(fNav2, "\x1b[?25h"));
     std::string seq = cursorMoveSeq(doc, cur, vp);
@@ -123,12 +123,12 @@ TEST(renderer_busqueda_diff_cache_con_modificacion){
     CHECK(contains(d1, "\x1b[?25h"));
     std::string d2 = rd.buildDiffFrame(doc, cur, vp, "t", false, "", State::Busqueda, std::nullopt, hl);
     CHECK(!contains(d2, "\x1b[?25h"));
-    CHECK(contains(d2, "\x1b[7mhola\x1b[0m"));
+    CHECK(contains(d2, "\x1b[48;5;60mhola\x1b[0m"));
     doc.restore({"hola mundo X"});
     std::string d3 = rd.buildDiffFrame(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
     CHECK(contains(d3, "\x1b[?25h"));
     CHECK(contains(d3, "hola mundo X"));
-    CHECK(!contains(d3, "\x1b[7mhola\x1b[0m"));
+    CHECK(!contains(d3, "\x1b[48;5;60mhola\x1b[0m"));
     std::string seq = cursorMoveSeq(doc, cur, vp);
     CHECK(contains(d3, seq));
     Renderer ref;

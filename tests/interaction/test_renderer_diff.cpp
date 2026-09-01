@@ -267,7 +267,7 @@ TEST(render_diff_vuelta_de_filebrowser_es_completo) {
     h.r.renderFileList({"a.txt", "b.txt"}, 0, 0, "/tmp", Message(""), 80, 24);
     CHECK(!h.r.hasCache_);
     const std::string trasFileList = h.step();
-    CHECK(trasFileList.find("\x1b[H\x1b[J") != std::string::npos);
+    CHECK(trasFileList.find("\x1b[2J\x1b[H") != std::string::npos);
 }
 
 // Resize y pantallas modales invalidan el cache: el proximo frame sale
@@ -282,12 +282,12 @@ TEST(render_diff_invalidacion_por_modal_y_resize) {
     h.r.renderBufferList({"uno", "dos"}, 0, 80, 24);
     CHECK(!h.r.hasCache_);
     const std::string trasModal = h.step();
-    CHECK(trasModal.find("\x1b[H\x1b[J") != std::string::npos); // frame completo
+    CHECK(trasModal.find("\x1b[2J\x1b[H") != std::string::npos); // frame completo
     CHECK(h.r.hasCache_);
 
     // Resize => invalida.
     h.buf().viewport.height = 30;
     const std::string trasResize = h.step();
-    CHECK(trasResize.find("\x1b[H\x1b[J") != std::string::npos);
+    CHECK(trasResize.find("\x1b[2J\x1b[H") != std::string::npos);
     CHECK_EQ(h.r.lastViewportH_, 30);
 }

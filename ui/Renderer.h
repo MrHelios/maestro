@@ -16,7 +16,11 @@
 
 class Renderer {
 public:
-    void setTheme(const Theme& t) { theme_ = t; }
+    void setTheme(const Theme& t) {
+        theme_ = t;
+        hasCache_ = false;
+        hasLastStatusData_ = false;
+    }
     const Theme& theme() const { return theme_; }
 
     std::string buildScreen(const Document& doc,

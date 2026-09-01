@@ -87,38 +87,62 @@ struct Theme {
 //                       (buffers/abrir), amarillo (guardar).
 //   - success         : verde;  warning : amarillo;  error : rojo.
 // ---------------------------------------------------------------------------
-inline constexpr const char* kCurrentLineStyle    = "\x1b[100m";                 // gris
-inline constexpr const char* kListSelectedStyle   = "\x1b[100m";                 // gris (activo)
-inline constexpr const char* kSelectionStyle      = "\x1b[7m";                   // video inverso
-inline constexpr const char* kLineNumberStyle     = "\x1b[90m";                  // gris tenue
-inline constexpr const char* kGutterCurrentStyle  = "\x1b[1m\x1b[37;100m";       // negrita blanca sobre gris
-inline constexpr const char* kMarkerStyle         = "\x1b[2m";                   // dim
+inline constexpr const char* kCurrentLineStyle    = "\x1b[48;5;237m";             // gris muy sutil
+inline constexpr const char* kListSelectedStyle   = "\x1b[48;5;237m";             // gris muy sutil (activo)
+inline constexpr const char* kSelectionStyle      = "\x1b[48;5;60m";              // azul grisáceo
+inline constexpr const char* kLineNumberStyle     = "\x1b[38;5;242m";             // gris apagado
+inline constexpr const char* kGutterCurrentStyle  = "\x1b[1m\x1b[38;5;81;48;5;237m"; // azul/gray sobre gris sutil
+inline constexpr const char* kMarkerStyle         = "\x1b[38;5;65m";              // verde apagado
 inline constexpr const char* kStatusBarStyle      = "\x1b[30m\x1b[48;2;102;102;102m";
 inline constexpr const char* kStatusBarName       = "\x1b[37m";                  // blanco
 inline constexpr const char* kStatusBarPath       = "\x1b[30m";                  // negro
 inline constexpr const char* kStatusBarCommand    = "\x1b[1m\x1b[38;5;178m";     // bold + dorado
 inline constexpr const char* kStatusBarModified   = "\x1b[1;38;5;221m";          // bold + amarillo claro
 inline constexpr const char* kPromptStyle         = "\x1b[1m";                   // negrita
-inline constexpr const char* kMessageSuccess      = "\x1b[32m";                  // verde
-inline constexpr const char* kMessageWarning      = "\x1b[33m";                  // amarillo
-inline constexpr const char* kMessageError        = "\x1b[31m";                  // rojo
+inline constexpr const char* kMessageSuccess      = "\x1b[38;5;250m";            // mismo color para todos los mensajes
+inline constexpr const char* kMessageWarning      = "\x1b[38;5;250m";
+inline constexpr const char* kMessageError        = "\x1b[38;5;250m";
 inline constexpr const char* kMessageReset        = "\x1b[0m";
 
-// Accents por estado activo (negrita + color 256 suave).
-inline constexpr const char* kAccentNavegacion   = "\x1b[1m\x1b[38;5;178m";      // dorado
-inline constexpr const char* kAccentInteraccion  = "\x1b[1m\x1b[38;5;178m";
-inline constexpr const char* kAccentSeleccion    = "\x1b[1m\x1b[38;5;178m";
-inline constexpr const char* kAccentComando      = "\x1b[1m\x1b[38;5;178m";
-inline constexpr const char* kAccentBuffers      = "\x1b[1m\x1b[38;5;178m";
-inline constexpr const char* kAccentGuardar      = "\x1b[1m\x1b[38;5;221m";      // amarillo suave
-inline constexpr const char* kAccentAbrir        = "\x1b[1m\x1b[38;5;178m";      
+// Accents por estado activo - dark: todos igual a navegacion
+inline constexpr const char* kAccentNavegacion   = "\x1b[1m\x1b[38;5;81m";       // azul clarito
+inline constexpr const char* kAccentInteraccion  = "\x1b[1m\x1b[38;5;81m";
+inline constexpr const char* kAccentSeleccion    = "\x1b[1m\x1b[38;5;81m";
+inline constexpr const char* kAccentComando      = "\x1b[1m\x1b[38;5;81m";
+inline constexpr const char* kAccentBuffers      = "\x1b[1m\x1b[38;5;81m";
+inline constexpr const char* kAccentGuardar      = "\x1b[1m\x1b[38;5;81m";
+inline constexpr const char* kAccentAbrir        = "\x1b[1m\x1b[38;5;81m";
 
-// El Theme por defecto (mismo aspecto que v1.1/v1.2 en los campos que ya
-// existian; los nuevos extienden el esquema con el lenguaje v1.3).
-inline Theme defaultTheme() {
+inline constexpr const char* kLightBackground        = "\x1b[48;5;255m";
+inline constexpr const char* kLightForeground        = "\x1b[38;5;235m";
+inline constexpr const char* kLightReset             = "\x1b[0m\x1b[48;5;255m\x1b[38;5;235m";
+inline constexpr const char* kLightCurrentLineStyle  = "\x1b[48;5;254m";
+inline constexpr const char* kLightListSelectedStyle = "\x1b[48;5;253m";
+inline constexpr const char* kLightSelectionStyle    = "\x1b[48;5;189m";
+inline constexpr const char* kLightLineNumberStyle   = "\x1b[38;5;245m";
+inline constexpr const char* kLightGutterCurrentStyle= "\x1b[1m\x1b[38;5;240;48;5;254m";
+inline constexpr const char* kLightMarkerStyle       = "\x1b[38;5;102m";
+inline constexpr const char* kLightStatusBarStyle    = "\x1b[38;5;235m\x1b[48;5;252m";
+inline constexpr const char* kLightStatusBarName     = "\x1b[1m\x1b[38;5;235m";
+inline constexpr const char* kLightStatusBarPath     = "\x1b[38;5;243m";
+inline constexpr const char* kLightStatusBarCommand  = "\x1b[1m\x1b[38;5;25m";
+inline constexpr const char* kLightStatusBarModified = "\x1b[1;38;5;160m";
+inline constexpr const char* kLightPromptStyle       = "\x1b[1m";
+inline constexpr const char* kLightMessageSuccess    = "\x1b[38;5;240m";
+inline constexpr const char* kLightMessageWarning    = "\x1b[38;5;240m";
+inline constexpr const char* kLightMessageError      = "\x1b[38;5;240m";
+inline constexpr const char* kLightAccentNavegacion  = "\x1b[1m\x1b[38;5;25m";
+inline constexpr const char* kLightAccentInteraccion = "\x1b[1m\x1b[38;5;25m";
+inline constexpr const char* kLightAccentSeleccion   = "\x1b[1m\x1b[38;5;25m";
+inline constexpr const char* kLightAccentComando     = "\x1b[1m\x1b[38;5;25m";
+inline constexpr const char* kLightAccentBuffers     = "\x1b[1m\x1b[38;5;25m";
+inline constexpr const char* kLightAccentGuardar     = "\x1b[1m\x1b[38;5;25m";
+inline constexpr const char* kLightAccentAbrir       = "\x1b[1m\x1b[38;5;25m";
+
+inline Theme darkTheme() {
     Theme t;
-    t.background     = "";                     // hereda el fondo de la terminal
-    t.foreground     = "";                     // hereda el color de la terminal
+    t.background     = "";
+    t.foreground     = "";
     t.lineNumber     = kLineNumberStyle;
     t.gutterCurrent  = kGutterCurrentStyle;
     t.marker         = kMarkerStyle;
@@ -130,7 +154,7 @@ inline Theme defaultTheme() {
     t.statusBarPath  = kStatusBarPath;
     t.statusBarAccent = kStatusBarCommand;
     t.statusBarModified = kStatusBarModified;
-    t.message        = "";                     // Info sin color
+    t.message        = "";
     t.prompt         = kPromptStyle;
     t.success        = kMessageSuccess;
     t.warning        = kMessageWarning;
@@ -145,3 +169,56 @@ inline Theme defaultTheme() {
     t.accentAbrir       = kAccentAbrir;
     return t;
 }
+
+inline Theme lightTheme() {
+    Theme t;
+    t.background     = kLightBackground;
+    t.foreground     = kLightForeground;
+    t.lineNumber     = kLightLineNumberStyle;
+    t.gutterCurrent  = kLightGutterCurrentStyle;
+    t.marker         = kLightMarkerStyle;
+    t.currentLine    = kLightCurrentLineStyle;
+    t.selection      = kLightSelectionStyle;
+    t.listSelected   = kLightListSelectedStyle;
+    t.statusBar      = kLightStatusBarStyle;
+    t.statusBarName  = kLightStatusBarName;
+    t.statusBarPath  = kLightStatusBarPath;
+    t.statusBarAccent = kLightStatusBarCommand;
+    t.statusBarModified = kLightStatusBarModified;
+    t.message        = "";
+    t.prompt         = kLightPromptStyle;
+    t.success        = kLightMessageSuccess;
+    t.warning        = kLightMessageWarning;
+    t.error          = kLightMessageError;
+    t.reset          = kLightReset;
+    t.accentNavegacion  = kLightAccentNavegacion;
+    t.accentInteraccion = kLightAccentInteraccion;
+    t.accentSeleccion   = kLightAccentSeleccion;
+    t.accentComando     = kLightAccentComando;
+    t.accentBuffers     = kLightAccentBuffers;
+    t.accentGuardar     = kLightAccentGuardar;
+    t.accentAbrir       = kLightAccentAbrir;
+    return t;
+}
+
+inline Theme defaultTheme() {
+    return darkTheme();
+}
+
+inline bool operator==(const Theme& a, const Theme& b) {
+    return a.background == b.background && a.foreground == b.foreground &&
+           a.lineNumber == b.lineNumber && a.gutterCurrent == b.gutterCurrent &&
+           a.marker == b.marker && a.currentLine == b.currentLine &&
+           a.selection == b.selection && a.listSelected == b.listSelected &&
+           a.statusBar == b.statusBar && a.statusBarName == b.statusBarName &&
+           a.statusBarPath == b.statusBarPath && a.statusBarAccent == b.statusBarAccent &&
+           a.statusBarModified == b.statusBarModified && a.message == b.message &&
+           a.prompt == b.prompt && a.success == b.success && a.warning == b.warning &&
+           a.error == b.error && a.reset == b.reset &&
+           a.accentNavegacion == b.accentNavegacion && a.accentInteraccion == b.accentInteraccion &&
+           a.accentSeleccion == b.accentSeleccion && a.accentComando == b.accentComando &&
+           a.accentBuffers == b.accentBuffers && a.accentGuardar == b.accentGuardar &&
+           a.accentAbrir == b.accentAbrir;
+}
+
+inline bool operator!=(const Theme& a, const Theme& b) { return !(a == b); }
