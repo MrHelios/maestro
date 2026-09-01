@@ -399,7 +399,7 @@ TEST(range_never_produces_invalid_utf8) {
         const int total = utf8::columnOf(s, static_cast<int>(s.size()));
         for (int from = 0; from <= total + 3; ++from)
             for (int to = from; to <= total + 3; ++to) {
-                std::string out = utf8::range(s, from, to);
+                std::string out = std::string(utf8::range(s, from, to));
                 if (!validUtf8(out)) {
                     CHECK(false);
                     std::printf("  UTF-8 invalido | from=%d to=%d len=%d\n",

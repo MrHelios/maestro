@@ -265,7 +265,7 @@ TEST(render_diff_vuelta_de_filebrowser_es_completo) {
     DiffHarness h(300);
     h.step();
     h.r.renderFileList({"a.txt", "b.txt"}, 0, 0, "/tmp", Message(""), 80, 24);
-    CHECK(!h.r.hasLastEditorBody_);
+    CHECK(!h.r.hasCache_);
     const std::string trasFileList = h.step();
     CHECK(trasFileList.find("\x1b[H\x1b[J") != std::string::npos);
 }
@@ -276,14 +276,14 @@ TEST(render_diff_invalidacion_por_modal_y_resize) {
     DiffHarness h(300);
 
     h.step(); // inicial completo
-    CHECK(h.r.hasLastEditorBody_);
+    CHECK(h.r.hasCache_);
 
     // Pantalla modal pinta encima => invalida.
     h.r.renderBufferList({"uno", "dos"}, 0, 80, 24);
-    CHECK(!h.r.hasLastEditorBody_);
+    CHECK(!h.r.hasCache_);
     const std::string trasModal = h.step();
     CHECK(trasModal.find("\x1b[H\x1b[J") != std::string::npos); // frame completo
-    CHECK(h.r.hasLastEditorBody_);
+    CHECK(h.r.hasCache_);
 
     // Resize => invalida.
     h.buf().viewport.height = 30;

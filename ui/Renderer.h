@@ -1,5 +1,6 @@
 #pragma once
 
+#include <deque>
 #include <optional>
 #include <string>
 #include <vector>
@@ -87,14 +88,20 @@ public:
 private:
     Theme theme_ = defaultTheme();
 
-    std::string lastEditorBody_;
-    bool hasLastEditorBody_ = false;
+    std::deque<std::string> rowCache_;   // una entrada por fila de contenido: "\x1b[K" + bytes
+    std::string statusCache_;            // status bar cacheado, filas separadas por "\r\n"
+    bool hasCache_ = false;
+    int cachedContentH_ = -1;
     int lastViewportW_ = -1;
     int lastViewportH_ = -1;
     int lastViewportTop_ = 0;
     int lastViewportLeft_ = 0;
     int lastCursorLine_ = 0;
     int lastCursorCol_ = 0;
+    uint64_t lastVersion_ = 0;
+    int lastLineCount_ = 0;
+    StatusBarData lastStatusData_;
+    bool hasLastStatusData_ = false;
 
     Layout calculateLayout(int contentRows, int width) const;
 
@@ -167,6 +174,30 @@ private:
                                  const std::optional<Selection>& searchHighlight,
                                  int deltaTop);
 
+    std::string buildCursorMoveFrame(const Document& doc,
+                                     const Cursor& cursor,
+                                     const Viewport& viewport,
+                                     const std::string& filename,
+                                     bool modified,
+                                     const Message& message,
+                                     State state,
+                                     const std::optional<Selection>& selection,
+                                     const std::optional<Selection>& searchHighlight);
+
+    void rebuildCache(const Document& doc, const Cursor& cursor, const Viewport& viewport,
+                      const std::string& filename, bool modified, const Message& message,
+                      State state, const std::optional<Selection>& selection,
+                      const std::optional<Selection>& searchHighlight);
+
+    bool patchContentRow(std::string& out, const Document& doc, const Cursor& cursor,
+                         const Viewport& viewport, const std::optional<Normalized>& sel,
+                         const std::optional<Normalized>& searchSel, int docLine,
+                         int gutterW, int textWidth, int contentH);
+
+    void patchStatusBar(std::string& out, const Document& doc, const Cursor& cursor,
+                        const std::string& filename, bool modified, const Message& message,
+                        State state, const Layout& layout, int contentH);
+
     void editorCursorPos(const Document& doc,
                           const Cursor& cursor,
                           const Viewport& viewport,
@@ -179,4 +210,6 @@ private:
     void hideCursor(std::string& out) const;
     void showCursor(std::string& out) const;
     void setCursorStyle(std::string& out, State state) const;
+
+    static void splitRows(const std::string& body, std::vector<std::string_view>* rows);
 };

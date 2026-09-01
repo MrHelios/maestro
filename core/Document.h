@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <cstdint>
 #include "core/Position.h"
 
 // Resultado de loadFromFile. Diferencia entre un archivo que genuinamente
@@ -203,10 +204,14 @@ public:
     // si devuelve 0.
     int indentLine(int line, bool indent, int indentLen);
 
+    uint64_t version() const { return version_; }
+
 private:
     std::vector<std::string> lines_;
     std::function<void(int,int)> touchedCallback_;
     void notifyTouched(int a,int b) { if (touchedCallback_) touchedCallback_(a,b); }
+    uint64_t version_ = 0;
+    void bumpVersion() { ++version_; }
 
     // Terminador de linea usado al guardar. Se detecta en loadFromFile
     // (LF vs CRLF) y se conserva hasta el siguiente guardado.

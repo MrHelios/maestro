@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <algorithm>
 
 // Utilitarios UTF-8 puros (sin dependencias del renderer): el renderer
@@ -22,7 +23,7 @@ namespace utf8 {
 // Asi un archivo con bytes invalidos sigue siendo navegable byte a byte,
 // y ninguna celda "se traga" bytes que no le pertenecen (un byte de
 // continuacion huerfano es una celda propia, no se pega al vecino).
-inline bool isCellStart(const std::string& line, int i) {
+inline bool isCellStart(std::string_view line, int i) {
     if (i < 0 || i >= static_cast<int>(line.size())) return false;
     unsigned char c = static_cast<unsigned char>(line[i]);
     if (c < 0x80) return true;               // ASCII
@@ -73,7 +74,7 @@ inline bool isCellStart(const std::string& line, int i) {
 // actual (bytes, ancho 1 por celda) es una aproximacion que no parte
 // secuencias UTF-8 validas y funciona para texto occidental, pero no
 // pretende ser un render de texto completo.
-inline int columnOf(const std::string& line, int byteCol) {
+inline int columnOf(std::string_view line, int byteCol) {
     int col = 0;
     int limit = std::min<int>(byteCol, static_cast<int>(line.size()));
     for (int i = 0; i < limit; ++i) {
@@ -87,7 +88,7 @@ inline int columnOf(const std::string& line, int byteCol) {
 // Trunca `line` a lo sumo `maxCols` COLUMNAS VISUALES, sin cortar una
 // celda por la mitad (lo que generaria bytes invalidos y corromperia el
 // resto del render).
-inline std::string truncate(const std::string& line, int maxCols) {
+inline std::string truncate(std::string_view line, int maxCols) {
     int col = 0;
     size_t i = 0;
     while (i < line.size()) {
@@ -97,13 +98,13 @@ inline std::string truncate(const std::string& line, int maxCols) {
         }
         i++;
     }
-    return line.substr(0, i);
+    return std::string(line.substr(0, i));
 }
 
 // Devuelve los bytes de `line` cuyas COLUMNAS VISUALES caen dentro de
 // [fromCol, toCol). No corta celdas por la mitad. Si el rango llega al
 // final de la linea devuelve hasta el ultimo byte.
-inline std::string range(const std::string& line, int fromCol, int toCol) {
+inline std::string_view range(std::string_view line, int fromCol, int toCol) {
     if (toCol <= fromCol) return "";
     int col = 0;
     size_t startByte = line.size();

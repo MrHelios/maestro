@@ -113,7 +113,7 @@ int gutterWidth(int totalLines) {
 // cubra SIEMPRE las `width` columnas completas y no solo el texto.
 // `bgStyle` vacio ("") = sin fondo, se escribe el texto truncado tal cual
 // (mismo comportamiento que antes para las filas no-activas).
-void renderFilledRow(std::string& out, const std::string& text, int width,
+void renderFilledRow(std::string& out, std::string_view text, int width,
                      const std::string& bgStyle, const std::string& reset) {
     std::string truncated = utf8::truncate(text, width);
     if (bgStyle.empty()) {
@@ -180,7 +180,7 @@ std::string renderGutterBlank(int gutterW) {
 // selecciono).
 void renderLine(std::string& out,
                 const Theme& T,
-                const std::string& line,
+                std::string_view line,
                 int width,
                 bool isCurrentLine,
                 int selStartByte = -1,
@@ -213,12 +213,12 @@ void renderLine(std::string& out,
     int endCol = utf8::columnOf(line, endByte);
 
     // Parte antes de la seleccion, en estilo de linea actual si corresponde.
-    std::string before = utf8::range(line, 0, std::min(startCol, width));
+    std::string_view before = utf8::range(line, 0, std::min(startCol, width));
     // Parte seleccionada, en video inverso (siempre gana).
-    std::string selected = utf8::range(line, std::min(startCol, width),
+    std::string_view selected = utf8::range(line, std::min(startCol, width),
                                        std::min(endCol, width));
     // Parte despues de la seleccion (si queda espacio).
-    std::string after = utf8::range(line, std::min(endCol, width), width);
+    std::string_view after = utf8::range(line, std::min(endCol, width), width);
 
     if (isCurrentLine) out += T.currentLine;
     out += before;
@@ -412,7 +412,7 @@ void Renderer::renderEditorRow(std::string& out,
 
         int absoluteVisStart = viewport.left;
         int absoluteVisEnd = absoluteVisStart + textWidth;
-        std::string visible = utf8::range(line, absoluteVisStart, absoluteVisEnd);
+        std::string_view visible = utf8::range(line, absoluteVisStart, absoluteVisEnd);
 
         if (merged.empty()) {
             renderLine(out, theme_, visible, textWidth, isCurrentLine, -1, -1, false);
@@ -439,14 +439,14 @@ void Renderer::renderEditorRow(std::string& out,
             int visibleSc = visibleIntervals[i].first;
             int visibleEc = visibleIntervals[i].second;
             if (visibleCur < visibleSc) {
-                std::string seg = utf8::range(visible, visibleCur, visibleSc);
+                std::string_view seg = utf8::range(visible, visibleCur, visibleSc);
                 if (isCurrentLine) out += theme_.currentLine;
                 out += seg;
                 if (isCurrentLine) out += theme_.reset;
                 used += colCount(seg);
             }
             {
-                std::string seg = utf8::range(visible, visibleSc, visibleEc);
+                std::string_view seg = utf8::range(visible, visibleSc, visibleEc);
                 out += theme_.selection;
                 out += seg;
                 out += theme_.reset;
@@ -455,7 +455,7 @@ void Renderer::renderEditorRow(std::string& out,
             visibleCur = visibleEc;
         }
         if (visibleCur < textWidth) {
-            std::string tail = utf8::range(visible, visibleCur, textWidth);
+            std::string_view tail = utf8::range(visible, visibleCur, textWidth);
             if (isCurrentLine) out += theme_.currentLine;
             out += tail;
             if (isCurrentLine) {
@@ -493,14 +493,144 @@ void Renderer::renderEditorContent(std::string& out,
 }
 
 void Renderer::renderStatusBar(std::string& out,
-                               const Rect& area,
-                               const StatusBarData& data) const {
+                                const Rect& area,
+                                const StatusBarData& data) const {
     // La barra NO conoce editor, buffer ni documento: la pantalla produce
     // un StatusBarData y la barra comun (StatusBar) solo lo pinta. El Theme
     // del Renderer se propaga a la barra: es un unico esquema de color.
     StatusBar bar;
     bar.setTheme(theme_);
     out += bar.render(area, data);
+}
+
+bool Renderer::patchContentRow(std::string& out, const Document& doc, const Cursor& cursor,
+                               const Viewport& viewport, const std::optional<Normalized>& sel,
+                               const std::optional<Normalized>& searchSel, int docLine,
+                               int gutterW, int textWidth, int contentH) {
+    const int row = docLine - viewport.top;
+    if (row < 0 || row >= contentH || row >= static_cast<int>(rowCache_.size())) return false;
+    std::string full;
+    full += "\x1b[K";
+    renderEditorRow(full, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth);
+    if (rowCache_[static_cast<size_t>(row)] == full) return false;
+    moveCursorTo(out, row + 1, 1);
+    out += theme_.reset;
+    out += full;
+    rowCache_[static_cast<size_t>(row)] = std::move(full);
+    return true;
+}
+
+void Renderer::patchStatusBar(std::string& out, const Document& doc, const Cursor& cursor,
+                              const std::string& filename, bool modified, const Message& message,
+                              State state, const Layout& layout, int contentH) {
+    StatusBarData data = editorBarData(filename, modified, stateLabel(state), message, cursor, doc.lineCount());
+    data.estadoAccent = stateAccent(theme_, state);
+    if (hasLastStatusData_ && data.name == lastStatusData_.name && data.path == lastStatusData_.path &&
+        data.estado == lastStatusData_.estado && data.estadoAccent == lastStatusData_.estadoAccent &&
+        data.message.text == lastStatusData_.message.text && data.message.kind == lastStatusData_.message.kind &&
+        data.right == lastStatusData_.right && data.modified == lastStatusData_.modified &&
+        data.cursorLine == lastStatusData_.cursorLine && data.cursorCol == lastStatusData_.cursorCol &&
+        data.totalLines == lastStatusData_.totalLines) {
+        return;
+    }
+    std::string statusBody;
+    renderStatusBar(statusBody, layout.statusBar, data);
+    if (statusBody == statusCache_) {
+        lastStatusData_ = data;
+        hasLastStatusData_ = true;
+        return;
+    }
+
+    std::vector<std::string_view> oldRows, newRows;
+    splitRows(statusCache_, &oldRows);
+    splitRows(statusBody, &newRows);
+    const size_t n = std::max(oldRows.size(), newRows.size());
+    for (size_t i = 0; i < n; ++i) {
+        std::string_view oldRow = i < oldRows.size() ? oldRows[i] : std::string_view{};
+        std::string_view newRow = i < newRows.size() ? newRows[i] : std::string_view{};
+        if (oldRow == newRow) continue;
+        moveCursorTo(out, contentH + static_cast<int>(i) + 1, 1);
+        out += theme_.reset;
+        out += "\x1b[K";
+        out.append(newRow.data(), newRow.size());
+    }
+    statusCache_ = std::move(statusBody);
+    lastStatusData_ = data;
+    hasLastStatusData_ = true;
+}
+
+void Renderer::rebuildCache(const Document& doc, const Cursor& cursor, const Viewport& viewport,
+                            const std::string& filename, bool modified, const Message& message,
+                            State state, const std::optional<Selection>& selection,
+                            const std::optional<Selection>& searchHighlight) {
+    const Layout layout = calculateLayout(viewport.height, viewport.width);
+    const int contentH = layout.content.height;
+    const EditorGeometry g = editorGeometry(doc, viewport);
+    const int gutterW = g.gutterW;
+    const int textWidth = std::max(0, layout.content.width - gutterW);
+    std::optional<Normalized> sel = selection.has_value() ? normalize(*selection) : std::nullopt;
+    std::optional<Normalized> searchSel = searchHighlight.has_value() ? normalize(*searchHighlight) : std::nullopt;
+
+    rowCache_.clear();
+    for (int row = 0; row < contentH; ++row) {
+        std::string full = "\x1b[K";
+        renderEditorRow(full, doc, cursor, viewport, sel, searchSel,
+                        viewport.top + row, gutterW, textWidth);
+        rowCache_.push_back(std::move(full));
+    }
+
+    StatusBarData data = editorBarData(filename, modified, stateLabel(state), message, cursor, doc.lineCount());
+    data.estadoAccent = stateAccent(theme_, state);
+    statusCache_.clear();
+    renderStatusBar(statusCache_, layout.statusBar, data);
+    lastStatusData_ = data;
+    hasLastStatusData_ = true;
+
+    hasCache_ = true;
+    cachedContentH_ = contentH;
+    lastVersion_ = doc.version();
+    lastLineCount_ = doc.lineCount();
+}
+
+std::string Renderer::buildCursorMoveFrame(const Document& doc, const Cursor& cursor,
+                                           const Viewport& viewport, const std::string& filename,
+                                           bool modified, const Message& message, State state,
+                                           const std::optional<Selection>& selection,
+                                           const std::optional<Selection>& searchHighlight) {
+    const EditorGeometry g = editorGeometry(doc, viewport);
+    const Layout& layout = g.layout;
+    const int contentH = layout.content.height;
+    if (contentH <= 0 || static_cast<int>(rowCache_.size()) != contentH) return "";
+
+    const int gutterW = g.gutterW;
+    const int textWidth = std::max(0, layout.content.width - gutterW);
+    const std::optional<Normalized> sel = std::nullopt;
+    const std::optional<Normalized> searchSel = std::nullopt;
+    (void)selection;
+    (void)searchHighlight;
+
+    std::string out;
+    hideCursor(out);
+    if (lastCursorLine_ == cursor.line) {
+        patchContentRow(out, doc, cursor, viewport, sel, searchSel, cursor.line, gutterW, textWidth, contentH);
+    } else {
+        patchContentRow(out, doc, cursor, viewport, sel, searchSel, lastCursorLine_, gutterW, textWidth, contentH);
+        patchContentRow(out, doc, cursor, viewport, sel, searchSel, cursor.line, gutterW, textWidth, contentH);
+    }
+    patchStatusBar(out, doc, cursor, filename, modified, message, state, layout, contentH);
+
+    if (state != State::Busqueda) {
+        int curRow = 1, curCol = 1;
+        editorCursorPos(doc, cursor, viewport, curRow, curCol);
+        moveCursorTo(out, curRow, curCol);
+        setCursorStyle(out, state);
+        showCursor(out);
+    }
+    lastCursorLine_ = cursor.line;
+    lastCursorCol_ = cursor.col;
+    lastVersion_ = doc.version();
+    lastLineCount_ = doc.lineCount();
+    return out;
 }
 
 static bool writeAll(int fd, const std::string& s) {
@@ -533,7 +663,7 @@ void Renderer::renderScreen(const Document& doc,
     writeAll(STDOUT_FILENO, buffer);
 }
 
-static void splitRows(const std::string& body, std::vector<std::string_view>* rows) {
+void Renderer::splitRows(const std::string& body, std::vector<std::string_view>* rows) {
     rows->clear();
     std::size_t start = 0;
     while (start <= body.size()) {
@@ -548,131 +678,83 @@ static void splitRows(const std::string& body, std::vector<std::string_view>* ro
 }
 
 void Renderer::renderScreenDiff(const Document& doc,
-                                 const Cursor& cursor,
-                                 const Viewport& viewport,
-                                 const std::string& filename,
-                                 bool modified,
-                                 const Message& message,
-                                 State state,
-                                 const std::optional<Selection>& selection,
-                                 const std::optional<Selection>& searchHighlight) {
+                                  const Cursor& cursor,
+                                  const Viewport& viewport,
+                                  const std::string& filename,
+                                  bool modified,
+                                  const Message& message,
+                                  State state,
+                                  const std::optional<Selection>& selection,
+                                  const std::optional<Selection>& searchHighlight) {
     const std::string out = buildDiffFrame(doc, cursor, viewport, filename,
-                                            modified, message, state, selection, searchHighlight);
-    if (!writeAll(STDOUT_FILENO, out)) hasLastEditorBody_ = false;
+                                             modified, message, state, selection, searchHighlight);
+    if (!writeAll(STDOUT_FILENO, out)) hasCache_ = false;
 }
 
-std::string Renderer::buildScrollFrame(const Document& doc,
-                                        const Cursor& cursor,
-                                        const Viewport& viewport,
-                                        const std::string& filename,
-                                        bool modified,
-                                        const Message& message,
-                                        State state,
+std::string Renderer::buildScrollFrame(const Document& doc, const Cursor& cursor,
+                                        const Viewport& viewport, const std::string& filename,
+                                        bool modified, const Message& message, State state,
                                         const std::optional<Selection>& selection,
                                         const std::optional<Selection>& searchHighlight,
                                         int deltaTop) {
     const Layout layout = calculateLayout(viewport.height, viewport.width);
     const int contentH = layout.content.height;
-    if (contentH <= 0) return "";
-
-    std::vector<std::string_view> oldRows;
-    splitRows(lastEditorBody_, &oldRows);
-    if (static_cast<int>(oldRows.size()) < contentH) return "";
+    const int absDelta = std::abs(deltaTop);
+    if (contentH <= 0 || absDelta == 0 || absDelta >= contentH) return "";
+    if (static_cast<int>(rowCache_.size()) != contentH) return "";
 
     const EditorGeometry g = editorGeometry(doc, viewport);
     const int gutterW = g.gutterW;
     const int textWidth = std::max(0, layout.content.width - gutterW);
-
     std::optional<Normalized> sel = selection.has_value() ? normalize(*selection) : std::nullopt;
     std::optional<Normalized> searchSel = searchHighlight.has_value() ? normalize(*searchHighlight) : std::nullopt;
 
-    const int newDocLine = (deltaTop == 1) ? viewport.top + contentH - 1 : viewport.top;
-
-    std::string newRowContent;
-    renderEditorRow(newRowContent, doc, cursor, viewport, sel, searchSel, newDocLine, gutterW, textWidth);
-    const std::string newRowFull = "\x1b[K" + newRowContent;
-
-    StatusBarData data = editorBarData(filename, modified, stateLabel(state), message, cursor, doc.lineCount());
-    data.estadoAccent = stateAccent(theme_, state);
-
-    std::string statusBody;
-    renderStatusBar(statusBody, layout.statusBar, data);
-    std::vector<std::string_view> newStatusRows;
-    splitRows(statusBody, &newStatusRows);
-
-    std::string oldHighlightFix;
-    std::string oldHighlightFull;
-    int oldFixRow = -1;
-    if (lastCursorLine_ != cursor.line) {
-        const int oldDocLine = lastCursorLine_;
-        if (oldDocLine >= viewport.top && oldDocLine < viewport.top + contentH && oldDocLine != newDocLine) {
-            renderEditorRow(oldHighlightFix, doc, cursor, viewport, sel, searchSel, oldDocLine, gutterW, textWidth);
-            oldHighlightFull = "\x1b[K" + oldHighlightFix;
-            oldFixRow = oldDocLine - viewport.top + 1;
-        }
-    }
-
-    // Build new cached body
-    std::string newBody;
-    newBody.reserve(lastEditorBody_.size() + newRowFull.size() + statusBody.size());
-    for (int i = 0; i < contentH; ++i) {
-        const int docLine = viewport.top + i;
-        if (docLine == newDocLine) {
-            newBody += newRowFull;
-        } else if (docLine == lastCursorLine_ && oldFixRow != -1) {
-            newBody += oldHighlightFull;
-        } else {
-            if (deltaTop == 1) {
-                if (i + 1 < contentH) {
-                    auto v = oldRows[static_cast<size_t>(i + 1)];
-                    newBody.append(v.data(), v.size());
-                } else {
-                    newBody += newRowFull;
-                }
-            } else {
-                if (i == 0) newBody += newRowFull;
-                else {
-                    auto v = oldRows[static_cast<size_t>(i - 1)];
-                    newBody.append(v.data(), v.size());
-                }
-            }
-        }
-        newBody += "\r\n";
-    }
-    newBody += statusBody;
-
-    // Emit using terminal scroll (CSI S/T) - test's TinyTerm ignores these
-    // but real terminals handle them correctly
     std::string out;
     hideCursor(out);
     out += "\x1b[1;";
     out += std::to_string(contentH);
     out += "r";
-    if (deltaTop == 1) out += "\x1b[1S";
-    else out += "\x1b[1T";
+    out += "\x1b[";
+    out += std::to_string(absDelta);
+    out += (deltaTop > 0) ? "S" : "T";
     out += "\x1b[r";
 
-    const int edgeRow = (deltaTop == 1) ? contentH : 1;
-    moveCursorTo(out, edgeRow, 1);
-    out += theme_.reset;
-    out += "\x1b[K";
-    out += newRowContent;
-
-    if (oldFixRow != -1) {
-        moveCursorTo(out, oldFixRow, 1);
-        out += theme_.reset;
-        out += "\x1b[K";
-        out += oldHighlightFix;
+    if (deltaTop > 0) {
+        for (int i = 0; i < absDelta; ++i) rowCache_.pop_front();
+        for (int i = 0; i < absDelta; ++i) {
+            const int docLine = viewport.top + contentH - absDelta + i;
+            std::string full = "\x1b[K";
+            renderEditorRow(full, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth);
+            rowCache_.push_back(std::move(full));
+        }
+        for (int i = 0; i < absDelta; ++i) {
+            const int row = contentH - absDelta + i;
+            moveCursorTo(out, row + 1, 1);
+            out += theme_.reset;
+            out += rowCache_[static_cast<size_t>(row)];
+        }
+    } else {
+        for (int i = 0; i < absDelta; ++i) rowCache_.pop_back();
+        for (int i = 0; i < absDelta; ++i) {
+            const int docLine = viewport.top + absDelta - 1 - i;
+            std::string full = "\x1b[K";
+            renderEditorRow(full, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth);
+            rowCache_.push_front(std::move(full));
+        }
+        for (int i = 0; i < absDelta; ++i) {
+            moveCursorTo(out, i + 1, 1);
+            out += theme_.reset;
+            out += rowCache_[static_cast<size_t>(i)];
+        }
     }
 
-    for (size_t i = 0; i < newStatusRows.size(); ++i) {
-        const int rowIdx = contentH + static_cast<int>(i);
-        if (rowIdx < static_cast<int>(oldRows.size()) && oldRows[static_cast<size_t>(rowIdx)] == newStatusRows[i]) continue;
-        moveCursorTo(out, rowIdx + 1, 1);
-        out += theme_.reset;
-        out += "\x1b[K";
-        out.append(newStatusRows[i].data(), newStatusRows[i].size());
+    if (lastCursorLine_ == cursor.line) {
+        patchContentRow(out, doc, cursor, viewport, sel, searchSel, cursor.line, gutterW, textWidth, contentH);
+    } else {
+        patchContentRow(out, doc, cursor, viewport, sel, searchSel, lastCursorLine_, gutterW, textWidth, contentH);
+        patchContentRow(out, doc, cursor, viewport, sel, searchSel, cursor.line, gutterW, textWidth, contentH);
     }
+    patchStatusBar(out, doc, cursor, filename, modified, message, state, layout, contentH);
 
     if (state != State::Busqueda) {
         int curRow = 1, curCol = 1;
@@ -682,40 +764,43 @@ std::string Renderer::buildScrollFrame(const Document& doc,
         showCursor(out);
     }
 
-    lastEditorBody_ = std::move(newBody);
     lastViewportTop_ = viewport.top;
     lastViewportLeft_ = viewport.left;
     lastCursorLine_ = cursor.line;
     lastCursorCol_ = cursor.col;
+    lastVersion_ = doc.version();
+    lastLineCount_ = doc.lineCount();
     return out;
 }
 
 std::string Renderer::buildDiffFrame(const Document& doc,
-                                      const Cursor& cursor,
-                                      const Viewport& viewport,
-                                      const std::string& filename,
-                                      bool modified,
-                                      const Message& message,
-                                      State state,
-                                      const std::optional<Selection>& selection,
-                                      const std::optional<Selection>& searchHighlight) {
-    if (!hasLastEditorBody_ || viewport.width != lastViewportW_ ||
-        viewport.height != lastViewportH_) {
-        lastEditorBody_ = buildEditorBody(doc, cursor, viewport, filename,
-                                          modified, message, state, selection, searchHighlight);
-        hasLastEditorBody_ = true;
+                                       const Cursor& cursor,
+                                       const Viewport& viewport,
+                                       const std::string& filename,
+                                       bool modified,
+                                       const Message& message,
+                                       State state,
+                                       const std::optional<Selection>& selection,
+                                       const std::optional<Selection>& searchHighlight) {
+    const Layout layout = calculateLayout(viewport.height, viewport.width);
+    const int contentH = layout.content.height;
+
+    if (!hasCache_ || viewport.width != lastViewportW_ || viewport.height != lastViewportH_
+        || cachedContentH_ != contentH) {
+        rebuildCache(doc, cursor, viewport, filename, modified, message, state, selection, searchHighlight);
         lastViewportW_ = viewport.width;
         lastViewportH_ = viewport.height;
         lastViewportTop_ = viewport.top;
         lastViewportLeft_ = viewport.left;
         lastCursorLine_ = cursor.line;
         lastCursorCol_ = cursor.col;
+        lastVersion_ = doc.version();
+        lastLineCount_ = doc.lineCount();
         std::string out;
         beginFrame(out);
-        out += lastEditorBody_;
-        if (state == State::Busqueda) {
-            return out;
-        }
+        for (auto& row : rowCache_) { out += row; out += "\r\n"; }
+        out += statusCache_;
+        if (state == State::Busqueda) return out;
         int curRow = 1, curCol = 1;
         editorCursorPos(doc, cursor, viewport, curRow, curCol);
         moveCursorTo(out, curRow, curCol);
@@ -726,10 +811,11 @@ std::string Renderer::buildDiffFrame(const Document& doc,
 
     const int deltaTop = viewport.top - lastViewportTop_;
     const int deltaLeft = viewport.left - lastViewportLeft_;
+    const bool noHighlight = !selection.has_value() && !searchHighlight.has_value();
 
-    const bool canScroll = (deltaTop == 1 || deltaTop == -1) && deltaLeft == 0
-                        && !selection.has_value() && !searchHighlight.has_value();
-    if (canScroll) {
+    // Only use scroll frame for single-line scrolls (matching original behavior).
+    // Multi-line scrolls fall through to slow path which does row-by-row diff.
+    if ((deltaTop == 1 || deltaTop == -1) && deltaLeft == 0 && noHighlight) {
         const std::string scrollFrame = buildScrollFrame(doc, cursor, viewport, filename,
                                                          modified, message, state,
                                                          selection, searchHighlight,
@@ -737,32 +823,65 @@ std::string Renderer::buildDiffFrame(const Document& doc,
         if (!scrollFrame.empty()) return scrollFrame;
     }
 
+    if (deltaTop == 0 && deltaLeft == 0 && noHighlight) {
+        const bool sameLineEdit = doc.version() != lastVersion_ && cursor.line == lastCursorLine_ &&
+                                  cursor.col != lastCursorCol_ && doc.lineCount() == lastLineCount_;
+        const bool pureCursorMove = doc.version() == lastVersion_ &&
+                                    (cursor.line != lastCursorLine_ || cursor.col != lastCursorCol_);
+        if (sameLineEdit || pureCursorMove) {
+            const std::string moveFrame = buildCursorMoveFrame(doc, cursor, viewport, filename,
+                                                                modified, message, state,
+                                                                selection, searchHighlight);
+            if (!moveFrame.empty()) return moveFrame;
+        }
+    }
+
+    // Camino lento: selección/búsqueda activa, o los caminos rápidos declinaron.
     const std::string fresh = buildEditorBody(doc, cursor, viewport, filename,
                                               modified, message, state,
                                               selection, searchHighlight);
-
-    std::vector<std::string_view> oldRows, newRows;
-    splitRows(lastEditorBody_, &oldRows);
+    std::vector<std::string_view> newRows;
     splitRows(fresh, &newRows);
-
-    assert(oldRows.size() == newRows.size());
+    std::vector<std::string_view> oldStatusRows;
+    splitRows(statusCache_, &oldStatusRows);
     std::string out;
     hideCursor(out);
-    for (int i = 0; i < static_cast<int>(oldRows.size()); ++i) {
-        if (oldRows[static_cast<size_t>(i)] ==
-            newRows[static_cast<size_t>(i)]) continue;
-        moveCursorTo(out, i + 1, 1);
+    for (size_t i = 0; i < newRows.size(); ++i) {
+        std::string_view oldRow;
+        if (i < static_cast<size_t>(contentH)) {
+            if (i < rowCache_.size()) oldRow = rowCache_[i];
+        } else if (i - static_cast<size_t>(contentH) < oldStatusRows.size()) {
+            oldRow = oldStatusRows[i - static_cast<size_t>(contentH)];
+        }
+        if (oldRow == newRows[i]) continue;
+        moveCursorTo(out, static_cast<int>(i) + 1, 1);
         out += theme_.reset;
         out += "\x1b[K";
         out.append(newRows[static_cast<size_t>(i)].data(), newRows[static_cast<size_t>(i)].size());
     }
 
+    rowCache_.clear();
+    for (int i = 0; i < contentH && static_cast<size_t>(i) < newRows.size(); ++i)
+        rowCache_.emplace_back(newRows[static_cast<size_t>(i)]);
+    statusCache_.clear();
+    for (size_t i = static_cast<size_t>(contentH); i < newRows.size(); ++i) {
+        if (i > static_cast<size_t>(contentH)) statusCache_ += "\r\n";
+        statusCache_.append(newRows[i].data(), newRows[i].size());
+    }
+    {
+        StatusBarData data = editorBarData(filename, modified, stateLabel(state), message, cursor, doc.lineCount());
+        data.estadoAccent = stateAccent(theme_, state);
+        lastStatusData_ = data;
+        hasLastStatusData_ = true;
+    }
+
     if (state == State::Busqueda) {
-        lastEditorBody_ = fresh;
         lastViewportTop_ = viewport.top;
         lastViewportLeft_ = viewport.left;
         lastCursorLine_ = cursor.line;
         lastCursorCol_ = cursor.col;
+        lastVersion_ = doc.version();
+        lastLineCount_ = doc.lineCount();
         return out;
     }
     int curRow = 1, curCol = 1;
@@ -771,11 +890,12 @@ std::string Renderer::buildDiffFrame(const Document& doc,
     setCursorStyle(out, state);
     showCursor(out);
 
-    lastEditorBody_ = fresh;
     lastViewportTop_ = viewport.top;
     lastViewportLeft_ = viewport.left;
     lastCursorLine_ = cursor.line;
     lastCursorCol_ = cursor.col;
+    lastVersion_ = doc.version();
+    lastLineCount_ = doc.lineCount();
     return out;
 }
 
@@ -844,10 +964,10 @@ void Renderer::renderBufferListContent(std::string& out,
 }
 
 void Renderer::renderBufferList(const std::vector<std::string>& names,
-                                int selected,
-                                int width,
-                                int height) {
-    hasLastEditorBody_ = false;
+                                 int selected,
+                                 int width,
+                                 int height) {
+    hasCache_ = false;
     std::string buffer = buildBufferListScreen(names, selected, width, height);
     writeAll(STDOUT_FILENO, buffer);
 }
@@ -922,14 +1042,14 @@ void Renderer::renderFileListContent(std::string& out,
 }
 
 void Renderer::renderFileList(const std::vector<std::string>& names,
-                              int selected,
-                              int scroll,
-                              const std::string& path,
-                              const Message& message,
-                              int width,
-                              int height) {
-    hasLastEditorBody_ = false;
+                               int selected,
+                               int scroll,
+                               const std::string& path,
+                               const Message& message,
+                               int width,
+                               int height) {
+    hasCache_ = false;
     std::string buffer = buildFileListScreen(names, selected, scroll,
-                                             path, message, width, height);
+                                              path, message, width, height);
     writeAll(STDOUT_FILENO, buffer);
 }

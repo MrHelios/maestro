@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include "core/utf8.h"
 
 // Helpers de texto/UTF-8 compartidos entre el Renderer (que arma el frame)
@@ -13,7 +14,7 @@ namespace chrome {
 inline std::string utf8Tail(const std::string& line, int maxTailCols) {
     int total = utf8::columnOf(line, static_cast<int>(line.size()));
     if (maxTailCols <= 0 || total <= maxTailCols) return line;
-    return utf8::range(line, total - maxTailCols, total);
+    return std::string(utf8::range(line, total - maxTailCols, total));
 }
 
 // Trunca manteniendo el INICIO (los primeros `maxCols` visibles), con ".."
@@ -28,7 +29,7 @@ inline std::string utf8TruncateFront(const std::string& line, int maxCols) {
 }
 
 // Columnas visuales de `s` (ignora los bytes de continuacion UTF-8).
-inline int colCount(const std::string& s) {
+inline int colCount(std::string_view s) {
     return utf8::columnOf(s, static_cast<int>(s.size()));
 }
 

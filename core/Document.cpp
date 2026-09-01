@@ -28,6 +28,7 @@ LoadResult Document::loadFromFile(const std::string& path) {
             lines_.push_back("");
             endsWithNewline_ = false;
             lineEnding_ = LineEnding::LF; // un archivo nuevo empieza en LF
+            bumpVersion();
             return LoadResult::NotFound;
         }
         if (errno == EACCES) {
@@ -67,6 +68,7 @@ LoadResult Document::loadFromFile(const std::string& path) {
         lines_.push_back("");
     }
 
+    bumpVersion();
     return LoadResult::Success;
 }
 
@@ -114,8 +116,10 @@ bool Document::endsWithNewline() const {
 }
 
 void Document::setEndsWithNewline(bool ends) {
+    if (endsWithNewline_ == ends) return;
     endsWithNewline_ = ends;
     normalizeEndsWithNewline();
+    bumpVersion();
 }
 
 void Document::normalizeEndsWithNewline() {
@@ -154,6 +158,7 @@ void Document::restore(const std::vector<std::string>& lines) {
         lines_.push_back("");
     }
     normalizeEndsWithNewline();
+    bumpVersion();
 }
 
 void Document::insertChar(int line, int col, char c) {
@@ -164,6 +169,7 @@ void Document::insertChar(int line, int col, char c) {
     target.insert(target.begin() + col, c);
     normalizeEndsWithNewline();
     notifyTouched(line, line);
+    bumpVersion();
 }
 
 namespace {
@@ -233,6 +239,7 @@ Position Document::insertText(int line, int col, const std::string& text) {
     target.insert(col, text);
     normalizeEndsWithNewline();
     notifyTouched(line, line);
+    bumpVersion();
     return {line, col + static_cast<int>(text.size())};
 }
 
@@ -247,6 +254,7 @@ void Document::splitLine(int line, int col) {
     lines_.insert(lines_.begin() + line + 1, rest);
     normalizeEndsWithNewline();
     notifyTouched(line, line + 1);
+    bumpVersion();
 }
 
 bool Document::mergeLine(int line) {
@@ -257,6 +265,7 @@ bool Document::mergeLine(int line) {
     lines_[line] += next;
     normalizeEndsWithNewline();
     notifyTouched(line, line);
+    bumpVersion();
     return true;
 }
 
@@ -274,6 +283,7 @@ int Document::deleteCharBefore(int line, int col) {
         int bytes = col - start;
         target.erase(start, static_cast<size_t>(bytes));
         notifyTouched(line, line);
+        bumpVersion();
         return bytes;
     }
 
@@ -285,6 +295,7 @@ int Document::deleteCharBefore(int line, int col) {
     lines_[line - 1] += current;
     normalizeEndsWithNewline();
     notifyTouched(line - 1, line - 1);
+    bumpVersion();
     return 0;
 }
 
@@ -301,6 +312,7 @@ int Document::deleteCharAt(int line, int col) {
         int bytes = end - col;
         target.erase(col, static_cast<size_t>(bytes));
         notifyTouched(line, line);
+        bumpVersion();
         return bytes;
     }
 
@@ -331,6 +343,7 @@ bool Document::deleteRange(int sl, int sc, int el, int ec) {
         lines_[sl].erase(sc, ec - sc);
         normalizeEndsWithNewline();
         notifyTouched(sl, sl);
+        bumpVersion();
         return true;
     }
 
@@ -340,6 +353,7 @@ bool Document::deleteRange(int sl, int sc, int el, int ec) {
     lines_.erase(lines_.begin() + sl + 1, lines_.begin() + el + 1);
     normalizeEndsWithNewline();
     notifyTouched(sl, el);
+    bumpVersion();
     return true;
 }
 
@@ -380,6 +394,7 @@ Position Document::insertBlock(int line, int col, const std::vector<std::string>
         target.insert(col, block[0]);
         normalizeEndsWithNewline();
         notifyTouched(line, line);
+        bumpVersion();
         return {line, col + static_cast<int>(block[0].size())};
     }
 
@@ -401,6 +416,7 @@ Position Document::insertBlock(int line, int col, const std::vector<std::string>
     lines_.insert(lines_.begin() + line, newLines.begin(), newLines.end());
     normalizeEndsWithNewline();
     notifyTouched(line, line + static_cast<int>(block.size()) - 1);
+    bumpVersion();
     return {line + static_cast<int>(block.size()) - 1,
             static_cast<int>(block.back().size())};
 }
@@ -412,6 +428,7 @@ int Document::indentLine(int line, bool indent, int indentLen) {
     if (indent) {
         s.insert(0, static_cast<size_t>(indentLen), ' ');
         notifyTouched(line, line);
+        bumpVersion();
         return indentLen;
     }
 
@@ -441,5 +458,6 @@ int Document::indentLine(int line, bool indent, int indentLen) {
     if (remove == 0) return 0;
     s.erase(0, static_cast<size_t>(remove));
     notifyTouched(line, line);
+    bumpVersion();
     return -remove;
 }

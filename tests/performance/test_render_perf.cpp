@@ -202,11 +202,25 @@ TEST(perf_bytes_por_evento_hacia_terminal) {
 
     // Frame base (pantalla ya dibujada) + cache del render diferencial.
     const std::string base = fx.frame();
-    fx.ed.renderer_.lastEditorBody_ = fx.ed.renderer_.buildEditorBody(
+    fx.ed.renderer_.rowCache_.clear();
+    fx.ed.renderer_.statusCache_.clear();
+    const std::string editorBody = fx.ed.renderer_.buildEditorBody(
         fx.ed.active().document, fx.ed.active().cursor,
         fx.ed.active().viewport, "perf.txt", false, fx.msg, State::Navegacion,
         std::nullopt);
-    fx.ed.renderer_.hasLastEditorBody_ = true;
+    const Layout layout = fx.ed.renderer_.calculateLayout(fx.ed.active().viewport.height, fx.ed.active().viewport.width);
+    const int contentH = layout.content.height;
+    std::vector<std::string_view> rows;
+    fx.ed.renderer_.splitRows(editorBody, &rows);
+    for (int i = 0; i < contentH && i < (int)rows.size(); ++i)
+        fx.ed.renderer_.rowCache_.push_back(std::string(rows[i]));
+    fx.ed.renderer_.statusCache_.clear();
+    for (size_t i = contentH; i < rows.size(); ++i) {
+        if (i > (size_t)contentH) fx.ed.renderer_.statusCache_ += "\r\n";
+        fx.ed.renderer_.statusCache_.append(rows[i].data(), rows[i].size());
+    }
+    fx.ed.renderer_.hasCache_ = true;
+    fx.ed.renderer_.cachedContentH_ = contentH;
     fx.ed.renderer_.lastViewportW_ = 80;
     fx.ed.renderer_.lastViewportH_ = 24;
 
