@@ -93,7 +93,7 @@ Editor::Editor(std::unique_ptr<SystemClipboard> clipboard, std::unique_ptr<FileW
     : clipboard_(std::move(clipboard)), watcher_(std::move(watcher)) {
     if (!clipboard_) clipboard_ = std::make_unique<FakeClipboard>();
     if (!watcher_) watcher_ = std::make_unique<NullFileWatcher>();
-    setStatusMessage(kHelpPrefix);
+    setStatusMessage(kHelpEmpty);
     registerCommands();
 }
 
