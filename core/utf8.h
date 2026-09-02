@@ -74,13 +74,27 @@ inline bool isCellStart(std::string_view line, int i) {
 // actual (bytes, ancho 1 por celda) es una aproximacion que no parte
 // secuencias UTF-8 validas y funciona para texto occidental, pero no
 // pretende ser un render de texto completo.
+inline int cellLen(std::string_view line, int pos, int n) {
+    unsigned char c = static_cast<unsigned char>(line[pos]);
+    if (c < 0x80) return 1;
+    if ((c & 0xC0) == 0x80) return 1;
+    int expect = 0;
+    if ((c & 0xE0) == 0xC0) expect = 1;
+    else if ((c & 0xF0) == 0xE0) expect = 2;
+    else if ((c & 0xF8) == 0xF0) expect = 3;
+    int len = 1;
+    while (len <= expect && pos + len < n && (static_cast<unsigned char>(line[pos + len]) & 0xC0) == 0x80) ++len;
+    return len;
+}
+
 inline int columnOf(std::string_view line, int byteCol) {
+    int n = static_cast<int>(line.size());
+    int limit = byteCol < n ? byteCol : n;
     int col = 0;
-    int limit = std::min<int>(byteCol, static_cast<int>(line.size()));
-    for (int i = 0; i < limit; ++i) {
-        if (isCellStart(line, i)) {
-            col++;
-        }
+    int i = 0;
+    while (i < limit) {
+        ++col;
+        i += cellLen(line, i, n);
     }
     return col;
 }

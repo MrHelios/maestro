@@ -197,6 +197,59 @@ TEST(column_mixed_orphan_interleaved_counts_correctly) {
     CHECK_EQ(utf8::columnOf(s, 6), 3);
 }
 
+TEST(column_byteCol_zero_and_size) {
+    const std::string empty = "";
+    CHECK_EQ(utf8::columnOf(empty, 0), 0);
+    CHECK_EQ(utf8::columnOf(empty, 1), 0);
+    CHECK_EQ(utf8::columnOf("abc", 0), 0);
+    CHECK_EQ(utf8::columnOf("abc", 3), 3);
+    const std::string s = U_E U_DASH U_EMOJI;
+    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 3);
+    const std::string inv = "A\x81\xff";
+    CHECK_EQ(utf8::columnOf(inv, 0), 0);
+    CHECK_EQ(utf8::columnOf(inv, static_cast<int>(inv.size())), 3);
+}
+
+TEST(column_lead_incompleto_al_final) {
+    const std::string s2 = "a\xC3";
+    CHECK_EQ(s2.size(), 2u);
+    CHECK_EQ(utf8::isCellStart(s2, 1), true);
+    CHECK_EQ(utf8::columnOf(s2, 0), 0);
+    CHECK_EQ(utf8::columnOf(s2, 1), 1);
+    CHECK_EQ(utf8::columnOf(s2, 2), 2);
+    const std::string s3 = "a\xE2\x80";
+    CHECK_EQ(s3.size(), 3u);
+    CHECK_EQ(utf8::columnOf(s3, 3), 2);
+    CHECK_EQ(utf8::columnOf(s3, 2), 2);
+    const std::string s4 = "a\xF0\x9F\x98";
+    CHECK_EQ(s4.size(), 4u);
+    CHECK_EQ(utf8::columnOf(s4, 4), 2);
+    CHECK_EQ(utf8::isCellStart(s4, 1), true);
+    CHECK_EQ(utf8::isCellStart(s4, 2), false);
+    CHECK_EQ(utf8::isCellStart(s4, 3), false);
+}
+
+TEST(column_mezcla_ascii_utf8_bordes) {
+    const std::string s = "a" U_E "b" U_DASH "c" U_EMOJI "d";
+    CHECK_EQ(s.size(), 13u);
+    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(utf8::columnOf(s, 1), 1);
+    CHECK_EQ(utf8::columnOf(s, 2), 2);
+    CHECK_EQ(utf8::columnOf(s, 3), 2);
+    CHECK_EQ(utf8::columnOf(s, 4), 3);
+    CHECK_EQ(utf8::columnOf(s, 5), 4);
+    CHECK_EQ(utf8::columnOf(s, 6), 4);
+    CHECK_EQ(utf8::columnOf(s, 7), 4);
+    CHECK_EQ(utf8::columnOf(s, 8), 5);
+    CHECK_EQ(utf8::columnOf(s, 9), 6);
+    CHECK_EQ(utf8::columnOf(s, 10), 6);
+    CHECK_EQ(utf8::columnOf(s, 11), 6);
+    CHECK_EQ(utf8::columnOf(s, 12), 6);
+    CHECK_EQ(utf8::columnOf(s, 13), 7);
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 7);
+}
+
 // ---------------------------------------------------------------------------
 // truncate: columnas visuales sin partir caracter
 // ---------------------------------------------------------------------------
