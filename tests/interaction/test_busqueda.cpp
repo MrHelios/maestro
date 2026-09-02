@@ -671,8 +671,8 @@ static void assertConsistentBusq(Editor& ed){
     }
     if(ed.active().selection.has_value() && ed.active().selection->anchor==ed.active().selection->position) CHECK(!ed.hasSelection());
     if(auto norm=ed.selection()) CHECK(norm->start.line<norm->end.line || (norm->start.line==norm->end.line && norm->start.col<=norm->end.col));
-    CHECK(ed.state_==State::Navegacion||ed.state_==State::Interaccion||ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAs||ed.state_==State::FileBrowser||ed.state_==State::Busqueda);
-    if(ed.hasSelection()) CHECK(ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAs||ed.state_==State::FileBrowser||ed.state_==State::Busqueda);
+    CHECK(ed.state_==State::Navegacion||ed.state_==State::Interaccion||ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAs||ed.state_==State::FileBrowser||ed.state_==State::Busqueda||ed.state_==State::IrAFila);
+    if(ed.hasSelection()) CHECK(ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAs||ed.state_==State::FileBrowser||ed.state_==State::Busqueda||ed.state_==State::IrAFila);
     if(ed.state_==State::Seleccion) CHECK(ed.active().selection.has_value());
     for(auto &l: ed.getClipboardBlock()) CHECK(validUtf8Busq(l));
 }

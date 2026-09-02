@@ -28,6 +28,7 @@ std::string stateLabel(State state) {
         case State::SaveAs: return "GUARDAR";
         case State::FileBrowser: return "ABRIR";
         case State::Busqueda: return "BUSQUEDA";
+        case State::IrAFila: return "IR A FILA";
     }
     return "";
 }
@@ -45,6 +46,7 @@ std::string stateAccent(const Theme& T, State state) {
         case State::SaveAs:        return T.accentGuardar;
         case State::FileBrowser:   return T.accentAbrir;
         case State::Busqueda:      return T.accentGuardar;
+        case State::IrAFila:       return T.accentNavegacion;
     }
     return T.statusBarAccent;
 }

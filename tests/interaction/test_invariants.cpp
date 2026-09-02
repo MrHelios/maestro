@@ -149,7 +149,8 @@ static void assertStateConsistent(Editor& ed) {
           ed.state_ == State::BufferSelector ||
           ed.state_ == State::SaveAs ||
           ed.state_ == State::FileBrowser ||
-          ed.state_ == State::Busqueda);
+          ed.state_ == State::Busqueda ||
+          ed.state_ == State::IrAFila);
 
     // Si hay un rango NO vacio, el editor debe estar en Seleccion... salvo
     // en Prefix, donde la seleccion se conserva mientras el comando espera
@@ -162,7 +163,8 @@ static void assertStateConsistent(Editor& ed) {
               ed.state_ == State::BufferSelector ||
               ed.state_ == State::SaveAs ||
               ed.state_ == State::FileBrowser ||
-              ed.state_ == State::Busqueda);
+              ed.state_ == State::Busqueda ||
+              ed.state_ == State::IrAFila);
     }
 
     // Estar en modo Seleccion implica que hay (al menos) una seleccion

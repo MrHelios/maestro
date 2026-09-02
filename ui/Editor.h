@@ -67,6 +67,17 @@ public:
     // estado) NO expiran: solo los de accion llevan timeout.
     static constexpr auto kActionMessageTimeout = std::chrono::seconds(5);
 
+    // Método público para testing: permite inyectar eventos directamente
+    // Solo debe usarse en tests, no en el flujo normal de la aplicación
+    void processEventForTesting(const Event& event) {
+        handleEvent(event);
+    }
+
+    // Getters para testing
+    State getStateForTesting() const { return state_; }
+    std::string getGoToLineQueryForTesting() const { return goToLineQuery_; }
+    Buffer& getActiveBufferForTesting() { return active(); }
+
 private:
     // ---- Mensajes al usuario (paso 8) ----
     // Un unico valor `statusMessage_` (ui::Message) lleva el texto, el tipo
@@ -214,6 +225,11 @@ private:
     void setSearchHighlight(const Position& pos, int len);
     void clearSearchHighlight();
     void centerViewportOnCursor();
+
+    // ---- Ir a fila (feature g) ----
+    std::string goToLineQuery_;
+    void startGoToLine();
+    void handleIrAFilaEvent(const Event& event);
 
     // ---- Seleccion total ('a') ----
     // Nota: selectAllActive_/selectAllPrevious_ viven en el Buffer (cada

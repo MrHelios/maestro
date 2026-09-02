@@ -32,6 +32,7 @@ constexpr const char* kHelpNavegacion =
 constexpr const char* kHelpEmpty = "";
 constexpr const char* kHelpPrefix =
     "command: Ctrl+k";
+constexpr const char* kHelpIrAFila = "ir a fila: ";
 }
 
 namespace {
@@ -300,6 +301,10 @@ void Editor::registerCommands() {
         state_ = State::Seleccion;
         setStatusMessage(kHelpEmpty);
     });
+    commands_.registerCommand("navegacion.ir_a_fila", [this] {
+        startGoToLine();
+    });
+
 
     // --- Seleccion ---
     commands_.registerCommand("seleccion.j", [this] {
@@ -956,6 +961,9 @@ void Editor::handleEvent(const Event& event) {
         case State::Seleccion:
             handleSeleccionEvent(event);
             break;
+        case State::IrAFila:
+            handleIrAFilaEvent(event);
+            break;
         default:
             break;
     }
@@ -982,6 +990,8 @@ void Editor::handleNavegacionEvent(const Event& event) {
                 commands_.execute("navegacion.palabra.adelante");
             } else if (event.text == "a") {
                 commands_.execute("seleccion.total");
+            } else if (event.text == "g") {
+                commands_.execute("navegacion.ir_a_fila");
             } else if (event.text == "f") {
                 commands_.execute("navegacion.buscar");
             } else if (event.text == "}") {
@@ -2015,4 +2025,68 @@ void Editor::toggleTheme() {
     renderer_.setTheme(t);
     state_ = priorState_;
     setActionMessage(isDarkTheme_ ? "Tema oscuro" : "Tema claro", MessageKind::Info);
+}
+
+void Editor::startGoToLine() {
+    goToLineQuery_.clear();
+    state_ = State::IrAFila;
+    setStatusMessage(std::string(kHelpIrAFila), MessageKind::Prompt);
+}
+
+void Editor::handleIrAFilaEvent(const Event& event) {
+    switch (event.type) {
+        case EventType::InsertChar:
+            // Solo aceptar dígitos, descartando cualquier otro carácter
+            if (event.text.size() == 1 && event.text[0] >= '0' && event.text[0] <= '9') {
+                goToLineQuery_ += event.text;
+                setStatusMessage(std::string(kHelpIrAFila) + goToLineQuery_, MessageKind::Prompt);
+            }
+            break;
+        case EventType::Backspace:
+            if (!goToLineQuery_.empty()) {
+                goToLineQuery_.pop_back();
+                setStatusMessage(std::string(kHelpIrAFila) + goToLineQuery_, MessageKind::Prompt);
+            }
+            break;
+        case EventType::InsertNewline: {
+            if (!goToLineQuery_.empty()) {
+                try {
+                    int lineNum = std::stoi(goToLineQuery_);
+                    int maxLines = active().document.lineCount();
+
+                    // Validar que la línea esté entre 1 y la longitud máxima del documento
+                    if (lineNum >= 1 && lineNum <= maxLines) {
+                        Buffer& b = active();
+                        b.cursor.line = lineNum - 1; // Las líneas internas son 0-indexed
+                        b.cursor.col = 0;
+                        b.cursor.clampToLine(b.document);
+                        centerViewportOnCursor();
+
+                        state_ = State::Navegacion;
+                        goToLineQuery_.clear();
+                        setStatusMessage("", MessageKind::Info);
+                        setActionMessage("Fila " + std::to_string(lineNum), MessageKind::Success);
+                    } else {
+                        // Unificamos el feedback en el propio prompt para evitar
+                        // la sobrescritura inmediata entre setActionMessage y setStatusMessage.
+                        setStatusMessage(std::string(kHelpIrAFila) + " [1-" + std::to_string(maxLines) + "]", MessageKind::Error);
+                        goToLineQuery_.clear();
+                    }
+                } catch (const std::out_of_range&) {
+                    // Por seguridad ante desbordamiento de std::stoi
+                    setStatusMessage(std::string(kHelpIrAFila) + " [valor invalido]", MessageKind::Error);
+                    goToLineQuery_.clear();
+                }
+            }
+            break;
+        }
+        case EventType::Escape:
+            state_ = State::Navegacion;
+            goToLineQuery_.clear();
+            setStatusMessage("", MessageKind::Info);
+            break;
+        default:
+            // Cualquier otra tecla es no-op (se descarta)
+            break;
+    }
 }

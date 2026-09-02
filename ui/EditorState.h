@@ -50,4 +50,5 @@ enum class State {
     SaveAs,
     FileBrowser,
     Busqueda,
+    IrAFila,
 };
