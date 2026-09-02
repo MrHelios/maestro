@@ -174,22 +174,72 @@ void Document::insertChar(int line, int col, char c) {
 
 namespace {
 
-// Recorridos de celdas byte-safe (ver utf8.h): compartidos por las
-// consultas cellTextBefore/cellTextAt y por las mutaciones de borrado,
-// de modo que capturar el texto y borrarlo NUNCA pueden desincronizarse.
+// 1. cellStartBefore: Optimizado y semánticamente idéntico al original.
+// Incluye la corrección crítica (conts > expect) para manejar bytes huérfanos
+// que aparecen después de una secuencia UTF-8 válida completada.
 int cellStartBefore(const std::string& s, int col) {
+    if (col <= 0) return 0;
     int start = col - 1;
-    while (start > 0 && !utf8::isCellStart(s, start)) {
-        start--;
+    unsigned char c = static_cast<unsigned char>(s[start]);
+    
+    // Si es ASCII o byte líder, ya es el inicio de la celda.
+    if (c < 0x80 || (c & 0xC0) != 0x80) {
+        return start;
     }
-    return start;
+    
+    // Es un byte de continuación: buscamos el byte líder hacia atrás una sola vez.
+    int j = start - 1;
+    while (j >= 0 && (static_cast<unsigned char>(s[j]) & 0xC0) == 0x80) {
+        j--;
+    }
+    
+    if (j < 0) return start; // Sin líder previo: es huérfano, él mismo es inicio.
+    
+    unsigned char lead = static_cast<unsigned char>(s[j]);
+    int expect = 0;
+    if ((lead & 0xE0) == 0xC0) expect = 1;
+    else if ((lead & 0xF0) == 0xE0) expect = 2;
+    else if ((lead & 0xF8) == 0xF0) expect = 3;
+    
+    int conts = start - j; // Bytes de continuación desde el líder hasta 'start'
+    
+    // CORRECCIÓN CLAVE: Si hay MÁS continuaciones de las esperadas, la secuencia
+    // previa ya se completó. Este byte es "huérfano" y empieza su propia celda.
+    if (conts > expect) {
+        return start;
+    }
+    
+    // De lo contrario, pertenece a la secuencia válida que comienza en 'j'.
+    return j;
 }
 
+// 2. cellEndAt: Optimizado asumiendo el invariante del editor (col es inicio de celda).
+// Es O(1) para el caso común. Si por alguna anomalía 'col' cae en un byte de 
+// continuación, el fallback lo trata como una celda de 1 byte (seguro y byte-safe).
 int cellEndAt(const std::string& s, int col) {
-    int end = col + 1;
-    while (end < static_cast<int>(s.size()) && !utf8::isCellStart(s, end)) {
-        end++;
+    if (col >= static_cast<int>(s.size())) return static_cast<int>(s.size());
+    
+    unsigned char c = static_cast<unsigned char>(s[col]);
+    
+    // Si es ASCII o byte de continuación, la celda termina en el siguiente byte.
+    // (Bajo el invariante, si es continuación, es porque es huérfano/corrupto).
+    if (c < 0x80 || (c & 0xC0) == 0x80) {
+        return col + 1;
     }
+    
+    // Es un byte líder válido. Contamos cuántas continuaciones debe consumir.
+    int expect = 0;
+    if ((c & 0xE0) == 0xC0) expect = 1;
+    else if ((c & 0xF0) == 0xE0) expect = 2;
+    else if ((c & 0xF8) == 0xF0) expect = 3;
+    
+    int end = col + 1;
+    while (end < static_cast<int>(s.size()) && expect > 0 &&
+           (static_cast<unsigned char>(s[end]) & 0xC0) == 0x80) {
+        ++end;
+        --expect;
+    }
+    
     return end;
 }
 
