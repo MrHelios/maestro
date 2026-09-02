@@ -243,6 +243,34 @@ int cellEndAt(const std::string& s, int col) {
     return end;
 }
 
+// NUEVO: Normaliza un offset para que apunte al inicio de la celda que lo contiene.
+// Si el offset ya es un límite de celda válido (o está en los extremos), se deja intacto.
+int alignStart(const std::string& s, int col) {
+    if (col <= 0 || col >= static_cast<int>(s.size())) return col;
+    // Si ya es el inicio de una celda (o un byte huérfano que actúa como inicio),
+    // no hay nada que alinear hacia atrás.
+    if (utf8::isCellStart(s, col)) return col;
+    
+    // Si llegamos aquí, 'col' es un byte de continuación válido.
+    // El inicio de esa secuencia está en o antes de col-1.
+    return cellStartBefore(s, col);
+}
+
+// NUEVO: Normaliza un offset para que apunte al final exclusivo de la celda que lo contiene.
+// Dado que los rangos en C++ son [start, end), si 'col' cae en medio de una celda,
+// debemos avanzar 'end' hasta el final de esa celda para no cortarla.
+int alignEnd(const std::string& s, int col) {
+    if (col <= 0 || col >= static_cast<int>(s.size())) return col;
+    // Si 'col' ya es el inicio de una celda, significa que la celda anterior
+    // ya está completa. No necesitamos avanzar 'col'.
+    if (utf8::isCellStart(s, col)) return col;
+    
+    // 'col' es un byte de continuación. Para encontrar el final de SU celda,
+    // primero debemos encontrar dónde empieza esa celda y luego calcular su longitud.
+    int start = cellStartBefore(s, col);
+    return cellEndAt(s, start);
+}
+
 } // namespace
 
 std::string Document::cellTextBefore(int line, int col) const {
@@ -356,6 +384,8 @@ int Document::deleteCharAt(int line, int col) {
     if (col < 0) col = 0;
 
     int len = lineLength(line);
+    if(col>len) col = len;
+
     if (col < len) {
         std::string& target = lines_[line];
         int end = cellEndAt(target, col);
@@ -379,57 +409,65 @@ bool Document::deleteRange(int sl, int sc, int el, int ec) {
     if (sc < 0 || sc > lineLength(sl)) return false;
     if (ec < 0 || ec > lineLength(el)) return false;
 
-    // Guarda de invariante: en una sola linea el rango debe venir
-    // ordenado (sc <= ec). No confiamos SOLO en que quien llama pase
-    // siempre el rango normalizado: si sc > ec, ec - sc es negativo y
-    // al pasarlo a erase() como size_t se seriala gigante y borraria
-    // todo desde sc hasta el final de la linea, corrompiendo el texto.
     if (sl == el && sc > ec) return false;
-
-    // Rango vacio: no hay nada que borrar.
     if (sl == el && sc == ec) return false;
 
+    // NUEVO: Alineación defensiva UTF-8 usando los nuevos helpers
+    int start = alignStart(lines_[sl], sc);
+    int end = alignEnd(lines_[el], ec);
+
     if (sl == el) {
-        lines_[sl].erase(sc, ec - sc);
+        if (start > end) start = end; // Protección por si la alineación invirtiera el rango
+        lines_[sl].erase(start, end - start);
         normalizeEndsWithNewline();
         notifyTouched(sl, sl);
         bumpVersion();
         return true;
     }
 
-    std::string tail = lines_[el].substr(ec);
-    lines_[sl].erase(sc);
+    std::string tail = lines_[el].substr(end);
+    lines_[sl].erase(start);
     lines_[sl] += tail;
     lines_.erase(lines_.begin() + sl + 1, lines_.begin() + el + 1);
+    
     normalizeEndsWithNewline();
     notifyTouched(sl, el);
     bumpVersion();
     return true;
 }
 
+/**
+ * Extrae el texto en el rango [sl, sc) a [el, ec).
+ * 
+ * GARANTÍA DE INTEGRIDAD UTF-8:
+ * Si sc o ec caen a mitad de una secuencia multibyte (ej. coordenadas crudas 
+ * del mouse), los límites se expanden silenciosamente al borde de celda válido 
+ * más cercano. Esto asegura que el texto devuelto sea siempre UTF-8 válido, 
+ * evitando copiar bytes huérfanos al portapapeles.
+ */
 std::vector<std::string> Document::extractRange(int sl, int sc, int el, int ec) const {
-    // Misma validacion de limites que deleteRange: rango invertido o fuera
-    // de las lineas/columnas se rechaza devolviendo vacio (sin reventar).
     if (sl < 0 || sl >= lineCount()) return {};
     if (el < sl || el >= lineCount()) return {};
     if (sc < 0 || sc > lineLength(sl)) return {};
     if (ec < 0 || ec > lineLength(el)) return {};
-    if (sl == el && (sc > ec || sc == ec)) return {};
+    if (sl == el && sc >= ec) return {};
+
+    // Normalización defensiva intencional (mismo contrato que deleteRange)
+    int start = alignStart(lines_[sl], sc);
+    int end = alignEnd(lines_[el], ec);
 
     std::vector<std::string> out;
     if (sl == el) {
-        // Una sola linea: substring [sc, ec).
-        out.push_back(lines_[sl].substr(sc, ec - sc));
-        return out;
+        if (start < end) {
+            out.push_back(lines_[sl].substr(start, end - start));
+        }
+    } else {
+        out.push_back(lines_[sl].substr(start));
+        for (int i = sl + 1; i < el; ++i) {
+            out.push_back(lines_[i]);
+        }
+        out.push_back(lines_[el].substr(0, end));
     }
-
-    // Multilinea: cola de la primera desde sc, lineas completas del medio,
-    // y cabeza de la ultima hasta ec (extremo exclusivo).
-    out.push_back(lines_[sl].substr(sc));
-    for (int l = sl + 1; l < el; ++l) {
-        out.push_back(lines_[l]);
-    }
-    out.push_back(lines_[el].substr(0, ec));
     return out;
 }
 
