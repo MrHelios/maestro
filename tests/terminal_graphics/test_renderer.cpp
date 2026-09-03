@@ -15,6 +15,37 @@
 
 namespace {
 
+// MEJORA 1: Unificar funciones duplicadas. Una sola versión robusta.
+std::string stripAnsi(const std::string& s) {
+    std::string out;
+    bool inEsc = false;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '\x1b') {
+            inEsc = true;
+            if (i + 1 < s.size() && s[i + 1] == '[') i++;
+        } else if (inEsc) {
+            unsigned char c = static_cast<unsigned char>(s[i]);
+            if (c >= 0x40 && c <= 0x7E) inEsc = false; // Fin de secuencia CSI
+        } else {
+            out += s[i];
+        }
+    }
+    return out;
+}
+
+// Columnas visuales simplificadas: 1 por code point UTF-8.
+// Para los tests del renderer, cada carácter UTF-8 cuenta como una columna.
+int colWidth(const std::string& s) {
+    int col = 0;
+    for (unsigned char c : s)
+        if ((c & 0xC0) != 0x80) ++col;
+    return col;
+}
+
+} // namespace
+
+namespace {
+
 // Monta un frame con el contenido dado y devuelve la secuencia ANSI.
 // `sel` opcional; si es std::nullopt, sin seleccion.
 std::string frame(const std::vector<std::string>& lines,
@@ -84,6 +115,7 @@ int cursorVisibleCol(const std::string& frame) {
     if (pos == std::string::npos) return -1;
     size_t end = frame.find('H', pos);
     if (end == std::string::npos) return -1;
+
     int terminalCol = std::stoi(frame.substr(pos + 4, end - pos - 4));
     return terminalCol - gutterWFor(1);
 }
@@ -279,39 +311,11 @@ bool validUtf8(const std::string& s) {
     return true;
 }
 
-// Quita las secuencias ANSI dejando solo el texto visible.
-std::string stripAnsiLocal(const std::string& s) {
-    std::string out;
-    bool inEsc = false;
-    size_t i = 0;
-    while (i < s.size()) {
-        if (s[i] == '\x1b') {
-            inEsc = true;
-            if (i + 1 < s.size() && s[i + 1] == '[') i++;
-        } else if (inEsc) {
-            unsigned char c = static_cast<unsigned char>(s[i]);
-            if (c >= 0x40 && c <= 0x7E) inEsc = false;
-        } else {
-            out += s[i];
-        }
-        i++;
-    }
-    return out;
-}
-
-// Columnas visuales (1 por byte de inicio de caracter).
-int colWidthLocal(const std::string& s) {
-    int col = 0;
-    for (unsigned char c : s)
-        if ((c & 0xC0) != 0x80) col++;
-    return col;
-}
-
 // Fila del documento (la primera, antes del primer \r\n) ya sin ANSI y con
 // el gutter de numeros de linea restado. `lineCount` es el numero de lineas
 // del documento con que se (re)calcula el ancho del gutter.
 std::string rowText(const std::string& frame, int lineCount) {
-    std::string plain = stripAnsiLocal(frame);
+    std::string plain = stripAnsi(frame);
     size_t nl = plain.find("\r\n");
     if (nl == std::string::npos) nl = plain.size();
     std::string row = plain.substr(0, nl);
@@ -394,11 +398,11 @@ TEST(truncate_never_splits_multibyte_any_width) {
         "abc\xf0\x9f\x98\x80" "def",
     };
     for (const std::string& line : lines) {
-        const int total = colWidthLocal(line);
+        const int total = colWidth(line);
         for (int w = 1; w <= total + 3; ++w) {
             std::string row = textRow(line, w);
             CHECK(validUtf8(row));
-            CHECK(colWidthLocal(row) <= w);
+            CHECK(colWidth(row) <= w);
         }
     }
 }
@@ -628,17 +632,17 @@ TEST(statusbar_two_rows_present) {
 
 TEST(statusbar_left_format_name_path_estado) {
     // <nombre> - <ruta> - <ESTADO>, en ese orden. Se compara sobre el texto
-    // plano (stripAnsiLocal): los fragmentos llevan colores distintos
+    // plano (stripAnsi): los fragmentos llevan colores distintos
     // (nombre blanco, estado dorado) que rompen la contiguedad cruda.
     std::string out = barFrame("/home/alice/proyecto/odo.txt", false, "",
                                State::Navegacion, 200);
-    CHECK(contains(stripAnsiLocal(out), "odo.txt - /home/alice/proyecto - NAVEGACION"));
+    CHECK(contains(stripAnsi(out), "odo.txt - /home/alice/proyecto - NAVEGACION"));
 }
 
 TEST(statusbar_modified_indicator) {
     // Un cambio sin guardar agrega [modificado] junto al nombre.
     std::string out = barFrame("/home/a/x.cc", true, "", State::Navegacion, 200);
-    CHECK(contains(stripAnsiLocal(out), "x.cc [modificado] - /home/a - NAVEGACION"));
+    CHECK(contains(stripAnsi(out), "x.cc [modificado] - /home/a - NAVEGACION"));
 }
 
 TEST(statusbar_modified_indicator_survives_long_name) {
@@ -661,35 +665,6 @@ TEST(statusbar_modified_indicator_survives_long_name) {
 }
 
 namespace {
-
-// Quita las secuencias ANSI (CSI y cursor) dejando solo el texto visible.
-std::string stripAnsi(const std::string& s) {
-    std::string out;
-    bool inEsc = false;
-    size_t i = 0;
-    while (i < s.size()) {
-        if (s[i] == '\x1b') {
-            inEsc = true;
-            if (i + 1 < s.size() && s[i + 1] == '[') i++;
-        } else if (inEsc) {
-            unsigned char c = static_cast<unsigned char>(s[i]);
-            if (c >= 0x40 && c <= 0x7E) inEsc = false; // fin de la secuencia CSI
-        } else {
-            out += s[i];
-        }
-        i++;
-    }
-    return out;
-}
-
-// Columnas visuales de una cadena (1 byte por columna, we ran wide/tab
-// como 1; suficiente para validar limites de ancho sobre ASCII plano).
-int colWidth(const std::string& s) {
-    int col = 0;
-    for (unsigned char c : s)
-        if ((c & 0xC0) != 0x80) col++;
-    return col;
-}
 
 // Anchura VISIBLE de la fila de la barra de estado (la 2da fila, tras
 // la unica fila de documento del frame armado con barFrame).
@@ -733,10 +708,10 @@ TEST(statusbar_label_fills_whole_width_edge_normal) {
 TEST(statusbar_state_labels) {
     // SELECCION y COMANDO se mapean 1 a 1 con los estados Seleccion y Prefix.
     std::string sel = barFrame("/a.txt", false, "", State::Seleccion, 200);
-    CHECK(contains(stripAnsiLocal(sel), "a.txt - / - SELECCION"));
+    CHECK(contains(stripAnsi(sel), "a.txt - / - SELECCION"));
 
     std::string pre = barFrame("/a.txt", false, "", State::Prefix, 200);
-    CHECK(contains(stripAnsiLocal(pre), "a.txt - / - COMANDO"));
+    CHECK(contains(stripAnsi(pre), "a.txt - / - COMANDO"));
 }
 
 TEST(statusbar_right_block_always_visible) {
@@ -748,7 +723,7 @@ TEST(statusbar_right_block_always_visible) {
         "/data/muy/largo/dir/de/archivos/nombre.txt", false, "",
         State::Navegacion, 20);
     CHECK(contains(out, "(1,1)"));
-    CHECK(contains(stripAnsiLocal(out), "0%"));
+    CHECK(contains(stripAnsi(out), "0%"));
 }
 
 TEST(statusbar_cursor_percentage_position) {
@@ -770,7 +745,7 @@ TEST(statusbar_cursor_percentage_position) {
         int expected = (cursorLine * 100) / (lines - 1);
         std::string out = r.buildScreen(doc, c, v, "/a.txt", false, "",
                                         State::Navegacion, std::nullopt);
-        CHECK(contains(stripAnsiLocal(out), std::to_string(expected) + "%"));
+        CHECK(contains(stripAnsi(out), std::to_string(expected) + "%"));
     }
 }
 
@@ -795,7 +770,7 @@ TEST(statusbar_path_uses_rest_after_name_reserved) {
     std::string out = barFrame(
         "/some/verylongdirectorychainloading/ending.txt",
         false, "", State::Navegacion, 41);
-    CHECK(contains(stripAnsiLocal(out), "ending.txt - ... - NAVEGACION"));
+    CHECK(contains(stripAnsi(out), "ending.txt - ... - NAVEGACION"));
     // La ruta casi no deja componente visible: su nombre de archivo no
     // debe colarse en el recorte.
     CHECK(!contains(out, "verylongdirectory"));
@@ -868,7 +843,7 @@ TEST(consecutive_truncate_each_position) {
             std::string row = textRow(line, w);
             CHECK_EQ(row, expect);
             CHECK(validUtf8(row));
-            CHECK(colWidthLocal(row) <= w);
+            CHECK(colWidth(row) <= w);
         }
     }
 }
@@ -936,7 +911,7 @@ TEST(mixed_extreme_truncate_each_width) {
         std::string row = textRow(kMix, t.w);
         CHECK_EQ(row, t.expect);
         CHECK(validUtf8(row));
-        CHECK(colWidthLocal(row) <= t.w);
+        CHECK(colWidth(row) <= t.w);
     }
 }
 
@@ -1006,7 +981,7 @@ TEST(edge_single_four_byte) {
 
 TEST(edge_all_utf8_only) {
     const std::string line = "\xe2\x80\x94\xc3\xa9\xf0\x9f\x98\x80"; // — é 😀, 3 cols
-    CHECK_EQ(colWidthLocal(line), 3);
+    CHECK_EQ(colWidth(line), 3);
     // Cursor al final (byte 9) -> columna visual 3 -> 1;4H.
     CHECK_EQ(cursorVisibleCol(curFrame(line, 9)), 4);
     // Truncado en el limite justo tras el 2do caracter ("—é", 2 cols).
@@ -1294,7 +1269,7 @@ namespace {
 
 // Fila `index` (0-based) del frame ya sin ANSI (con su gutter y contenido).
 std::string plainRow(const std::string& frame, int index) {
-    std::string plain = stripAnsiLocal(frame);
+    std::string plain = stripAnsi(frame);
     size_t start = 0;
     for (int i = 0; i < index; ++i) {
         size_t pos = plain.find("\r\n", start);

@@ -47,13 +47,16 @@ TEST(layout_very_small_no_invalid_geometry) {
     for (int rows : {1, 2, 3}) {
         for (int cols : {1, 5, 80}) {
             const Layout l = computeLayout(rows, cols);
+
             CHECK(l.content.height >= 1);
             CHECK(l.content.row == 0);
             CHECK(l.content.col == 0);
             CHECK(l.content.width == cols);
+
             CHECK(l.statusBar.row == l.content.height);
             CHECK(l.statusBar.col == 0);
             CHECK(l.statusBar.width == cols);
+
             CHECK(l.statusBar.row + l.statusBar.height <= rows);
             CHECK(l.statusBar.height >= 0);
             CHECK(l.statusBar.height <= kStatusBarRows);
@@ -61,11 +64,24 @@ TEST(layout_very_small_no_invalid_geometry) {
     }
 }
 
+TEST(layout_zero_rows_keeps_virtual_content_row) {
+    for (int cols : {1, 5, 80}) {
+        const Layout l = computeLayout(0, cols);
+
+        CHECK(l.content.height == 1);
+        CHECK(l.content.row == 0);
+        CHECK(l.content.col == 0);
+        CHECK(l.content.width == cols);
+
+        CHECK(l.statusBar.height == 0);
+    }
+}
+
 // Invariante global: para terminales normales (rows > kStatusBarRows) el
 // contenido + la barra llenan EXACTAMENTE la terminal, sin solaparse ni
 // exceder las cotas. El contenido nunca invade la barra.
 TEST(layout_content_never_invades_statusbar) {
-    for (int rows = 3; rows <= 40; ++rows) {
+    for (int rows = kStatusBarRows+1; rows <= 40; ++rows) {
         for (int cols : {10, 80, 120}) {
             const Layout l = computeLayout(rows, cols);
             CHECK(l.content.height == rows - kStatusBarRows);

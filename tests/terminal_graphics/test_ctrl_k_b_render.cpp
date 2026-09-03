@@ -72,7 +72,7 @@ TEST(ctrl_k_b_diff_equals_full_after_switch){
         std::string out; bool esc=false;
         for(size_t i=0;i<s.size();++i){
             if(s[i]=='\x1b'){ esc=true; if(i+1<s.size() && s[i+1]=='[') i++; }
-            else if(esc){ if(s[i]>='A' && s[i]<='Z' || s[i]>='a' && s[i]<='z') esc=false; }
+            else if(esc){ if((s[i]>='A' && s[i]<='Z') || (s[i]>='a' && s[i]<='z')) esc=false; }
             else if(s[i]!='\r') out+=s[i];
         }
         return out;

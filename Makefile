@@ -22,14 +22,28 @@ SRC := $(wildcard core/*.cpp ui/*.cpp terminal/*.cpp clipboard/*.cpp filesystem/
 # helpers/. test_main.cpp es el runner en la raiz de tests/.
 TEST_DIR := tests
 TEST_INC := -I$(TEST_DIR) -I$(TEST_DIR)/helpers
-TEST_SRC := $(TEST_DIR)/test_main.cpp \
+TEST_SRC_ALL := $(TEST_DIR)/test_main.cpp \
             $(wildcard $(TEST_DIR)/unit/*.cpp) \
             $(wildcard $(TEST_DIR)/interaction/*.cpp) \
             $(wildcard $(TEST_DIR)/performance/*.cpp) \
+            $(wildcard $(TEST_DIR)/terminal_graphics/*.cpp) \
             $(wildcard $(TEST_DIR)/e2e/*.cpp) \
             $(wildcard $(TEST_DIR)/integration/*.cpp) \
             $(wildcard $(TEST_DIR)/integration/x11_clipboard/*.cpp)
+TEST_SRC := $(TEST_DIR)/test_main.cpp \
+            $(wildcard $(TEST_DIR)/unit/*.cpp) \
+            $(wildcard $(TEST_DIR)/interaction/*.cpp) \
+            $(wildcard $(TEST_DIR)/e2e/*.cpp) \
+            $(wildcard $(TEST_DIR)/integration/*.cpp) \
+            $(wildcard $(TEST_DIR)/integration/x11_clipboard/*.cpp)
+TEST_SRC_PERF := $(TEST_DIR)/test_main.cpp \
+            $(wildcard $(TEST_DIR)/performance/*.cpp)
+TEST_SRC_TERM := $(TEST_DIR)/test_main.cpp \
+            $(wildcard $(TEST_DIR)/terminal_graphics/*.cpp)
 TEST_BIN := build/edit_tests
+TEST_BIN_ALL := build/edit_tests_all
+TEST_BIN_PERF := build/edit_tests_performance
+TEST_BIN_TERM := build/edit_tests_terminal
 
 # --- Build normal (build/) y sanitizado (build-san/) ---
 # Compilar con -fsanitize requiere que TODOS los objetos (y el link) usen
@@ -52,13 +66,22 @@ TEST_BIN := build/edit_tests
 # test-sanitize, ./maestro clean.
 OBJ := $(addprefix build/,$(notdir $(SRC:.cpp=.o)))
 TEST_OBJ := $(addprefix build/,$(notdir $(TEST_SRC:.cpp=.o)))
+TEST_OBJ_ALL := $(addprefix build/,$(notdir $(TEST_SRC_ALL:.cpp=.o)))
+TEST_OBJ_PERF := $(addprefix build/,$(notdir $(TEST_SRC_PERF:.cpp=.o)))
+TEST_OBJ_TERM := $(addprefix build/,$(notdir $(TEST_SRC_TERM:.cpp=.o)))
 # Fuentes del programa enlazadas en los tests (sin el main).
 OBJ_NO_MAIN := $(filter-out build/main.o,$(OBJ))
 
 SAN_BIN := build-san/maestro
 SAN_TEST_BIN := build-san/edit_tests
+SAN_TEST_BIN_ALL := build-san/edit_tests_all
+SAN_TEST_BIN_PERF := build-san/edit_tests_performance
+SAN_TEST_BIN_TERM := build-san/edit_tests_terminal
 SAN_OBJ := $(addprefix build-san/,$(notdir $(SRC:.cpp=.o)))
 SAN_TEST_OBJ := $(addprefix build-san/,$(notdir $(TEST_SRC:.cpp=.o)))
+SAN_TEST_OBJ_ALL := $(addprefix build-san/,$(notdir $(TEST_SRC_ALL:.cpp=.o)))
+SAN_TEST_OBJ_PERF := $(addprefix build-san/,$(notdir $(TEST_SRC_PERF:.cpp=.o)))
+SAN_TEST_OBJ_TERM := $(addprefix build-san/,$(notdir $(TEST_SRC_TERM:.cpp=.o)))
 SAN_OBJ_NO_MAIN := $(filter-out build-san/main.o,$(SAN_OBJ))
 
 # Flags extra para el build sanitizado (compilacion y link).
@@ -100,6 +123,9 @@ build/%.o: tests/e2e/%.cpp | build
 build/%.o: tests/performance/%.cpp | build
 	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
 
+build/%.o: tests/terminal_graphics/%.cpp | build
+	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
+
 build/%.o: tests/integration/%.cpp | build
 	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
 
@@ -136,6 +162,9 @@ build-san/%.o: tests/e2e/%.cpp | build-san
 build-san/%.o: tests/performance/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
 
+build-san/%.o: tests/terminal_graphics/%.cpp | build-san
+	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
+
 build-san/%.o: tests/integration/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
 
@@ -154,22 +183,58 @@ $(BIN): $(OBJ) | build
 $(TEST_BIN): $(TEST_OBJ) $(OBJ_NO_MAIN) | build
 	$(CXX) $(TEST_OBJ) $(OBJ_NO_MAIN) -o $(TEST_BIN) -lX11 -pthread
 
+$(TEST_BIN_ALL): $(TEST_OBJ_ALL) $(OBJ_NO_MAIN) | build
+	$(CXX) $(TEST_OBJ_ALL) $(OBJ_NO_MAIN) -o $(TEST_BIN_ALL) -lX11 -pthread
+
+$(TEST_BIN_PERF): $(TEST_OBJ_PERF) $(OBJ_NO_MAIN) | build
+	$(CXX) $(TEST_OBJ_PERF) $(OBJ_NO_MAIN) -o $(TEST_BIN_PERF) -lX11 -pthread
+
+$(TEST_BIN_TERM): $(TEST_OBJ_TERM) $(OBJ_NO_MAIN) | build
+	$(CXX) $(TEST_OBJ_TERM) $(OBJ_NO_MAIN) -o $(TEST_BIN_TERM) -lX11 -pthread
+
 edit-san: $(SAN_OBJ) | build-san
 	$(CXX) $(SANFLAGS) $(SAN_OBJ) -o $(SAN_BIN) -lX11 -pthread
 
 test-san: $(SAN_TEST_OBJ) $(SAN_OBJ_NO_MAIN) | build-san
 	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN) -lX11 -pthread
 
+test-san-all: $(SAN_TEST_OBJ_ALL) $(SAN_OBJ_NO_MAIN) | build-san
+	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ_ALL) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN_ALL) -lX11 -pthread
+
+test-san-perf: $(SAN_TEST_OBJ_PERF) $(SAN_OBJ_NO_MAIN) | build-san
+	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ_PERF) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN_PERF) -lX11 -pthread
+
+test-san-term: $(SAN_TEST_OBJ_TERM) $(SAN_OBJ_NO_MAIN) | build-san
+	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ_TERM) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN_TERM) -lX11 -pthread
+
 sanitize: edit-san test-san
 
 test: $(TEST_BIN)
 	./$(TEST_BIN)
+
+test-all: $(TEST_BIN_ALL)
+	./$(TEST_BIN_ALL)
+
+test-performance: $(TEST_BIN_PERF)
+	./$(TEST_BIN_PERF)
+
+test-terminal-graphics: $(TEST_BIN_TERM)
+	./$(TEST_BIN_TERM)
 
 # AVISO: compilar la suite sanitizada es LENTO (cada .o se compila dos
 # veces, la segunda con ASan/UBSan). No correrlo por defecto; solo cuando
 # lo pida el usuario o lo exija el CI.
 test-sanitize: test-san
 	./$(SAN_TEST_BIN)
+
+test-sanitize-all: test-san-all
+	./$(SAN_TEST_BIN_ALL)
+
+test-sanitize-performance: test-san-perf
+	./$(SAN_TEST_BIN_PERF)
+
+test-sanitize-terminal-graphics: test-san-term
+	./$(SAN_TEST_BIN_TERM)
 
 INSTALL_DIR := $(HOME)/.local/bin
 INSTALL_BIN := $(INSTALL_DIR)/maestro
@@ -188,6 +253,6 @@ uninstall:
 clean:
 	rm -rf build build-san
 
--include $(OBJ:.o=.d) $(TEST_OBJ:.o=.d) $(SAN_OBJ:.o=.d) $(SAN_TEST_OBJ:.o=.d)
+-include $(OBJ:.o=.d) $(TEST_OBJ:.o=.d) $(TEST_OBJ_ALL:.o=.d) $(TEST_OBJ_PERF:.o=.d) $(TEST_OBJ_TERM:.o=.d) $(SAN_OBJ:.o=.d) $(SAN_TEST_OBJ:.o=.d) $(SAN_TEST_OBJ_ALL:.o=.d) $(SAN_TEST_OBJ_PERF:.o=.d) $(SAN_TEST_OBJ_TERM:.o=.d)
 
-.PHONY: all test sanitize test-sanitize clean edit-san test-san install uninstall
+.PHONY: all test test-all test-performance test-terminal-graphics sanitize test-sanitize test-sanitize-all test-sanitize-performance test-sanitize-terminal-graphics clean edit-san test-san test-san-all test-san-perf test-san-term install uninstall

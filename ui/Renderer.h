@@ -16,6 +16,8 @@
 
 class Renderer {
 public:
+    static void setTestMode(bool v) { s_testMode = v; }
+    static bool isTestMode() { return s_testMode; }
     void setTheme(const Theme& t) {
         theme_ = t;
         hasCache_ = false;
@@ -220,4 +222,6 @@ private:
     void setCursorStyle(std::string& out, State state) const;
 
     static void splitRows(const std::string& body, std::vector<std::string_view>* rows);
+
+    static inline bool s_testMode = false;
 };

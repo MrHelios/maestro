@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 
 // Regiones rectangulares del frame completo que dibuja el Renderer.
 //
@@ -28,27 +29,20 @@ struct Layout {
 // los comandos, asi que se conserva; NO se colapsa a una sola fila).
 inline constexpr int kStatusBarRows = 2;
 
-// Geometria UNICA del frame: dado el tamano de la terminal (`rows` x `cols`)
-// devuelve el area de contenido y la de la barra comun. Es la unica fuente
-// de la altura del contenido: ninguna pantalla recalcula donde termina el
-// contenido, ni el Renderer ni BufferManager. Por eso fitViewport() y
-// calculateLayout() delegan aqui.
-//
-//   80 x 24  -> content 80 x 22 ; statusBar filas 23-24
-//   120 x 40 -> content 120 x 38 ; statusBar filas 39-40
-//
-// En terminales muy chicas (rows <= kStatusBarRows) el contenido nunca baja
-// de 1 fila y la barra se recorta para no escribir fuera del rango visible:
-// rows=1 -> content 1 + status 0; rows=2 -> content 1 + status 1;
-// rows=3 -> content 1 + status 2. Asi siempre content.row+height <=
-// statusBar.row y statusBar.row+height <= rows.
 inline Layout computeLayout(int rows, int cols) {
     Layout layout;
-    const int contentRows = rows > kStatusBarRows ? rows - kStatusBarRows : 1;
-    int statusRows = rows - contentRows;
-    if (statusRows < 0) statusRows = 0;
-    if (statusRows > kStatusBarRows) statusRows = kStatusBarRows;
+    
+    // 1. El contenido siempre tiene al menos 1 fila.
+    // Si la terminal es más grande que la barra, le restamos el espacio de la barra.
+    const int contentRows = (rows > kStatusBarRows) ? (rows - kStatusBarRows) : 1;
+    
+    // 2. La barra de estado ocupa el espacio restante.
+    // std::max asegura que no sea negativo.
+    // std::min asegura que nunca exceda kStatusBarRows.
+    const int statusRows = std::max(0, std::min(kStatusBarRows, rows - contentRows));
+    
     layout.content = Rect{0, 0, cols, contentRows};
     layout.statusBar = Rect{contentRows, 0, cols, statusRows};
+    
     return layout;
 }
