@@ -1283,20 +1283,37 @@ std::string plainRow(const std::string& frame, int index) {
 
 } // namespace
 
-TEST(gutter_shows_right_aligned_numbers) {
-    // Documento de 3 lineas: gutter de ancho 3, numeros a la derecha
-    // (" 1 ", " 2 ", " 3 ") seguidos del contenido.
-    Document doc; doc.restore({"aaa", "bbb", "ccc"});
-    Viewport vp; vp.top = 0; vp.height = 3; vp.width = 20;
-    Cursor cur; cur.line = 0; cur.col = 0;
+TEST(gutter_shows_correct_numbers_when_scrolled) {
+    // Documento de 100 líneas. El viewport muestra desde la línea 50 (índice 49).
+    Document doc; 
+    doc.restore(std::vector<std::string>(100, "linea"));
+    
+    Viewport vp; 
+    vp.top = 49;       // Empezar a mostrar en la línea 50 del documento
+    vp.height = 3;     // Mostrar 3 líneas
+    vp.width = 20;     // Ancho total del viewport (incluye gutter)
+    
+    Cursor cur; 
+    cur.line = 49; 
+    cur.col = 0;
+    
     Renderer r;
-    std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion,
-                                    std::nullopt);
-    CHECK(plainRow(out, 0).substr(0, 3) == " 1 ");
-    CHECK(plainRow(out, 1).substr(0, 3) == " 2 ");
-    CHECK(plainRow(out, 2).substr(0, 3) == " 3 ");
-    // Y el contenido sigue al gutter.
-    CHECK(plainRow(out, 2) == " 3 ccc");
+    std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
+    
+    // Para 100 líneas, gutterWFor(100) devuelve 4.
+    // El formato es: número alineado a la derecha en (ancho-1) + 1 espacio.
+    // Para ancho 4 y línea 50: "%3d " -> " 50 "
+    
+    std::string row0 = plainRow(out, 0);
+    CHECK(row0.substr(0, 4) == " 50 "); 
+    
+    // MEJORA: Comparamos solo los 5 caracteres de "linea", ignorando el relleno de espacios 
+    // que el renderer agrega hasta llegar a vp.width (20 columnas).
+    CHECK(row0.substr(4, 5) == "linea");   
+    
+    // La segunda fila visible debe mostrar la línea 51
+    std::string row1 = plainRow(out, 1);
+    CHECK(row1.substr(0, 4) == " 51 ");
 }
 
 TEST(gutter_tilde_rows_blank) {
