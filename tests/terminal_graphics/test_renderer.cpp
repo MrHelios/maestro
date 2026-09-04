@@ -2,6 +2,7 @@
 #include <string>
 
 #include "test_framework.h"
+#include "helpers/test_render_utils.h"
 
 // Probamos buildScreen(), que es la parte pura del renderer: construye
 // el frame ANSI completo sin tocar la terminal. Para montar un frame
@@ -15,36 +16,17 @@
 
 namespace {
 
-// MEJORA 1: Unificar funciones duplicadas. Una sola versión robusta.
-std::string stripAnsi(const std::string& s) {
-    std::string out;
-    bool inEsc = false;
-    for (size_t i = 0; i < s.size(); ++i) {
-        if (s[i] == '\x1b') {
-            inEsc = true;
-            if (i + 1 < s.size() && s[i + 1] == '[') i++;
-        } else if (inEsc) {
-            unsigned char c = static_cast<unsigned char>(s[i]);
-            if (c >= 0x40 && c <= 0x7E) inEsc = false; // Fin de secuencia CSI
-        } else {
-            out += s[i];
-        }
-    }
-    return out;
-}
-
-// Columnas visuales simplificadas: 1 por code point UTF-8.
-// Para los tests del renderer, cada carácter UTF-8 cuenta como una columna.
-int colWidth(const std::string& s) {
-    int col = 0;
-    for (unsigned char c : s)
-        if ((c & 0xC0) != 0x80) ++col;
-    return col;
-}
+using testutil::stripAnsi;
+using testutil::colWidth;
+using testutil::contains;
+using testutil::gutterWidth;
+using testutil::validUtf8;
 
 } // namespace
 
 namespace {
+
+using testutil::gutterWidth;
 
 // Monta un frame con el contenido dado y devuelve la secuencia ANSI.
 // `sel` opcional; si es std::nullopt, sin seleccion.
@@ -67,9 +49,6 @@ std::string frame(const std::vector<std::string>& lines,
                          State::Navegacion, sel);
 }
 
-bool contains(const std::string& hay, const std::string& needle) {
-    return hay.find(needle) != std::string::npos;
-}
 
 Selection selAt(Position a, Position p) {
     Selection s;
@@ -98,13 +77,6 @@ std::string curFrame(const std::string& line, int byteCol) {
                          State::Navegacion, std::nullopt);
 }
 
-// Ancho del gutter de numeros de linea (mismo calculo que el Renderer).
-int gutterWFor(int totalLines) {
-    int digits = 1;
-    for (int n = totalLines; n >= 10; n /= 10) ++digits;
-    return std::max(3, digits + 1);
-}
-
 // Extrae la columna VISUAL del texto a la que el renderer mueve el cursor
 // al final del frame. La secuencia es "\x1b[<fila>;<col>H" (fila 1 en un
 // frame de una sola linea); de esa columna de terminal se resta el gutter
@@ -117,7 +89,7 @@ int cursorVisibleCol(const std::string& frame) {
     if (end == std::string::npos) return -1;
 
     int terminalCol = std::stoi(frame.substr(pos + 4, end - pos - 4));
-    return terminalCol - gutterWFor(1);
+    return terminalCol - gutterWidth(1);
 }
 
 } // namespace
@@ -290,26 +262,6 @@ TEST(cursor_fourbyte_end) {
 // renderer recorta por COLUMNAS VISUALES. Condicion fundamental: nunca debe
 // cortar un caracter UTF-8 por la mitad (siempre produce UTF-8 valido).
 // ---------------------------------------------------------------------------
-namespace {
-
-bool validUtf8(const std::string& s) {
-    size_t i = 0;
-    while (i < s.size()) {
-        unsigned char c = static_cast<unsigned char>(s[i]);
-        int need;
-        if ((c & 0x80) == 0) need = 0;
-        else if ((c & 0xE0) == 0xC0) need = 1;
-        else if ((c & 0xF0) == 0xE0) need = 2;
-        else if ((c & 0xF8) == 0xF0) need = 3;
-        else return false;
-        if (i + static_cast<size_t>(need) >= s.size()) return false;
-        for (int k = 1; k <= need; ++k)
-            if ((static_cast<unsigned char>(s[i + static_cast<size_t>(k)]) & 0xC0) != 0x80)
-                return false;
-        i += static_cast<size_t>(need) + 1;
-    }
-    return true;
-}
 
 // Fila del documento (la primera, antes del primer \r\n) ya sin ANSI y con
 // el gutter de numeros de linea restado. `lineCount` es el numero de lineas
@@ -319,7 +271,7 @@ std::string rowText(const std::string& frame, int lineCount) {
     size_t nl = plain.find("\r\n");
     if (nl == std::string::npos) nl = plain.size();
     std::string row = plain.substr(0, nl);
-    int gw = gutterWFor(lineCount);
+    int gw = testutil::gutterWidth(lineCount);
     row.erase(0, std::min(gw, static_cast<int>(row.size())));
     return row;
 }
@@ -330,7 +282,7 @@ std::string rowText(const std::string& frame, int lineCount) {
 // solo el TEXTO visible, sin ANSI y sin el gutter.
 std::string textRow(const std::string& line, int cols) {
     Document doc; doc.restore({line, ""});
-    int gw = gutterWFor(2);
+    int gw = testutil::gutterWidth(2);
     Viewport vp; vp.top = 0; vp.height = 1; vp.width = gw + cols;
     Cursor cur; cur.line = 1; cur.col = 0;
     Renderer r;
@@ -338,7 +290,6 @@ std::string textRow(const std::string& line, int cols) {
     return rowText(f, 2);
 }
 
-} // namespace
 
 TEST(truncate_line_to_ascii_width) {
     // "abcdef" recortado a 3 columnas.
@@ -1300,7 +1251,7 @@ TEST(gutter_shows_correct_numbers_when_scrolled) {
     Renderer r;
     std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
     
-    // Para 100 líneas, gutterWFor(100) devuelve 4.
+    // Para 100 líneas, gutterWidth(100) devuelve 4.
     // El formato es: número alineado a la derecha en (ancho-1) + 1 espacio.
     // Para ancho 4 y línea 50: "%3d " -> " 50 "
     

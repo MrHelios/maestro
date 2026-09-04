@@ -5,6 +5,7 @@
 #include "core/utf8.h"
 #include "ui/Renderer.h"
 #include "test_framework.h"
+#include "helpers/test_render_utils.h"
 #include <string>
 #include <vector>
 #include <optional>
@@ -20,13 +21,10 @@ namespace Ansi {
 
 namespace {
 
-int gutterWFor(int totalLines) {
-    int digits = std::to_string(std::max(1, totalLines)).length();
-    return std::max(3, digits + 1);
-}
+using testutil::gutterWidth;
 
 std::string cursorMoveSeq(const Document& doc, const Cursor& cur, const Viewport& vp) {
-    int gutterW = std::min(gutterWFor(doc.lineCount()), vp.width);
+    int gutterW = std::min(gutterWidth(doc.lineCount()), vp.width);
     Layout layout = computeLayout(vp.height, vp.width);
 
     int absCol = utf8::columnOf(doc.lineAt(cur.line), cur.col);
@@ -39,9 +37,7 @@ std::string cursorMoveSeq(const Document& doc, const Cursor& cur, const Viewport
            std::to_string(outCol) + "H";
 }
 
-bool contains(const std::string& hay, const std::string& needle){
-    return hay.find(needle)!=std::string::npos;
-}
+using testutil::contains;
 
 }
 

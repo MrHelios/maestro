@@ -55,4 +55,33 @@ inline std::vector<std::string> visibleRows(const std::string& frame) {
     return out;
 }
 
+inline int gutterWidth(int totalLines) {
+    int digits = 1;
+    for (int n = totalLines; n >= 10; n /= 10) ++digits;
+    return std::max(3, digits + 1);
+}
+
+// Valida estructura basica UTF-8 para tests: detecta truncamientos y
+// bytes de continuacion invalidos. No pretende validar todos los casos
+// Unicode (overlong/surrogates/>U+10FFFF) - suficiente para comprobar
+// que truncate() no partio un caracter multibyte.
+inline bool validUtf8(const std::string& s) {
+    size_t i = 0;
+    while (i < s.size()) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+        int need;
+        if ((c & 0x80) == 0) need = 0;
+        else if ((c & 0xE0) == 0xC0) need = 1;
+        else if ((c & 0xF0) == 0xE0) need = 2;
+        else if ((c & 0xF8) == 0xF0) need = 3;
+        else return false;
+        if (i + static_cast<size_t>(need) >= s.size()) return false;
+        for (int k = 1; k <= need; ++k)
+            if ((static_cast<unsigned char>(s[i + static_cast<size_t>(k)]) & 0xC0) != 0x80)
+                return false;
+        i += static_cast<size_t>(need) + 1;
+    }
+    return true;
+}
+
 }

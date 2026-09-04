@@ -1,4 +1,6 @@
 #include "test_framework.h"
+#include "helpers/test_render_utils.h"
+#include <algorithm>
 #define private public
 #include "ui/Editor.h"
 #undef private
@@ -69,13 +71,9 @@ TEST(ctrl_k_b_diff_equals_full_after_switch){
     std::string full = r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, Message{}, State::Navegacion, b.selection);
 
     auto strip = [](const std::string& s){
-        std::string out; bool esc=false;
-        for(size_t i=0;i<s.size();++i){
-            if(s[i]=='\x1b'){ esc=true; if(i+1<s.size() && s[i+1]=='[') i++; }
-            else if(esc){ if((s[i]>='A' && s[i]<='Z') || (s[i]>='a' && s[i]<='z')) esc=false; }
-            else if(s[i]!='\r') out+=s[i];
-        }
-        return out;
+        std::string t = testutil::stripAnsi(s);
+        t.erase(std::remove(t.begin(), t.end(), '\r'), t.end());
+        return t;
     };
     std::string diffStripped = strip(diff);
     CHECK(diffStripped.find("HELLO") != std::string::npos);

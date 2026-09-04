@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "helpers/test_render_utils.h"
 
 #include "core/Document.h"
 #include "core/Cursor.h"
@@ -41,78 +42,11 @@
 
 namespace {
 
-std::string stripAnsiLocal(const std::string& s) {
-    std::string out;
-    bool inEsc = false;
-    for (size_t i = 0; i < s.size(); ++i) {
-        if (s[i] == '\x1b') {
-            inEsc = true;
-            if (i + 1 < s.size() && s[i + 1] == '[') ++i;
-        } else if (inEsc) {
-            unsigned char c = static_cast<unsigned char>(s[i]);
-            if (c >= 0x40 && c <= 0x7E) inEsc = false;
-        } else {
-            out += s[i];
-        }
-    }
-    return out;
-}
-
-// Ancho visual simplificado: 1 por code point UTF-8 (no wcwidth).
-// Coincide con modelo del proyecto core/utf8.h (limitacion documentada):
-// emoji/CJK cuentan 1 aqui aunque en terminal ocupen 2. Suficiente para
-// invariante de no-partir multibyte, no para medir ancho real de terminal.
-int colWidthLocal(const std::string& s) {
-    int col = 0;
-    for (unsigned char c : s)
-        if ((c & 0xC0) != 0x80) col++;
-    return col;
-}
-
-// Debe mantenerse sincronizado con ui/Renderer.cpp:gutterWidth() y
-// ui/Editor.cpp:gutterWidthFor(). Duplicado aqui para no exponer
-// internals de produccion; si cambia la formula, actualizar este helper.
-int gutterWidthLocal(int totalLines) {
-    int digits = 1;
-    for (int n = totalLines; n >= 10; n /= 10) ++digits;
-    return std::max(3, digits + 1);
-}
-
-bool validUtf8(const std::string& s) {
-    size_t i = 0;
-    while (i < s.size()) {
-        unsigned char c = static_cast<unsigned char>(s[i]);
-        int need;
-        if ((c & 0x80) == 0) need = 0;
-        else if ((c & 0xE0) == 0xC0) need = 1;
-        else if ((c & 0xF0) == 0xE0) need = 2;
-        else if ((c & 0xF8) == 0xF0) need = 3;
-        else return false;
-        if (i + static_cast<size_t>(need) >= s.size()) return false;
-        for (int k = 1; k <= need; ++k)
-            if ((static_cast<unsigned char>(s[i + static_cast<size_t>(k)]) & 0xC0) != 0x80)
-                return false;
-        i += static_cast<size_t>(need) + 1;
-    }
-    return true;
-}
-
-// Divide el frame en filas visibles, ya sin ANSI ni \r.
-std::vector<std::string> visibleRows(const std::string& frame) {
-    std::string plain = stripAnsiLocal(frame);
-    std::vector<std::string> out;
-    std::string cur;
-    for (char c : plain) {
-        if (c == '\n') {
-            out.push_back(cur);
-            cur.clear();
-        } else if (c != '\r') {
-            cur += c;
-        }
-    }
-    out.push_back(cur);
-    return out;
-}
+using testutil::stripAnsi;
+using testutil::colWidth;
+using testutil::gutterWidth;
+using testutil::validUtf8;
+using testutil::visibleRows;
 
 // ----- Frames de cada pantalla ----------------------------------------------
 
@@ -168,15 +102,15 @@ void checkFrameWithinBounds(const std::string& frame, int content, int width) {
 
     // 2. Ninguna fila (contenido, barra fija ni mensajes) supera `width`.
     for (const std::string& r : rows) {
-        CHECK(colWidthLocal(r) <= width);
+        CHECK(colWidth(r) <= width);
         CHECK(validUtf8(r));
     }
 
     // 3/4. La fila fija llena exactamente el ancho; la de mensajes no lo pasa.
     CHECK((int)rows.size() >= kStatusBarRows);
     const int barRow = static_cast<int>(rows.size()) - kStatusBarRows;
-    CHECK_EQ(colWidthLocal(rows[barRow]), width);
-    CHECK(colWidthLocal(rows[static_cast<int>(rows.size()) - 1]) <= width);
+    CHECK_EQ(colWidth(rows[barRow]), width);
+    CHECK(colWidth(rows[static_cast<int>(rows.size()) - 1]) <= width);
 }
 
 } // namespace
@@ -306,7 +240,7 @@ TEST(regression_utf8_content) {
         std::string f = frameEditor(lines, 6, width);
         checkFrameWithinBounds(f, 6, width);
         const auto rows = visibleRows(f);
-        int gw = std::min(gutterWidthLocal((int)lines.size()), width);
+        int gw = std::min(gutterWidth((int)lines.size()), width);
         int tw = std::max(0, width - gw);
         for (size_t i = 0; i < lines.size() && (int)i < 6; ++i) {
             std::string row = rows[i];
@@ -315,7 +249,7 @@ TEST(regression_utf8_content) {
             std::string expected = utf8::truncate(lines[i], tw);
             if ((int)i == 0) {
                 std::string padded = expected;
-                int pad = tw - colWidthLocal(expected);
+                int pad = tw - colWidth(expected);
                 if (pad > 0) padded.append(pad, ' ');
                 CHECK_EQ(textPart, padded);
             } else {
@@ -375,9 +309,9 @@ TEST(regression_gutter_clamped_at_narrow_width) {
         std::string f = frameEditor(doc, 6, width);
         checkFrameWithinBounds(f, 6, width);
         const auto rows = visibleRows(f);
-        int gw = std::min(gutterWidthLocal((int)doc.size()), width);
+        int gw = std::min(gutterWidth((int)doc.size()), width);
         for (int row = 0; row < 6; ++row) {
-            CHECK(colWidthLocal(rows[row]) <= width);
+            CHECK(colWidth(rows[row]) <= width);
             std::string numStr = std::to_string(row + 1);
             int maxNumCols = std::max(0, gw - 1);
             if ((int)numStr.size() > maxNumCols)
@@ -407,7 +341,7 @@ TEST(regression_gutter_clamped_at_narrow_width) {
             std::string f = frameAt(top);
             checkFrameWithinBounds(f, 6, width);
             const auto rows = visibleRows(f);
-            int gw = std::min(gutterWidthLocal((int)doc1000.size()), width);
+            int gw = std::min(gutterWidth((int)doc1000.size()), width);
             for (int row = 0; row < 6; ++row) {
                 int docLine = top + row + 1;
                 std::string numStr = std::to_string(docLine);
@@ -418,7 +352,7 @@ TEST(regression_gutter_clamped_at_narrow_width) {
                 std::string expectedGutter = std::string(pad, ' ') + numStr + ' ';
                 std::string actualGutter = rows[row].size() >= (size_t)gw ? rows[row].substr(0, gw) : rows[row];
                 CHECK_EQ(actualGutter, expectedGutter);
-                CHECK(colWidthLocal(rows[row]) <= width);
+                CHECK(colWidth(rows[row]) <= width);
             }
         }
     }
