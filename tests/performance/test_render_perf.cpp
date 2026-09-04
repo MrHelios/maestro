@@ -39,6 +39,7 @@
 namespace {
 
 using perf_time::g_sink;
+using perf_helpers::moveEvent;
 
 struct RenderFixture {
     Editor ed;
@@ -56,7 +57,7 @@ struct RenderFixture {
         return ed.renderer_.buildScreen(ed.active().document,
                                         ed.active().cursor,
                                         ed.active().viewport, "perf.txt", false,
-                                        msg, State::Navegacion, std::nullopt);
+                                        msg, ed.state_, std::nullopt);
     }
 };
 
@@ -201,7 +202,7 @@ TEST(perf_bytes_por_evento_hacia_terminal) {
     const std::size_t deltaTecla = fx.ed.renderer_
         .buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor,
                         fx.ed.active().viewport, "perf.txt", false, fx.msg,
-                        State::Navegacion, std::nullopt)
+                        State::Interaccion, std::nullopt)
         .size();
 
     // Caso B: scroll de una linea (cursor al borde inferior -> viewport.top++),
@@ -212,7 +213,7 @@ TEST(perf_bytes_por_evento_hacia_terminal) {
     const std::size_t deltaScroll = fx.ed.renderer_
         .buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor,
                         fx.ed.active().viewport, "perf.txt", false, fx.msg,
-                        State::Navegacion, std::nullopt)
+                        State::Interaccion, std::nullopt)
         .size();
 
     auto changedRows = [](const std::string& a, const std::string& b) {
@@ -240,3 +241,86 @@ TEST(perf_bytes_por_evento_hacia_terminal) {
                 changedRows(base, trasScroll), trasScroll.size(), deltaScroll);
     CHECK(!base.empty());
 }
+// ---------------------------------------------------------------------------
+// 5. Ciclo con diff integrado: handleEvent + buildDiffFrame (vs buildScreen).
+// ---------------------------------------------------------------------------
+TEST(perf_ciclo_diff_integrado) {
+    std::printf("\n== perf: ciclo handleEvent + buildDiffFrame (diff integrado) ==\n");
+    RenderFixture fx(300);
+    fx.ed.state_ = State::Interaccion;
+    // primar cache con un frame completo
+    std::string base = fx.frame();
+    (void)base;
+    Event e; e.type = EventType::InsertChar; e.text = "a";
+    perf_time::bench_ns("handleEvent+buildDiffFrame", 2000, [&]{
+        fx.ed.handleEvent(e);
+        auto out = fx.ed.renderer_.buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor, fx.ed.active().viewport, "perf.txt", false, fx.msg, fx.ed.state_, std::nullopt);
+        perf_time::g_sink += out.size();
+        // volver atras para no crecer indefinidamente
+        Event back; back.type = EventType::Backspace;
+        fx.ed.handleEvent(back);
+        auto out2 = fx.ed.renderer_.buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor, fx.ed.active().viewport, "perf.txt", false, fx.msg, fx.ed.state_, std::nullopt);
+        perf_time::g_sink += out2.size();
+    });
+    CHECK(perf_time::g_sink > 0);
+}
+
+// ---------------------------------------------------------------------------
+// 6. Movimiento horizontal y saltos grandes (columnOf + scrollToCursor).
+// ---------------------------------------------------------------------------
+TEST(perf_movimiento_horizontal_y_saltos) {
+    std::printf("\n== perf: movimiento horizontal y saltos grandes ==\n");
+    RenderFixture fx(10);
+    fx.ed.state_ = State::Navegacion;
+    fx.ed.active().document.restore(perf_helpers::makeLines(10, 4000));
+    fx.ed.active().cursor.line = 5; fx.ed.active().cursor.col = 2000;
+    fx.ed.active().viewport.width = 80; fx.ed.active().viewport.height = 10;
+    perf_time::bench_ns("MoveLeft/Right x1000", 1000, [&]{
+        for(int i=0;i<500;++i){ fx.ed.handleEvent(moveEvent(EventType::MoveLeft)); fx.ed.handleEvent(moveEvent(EventType::MoveRight)); }
+        perf_time::g_sink += fx.ed.active().cursor.col;
+    });
+    RenderFixture fx2(3000);
+    fx2.ed.state_ = State::Navegacion;
+    fx2.ed.active().viewport.height = 24;
+    perf_time::bench_ns("PageUp/PageDown x200", 200, [&]{
+        for(int i=0;i<100;++i){ fx2.ed.handleEvent(moveEvent(EventType::PageUp)); fx2.ed.handleEvent(moveEvent(EventType::PageDown)); }
+        perf_time::g_sink += fx2.ed.active().cursor.line;
+    });
+    perf_time::bench_ns("Home/End x200", 200, [&]{
+        for(int i=0;i<100;++i){ fx2.ed.handleEvent(moveEvent(EventType::MoveHome)); fx2.ed.handleEvent(moveEvent(EventType::MoveEnd)); }
+        perf_time::g_sink += fx2.ed.active().cursor.col;
+    });
+    CHECK(perf_time::g_sink > 0);
+}
+
+// ---------------------------------------------------------------------------
+// 7. Paste / multibyte y carga inicial.
+// ---------------------------------------------------------------------------
+TEST(perf_paste_multibyte_y_carga) {
+    std::printf("\n== perf: paste multibyte y carga inicial ==\n");
+    std::string big(10000, 'x');
+    perf_time::bench_ns("Document::restore 3000x80", 20, [&]{
+        Document d; d.restore(perf_helpers::makeLines(3000, 80));
+        perf_time::g_sink += d.lineCount();
+    });
+    {
+        RenderFixture fx2(300);
+        fx2.ed.state_ = State::Interaccion;
+        Event e_accent; e_accent.type = EventType::InsertChar; e_accent.text = "\xC3\xA9";
+        perf_time::bench_ns("Insert multibyte \xC3\xA9 x10", 100, [&]{
+            for(int i=0;i<10;++i) fx2.ed.handleEvent(e_accent);
+            perf_time::g_sink += fx2.ed.active().document.lineLength(10);
+            for(int i=0;i<10;++i) fx2.ed.handleEvent(moveEvent(EventType::Backspace));
+        });
+    }
+    {
+        Buffer b2; b2.document.restore(perf_helpers::makeLines(300, 80)); b2.cursor.line = 10;
+        perf_time::bench_ns("paste 10k insertText", 50, [&]{
+            b2.document.insertText(10, 5, big);
+            perf_time::g_sink += b2.document.lineLength(10);
+            b2.document.deleteRange(10, 5, 10, 5 + (int)big.size());
+        });
+    }
+    CHECK(perf_time::g_sink > 0);
+}
+
