@@ -11,6 +11,8 @@
 //      (renderEditorContent), status bar y posicion de cursor, medidos
 //      por separado contra el total de buildScreen.
 //   3. Ciclo real de tecleo: handleEvent + buildScreen por tecla.
+//   4. Bytes por evento: frame completo vs render diferencial (buildDiffFrame)
+//      - mide cuanto debe reprocesar el emulador por tecla/scroll.
 //
 // No verifica comportamiento: imprime numeros para decidir SI conviene
 // optimizar y DONDE.
@@ -24,6 +26,9 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "helpers/perf_time_utils.h"
+#include "helpers/test_render_utils.h"
+#include "helpers/perf_helpers.h"
 
 #define private public
 #include "ui/Editor.h"
@@ -33,28 +38,14 @@
 
 namespace {
 
-std::size_t g_sink = 0; // evita que el compilador elimine el trabajo medido
-
-double nsPerFrame(const char* label, int frames, const std::function<void()>& fn) {
-    fn(); // warmup (paginas, cache de strings, etc.)
-    const auto start = std::chrono::steady_clock::now();
-    for (int i = 0; i < frames; ++i) fn();
-    const auto end = std::chrono::steady_clock::now();
-    const double ns =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-    const double per = ns / frames;
-    std::printf("%-46s %8.1f us/frame  (%d frames)\n", label, per / 1000.0, frames);
-    return per;
-}
+using perf_time::g_sink;
 
 struct RenderFixture {
     Editor ed;
     Message msg;
 
     explicit RenderFixture(int lines, int width = 80) {
-        ed.active().document.restore(
-            std::vector<std::string>(static_cast<size_t>(lines),
-                                     std::string(static_cast<size_t>(width), 'x')));
+        ed.active().document.restore(perf_helpers::makeLines(lines, width));
         ed.active().cursor.line = lines / 2;
         ed.active().viewport.top = std::max(0, lines / 2 - 5);
         ed.active().viewport.height = 24;
@@ -80,11 +71,11 @@ TEST(perf_render_escalado_con_documento) {
     const int sizes[] = {300, 3000, 30000};
     for (int i = 0; i < 3; ++i) {
         RenderFixture fx(sizes[i]);
-        nsPerFrame("doc", frames[i], [&fx] {
-            g_sink += fx.frame().size();
+        perf_time::bench_ns("doc", frames[i], [&fx] {
+            perf_time::g_sink += fx.frame().size();
         });
     }
-    CHECK(g_sink > 0);
+    CHECK(perf_time::g_sink > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -98,7 +89,7 @@ TEST(perf_render_desglose_fases) {
     const Cursor& cur = b.cursor;
     const Viewport& vp = b.viewport;
 
-    const int gutterW = std::min(std::max(3, 4), vp.width); // gutterWidth(300)=4
+    const int gutterW = std::min(testutil::gutterWidth(300), vp.width);
     const Layout layout = computeLayout(vp.height + kStatusBarRows, vp.width);
 
     // Espejo de editorBarData (Renderer.cpp, internal linkage): los campos
@@ -118,47 +109,40 @@ TEST(perf_render_desglose_fases) {
     };
 
     std::printf("\n== perf: desglose de buildScreen (300x80, viewport 24x80) ==\n");
-    const double total = nsPerFrame("buildScreen TOTAL", 2000, [&fx] {
-        g_sink += fx.frame().size();
+    const double total = perf_time::bench_ns("buildScreen TOTAL", 2000, [&fx] {
+        perf_time::g_sink += fx.frame().size();
     });
 
     auto bench = [&](const char* name, int frames, const std::function<void()>& fn) {
-        fn();
-        const auto s = std::chrono::steady_clock::now();
-        for (int i = 0; i < frames; ++i) fn();
-        const auto e = std::chrono::steady_clock::now();
-        const double ns = static_cast<double>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(e - s).count());
-        std::printf("%-46s %8.1f us  (%4.1f%% del total)\n", name, ns / frames / 1000.0,
-                    100.0 * ns / frames / total);
+        perf_time::bench_with_total(name, frames, total, fn);
     };
 
     bench("beginFrame+endFrame", 20000, [&] {
         std::string out;
         r.beginFrame(out);
         r.endFrame(out);
-        g_sink += out.size();
+        perf_time::g_sink += out.size();
     });
     bench("renderEditorContent (22 filas visibles)", 2000, [&] {
         std::string out;
         r.renderEditorContent(out, doc, cur, vp, std::nullopt, layout.content,
                               gutterW);
-        g_sink += out.size();
+        perf_time::g_sink += out.size();
     });
     bench("statusBar (data+render)", 20000, [&] {
         std::string out;
         StatusBarData data = barData();
         r.renderStatusBar(out, layout.statusBar, data);
-        g_sink += out.size();
+        perf_time::g_sink += out.size();
     });
     bench("moveCursorTo+columnOf", 20000, [&] {
         std::string out;
         int visualCol = utf8::columnOf(doc.lineAt(cur.line), cur.col);
         r.moveCursorTo(out, cur.line - vp.top + 1, gutterW + visualCol + 1 +
                                                      layout.content.col);
-        g_sink += out.size();
+        perf_time::g_sink += out.size();
     });
-    CHECK(g_sink > 0);
+    CHECK(perf_time::g_sink > 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +161,7 @@ TEST(perf_ciclo_tecla_mas_frame) {
         const auto s = std::chrono::steady_clock::now();
         while (keys < 2000) {
             fx.ed.handleEvent(e);
-            g_sink += fx.frame().size();
+            perf_time::g_sink += fx.frame().size();
             ++keys;
         }
         const auto en = std::chrono::steady_clock::now();
@@ -200,29 +184,12 @@ TEST(perf_bytes_por_evento_hacia_terminal) {
     RenderFixture fx(300);
     fx.ed.state_ = State::Interaccion;
 
-    // Frame base (pantalla ya dibujada) + cache del render diferencial.
+    // frame() construye el frame completo y deja el cache interno preparado.
+    // No manipulamos rowCache_/statusCache_ directamente: el benchmark debe
+    // depender de la API real del Renderer, no de su implementacion interna.
     const std::string base = fx.frame();
-    fx.ed.renderer_.rowCache_.clear();
-    fx.ed.renderer_.statusCache_.clear();
-    const std::string editorBody = fx.ed.renderer_.buildEditorBody(
-        fx.ed.active().document, fx.ed.active().cursor,
-        fx.ed.active().viewport, "perf.txt", false, fx.msg, State::Navegacion,
-        std::nullopt);
-    const Layout layout = fx.ed.renderer_.calculateLayout(fx.ed.active().viewport.height, fx.ed.active().viewport.width);
-    const int contentH = layout.content.height;
-    std::vector<std::string_view> rows;
-    fx.ed.renderer_.splitRows(editorBody, &rows);
-    for (int i = 0; i < contentH && i < (int)rows.size(); ++i)
-        fx.ed.renderer_.rowCache_.push_back(std::string(rows[i]));
-    fx.ed.renderer_.statusCache_.clear();
-    for (size_t i = contentH; i < rows.size(); ++i) {
-        if (i > (size_t)contentH) fx.ed.renderer_.statusCache_ += "\r\n";
-        fx.ed.renderer_.statusCache_.append(rows[i].data(), rows[i].size());
-    }
-    fx.ed.renderer_.hasCache_ = true;
-    fx.ed.renderer_.cachedContentH_ = contentH;
-    fx.ed.renderer_.lastViewportW_ = 80;
-    fx.ed.renderer_.lastViewportH_ = 24;
+    // Nota: buildDiffFrame se mide aqui pero el ciclo real (perf_ciclo_tecla)
+    // aun usa buildScreen; el diff es feature medida pero no integrada.
 
     Event e;
     e.type = EventType::InsertChar;

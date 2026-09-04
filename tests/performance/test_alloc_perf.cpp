@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "helpers/perf_helpers.h"
 #include "alloc_stats.h"
 
 #define private public
@@ -26,10 +27,7 @@
 
 namespace {
 
-std::vector<std::string> makeLines(int n, int width) {
-    return std::vector<std::string>(static_cast<size_t>(n),
-                                    std::string(static_cast<size_t>(width), 'x'));
-}
+using perf_helpers::makeLines;
 
 Event charEvent(char c) {
     Event e;

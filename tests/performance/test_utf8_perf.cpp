@@ -1,25 +1,25 @@
+// ===========================================================================
+// PERF UTF-8: micro-benchmarks de columnOf/truncate/range/isCellStart.
+// Mide el costo de las utilidades de core/utf8.h que usa el renderer por
+// tecla (columnOf para posicionar cursor, truncate/range para recortar
+// lineas al ancho del viewport). Tamanos elegidos para representar lineas
+// reales: 1k cols ~ linea corta, 4k ~ linea larga, 10k/40k ~ documento
+// concatenado o linea extrema; los casos "mid" ejercitan busqueda en el
+// medio del buffer, no solo al final.
+// ---------------------------------------------------------------------------
+
 #include <chrono>
 #include <cstdio>
 #include <string>
 #include <string_view>
 #include <vector>
 #include "test_framework.h"
+#include "helpers/perf_time_utils.h"
 #include "core/utf8.h"
 
 namespace {
-size_t g_sink = 0;
-
-template<typename F>
-double bench_us(const char* label, int iters, F fn) {
-    fn();
-    auto s = std::chrono::steady_clock::now();
-    for (int i = 0; i < iters; ++i) fn();
-    auto e = std::chrono::steady_clock::now();
-    double ns = std::chrono::duration_cast<std::chrono::nanoseconds>(e - s).count();
-    double us = ns / iters / 1000.0;
-    std::printf("%-48s %8.2f us/op  (%d iters)\n", label, us, iters);
-    return us;
-}
+using perf_time::g_sink;
+using perf_time::bench_us;
 
 std::string makeMixed(int cols) {
     std::string s;
@@ -46,19 +46,9 @@ TEST(perf_utf8_columnOf) {
     bench_us("columnOf UTF-8 100KB ~40k cols", 2000, [&]{ g_sink += utf8::columnOf(utf8_100k, (int)utf8_100k.size()); });
     bench_us("columnOf ascii 4k", 20000, [&]{ g_sink += utf8::columnOf(ascii4k, (int)ascii4k.size()); });
     bench_us("columnOf mixed 1k", 20000, [&]{ g_sink += utf8::columnOf(mixed1k, (int)mixed1k.size()); });
+    bench_us("columnOf 100KB mid 50kB", 5000, [&]{ g_sink += utf8::columnOf(utf8_100k, 50000); });
     CHECK(g_sink > 0);
 }
-
-TEST(perf_utf8_render_cursor) {
-    std::printf("\n== perf: render linea larga + cursor move (columnOf path) ==\n");
-    std::string utf8_10k = makeMixed(4000);
-    std::string utf8_100k = makeMixed(40000);
-    bench_us("cursor columnOf 10KB end", 50000, [&]{ g_sink += utf8::columnOf(utf8_10k, (int)utf8_10k.size()); });
-    bench_us("cursor columnOf 100KB end", 5000, [&]{ g_sink += utf8::columnOf(utf8_100k, (int)utf8_100k.size()); });
-    bench_us("cursor columnOf 100KB mid 50kB", 5000, [&]{ g_sink += utf8::columnOf(utf8_100k, 50000); });
-    CHECK(g_sink > 0);
-}
-
 TEST(perf_utf8_truncate) {
     std::printf("\n== perf: utf8::truncate ==\n");
     std::string ascii(4000, 'a');
