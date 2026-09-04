@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "helpers/test_render_utils.h"
 
 #include "core/Document.h"
 #include "core/Cursor.h"
@@ -27,60 +28,16 @@
 
 namespace {
 
-// Quita las secuencias ANSI dejando solo el texto visible.
-std::string stripAnsiLocal(const std::string& s) {
-    std::string out;
-    bool inEsc = false;
-    size_t i = 0;
-    while (i < s.size()) {
-        if (s[i] == '\x1b') {
-            inEsc = true;
-            if (i + 1 < s.size() && s[i + 1] == '[') i++;
-        } else if (inEsc) {
-            unsigned char c = static_cast<unsigned char>(s[i]);
-            if (c >= 0x40 && c <= 0x7E) inEsc = false;
-        } else {
-            out += s[i];
-        }
-        i++;
-    }
-    return out;
-}
-
-// Columnas visuales (1 por celda; basta para limites de ancho ASCII).
-int colWidthLocal(const std::string& s) {
-    int col = 0;
-    for (unsigned char c : s)
-        if ((c & 0xC0) != 0x80) col++;
-    return col;
-}
-
-// Las filas visibles del frame (ya sin ANSI ni \r).
-std::vector<std::string> visibleRows(const std::string& frame) {
-    std::string plain = stripAnsiLocal(frame);
-    std::vector<std::string> out;
-    std::string cur;
-    for (char c : plain) {
-        if (c == '\n') {
-            out.push_back(cur);
-            cur.clear();
-        } else if (c != '\r') {
-            cur += c;
-        }
-    }
-    out.push_back(cur);
-    return out;
-}
+using testutil::stripAnsi;
+using testutil::colWidth;
+using testutil::visibleRows;
+using testutil::startsWith;
 
 // Pares de filas de la barra (fija superior + mensajes).
 struct BarRows {
     std::string fixed;
     std::string message;
 };
-
-bool startsWith(const std::string& s, const std::string& p) {
-    return s.size() >= p.size() && s.compare(0, p.size(), p) == 0;
-}
 
 // ---------------------------------------------------------------------------
 // Frames de cada pantalla. Las tres pantallas reciben `content` FILAS DE
@@ -127,8 +84,10 @@ BarRows barOf(const std::string& frame) {
 
 // ---------------------------------------------------------------------------
 // StatusBarData que cada pantalla deberia estar produciendo (espejo de la
-// logica en Renderer.cpp). Al comprobar que la barra del frame ==
-// StatusBar::render(area, este dato), probamos que solo varia el dato.
+// logica en Renderer.cpp - si cambia Renderer, actualizar aqui). Al comprobar
+// que la barra del frame == StatusBar::render(area, este dato), probamos que
+// solo varia el dato; no prueba por si solo que los valores sean
+// funcionalmente correctos (requiere cobertura de StatusBar unit).
 // ---------------------------------------------------------------------------
 
 StatusBarData editorData() {
@@ -228,9 +187,9 @@ TEST(integration_chrome_is_exactly_shared_statusbar) {
 }
 
 // ---------------------------------------------------------------------------
-// Mismo background: la fila fija SIEMPRE lleva el estilo de fondo gris 60%
-// (kStatusBarStyle) en las tres pantallas; la fila de mensajes jamas lo
-// lleva (es texto plano coloreado por tipo, sin fondo).
+// Mismo background: la fila fija SIEMPRE lleva kStatusBarStyle
+// en las tres pantallas; la fila de mensajes no lleva ese fondo
+// (su ancho nunca excede `width`).
 // ---------------------------------------------------------------------------
 TEST(integration_same_background_across_screens) {
     const int content = 22;
@@ -243,12 +202,12 @@ TEST(integration_same_background_across_screens) {
     for (const std::string& frame : screens) {
         CHECK(frame.find(std::string(kStatusBarStyle)) != std::string::npos);
         // El texto fijo (ya sin ANSI) llena todo el ancho con ese fondo.
-        CHECK_EQ(colWidthLocal(barOf(frame).fixed), width);
+        CHECK_EQ(colWidth(barOf(frame).fixed), width);
     }
     // La fila de mensajes no lleva el fondo de la barra (sin relleno de ancho
     // completo: solo su contenido + paddings).
     for (const std::string& frame : screens) {
-        CHECK(colWidthLocal(barOf(frame).message) <= width);
+        CHECK(colWidth(barOf(frame).message) <= width);
     }
 }
 
@@ -284,20 +243,18 @@ TEST(integration_same_resize_behavior_across_screens) {
 
             for (const std::string& frame : {a, b, c}) {
                 BarRows r = barOf(frame);
-                CHECK_EQ(colWidthLocal(r.fixed), width);
-                CHECK(colWidthLocal(r.fixed) <= width);
-                CHECK(colWidthLocal(r.message) <= width);
+                CHECK_EQ(colWidth(r.fixed), width);
+                CHECK(colWidth(r.message) <= width);
             }
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// v1.4: el ciclo de vida del frame (ocultar cursor / home / limpiar /
-// mostrar) es responsabilidad del frame GLOBAL, no de cada pantalla. Las tres
+// v1.4: el ciclo de vida del frame (ocultar cursor / limpiar / home /
+// mostrar) es responsabilidad del frame global, no de cada pantalla. Las tres
 // pantallas arrancan con la MISMA secuencia de preludio y cierran con la
-// misma de epilogo. Antes el editor omitia el limpiado \x1b[J que el selector
-// y el explorador si emitian (ciclo de vida inconsistente).
+// misma de epilogo.
 // ---------------------------------------------------------------------------
 TEST(integration_frame_lifecycle_shared) {
     const std::string prelude = "\x1b[?25l\x1b[2J\x1b[H";

@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "helpers/test_render_utils.h"
 
 #include "core/Layout.h"
 #include "ui/Message.h"
@@ -25,34 +26,9 @@
 
 namespace {
 
-// Quita las secuencias ANSI dejando solo el texto visible.
-std::string stripAnsi(const std::string& s) {
-    std::string out;
-    bool inEsc = false;
-    size_t i = 0;
-    while (i < s.size()) {
-        if (s[i] == '\x1b') {
-            inEsc = true;
-            if (i + 1 < s.size() && s[i + 1] == '[') i++;
-        } else if (inEsc) {
-            unsigned char c = static_cast<unsigned char>(s[i]);
-            if (c >= 0x40 && c <= 0x7E) inEsc = false;
-        } else {
-            out += s[i];
-        }
-        i++;
-    }
-    return out;
-}
-
-// Columnas visuales (1 por celda). Suficiente para validar limites de ancho
-// sobre texto ASCII; para UTF-8 lo mismo que colCount() del prompt.
-int colWidth(const std::string& s) {
-    int col = 0;
-    for (unsigned char c : s)
-        if ((c & 0xC0) != 0x80) col++;
-    return col;
-}
+using testutil::stripAnsi;
+using testutil::colWidth;
+using testutil::contains;
 
 // Fila 1 y fila 2 (mensajes) del texto ya sin ANSI, separadas por \r\n.
 struct Rows {
@@ -75,10 +51,6 @@ Rows renderRows(const StatusBarData& data, int w) {
     return rowsOf(StatusBar().render(area, data));
 }
 
-bool contains(const std::string& hay, const std::string& needle) {
-    return hay.find(needle) != std::string::npos;
-}
-
 std::string longStr(int n, char c = 'n') {
     return std::string(static_cast<size_t>(n), c);
 }
@@ -97,7 +69,7 @@ TEST(statusbar_left_corto) {
     d.totalLines = 1;
 
     Rows r = renderRows(d, 80);
-    // La x de la fila fija es exactamente el ancho del area (anclado a la
+    // La fila fija ocupa exactamente el ancho del area (anclado a la
     // derecha: el bloque "pct% (fila,col)" termina en el ultimo caracter).
     CHECK_EQ(colWidth(r.fixed), 80);
     CHECK(contains(r.fixed, "archivo.txt"));
@@ -124,8 +96,7 @@ TEST(statusbar_center_corto) {
     // El relleno central queda en cero o una columna de sobra.
     for (int w = 35; w <= 37; ++w) {
         Rows r = renderRows(d, w);
-        CHECK_EQ(colWidth(r.fixed), w); // la fila ocupa todo el ancho...
-        CHECK(colWidth(r.fixed) <= w);  // ...pero nunca lo excede
+        CHECK_EQ(colWidth(r.fixed), w); // la fila ocupa todo el ancho y nunca lo excede
         CHECK(colWidth(r.message) <= w);
     }
     // El bloque derecho nunca se pisa con el izquierdo: (1,1) pegado al borde.
@@ -136,7 +107,7 @@ TEST(statusbar_center_corto) {
 }
 
 // ---------------------------------------------------------------------------
-// right corto: override explicito del bloque derecho (pantallas sin
+// right corto: sobreescritura explicita del bloque derecho (valor forzado, pantallas sin
 // documento) de pocas columnas; se usa tal cual y se ancla a la derecha.
 // ---------------------------------------------------------------------------
 TEST(statusbar_right_corto) {
@@ -166,8 +137,7 @@ TEST(statusbar_left_demasiado_largo) {
 
     for (int w = 12; w <= 80; w += 7) {
         Rows r = renderRows(d, w);
-        CHECK_EQ(colWidth(r.fixed), w); // ocupa todo el ancho
-        CHECK(colWidth(r.fixed) <= w);  // sin excederlo
+        CHECK_EQ(colWidth(r.fixed), w); // ocupa todo el ancho sin excederlo
         CHECK(colWidth(r.message) <= w);
     }
     // El estado NO se sacrifica antes que el nombre: se ve entero.
@@ -190,8 +160,7 @@ TEST(statusbar_path_demasiado_largo) {
 
     for (int w = 20; w <= 80; w += 5) {
         Rows r = renderRows(d, w);
-        CHECK_EQ(colWidth(r.fixed), w);
-        CHECK(colWidth(r.fixed) <= w);
+        CHECK_EQ(colWidth(r.fixed), w); // ocupa todo el ancho sin excederlo
         CHECK(colWidth(r.message) <= w);
     }
     // En ancho generoso el nombre queda entero y la ruta truncada al frente.
@@ -220,9 +189,8 @@ TEST(statusbar_todos_demasiado_largos) {
 
     for (int w = 1; w <= 100; ++w) {
         Rows r = renderRows(d, w);
-        CHECK(colWidth(r.fixed) <= w);
+        CHECK_EQ(colWidth(r.fixed), w); // la barra fija SIEMPRE llena el ancho
         CHECK(colWidth(r.message) <= w);
-        CHECK(colWidth(r.fixed) == w); // la barra fija SIEMPRE llena el ancho
     }
 }
 
@@ -242,8 +210,7 @@ TEST(statusbar_terminal_extremadamente_angosta) {
 
     for (int w = 1; w <= 11; ++w) {
         Rows r = renderRows(d, w);
-        CHECK(colWidth(r.fixed) == w); // llena exactamente
-        CHECK(colWidth(r.fixed) <= w); // nunca desborda
+        CHECK_EQ(colWidth(r.fixed), w); // llena exactamente y nunca desborda
         CHECK(colWidth(r.message) <= w);
         CHECK(!r.fixed.empty());
     }
@@ -262,8 +229,7 @@ TEST(statusbar_right_block_edge_layout) {
         d.totalLines = 5;
         d.cursorLine = 2; // 2/(5-1) = 50%
         Rows r = renderRows(d, w);
-        CHECK(colWidth(r.fixed) <= w);
-        CHECK(colWidth(r.fixed) == w);
+        CHECK_EQ(colWidth(r.fixed), w);
         CHECK_EQ(r.fixed.back(), ')'); // el (fila,col) cabe entero aca
     }
     // Sin documento (totalLines=0): el bloque derecho se calcula igual
