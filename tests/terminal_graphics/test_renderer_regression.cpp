@@ -5,9 +5,14 @@
 // ancho de la terminal, y la fila fija de la barra ocupa EXACTAMENTE el
 // ancho. Se prueban primariamente sobre el Editor (buildScreen) y sobre las
 // pantallas de lista (BufferSelector/FileBrowser) "donde aplique".
+// NOTA: suite principalmente geometrica: verifica cotas de ancho y UTF-8
+// valido. Excepciones puntuales verifican correccion funcional del
+// recorte: regression_utf8_content comprueba truncamiento exacto via
+// utf8::truncate, y regression_gutter_clamped comprueba formato exacto
+// del gutter. Ver Nota 3.
 //
 // Casos cubiertos:
-//   - tamano del documento: vazio, 1, 9, 10, 99, 100, 999 y 1000 lineas
+//   - tamano del documento: vacio, 1, 9, 10, 99, 100, 999 y 1000 lineas
 //     (incl. el cambio de digito del gutter en 9->10 y 99->100);
 //   - contenido UTF-8 (acentos, guiones largos, emoji);
 //   - seleccion: simple, multilinea, y linea vacia seleccionada;
@@ -20,6 +25,7 @@
 //   4. la fila de mensajes jamas supera `width`;
 //   5. el frame produce UTF-8 valido (ningun multibyte partido).
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -28,6 +34,7 @@
 #include "core/Document.h"
 #include "core/Cursor.h"
 #include "core/Layout.h"
+#include "core/utf8.h"
 #include "core/Viewport.h"
 #include "ui/Message.h"
 #include "ui/Renderer.h"
@@ -37,27 +44,38 @@ namespace {
 std::string stripAnsiLocal(const std::string& s) {
     std::string out;
     bool inEsc = false;
-    size_t i = 0;
-    while (i < s.size()) {
+    for (size_t i = 0; i < s.size(); ++i) {
         if (s[i] == '\x1b') {
             inEsc = true;
-            if (i + 1 < s.size() && s[i + 1] == '[') i++;
+            if (i + 1 < s.size() && s[i + 1] == '[') ++i;
         } else if (inEsc) {
             unsigned char c = static_cast<unsigned char>(s[i]);
             if (c >= 0x40 && c <= 0x7E) inEsc = false;
         } else {
             out += s[i];
         }
-        i++;
     }
     return out;
 }
 
+// Ancho visual simplificado: 1 por code point UTF-8 (no wcwidth).
+// Coincide con modelo del proyecto core/utf8.h (limitacion documentada):
+// emoji/CJK cuentan 1 aqui aunque en terminal ocupen 2. Suficiente para
+// invariante de no-partir multibyte, no para medir ancho real de terminal.
 int colWidthLocal(const std::string& s) {
     int col = 0;
     for (unsigned char c : s)
         if ((c & 0xC0) != 0x80) col++;
     return col;
+}
+
+// Debe mantenerse sincronizado con ui/Renderer.cpp:gutterWidth() y
+// ui/Editor.cpp:gutterWidthFor(). Duplicado aqui para no exponer
+// internals de produccion; si cambia la formula, actualizar este helper.
+int gutterWidthLocal(int totalLines) {
+    int digits = 1;
+    for (int n = totalLines; n >= 10; n /= 10) ++digits;
+    return std::max(3, digits + 1);
 }
 
 bool validUtf8(const std::string& s) {
@@ -155,9 +173,9 @@ void checkFrameWithinBounds(const std::string& frame, int content, int width) {
     }
 
     // 3/4. La fila fija llena exactamente el ancho; la de mensajes no lo pasa.
+    CHECK((int)rows.size() >= kStatusBarRows);
     const int barRow = static_cast<int>(rows.size()) - kStatusBarRows;
     CHECK_EQ(colWidthLocal(rows[barRow]), width);
-    CHECK(colWidthLocal(rows[barRow]) <= width);
     CHECK(colWidthLocal(rows[static_cast<int>(rows.size()) - 1]) <= width);
 }
 
@@ -256,7 +274,7 @@ TEST(regression_selection_empty_line) {
 
 TEST(regression_selection_reverse_direction) {
     // Seleccion "hacia atras" (cursor < anchor): normaliza y el resultado
-    // visual (y por tanto la cota de ancho) no debe cambiar.
+    // visual (contenido y barra, cursor en 0,0) no debe cambiar.
     const std::vector<std::string> lines = {"hello world", "segunda"};
     Selection fwd; fwd.anchor = Position{0, 0}; fwd.position = Position{0, 5};
     Selection rev; rev.anchor = Position{0, 5}; rev.position = Position{0, 0};
@@ -264,7 +282,10 @@ TEST(regression_selection_reverse_direction) {
     std::string b = frameEditor(lines, 6, 40, rev);
     checkFrameWithinBounds(a, 6, 40);
     checkFrameWithinBounds(b, 6, 40);
-    CHECK_EQ(stripAnsiLocal(a), stripAnsiLocal(b));
+    auto ra = visibleRows(a);
+    auto rb = visibleRows(b);
+    CHECK_EQ((int)ra.size(), (int)rb.size());
+    for (int i = 0; i < (int)ra.size(); ++i) CHECK_EQ(ra[i], rb[i]);
 }
 
 // ---------------------------------------------------------------------------
@@ -274,7 +295,7 @@ TEST(regression_selection_reverse_direction) {
 TEST(regression_utf8_content) {
     // NOTA: los literales con secuencias hex seguidas de [a-f0-9] se
     // dividen en trozos contiguos para que \x no "coma" los digitos hex
-    // del texto (greedy): "mañana" = "ma\xc3\xb1" + "ana", etc.
+    // del texto (greedy): "ma\xc3\xb1" + "ana", etc.
     const std::vector<std::string> lines = {
         "caf\xc3\xa9 y \xe2\x80\x94 guion",
         "ma\xc3\xb1" "ana \xf0\x9f\x98\x80 emoji",
@@ -284,6 +305,25 @@ TEST(regression_utf8_content) {
     for (int width : {10, 15, 25, 60}) {
         std::string f = frameEditor(lines, 6, width);
         checkFrameWithinBounds(f, 6, width);
+        const auto rows = visibleRows(f);
+        int gw = std::min(gutterWidthLocal((int)lines.size()), width);
+        int tw = std::max(0, width - gw);
+        for (size_t i = 0; i < lines.size() && (int)i < 6; ++i) {
+            std::string row = rows[i];
+            CHECK(validUtf8(row));
+            std::string textPart = row.size() > (size_t)gw ? row.substr(gw) : "";
+            std::string expected = utf8::truncate(lines[i], tw);
+            if ((int)i == 0) {
+                std::string padded = expected;
+                int pad = tw - colWidthLocal(expected);
+                if (pad > 0) padded.append(pad, ' ');
+                CHECK_EQ(textPart, padded);
+            } else {
+                CHECK_EQ(textPart, expected);
+            }
+            CHECK(validUtf8(textPart));
+            CHECK(validUtf8(expected));
+        }
     }
 }
 
@@ -325,17 +365,62 @@ TEST(regression_terminal_large) {
 // Gutter y recorte de columnas: con 100 lineas y una terminal estrecha, el
 // numero de linea (de 3 digitos) no debe desbordar; con el fix, el gutter se
 // recorta al ancho disponible y la fila sigue dentro de la cota.
+// Verifica especificamente que el gutter esta recortado (cola del numero)
+// y no desborda, no solo el invariante global.
 // ---------------------------------------------------------------------------
 TEST(regression_gutter_clamped_at_narrow_width) {
     std::vector<std::string> doc;
     for (int i = 0; i < 100; ++i) doc.push_back("linea " + std::to_string(i + 1));
-    // Ancho 4: el gutter minimo (3) cabe entero y deja 1 columna de texto.
-    for (int width = 4; width <= 8; ++width) {
+    for (int width = 2; width <= 8; ++width) {
         std::string f = frameEditor(doc, 6, width);
+        checkFrameWithinBounds(f, 6, width);
         const auto rows = visibleRows(f);
-        // El contenido (filas 0..content-1) nunca excede el ancho.
-        for (int row = 0; row < 6; ++row)
+        int gw = std::min(gutterWidthLocal((int)doc.size()), width);
+        for (int row = 0; row < 6; ++row) {
             CHECK(colWidthLocal(rows[row]) <= width);
+            std::string numStr = std::to_string(row + 1);
+            int maxNumCols = std::max(0, gw - 1);
+            if ((int)numStr.size() > maxNumCols)
+                numStr = numStr.substr(numStr.size() - (size_t)maxNumCols);
+            int pad = std::max(0, gw - 1 - (int)numStr.size());
+            std::string expectedGutter = std::string(pad, ' ') + numStr + ' ';
+            std::string actualGutter = rows[row].size() >= (size_t)gw ? rows[row].substr(0, gw) : rows[row];
+            CHECK_EQ(actualGutter, expectedGutter);
+        }
+    }
+    std::vector<std::string> doc1000;
+    for (int i = 0; i < 1000; ++i) doc1000.push_back("linea " + std::to_string(i + 1));
+    for (int width = 3; width <= 6; ++width) {
+        auto frameAt = [&](int top) {
+            Document d; d.restore(doc1000);
+            Viewport vp; vp.top = top; vp.height = 6; vp.width = width;
+            Cursor cur; cur.line = top; cur.col = 0;
+            Renderer r;
+            return r.buildScreen(d, cur, vp, "/ruta/proyecto/archivo.txt", false, Message(""), State::Navegacion, std::nullopt);
+        };
+        {
+            std::string f = frameAt(0);
+            checkFrameWithinBounds(f, 6, width);
+        }
+        {
+            int top = (int)doc1000.size() - 6;
+            std::string f = frameAt(top);
+            checkFrameWithinBounds(f, 6, width);
+            const auto rows = visibleRows(f);
+            int gw = std::min(gutterWidthLocal((int)doc1000.size()), width);
+            for (int row = 0; row < 6; ++row) {
+                int docLine = top + row + 1;
+                std::string numStr = std::to_string(docLine);
+                int maxNumCols = std::max(0, gw - 1);
+                if ((int)numStr.size() > maxNumCols)
+                    numStr = numStr.substr(numStr.size() - (size_t)maxNumCols);
+                int pad = std::max(0, gw - 1 - (int)numStr.size());
+                std::string expectedGutter = std::string(pad, ' ') + numStr + ' ';
+                std::string actualGutter = rows[row].size() >= (size_t)gw ? rows[row].substr(0, gw) : rows[row];
+                CHECK_EQ(actualGutter, expectedGutter);
+                CHECK(colWidthLocal(rows[row]) <= width);
+            }
+        }
     }
 }
 
