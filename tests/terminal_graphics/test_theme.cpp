@@ -31,8 +31,7 @@ constexpr const char* kTestFgWhite = "\x1b[37m";
 constexpr const char* kTestFgBlack = "\x1b[30m";
 constexpr const char* kTestReset = "\x1b[0m";
 
-// Monta un frame del editor de una unica linea con seleccion (para ejercitar
-// currentLine + selection) y devuelve el ANSI crudo.
+// Construye un frame minimo que ejercita currentLine y selection.
 std::string editorFrameWithSelection(const Theme& theme, int width = 200) {
     Document doc;
     doc.restore({"hello world"});
@@ -68,10 +67,8 @@ std::string fileFrameWithSelection(const Theme& theme, int width = 200) {
 
 } // namespace
 
-// ---------------------------------------------------------------------------
-// El Theme por defecto reproduce los colores de v1.1. Si alguna constante
-// cambia de valor sin actualizar defaultTheme, este test lo delata.
-// ---------------------------------------------------------------------------
+// Garantiza que defaultTheme() conserve compatibilidad visual con el
+// esquema anterior.
 TEST(theme_default_matches_legacy_colors) {
     const Theme t = defaultTheme();
     CHECK_EQ(t.currentLine, std::string(kCurrentLineStyle));
@@ -112,10 +109,6 @@ TEST(theme_defaults_new_visual_language) {
     CHECK_EQ(t.listSelected, t.currentLine);
 }
 
-// ---------------------------------------------------------------------------
-// Renderer: el color de seleccion y de fila actual salen del Theme, no de
-// constantes. Un Theme con colores BIZARROS debe verse en el output.
-// ---------------------------------------------------------------------------
 TEST(theme_renderer_uses_theme_for_selection_and_currentline) {
     Theme t = defaultTheme();
     t.currentLine = kTestBgMagenta;
@@ -135,12 +128,6 @@ TEST(theme_renderer_uses_theme_for_selection_and_currentline) {
     CHECK(frame != editorFrameWithSelection(defaultTheme()));
 }
 
-// ---------------------------------------------------------------------------
-// Las listas (selector de buffers, explorador) usan el accent del item
-// ACTIVO (listSelected), NO el de la seleccion de TEXTO (selection). Asi el
-// lenguaje ACTIVO (gris) cubre la fila del cursor y el item de lista, y el
-// de SELECCION (video inverso) queda solo para el texto marcado.
-// ---------------------------------------------------------------------------
 TEST(theme_lists_use_listselected_not_selection) {
     const std::string base = bufferFrameWithSelection(defaultTheme());
     Theme t1 = defaultTheme();
@@ -163,10 +150,6 @@ TEST(theme_file_lists_use_listselected_not_selection) {
     CHECK(base.find(defaultTheme().listSelected) != std::string::npos);
 }
 
-// ---------------------------------------------------------------------------
-// StatusBar: la barra tambien lee sus colores del Theme. Un Theme alterado
-// debe reflejarse en la fila fija y en los mensajes de cada tipo.
-// ---------------------------------------------------------------------------
 TEST(theme_statusbar_uses_theme_for_colors) {
     Theme t = defaultTheme();
     t.statusBar = kTestBgBlue;
@@ -237,6 +220,9 @@ TEST(theme_renderer_propagates_to_statusbar) {
     CHECK(ed != edDefault);
 }
 
+// Cada reset debe reestablecer el background de la status bar. Esto evita
+// que segmentos con estilos propios dejen zonas de la fila sin el background
+// del Theme.
 TEST(theme_statusbar_background_covers_full_width) {
     Theme t = defaultTheme();
     t.statusBar = kTestBgBlue;
