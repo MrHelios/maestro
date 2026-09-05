@@ -1,86 +1,6 @@
+#include "test_support.h"
 #include <fstream>
 #include <iterator>
-#include <string>
-#include <vector>
-
-#include "test_framework.h"
-
-#include <cstdlib>
-#include <string>
-#include <vector>
-#define private public
-#include "ui/Editor.h"
-#undef private
-
-using testfw::TempFile;
-
-static Event insert(char c) {
-    Event e;
-    e.type = EventType::InsertChar;
-    e.text = std::string(1, c);
-    return e;
-}
-
-static void press(Editor& ed, EventType type) {
-    Event e;
-    e.type = type;
-    ed.handleEvent(e);
-}
-
-static void pressEvent(Editor& ed, const Event& ev) {
-    ed.handleEvent(ev);
-}
-static void saveViaS(Editor& ed) {
-    press(ed, EventType::Prefix);
-    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e);
-}
-
-
-static void type(Editor& ed, const std::string& s) {
-    if (s.empty()) return;
-    if (ed.state_ != State::Interaccion) {
-        if (ed.state_ == State::Seleccion) {
-            Event esc; esc.type = EventType::Escape; ed.handleEvent(esc);
-        }
-        ed.handleEvent(insert('i'));
-    }
-    for (char c : s)
-        ed.handleEvent(insert(c));
-}
-
-// v0.6.3: comandos de buffer via el prefijo Ctrl+K.
-static void newBuffer(Editor& ed) {
-    press(ed, EventType::Prefix);
-    pressEvent(ed, insert('n'));
-}
-
-// v0.7: guardar como. Ctrl+K Ctrl+S sobre un buffer sin nombre abre el
-// prompt "Guardar archivo:" en la fila de mensajes.
-static void openSaveAs(Editor& ed) {
-    press(ed, EventType::Prefix);
-    press(ed, EventType::Save);
-}
-
-// Escribe texto dentro del prompt SaveAs (modal: no pasa por Interaccion).
-static void typePrompt(Editor& ed, const std::string& s) {
-    for (char c : s)
-        pressEvent(ed, insert(c));
-}
-
-static void clearPrompt(Editor& ed) {
-    while (!ed.saveAsPath_.empty())
-        press(ed, EventType::Backspace);
-}
-
-static void openSelector(Editor& ed) {
-    press(ed, EventType::Prefix);
-    pressEvent(ed, insert('t'));
-}
-
-static void closeBuffer(Editor& ed) {
-    press(ed, EventType::Prefix);
-    pressEvent(ed, insert('w'));
-}
 
 // ---------------------------------------------------------------------------
 // Modelo de buffers (v0.6.3)
@@ -742,7 +662,7 @@ TEST(ctrl_k_w_modified_blocked_until_save) {
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK(ed.active().modified);
 
-    saveViaS(ed);
+    save(ed);
     CHECK(!ed.active().modified);
 
     closeBuffer(ed);                       // ahora si (ultimo buffer -> reset)
@@ -852,7 +772,7 @@ TEST(save_as_enter_saves_file) {
 
     type(ed, "!");
     press(ed, EventType::Escape);
-    saveViaS(ed);
+    save(ed);
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.statusMessage_, "Guardado.");
 }
@@ -885,7 +805,7 @@ TEST(save_as_on_new_buffer_updates_name_and_display) {
     type(ed, "!");
     press(ed, EventType::Escape);
     CHECK(ed.active().modified);
-    saveViaS(ed);
+    save(ed);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Navegacion));
     CHECK(!ed.active().modified);
 
@@ -1087,39 +1007,6 @@ TEST(save_as_unnamed_user_can_change_directory) {
     rmdir(dir);
 }
 
-// ---------------------------------------------------------------------------
-// Invariantes globales del modelo de buffers (v0.6.3)
-// ---------------------------------------------------------------------------
-static void assertBuffersConsistent(Editor& ed) {
-    // 1. Siempre existe al menos un buffer.
-    CHECK(ed.buffers.buffers_.size() >= 1);
-    // 2. Existe exactamente un buffer activo y es valido.
-    CHECK(ed.buffers.activeBuffer_ >= 0);
-    CHECK(ed.buffers.activeBuffer_ < static_cast<int>(ed.buffers.buffers_.size()));
-
-    // 3-9. Cada buffer mantiene su propio estado coherente.
-    for (const Buffer& b : ed.buffers.buffers_) {
-        CHECK(b.document.lineCount() >= 1);
-        CHECK(b.cursor.line >= 0);
-        CHECK(b.cursor.line < b.document.lineCount());
-        CHECK(b.cursor.col >= 0);
-        CHECK(b.cursor.col <= b.document.lineLength(b.cursor.line));
-        CHECK(b.undoStack.size() <= Buffer::MAX_UNDO);
-        CHECK(b.redoStack.size() <= Buffer::MAX_UNDO);
-        if (b.selection.has_value()) {
-            CHECK(b.selection->anchor.line >= 0);
-            CHECK(b.selection->anchor.line < b.document.lineCount());
-            CHECK(b.selection->position.line >= 0);
-            CHECK(b.selection->position.line < b.document.lineCount());
-        }
-    }
-
-    // 10. El modo global es coherente con el buffer activo.
-    if (ed.hasSelection()) {
-        CHECK(ed.state_ == State::Seleccion || ed.state_ == State::Prefix);
-    }
-}
-
 TEST(invariants_always_at_least_one_buffer) {
     Editor ed;
     newBuffer(ed);
@@ -1207,13 +1094,6 @@ TEST(buffer_stress_mixed_operations) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Renderer del selector (v0.6.3)
-// ---------------------------------------------------------------------------
-static bool contains(const std::string& hay, const std::string& needle) {
-    return hay.find(needle) != std::string::npos;
-}
-
 TEST(renderer_buffer_list_marks_selected) {
     Renderer r;
     std::string out = r.buildBufferListScreen({"a.txt", "b.txt", "SinNombre"}, 1, 80, 10);
@@ -1294,15 +1174,6 @@ TEST(buffer_names_include_modified_marker) {
     CHECK_EQ(names.size(), size_t(2));
     CHECK_EQ(names[0], "SinNombre *");
     CHECK_EQ(names[1], "SinNombre1");
-}
-
-// ---------------------------------------------------------------------------
-// Ctrl+K b : buffer anterior (toggle)
-// ---------------------------------------------------------------------------
-
-static void previousBuffer(Editor& ed) {
-    press(ed, EventType::Prefix);
-    pressEvent(ed, insert('b'));
 }
 
 TEST(ctrl_k_b_single_buffer_no_change) {

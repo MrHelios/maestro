@@ -1,58 +1,5 @@
-#include "test_framework.h"
-
-#define private public
-#include "ui/Editor.h"
-#undef private
+#include "test_support.h"
 #include "clipboard/FakeClipboard.h"
-
-static Event insert(char c) {
-    Event e;
-    e.type = EventType::InsertChar;
-    e.text = std::string(1, c);
-    return e;
-}
-
-static void press(Editor& ed, EventType t) {
-    Event e;
-    e.type = t;
-    ed.handleEvent(e);
-}
-
-static void pressEvent(Editor& ed, const Event& ev) {
-    ed.handleEvent(ev);
-}
-
-static void type(Editor& ed, const std::string& s) {
-    if (s.empty()) return;
-    if (ed.state_ != State::Interaccion) {
-        if (ed.state_ == State::Seleccion) {
-            Event esc; esc.type = EventType::Escape; ed.handleEvent(esc);
-        }
-        ed.handleEvent(insert('i'));
-    }
-    for (char c : s) ed.handleEvent(insert(c));
-}
-
-static void safeQuit(Editor& ed) {
-    press(ed, EventType::Prefix);
-    pressEvent(ed, insert('q'));
-}
-
-static void forcedQuit(Editor& ed) {
-    press(ed, EventType::Prefix);
-    press(ed, EventType::Quit);
-}
-
-static void saveViaS(Editor& ed) {
-    press(ed, EventType::Prefix);
-    pressEvent(ed, insert('s'));
-}
-
-static void newBuffer(Editor& ed) {
-    press(ed, EventType::Prefix);
-    pressEvent(ed, insert('n'));
-}
-
 TEST(safe_quit_single_saved_exits) {
     Editor ed(std::make_unique<FakeClipboard>());
     CHECK(!ed.active().modified);
@@ -344,7 +291,7 @@ TEST(caso_09_modificar_guardar_q) {
     type(ed, "x");
     press(ed, EventType::Escape);
     CHECK(ed.active().modified);
-    saveViaS(ed);
+    save(ed);
     CHECK(!ed.active().modified);
     safeQuit(ed);
     CHECK(!ed.running_);
@@ -356,7 +303,7 @@ TEST(caso_10_modificar_guardar_modificar_nuevamente) {
     CHECK(ed.openFile(f.path));
     type(ed, "X");
     press(ed, EventType::Escape);
-    saveViaS(ed);
+    save(ed);
     CHECK(!ed.active().modified);
     type(ed, "Y");
     press(ed, EventType::Escape);
@@ -391,7 +338,7 @@ TEST(caso_12_salir_despues_de_guardar_manualmente) {
     press(ed, EventType::Escape);
     safeQuit(ed);
     CHECK(ed.running_);
-    saveViaS(ed);
+    save(ed);
     CHECK(!ed.active().modified);
     safeQuit(ed);
     CHECK(!ed.running_);
@@ -458,7 +405,7 @@ TEST(caso_17_mensaje_desaparece) {
     press(ed, EventType::Escape);
     safeQuit(ed);
     CHECK(ed.statusMessage_.text.find("sin guardar") != std::string::npos);
-    saveViaS(ed);
+    save(ed);
     CHECK(!ed.active().modified);
     safeQuit(ed);
     CHECK(!ed.running_);
@@ -471,7 +418,7 @@ TEST(caso_18_regresion_ctrl_k_s) {
     type(ed, "MOD");
     press(ed, EventType::Escape);
     CHECK(ed.active().modified);
-    saveViaS(ed);
+    save(ed);
     CHECK(!ed.active().modified);
     std::ifstream in(f.path);
     std::string disk((std::istreambuf_iterator<char>(in)), {});

@@ -1,14 +1,3 @@
-#include <string>
-#include <vector>
-
-#include "test_framework.h"
-
-#include <string>
-#include <vector>
-#define private public
-#include "ui/Editor.h"
-#undef private
-
 // ===========================================================================
 // P0: INTERACTION TEST - Seleccion -> Delete -> Undo -> Redo
 // ===========================================================================
@@ -32,23 +21,7 @@
 // edicion Delete/Undo/Redo sobre una seleccion establecida.
 // ---------------------------------------------------------------------------
 
-static void press(Editor& ed, EventType type) {
-    Event e;
-    e.type = type;
-    ed.handleEvent(e);
-}
-
-static Event insert(char c) {
-    Event e;
-    e.type = EventType::InsertChar;
-    e.text = std::string(1, c);
-    return e;
-}
-
-// Prepara un editor con el documento dado, una seleccion [anchor, position]
-// ya establecida (modo Seleccion, cursor en el extremo position) y marca el
-// estado actual como "guardado" (modified=false) para poder verificar que
-// modified solo cambia cuando difiere del guardado.
+#include "test_support.h"
 static void prepareScenario(Editor& ed,
                             const std::vector<std::string>& lines,
                             Position anchor,

@@ -1,83 +1,5 @@
-#include <cstdlib>
+#include "test_support.h"
 #include <filesystem>
-#include <fstream>
-#include <iterator>
-#include <string>
-#include <unistd.h>
-
-#include "test_framework.h"
-
-// Incluimos los headers estandar ANTES de abrir las visibilidades privadas
-// para que <string>/<vector> mantengan su layout. Solo Editor se expone.
-#include <string>
-#include <vector>
-#define private public
-#include "ui/Editor.h"
-#undef private
-#include "core/utf8.h"
-
-using testfw::TempFile;
-
-static Event insert(char c) {
-    Event e;
-    e.type = EventType::InsertChar;
-    e.text = std::string(1, c);
-    return e;
-}
-
-static Event insertBytes(const std::string& text) {
-    Event e;
-    e.type = EventType::InsertChar;
-    e.text = text;
-    return e;
-}
-
-// Cuantos bytes UTF-8 ocupa el caracter cuyo byte de inicio es `b`.
-static int utf8Len(unsigned char b) {
-    if ((b & 0xE0) == 0xC0) return 2;
-    if ((b & 0xF0) == 0xE0) return 3;
-    if ((b & 0xF8) == 0xF0) return 4;
-    return 1;
-}
-
-// Abre el modo Interaccion (presiona 'i') si no estamos ya en el: es lo
-// que en v0.5 permite escribir libremente.
-static void enterInteraccion(Editor& ed) {
-    if (ed.state_ != State::Interaccion) {
-        if (ed.state_ == State::Seleccion) {
-            Event esc; esc.type = EventType::Escape; ed.handleEvent(esc);
-        }
-        ed.handleEvent(insert('i'));
-    }
-}
-
-static void type(Editor& ed, const std::string& s) {
-    if (s.empty()) return;
-    enterInteraccion(ed);
-    for (size_t i = 0; i < s.size();) {
-        int len = utf8Len(static_cast<unsigned char>(s[i]));
-        ed.handleEvent(insertBytes(s.substr(i, static_cast<size_t>(len))));
-        i += static_cast<size_t>(len);
-    }
-}
-
-static void press(Editor& ed, EventType type) {
-    Event e;
-    e.type = type;
-    ed.handleEvent(e);
-}
-
-// v0.5: un Save suelto (Ctrl+S) es no-op fuera del prefijo. Guardar pasa
-// obligatoriamente por Ctrl+K -> Ctrl+S (Prefix -> Save).
-static void save(Editor& ed) {
-    press(ed, EventType::Prefix);
-    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e);
-}
-
-static std::string fileContent(const std::string& p) {
-    std::ifstream f(p, std::ios::binary);
-    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-}
 
 // ---------------------------------------------------------------------------
 // 1. Inicio del programa / Abrir archivo
@@ -135,25 +57,6 @@ TEST(editor_open_relative_resolves_absolute) {
     CHECK(getcwd(cwd, sizeof cwd) != nullptr);
     CHECK_EQ(ed.active().filename, std::string(cwd) + "/archivo_rel_zz_no_existe.txt");
 }
-
-// Directorio temporal (mkdtemp) que se borra al salir, aunque un CHECK falle.
-struct TempDir {
-    std::string path;
-
-    TempDir() {
-        char tmpl[] = "/tmp/edit_test_dir_XXXXXX";
-        char* p = mkdtemp(tmpl);
-        path = p ? std::string(p) : std::string();
-    }
-
-    ~TempDir() {
-        if (!path.empty())
-            rmdir(path.c_str());
-    }
-
-    TempDir(const TempDir&) = delete;
-    TempDir& operator=(const TempDir&) = delete;
-};
 
 TEST(editor_open_normalizes_dotdot) {
     // Abrir "dir/sub/../a.txt" (con "..") debe guardar el filename
@@ -859,28 +762,6 @@ TEST(editor_quit_with_unsaved_changes_via_prefix) {
     press(ed, EventType::Quit);
     CHECK(!ed.running_);
 }
-
-// Cursor: columna VISUAL (1-based, la de la secuencia "\x1b[1;<col>H") a la
-// que el Renderer moveria el cursor para `line` con cursor en el byte
-// `byteCol`. Usado por los tests de cursor tras tipear multibyte.
-namespace {
-int cursorScreenCol(const std::string& line, int byteCol) {
-    Document doc;
-    doc.restore({line});
-    Viewport vp;
-    vp.top = 0; vp.height = 1; vp.width = 200;
-    Cursor c;
-    c.line = 0; c.col = byteCol;
-    Renderer r;
-    std::string f = r.buildScreen(doc, c, vp, "t", false, "", State::Navegacion, std::nullopt);
-    size_t pos = f.rfind("\x1b[1;");
-    if (pos == std::string::npos) return -1;
-    size_t end = f.find('H', pos);
-    // La columna de terminal emite gutter+visual+1; se resta el gutter (3
-    // para un frame de 1 linea) para devolver la columna VISUAL del texto.
-    return std::stoi(f.substr(pos + 4, end - pos - 4)) - 3;
-}
-} // namespace
 
 // ---------------------------------------------------------------------------
 // 16. Cursor desplazandose por caracteres UTF-8 CONSECUTIVOS ("éééé",

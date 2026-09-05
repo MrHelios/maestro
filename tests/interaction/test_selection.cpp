@@ -1,82 +1,6 @@
+#include "test_support.h"
 #include <fstream>
 #include <iterator>
-#include <string>
-#include <vector>
-
-#include "test_framework.h"
-
-// Accedemos a las piezas internas (document_, cursor_) igual que en
-// test_editor.cpp, para verificar que la seleccion se mantiene
-// sincronizada con el cursor.
-#include <string>
-#include <vector>
-#define private public
-#include "ui/Editor.h"
-#undef private
-
-static Event insert(char c) {
-    Event e;
-    e.type = EventType::InsertChar;
-    e.text = std::string(1, c);
-    return e;
-}
-
-static Event escapeEvent() {
-    Event e;
-    e.type = EventType::Escape;
-    return e;
-}
-
-// v0.5: escribir requiere el modo Interaccion (letra 'i').
-static void enterInteraccion(Editor& ed) {
-    if (ed.state_ != State::Interaccion) {
-        if (ed.state_ == State::Seleccion) {
-            ed.handleEvent(escapeEvent());
-        }
-        ed.handleEvent(insert('i'));
-    }
-}
-
-static void type(Editor& ed, const std::string& s) {
-    if (s.empty()) return;
-    enterInteraccion(ed);
-    for (char c : s)
-        ed.handleEvent(insert(c));
-}
-
-static void press(Editor& ed, EventType type) {
-    Event e;
-    e.type = type;
-    ed.handleEvent(e);
-}
-
-// v0.5: la seleccion se activa con la letra 's' desde Navegacion. Este
-// helper emula el flujo del usuario: si no estamos en modo seleccion,
-// salimos de Interaccion si hace falta (ESC) y presionamos 's'; la
-// flecha posterior extiende la seleccion.
-static void enterSeleccion(Editor& ed) {
-    if (ed.state_ != State::Seleccion) {
-        if (ed.state_ == State::Interaccion) {
-            ed.handleEvent(escapeEvent());
-        }
-        ed.handleEvent(insert('s'));
-    }
-}
-
-static void selectPress(Editor& ed, EventType type) {
-    enterSeleccion(ed);
-    press(ed, type);
-}
-
-// guardar pasa por el prefijo (Ctrl+K s); un Save suelto no-op.
-static void save(Editor& ed) {
-    press(ed, EventType::Prefix);
-    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e);
-}
-
-// ---------------------------------------------------------------------------
-// 15. Seleccion: modelo y contrato via eventos
-// ---------------------------------------------------------------------------
 TEST(selection_empty_by_default) {
     Editor ed;
     CHECK(!ed.hasSelection());
@@ -1075,15 +999,6 @@ TEST(selection_cancel_does_not_set_modified) {
     CHECK(!ed.active().modified);
 }
 
-// ---------------------------------------------------------------------------
-// Paso 14: la seleccion no se guarda (solo el documento)
-// ---------------------------------------------------------------------------
-static std::string selSavedContent(const std::string& p) {
-    std::ifstream f(p, std::ios::binary);
-    return std::string((std::istreambuf_iterator<char>(f)),
-                       std::istreambuf_iterator<char>());
-}
-
 TEST(editor_save_with_selection) {
     using testfw::TempFile;
     TempFile f;
@@ -1098,7 +1013,7 @@ TEST(editor_save_with_selection) {
     save(ed);   // Ctrl+K + Ctrl+S
 
     // El archivo guarda SOLO el documento, sin nada de seleccion.
-    CHECK_EQ(selSavedContent(f.path), "hello");
+    CHECK_EQ(fileContent(f.path), "hello");
     CHECK(!ed.active().modified);
     CHECK(ed.hasSelection()); // la seleccion en pantalla sigue intacta
 }
@@ -1115,7 +1030,7 @@ TEST(editor_save_after_selection_cancel) {
 
     save(ed);   // Ctrl+K + Ctrl+S
 
-    CHECK_EQ(selSavedContent(f.path), "hello");
+    CHECK_EQ(fileContent(f.path), "hello");
     CHECK(!ed.active().modified);
 }
 

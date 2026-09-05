@@ -461,3 +461,19 @@ TEST(range_never_produces_invalid_utf8) {
             }
     }
 }
+
+TEST(isValid_empty_and_ascii) {
+    CHECK(utf8::isValid(""));
+    CHECK(utf8::isValid("hello"));
+    CHECK(utf8::isValid("café"));
+    CHECK(utf8::isValid("😀"));
+}
+
+TEST(isValid_rejects_overlong_and_surrogates) {
+    CHECK(!utf8::isValid("\xC0\x80"));
+    CHECK(!utf8::isValid("\xE0\x80\x80"));
+    CHECK(!utf8::isValid("\xED\xA0\x80"));
+    CHECK(!utf8::isValid("\xF4\x90\x80\x80"));
+    CHECK(!utf8::isValid("\xC3"));
+    CHECK(!utf8::isValid("\x80"));
+}

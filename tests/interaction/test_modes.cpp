@@ -1,78 +1,4 @@
-#include <fstream>
-#include <iterator>
-#include <string>
-#include <vector>
-
-#include "test_framework.h"
-
-#include <string>
-#include <vector>
-#define private public
-#include "ui/Editor.h"
-#undef private
-
-using testfw::TempFile;
-
-static Event insert(char c) {
-    Event e;
-    e.type = EventType::InsertChar;
-    e.text = std::string(1, c);
-    return e;
-}
-
-static Event escapeEvent() {
-    Event e;
-    e.type = EventType::Escape;
-    return e;
-}
-
-static void type(Editor& ed, const std::string& s) {
-    if (s.empty()) return;
-    // v0.5: escribir requiere el modo Interaccion (letra 'i').
-    if (ed.state_ != State::Interaccion) {
-        if (ed.state_ == State::Seleccion) {
-            ed.handleEvent(escapeEvent());
-        }
-        ed.handleEvent(insert('i'));
-    }
-    for (char c : s)
-        ed.handleEvent(insert(c));
-}
-
-static void press(Editor& ed, EventType type) {
-    Event e;
-    e.type = type;
-    ed.handleEvent(e);
-}
-static void saveViaS(Editor& ed) {
-    press(ed, EventType::Prefix);
-    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e);
-}
-
-
-// Entra al modo seleccion con la letra 's' (desde Navegacion).
-static void enterSeleccion(Editor& ed) {
-    if (ed.state_ != State::Seleccion) {
-        if (ed.state_ == State::Interaccion) {
-            ed.handleEvent(escapeEvent());
-        }
-        ed.handleEvent(insert('s'));
-    }
-}
-
-static void prefix(Editor& ed, EventType first, EventType second) {
-    press(ed, first);
-    press(ed, second);
-}
-
-static std::string fileContent(const std::string& p) {
-    std::ifstream f(p, std::ios::binary);
-    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
-}
-
-// ---------------------------------------------------------------------------
-// v0.5: modo Navegacion (estado por defecto)
-// ---------------------------------------------------------------------------
+#include "test_support.h"
 TEST(navigation_starts_in_navegacion) {
     Editor ed;
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -523,7 +449,7 @@ TEST(prefix_save_saves_file) {
     ed.openFile(f.path);
     type(ed, "hola");
     CHECK(ed.active().modified);
-    saveViaS(ed); // Ctrl+K, Ctrl+S
+    save(ed); // Ctrl+K, Ctrl+S
     CHECK(!ed.active().modified);
     CHECK_EQ(fileContent(f.path), "hola");
 }
@@ -534,7 +460,7 @@ TEST(prefix_save_returns_to_navegacion) {
     ed.openFile(f.path);
     type(ed, "abc");
     press(ed, EventType::Escape); // -> Navegacion
-    saveViaS(ed);
+    save(ed);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
@@ -545,7 +471,7 @@ TEST(prefix_save_keeps_interaction_mode) {
     Editor ed;
     ed.openFile(f.path);
     type(ed, "abc");              // Interaccion
-    saveViaS(ed);
+    save(ed);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
 }
 
@@ -607,7 +533,7 @@ TEST(prefix_save_from_selection_keeps_mode) {
     CHECK(ed.hasSelection());
     CHECK(ed.active().modified);
 
-    saveViaS(ed); // Ctrl+K, Ctrl+S
+    save(ed); // Ctrl+K, Ctrl+S
     CHECK(!ed.active().modified);
     CHECK_EQ(fileContent(f.path), "hello");
     CHECK(ed.hasSelection());
@@ -688,26 +614,6 @@ TEST(open_file_starts_in_navegacion) {
 //   El editor debe comenzar SIEMPRE en Navegacion, con un cursor valido,
 //   sin seleccion, sin portapapeles y sin cambios pendientes.
 // ---------------------------------------------------------------------------
-// Invariantes del estado inicial: cursor valido (dentro del documento),
-// ninguna seleccion, clipboard_ vacio y modified_ == false.
-static void assertInitialState(const Editor& ed) {
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-
-    // Cursor valido: apunta a una posicion existente del documento.
-    CHECK(ed.active().cursor.line >= 0);
-    CHECK(ed.active().cursor.col >= 0);
-    CHECK(ed.active().cursor.line < ed.active().document.lineCount());
-    CHECK(ed.active().cursor.col <= ed.active().document.lineLength(ed.active().cursor.line));
-
-    // Ninguna seleccion activa.
-    CHECK(!ed.hasSelection());
-
-    // Portapapeles vacio.
-    CHECK(ed.getClipboardBlock().empty());
-
-    // Sin cambios sin guardar.
-    CHECK(!ed.active().modified);
-}
 
 TEST(initial_state_fresh_editor_is_navegacion) {
     // Editor recien creado (aun sin abrir archivo alguno).
@@ -772,7 +678,7 @@ TEST(initial_state_after_save_is_navegacion) {
     ed.openFile(f.path);
     type(ed, "hola");                    // Interaccion
     press(ed, EventType::Escape);        // -> Navegacion
-    saveViaS(ed); // guarda -> vuelve
+    save(ed); // guarda -> vuelve
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(!ed.active().modified);
     CHECK(ed.getClipboardBlock().empty()); // sin portapapeles
@@ -801,24 +707,11 @@ TEST(initial_state_after_cancel_prefix_returns_navegacion) {
 // ---------------------------------------------------------------------------
 // v0.55: buffer copiar/cortar/pegar
 // ---------------------------------------------------------------------------
-// Helper: deja el editor con el cursor en Home y baja a una seleccion
-// del rango [0, n) de la linea actual (input y seleccion comparten linea).
-// Devuelve el rango seleccionado via ed.hasSelection() si n > 0.
-static void selectChars(Editor& ed, int n) {
-    press(ed, EventType::MoveHome); // -> cursor col 0
-    if (ed.state_ != State::Seleccion) {
-        enterSeleccion(ed);
-    }
-    for (int i = 0; i < n; ++i) {
-        press(ed, EventType::MoveRight);
-    }
-}
-
 TEST(clipboard_c_copies_without_removing) {
     Editor ed;
     type(ed, "abc");               // Interaccion, cursor (0,3); modifica + historial
     size_t undoBefore = ed.active().undoStack.size();
-    selectChars(ed, 2);            // selecciona "ab"
+    selectFirstChars(ed, 2);            // selecciona "ab"
     CHECK(ed.hasSelection());
     ed.handleEvent(insert('c'));
     CHECK(!ed.hasSelection());
@@ -849,7 +742,7 @@ TEST(clipboard_c_with_empty_selection_copies_nothing) {
 TEST(clipboard_x_cuts_and_pushes_history) {
     Editor ed;
     type(ed, "abc");
-    selectChars(ed, 2);            // selecciona "ab"
+    selectFirstChars(ed, 2);            // selecciona "ab"
     ed.handleEvent(insert('x'));
     CHECK_EQ(ed.active().document.lineAt(0), "c");
     CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ab"}));
@@ -895,7 +788,7 @@ TEST(clipboard_p_with_empty_buffer_noop) {
 TEST(clipboard_p_pastes_and_repositions_cursor) {
     Editor ed;
     type(ed, "abc");
-    selectChars(ed, 2);             // selecciona "ab"
+    selectFirstChars(ed, 2);             // selecciona "ab"
     ed.handleEvent(insert('c'));    // copia "ab" -> Navegacion, cursor (0,0)
     ed.handleEvent(insert('p'));    // pega en (0,0)... cursor real (0,2)
     CHECK_EQ(ed.active().document.lineAt(0), "ababc");
@@ -974,7 +867,7 @@ TEST(clipboard_p_in_selection_is_noop) {
     // que no sea c/x: se ignora, sin pegar y sin salir del modo.
     Editor ed;
     type(ed, "abc");
-    selectChars(ed, 1);             // [a]
+    selectFirstChars(ed, 1);             // [a]
     CHECK(ed.hasSelection());
     ed.handleEvent(insert('p'));
     CHECK(ed.hasSelection());
@@ -1391,7 +1284,7 @@ TEST(clipboard_paste_undo_redo_clipboard_stays_constant) {
 TEST(clipboard_cut_then_undo_keeps_buffer) {
     Editor ed;
     type(ed, "hola");
-    selectChars(ed, 2);             // [ho]
+    selectFirstChars(ed, 2);             // [ho]
     ed.handleEvent(insert('x'));    // corta "ho": doc "la", buffer ["ho"]
     CHECK_EQ(ed.active().document.lineAt(0), "la");
     CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ho"}));
@@ -1500,7 +1393,7 @@ TEST(undo_cut_redo_then_undo_cycles_selection) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    selectChars(ed, 2);                       // [ab] (0,0)-(0,2)
+    selectFirstChars(ed, 2);                       // [ab] (0,0)-(0,2)
     ed.handleEvent(insert('x'));              // corta "ab"
 
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"cdef"}));

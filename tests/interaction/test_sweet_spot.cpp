@@ -1,20 +1,11 @@
+#include "test_support.h"
 #include <chrono>
-#include <filesystem>
-#include <fstream>
 #include <thread>
-#include <vector>
-
-#include "test_framework.h"
-
-#define private public
-#include "ui/Editor.h"
-#include "filesystem/InotifyFileWatcher.h"
-#undef private
 #include "clipboard/FakeClipboard.h"
 #include "filesystem/NullFileWatcher.h"
-
-using testfw::TempFile;
-
+#define private public
+#include "filesystem/InotifyFileWatcher.h"
+#undef private
 static Editor makeNullEditor() {
     return Editor(std::make_unique<FakeClipboard>(), std::make_unique<NullFileWatcher>());
 }

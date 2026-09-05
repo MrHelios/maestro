@@ -1,20 +1,10 @@
-#include <string>
-#include <vector>
-#include "test_framework.h"
-#include "core/utf8.h"
-#define private public
-#include "ui/Editor.h"
-#undef private
-
-static Event ins(char c){ Event e; e.type=EventType::InsertChar; e.text=std::string(1,c); return e; }
-static Event ev(EventType t){ Event e; e.type=t; return e; }
-static void typeQ(Editor& ed, const std::string& s){ for(unsigned char c: s) ed.handleEvent(ins(c)); }
+#include "test_support.h"
 
 // 1 Entrada y salida
 TEST(busqueda_f_entra) {
     Editor ed; ed.active().document.restore({"abc"});
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    ed.handleEvent(ins('f'));
+    ed.handleEvent(insert('f'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Busqueda));
     CHECK_EQ(ed.searchQuery_, "");
     CHECK_EQ(ed.statusMessage_.text, "Find: ");
@@ -23,7 +13,7 @@ TEST(busqueda_esc_vacia) {
     Editor ed; ed.active().document.restore({"abc"});
     ed.active().cursor.line=0; ed.active().cursor.col=1;
     Position orig{1,1}; orig.line=0; orig.col=1;
-    ed.handleEvent(ins('f'));
+    ed.handleEvent(insert('f'));
     ed.handleEvent(ev(EventType::Escape));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().cursor.line, orig.line);
@@ -34,7 +24,7 @@ TEST(busqueda_enter_vacia) {
     Editor ed; ed.active().document.restore({"abc"});
     ed.active().cursor.line=0; ed.active().cursor.col=2;
     Position orig{0,2};
-    ed.handleEvent(ins('f'));
+    ed.handleEvent(insert('f'));
     ed.handleEvent(ev(EventType::InsertNewline));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().cursor.line, orig.line);
@@ -45,28 +35,28 @@ TEST(busqueda_enter_vacia) {
 TEST(busqueda_unica_coincidencia) {
     Editor ed; ed.active().document.restore({"hello world"});
     ed.active().cursor.line=0; ed.active().cursor.col=0;
-    ed.handleEvent(ins('f')); typeQ(ed,"world");
+    ed.handleEvent(insert('f')); typeBytes(ed,"world");
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 6);
 }
 TEST(busqueda_varias_primera) {
     Editor ed; ed.active().document.restore({"hello","world","hello again"});
     ed.active().cursor.line=0; ed.active().cursor.col=0;
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
 }
 TEST(busqueda_desde_cursor) {
     Editor ed; ed.active().document.restore({"hello","world","hello"});
     ed.active().cursor.line=1; ed.active().cursor.col=0;
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 2);
     CHECK_EQ(ed.active().cursor.col, 0);
 }
 TEST(busqueda_exacta_sobre_coincidencia) {
     Editor ed; ed.active().document.restore({"hello"});
     ed.active().cursor.line=0; ed.active().cursor.col=0;
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
 }
@@ -74,7 +64,7 @@ TEST(busqueda_no_coincidencias) {
     Editor ed; ed.active().document.restore({"hello"});
     ed.active().cursor.line=0; ed.active().cursor.col=2;
     Position orig{0,2};
-    ed.handleEvent(ins('f')); typeQ(ed,"zzz");
+    ed.handleEvent(insert('f')); typeBytes(ed,"zzz");
     CHECK_EQ(ed.active().cursor.line, orig.line);
     CHECK_EQ(ed.active().cursor.col, orig.col);
     CHECK(ed.statusMessage_.text.find("- not found")!=std::string::npos);
@@ -83,7 +73,7 @@ TEST(busqueda_query_vacia_vuelve_origen) {
     Editor ed; ed.active().document.restore({"hello world"});
     ed.active().cursor.line=0; ed.active().cursor.col=1;
     Position orig{0,1};
-    ed.handleEvent(ins('f')); typeQ(ed,"hi");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hi");
     ed.handleEvent(ev(EventType::Backspace)); ed.handleEvent(ev(EventType::Backspace));
     CHECK_EQ(ed.searchQuery_, "");
     CHECK_EQ(ed.active().cursor.line, orig.line);
@@ -94,14 +84,14 @@ TEST(busqueda_query_vacia_vuelve_origen) {
 // 3 Navegación
 TEST(busqueda_navegacion_down) {
     Editor ed; ed.active().document.restore({"hello","abc","hello","abc","hello"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 0);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.line, 2);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.line, 4);
 }
 TEST(busqueda_navegacion_up) {
     Editor ed; ed.active().document.restore({"hello","abc","hello","abc","hello"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     ed.handleEvent(ev(EventType::MoveDown)); ed.handleEvent(ev(EventType::MoveDown));
     CHECK_EQ(ed.active().cursor.line, 4);
     ed.handleEvent(ev(EventType::MoveUp)); CHECK_EQ(ed.active().cursor.line, 2);
@@ -109,27 +99,27 @@ TEST(busqueda_navegacion_up) {
 }
 TEST(busqueda_wrap_down) {
     Editor ed; ed.active().document.restore({"hello","abc","hello","abc","hello"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     ed.handleEvent(ev(EventType::MoveDown)); ed.handleEvent(ev(EventType::MoveDown));
     CHECK_EQ(ed.active().cursor.line, 4);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.line, 0);
 }
 TEST(busqueda_wrap_up) {
     Editor ed; ed.active().document.restore({"hello","abc","hello","abc","hello"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 0);
     ed.handleEvent(ev(EventType::MoveUp)); CHECK_EQ(ed.active().cursor.line, 4);
 }
 TEST(busqueda_una_sola_no_cambia) {
     Editor ed; ed.active().document.restore({"hello","abc","xyz"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 0);
     ed.handleEvent(ev(EventType::MoveUp)); CHECK_EQ(ed.active().cursor.line, 0);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.line, 0);
 }
 TEST(busqueda_sin_coincidencias_up_down_no_cambia) {
     Editor ed; ed.active().document.restore({"hello"});
-    ed.handleEvent(ins('f')); typeQ(ed,"zzz");
+    ed.handleEvent(insert('f')); typeBytes(ed,"zzz");
     Position p{ed.active().cursor.line, ed.active().cursor.col};
     ed.handleEvent(ev(EventType::MoveUp));
     CHECK_EQ(ed.active().cursor.line, p.line);
@@ -140,7 +130,7 @@ TEST(busqueda_sin_coincidencias_up_down_no_cambia) {
 }
 TEST(busqueda_varias_misma_linea) {
     Editor ed; ed.active().document.restore({"hola hola hola"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hola");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hola");
     CHECK_EQ(ed.active().cursor.col, 0);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.col, 5);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.col, 10);
@@ -148,7 +138,7 @@ TEST(busqueda_varias_misma_linea) {
 }
 TEST(busqueda_navegacion_tres_matches_wrap) {
     Editor ed; ed.active().document.restore({"hello","abc","hello","abc","hello"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK(ed.statusMessage_.text.find("(1/3)") != std::string::npos);
     CHECK(ed.searchHighlight_.has_value());
@@ -173,12 +163,12 @@ TEST(busqueda_navegacion_tres_matches_wrap) {
 
 TEST(busqueda_contador_1) {
     Editor ed; ed.active().document.restore({"ola"});
-    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    ed.handleEvent(insert('f')); typeBytes(ed,"ola");
     CHECK(ed.statusMessage_.text.find("(1/1)") != std::string::npos);
 }
 TEST(busqueda_contador_2) {
     Editor ed; ed.active().document.restore({"ola","ola"});
-    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    ed.handleEvent(insert('f')); typeBytes(ed,"ola");
     CHECK(ed.statusMessage_.text.find("(1/2)") != std::string::npos);
     ed.handleEvent(ev(EventType::MoveDown));
     CHECK(ed.statusMessage_.text.find("(2/2)") != std::string::npos);
@@ -186,28 +176,28 @@ TEST(busqueda_contador_2) {
 TEST(busqueda_contador_12) {
     std::vector<std::string> lines(12,"ola");
     Editor ed; ed.active().document.restore(lines);
-    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    ed.handleEvent(insert('f')); typeBytes(ed,"ola");
     CHECK(ed.statusMessage_.text.find("(1/12)") != std::string::npos);
     CHECK(ed.statusMessage_.text.find("(100+)") == std::string::npos);
 }
 TEST(busqueda_contador_100) {
     std::vector<std::string> lines(100,"ola");
     Editor ed; ed.active().document.restore(lines);
-    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    ed.handleEvent(insert('f')); typeBytes(ed,"ola");
     CHECK(ed.statusMessage_.text.find("(1/100)") != std::string::npos);
     CHECK(ed.statusMessage_.text.find("(100+)") == std::string::npos);
 }
 TEST(busqueda_contador_101) {
     std::vector<std::string> lines(101,"ola");
     Editor ed; ed.active().document.restore(lines);
-    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    ed.handleEvent(insert('f')); typeBytes(ed,"ola");
     CHECK(ed.statusMessage_.text.find("(100+)") != std::string::npos);
     CHECK(ed.statusMessage_.text.find("(1/101)") == std::string::npos);
 }
 TEST(busqueda_contador_101_navega) {
     std::vector<std::string> lines(101,"ola");
     Editor ed; ed.active().document.restore(lines);
-    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    ed.handleEvent(insert('f')); typeBytes(ed,"ola");
     CHECK(ed.statusMessage_.text.find("(100+)") != std::string::npos);
     for (int i = 0; i < 100; ++i) ed.handleEvent(ev(EventType::MoveDown));
     CHECK_EQ(ed.active().cursor.line, 100);
@@ -219,17 +209,17 @@ TEST(busqueda_contador_101_navega) {
 // 4 Actualización incremental
 TEST(busqueda_incremental_cada_caracter) {
     Editor ed; ed.active().document.restore({"hello","help","hero"});
-    ed.handleEvent(ins('f'));
-    ed.handleEvent(ins('h')); CHECK_EQ(ed.active().cursor.line, 0);
-    ed.handleEvent(ins('e')); CHECK_EQ(ed.active().cursor.line, 0);
-    ed.handleEvent(ins('l')); CHECK_EQ(ed.active().cursor.line, 0);
-    ed.handleEvent(ins('l')); CHECK_EQ(ed.active().cursor.line, 0);
-    ed.handleEvent(ins('o')); CHECK_EQ(ed.active().cursor.line, 0);
+    ed.handleEvent(insert('f'));
+    ed.handleEvent(insert('h')); CHECK_EQ(ed.active().cursor.line, 0);
+    ed.handleEvent(insert('e')); CHECK_EQ(ed.active().cursor.line, 0);
+    ed.handleEvent(insert('l')); CHECK_EQ(ed.active().cursor.line, 0);
+    ed.handleEvent(insert('l')); CHECK_EQ(ed.active().cursor.line, 0);
+    ed.handleEvent(insert('o')); CHECK_EQ(ed.active().cursor.line, 0);
     CHECK(ed.statusMessage_.text.find("- not found")==std::string::npos);
 }
 TEST(busqueda_backspace_recalcula) {
     Editor ed; ed.active().document.restore({"hello"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.col, 0);
     ed.handleEvent(ev(EventType::Backspace));
     CHECK_EQ(ed.searchQuery_, "hell");
@@ -238,17 +228,17 @@ TEST(busqueda_backspace_recalcula) {
 }
 TEST(busqueda_notfound_a_encontrado) {
     Editor ed; ed.active().document.restore({"hello"});
-    ed.handleEvent(ins('f')); ed.handleEvent(ins('x'));
+    ed.handleEvent(insert('f')); ed.handleEvent(insert('x'));
     CHECK(ed.statusMessage_.text.find("- not found")!=std::string::npos);
-    ed.handleEvent(ev(EventType::Backspace)); ed.handleEvent(ins('h'));
+    ed.handleEvent(ev(EventType::Backspace)); ed.handleEvent(insert('h'));
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK(ed.statusMessage_.text.find("- not found")==std::string::npos);
 }
 TEST(busqueda_encontrado_a_notfound) {
     Editor ed; ed.active().document.restore({"hello"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     Position p{ed.active().cursor.line, ed.active().cursor.col};
-    ed.handleEvent(ins('x'));
+    ed.handleEvent(insert('x'));
     CHECK(ed.statusMessage_.text.find("- not found")!=std::string::npos);
     CHECK_EQ(ed.active().cursor.line, p.line);
     CHECK_EQ(ed.active().cursor.col, p.col);
@@ -259,7 +249,7 @@ TEST(busqueda_esc_vuelve_origen) {
     Editor ed; ed.active().document.restore({"abc hola","xxxx","abc hola"});
     ed.active().cursor.line=0; ed.active().cursor.col=0;
     Position orig{0,0};
-    ed.handleEvent(ins('f')); typeQ(ed,"hola");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hola");
     ed.handleEvent(ev(EventType::MoveDown));
     CHECK_EQ(ed.active().cursor.line, 2);
     ed.handleEvent(ev(EventType::Escape));
@@ -270,7 +260,7 @@ TEST(busqueda_esc_vuelve_origen) {
 }
 TEST(busqueda_enter_deja_posicion) {
     Editor ed; ed.active().document.restore({"abc hola","xxxx","abc hola"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hola");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hola");
     ed.handleEvent(ev(EventType::MoveDown));
     Position last{ed.active().cursor.line, ed.active().cursor.col};
     ed.handleEvent(ev(EventType::InsertNewline));
@@ -283,18 +273,18 @@ TEST(busqueda_enter_deja_posicion) {
 TEST(busqueda_utf8) {
     Editor ed; ed.active().document.restore({"abc café hola"});
     ed.active().cursor.line=0; ed.active().cursor.col=0;
-    ed.handleEvent(ins('f')); typeQ(ed,"hola");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hola");
     CHECK_EQ(ed.active().cursor.col, 10);
     ed.handleEvent(ev(EventType::Escape));
-    ed.handleEvent(ins('f')); typeQ(ed,"café");
+    ed.handleEvent(insert('f')); typeBytes(ed,"café");
     CHECK_EQ(ed.active().cursor.col, 4);
     ed.handleEvent(ev(EventType::Escape));
-    ed.handleEvent(ins('f')); typeQ(ed,"é");
+    ed.handleEvent(insert('f')); typeBytes(ed,"é");
     CHECK_EQ(ed.active().cursor.col, 7);
 }
 TEST(busqueda_utf8_backspace) {
     Editor ed; ed.active().document.restore({"café café"});
-    ed.handleEvent(ins('f')); typeQ(ed,"café");
+    ed.handleEvent(insert('f')); typeBytes(ed,"café");
     CHECK_EQ(ed.active().cursor.col, 0);
     ed.handleEvent(ev(EventType::Backspace));
     CHECK_EQ(ed.searchQuery_, "caf");
@@ -302,7 +292,7 @@ TEST(busqueda_utf8_backspace) {
 }
 TEST(busqueda_archivo_vacio) {
     Editor ed; ed.active().document.restore({""});
-    ed.handleEvent(ins('f')); typeQ(ed,"a");
+    ed.handleEvent(insert('f')); typeBytes(ed,"a");
     CHECK(ed.statusMessage_.text.find("- not found")!=std::string::npos);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Busqueda));
     ed.handleEvent(ev(EventType::Escape));
@@ -311,7 +301,7 @@ TEST(busqueda_archivo_vacio) {
 TEST(busqueda_abc_hola_wrap) {
     Editor ed; ed.active().document.restore({"abc hola","xxxx","abc hola"});
     ed.active().cursor.line=0; ed.active().cursor.col=0;
-    ed.handleEvent(ins('f')); typeQ(ed,"hola");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hola");
     CHECK_EQ(ed.active().cursor.line, 0);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.line, 2);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.line, 0);
@@ -325,7 +315,7 @@ TEST(busqueda_esc_restaura_linea5_col10) {
     ed.active().document.restore(lines);
     ed.active().cursor.line=0; ed.active().cursor.col=0;
     Position orig{0,0};
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 5);
     CHECK_EQ(ed.active().cursor.col, 10);
     ed.handleEvent(ev(EventType::Escape));
@@ -338,7 +328,7 @@ TEST(busqueda_esc_varias_navegaciones_vuelve_origen) {
     Editor ed; ed.active().document.restore({"hello","abc","hello","abc","hello"});
     ed.active().cursor.line=0; ed.active().cursor.col=0;
     Position orig{0,0};
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     ed.handleEvent(ev(EventType::MoveDown));
     ed.handleEvent(ev(EventType::MoveDown));
     CHECK_EQ(ed.active().cursor.line, 4);
@@ -351,7 +341,7 @@ TEST(busqueda_esc_notfound_vuelve_origen) {
     Editor ed; ed.active().document.restore({"hello"});
     ed.active().cursor.line=0; ed.active().cursor.col=1;
     Position orig{0,1};
-    ed.handleEvent(ins('f')); typeQ(ed,"zzz");
+    ed.handleEvent(insert('f')); typeBytes(ed,"zzz");
     CHECK(ed.statusMessage_.text.find("- not found")!=std::string::npos);
     ed.handleEvent(ev(EventType::Escape));
     CHECK_EQ(ed.active().cursor.line, orig.line);
@@ -363,9 +353,9 @@ TEST(busqueda_esc_tras_modificar_query_vuelve_origen) {
     Editor ed; ed.active().document.restore({"hello","hello world"});
     ed.active().cursor.line=0; ed.active().cursor.col=0;
     Position orig{0,0};
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     ed.handleEvent(ev(EventType::Backspace));
-    typeQ(ed,"o");
+    typeBytes(ed,"o");
     ed.handleEvent(ev(EventType::MoveDown));
     ed.handleEvent(ev(EventType::Escape));
     CHECK_EQ(ed.active().cursor.line, orig.line);
@@ -375,7 +365,7 @@ TEST(busqueda_esc_tras_modificar_query_vuelve_origen) {
 
 TEST(busqueda_enter_conserva_primera) {
     Editor ed; ed.active().document.restore({"hello world"});
-    ed.handleEvent(ins('f')); typeQ(ed,"world");
+    ed.handleEvent(insert('f')); typeBytes(ed,"world");
     Position match{ed.active().cursor.line, ed.active().cursor.col};
     ed.handleEvent(ev(EventType::InsertNewline));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -385,7 +375,7 @@ TEST(busqueda_enter_conserva_primera) {
 
 TEST(busqueda_enter_conserva_navegada) {
     Editor ed; ed.active().document.restore({"hello","abc","hello","abc","hello"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     ed.handleEvent(ev(EventType::MoveDown));
     ed.handleEvent(ev(EventType::MoveDown));
     Position match{ed.active().cursor.line, ed.active().cursor.col};
@@ -398,7 +388,7 @@ TEST(busqueda_enter_conserva_navegada) {
 
 TEST(busqueda_enter_despues_up) {
     Editor ed; ed.active().document.restore({"hello","abc","hello","abc","hello"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 0);
     ed.handleEvent(ev(EventType::MoveUp));
     Position match{ed.active().cursor.line, ed.active().cursor.col};
@@ -412,7 +402,7 @@ TEST(busqueda_enter_notfound_conserva_origen) {
     Editor ed; ed.active().document.restore({"hello"});
     ed.active().cursor.line=0; ed.active().cursor.col=2;
     Position orig{0,2};
-    ed.handleEvent(ins('f')); typeQ(ed,"zzz");
+    ed.handleEvent(insert('f')); typeBytes(ed,"zzz");
     CHECK(ed.statusMessage_.text.find("- not found")!=std::string::npos);
     ed.handleEvent(ev(EventType::InsertNewline));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -424,7 +414,7 @@ TEST(busqueda_no_modifica_documento) {
     Editor ed; ed.active().document.restore({"hello","world"});
     auto before = ed.active().document.snapshot();
     size_t undoBefore = ed.active().undoStack.size();
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     ed.handleEvent(ev(EventType::MoveDown));
     ed.handleEvent(ev(EventType::MoveUp));
     ed.handleEvent(ev(EventType::Backspace));
@@ -436,7 +426,7 @@ TEST(busqueda_no_modifica_documento) {
 TEST(busqueda_no_genera_undo) {
     Editor ed; ed.active().document.restore({"hello","world","hello"});
     size_t undoBefore = ed.active().undoStack.size();
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     ed.handleEvent(ev(EventType::MoveDown));
     ed.handleEvent(ev(EventType::MoveUp));
     ed.handleEvent(ev(EventType::InsertNewline));
@@ -454,7 +444,7 @@ TEST(busqueda_ctrl_u_no_modifica) {
     }
     auto before = ed.active().document.snapshot();
     size_t undoBefore = ed.active().undoStack.size();
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     ed.handleEvent(ev(EventType::Undo));
     CHECK(before == ed.active().document.snapshot());
     CHECK_EQ(ed.active().undoStack.size(), undoBefore);
@@ -467,7 +457,7 @@ TEST(busqueda_ctrl_y_no_modifica) {
     auto before = ed.active().document.snapshot();
     size_t undoBefore = ed.active().undoStack.size();
     size_t redoBefore = ed.active().redoStack.size();
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     ed.handleEvent(ev(EventType::Redo));
     CHECK(before == ed.active().document.snapshot());
     CHECK_EQ(ed.active().undoStack.size(), undoBefore);
@@ -477,21 +467,21 @@ TEST(busqueda_ctrl_y_no_modifica) {
 
 TEST(busqueda_utf8_caracter_e_acento) {
     Editor ed; ed.active().document.restore({"café"});
-    ed.handleEvent(ins('f')); typeQ(ed,"é");
+    ed.handleEvent(insert('f')); typeBytes(ed,"é");
     CHECK_EQ(ed.active().cursor.col, 3);
     CHECK(ed.statusMessage_.text.find("- not found")==std::string::npos);
 }
 
 TEST(busqueda_utf8_palabra_programacion) {
     Editor ed; ed.active().document.restore({"programación"});
-    ed.handleEvent(ins('f')); typeQ(ed,"programación");
+    ed.handleEvent(insert('f')); typeBytes(ed,"programación");
     CHECK_EQ(ed.active().cursor.col, 0);
     CHECK(ed.statusMessage_.text.find("- not found")==std::string::npos);
 }
 
 TEST(busqueda_utf8_backspace_progresivo) {
     Editor ed; ed.active().document.restore({"café"});
-    ed.handleEvent(ins('f')); typeQ(ed,"café");
+    ed.handleEvent(insert('f')); typeBytes(ed,"café");
     CHECK_EQ(ed.searchQuery_, "café");
     CHECK_EQ(ed.active().cursor.col, 0);
     ed.handleEvent(ev(EventType::Backspace));
@@ -509,14 +499,14 @@ TEST(busqueda_utf8_backspace_progresivo) {
 
 TEST(busqueda_utf8_simbolo_emdash) {
     Editor ed; ed.active().document.restore({"hola — mundo"});
-    ed.handleEvent(ins('f')); typeQ(ed,"—");
+    ed.handleEvent(insert('f')); typeBytes(ed,"—");
     CHECK_EQ(ed.active().cursor.col, 5);
     CHECK(ed.statusMessage_.text.find("- not found")==std::string::npos);
 }
 
 TEST(busqueda_utf8_varias_cafe) {
     Editor ed; ed.active().document.restore({"café","café","café"});
-    ed.handleEvent(ins('f')); typeQ(ed,"café");
+    ed.handleEvent(insert('f')); typeBytes(ed,"café");
     CHECK_EQ(ed.active().cursor.line, 0);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.line, 1);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.line, 2);
@@ -526,29 +516,29 @@ TEST(busqueda_utf8_varias_cafe) {
 
 TEST(busqueda_multilinea_inicio) {
     Editor ed; ed.active().document.restore({"hello world","xxx"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 0); CHECK_EQ(ed.active().cursor.col, 0);
 }
 TEST(busqueda_multilinea_medio) {
     Editor ed; ed.active().document.restore({"abc hello xyz","xxx"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 0); CHECK_EQ(ed.active().cursor.col, 4);
 }
 TEST(busqueda_multilinea_final) {
     Editor ed; ed.active().document.restore({"abc hello","xxx"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 0); CHECK_EQ(ed.active().cursor.col, 4);
 }
 TEST(busqueda_multilinea_ultima) {
     Editor ed; ed.active().document.restore({"xxx","xxx","hello"});
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 2); CHECK_EQ(ed.active().cursor.col, 0);
 }
 TEST(busqueda_documento_vacio) {
     Editor ed; ed.active().document.restore({""});
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
-    ed.handleEvent(ins('f')); typeQ(ed,"a");
+    ed.handleEvent(insert('f')); typeBytes(ed,"a");
     CHECK(ed.statusMessage_.text.find("- not found")!=std::string::npos);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
@@ -558,7 +548,7 @@ TEST(busqueda_muchas_lineas_circular) {
     std::vector<std::string> lines(100,"xxx");
     lines[0]="hello"; lines[25]="hello"; lines[50]="hello"; lines[75]="hello"; lines[99]="hello";
     Editor ed; ed.active().document.restore(lines);
-    ed.handleEvent(ins('f')); typeQ(ed,"hello");
+    ed.handleEvent(insert('f')); typeBytes(ed,"hello");
     CHECK_EQ(ed.active().cursor.line, 0);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.line, 25);
     ed.handleEvent(ev(EventType::MoveDown)); CHECK_EQ(ed.active().cursor.line, 50);
@@ -575,7 +565,7 @@ TEST(busqueda_cambio_query_recalcula) {
     ed.active().viewport.height = 10;
     ed.active().viewport.top = 0;
     ed.active().cursor.line = 0; ed.active().cursor.col = 0;
-    ed.handleEvent(ins('f')); typeQ(ed,"ola");
+    ed.handleEvent(insert('f')); typeBytes(ed,"ola");
     CHECK(ed.searchHighlight_.has_value());
     CHECK_EQ(ed.active().cursor.line, 5);
     CHECK(ed.statusMessage_.text.find("(1/2)") != std::string::npos);
@@ -594,7 +584,7 @@ TEST(busqueda_cambio_query_recalcula) {
         auto hl = *ed.searchHighlight_;
         CHECK_EQ(hl.anchor.col, 0); CHECK_EQ(hl.position.col, 2);
     }
-    ed.handleEvent(ins('a'));
+    ed.handleEvent(insert('a'));
     CHECK_EQ(ed.searchQuery_, "ola");
     CHECK_EQ(ed.active().cursor.line, 5);
     CHECK(ed.statusMessage_.text.find("(1/2)") != std::string::npos);
@@ -613,7 +603,7 @@ TEST(busqueda_cambio_query_recalcula) {
 
 TEST(busqueda_cafe_cafe_dos_matches_highlight) {
     Editor ed; ed.active().document.restore({"café café"});
-    ed.handleEvent(ins('f')); typeQ(ed,"café");
+    ed.handleEvent(insert('f')); typeBytes(ed,"café");
     auto m = ed.collectMatches("café");
     CHECK_EQ((int)m.size(), 2);
     CHECK_EQ(m[0].line, 0); CHECK_EQ(m[0].col, 0);
@@ -635,7 +625,7 @@ TEST(busqueda_cafe_cafe_dos_matches_highlight) {
 }
 TEST(busqueda_cafe_e_un_columna_highlight) {
     Editor ed; ed.active().document.restore({"café"});
-    ed.handleEvent(ins('f')); typeQ(ed,"é");
+    ed.handleEvent(insert('f')); typeBytes(ed,"é");
     auto m = ed.collectMatches("é");
     CHECK_EQ((int)m.size(), 1);
     CHECK_EQ(m[0].col, 3);
@@ -651,39 +641,13 @@ TEST(busqueda_cafe_e_un_columna_highlight) {
     CHECK(ed.statusMessage_.text.find("(1/1)") != std::string::npos);
 }
 
-static bool validUtf8Busq(const std::string& s){ size_t i=0; while(i<s.size()){ unsigned char c=(unsigned char)s[i]; int need; if((c&0x80)==0) need=0; else if((c&0xE0)==0xC0) need=1; else if((c&0xF0)==0xE0) need=2; else if((c&0xF8)==0xF0) need=3; else return false; if(i+need>=s.size()) return false; for(int k=1;k<=need;++k) if(((unsigned char)s[i+k]&0xC0)!=0x80) return false; i+=need+1;} return true; }
-static void assertConsistentBusq(Editor& ed){
-    const Document& d=ed.active().document;
-    CHECK(d.lineCount()>=1);
-    for(int i=0;i<d.lineCount();++i) CHECK_EQ(d.lineAt(i).size(), (size_t)d.lineLength(i));
-    CHECK(ed.active().cursor.line>=0); CHECK(ed.active().cursor.col>=0);
-    CHECK(ed.active().cursor.line<d.lineCount());
-    CHECK(ed.active().cursor.col<=d.lineLength(ed.active().cursor.line));
-    CHECK(ed.active().undoStack.size()<=Editor::MAX_UNDO);
-    CHECK(ed.active().redoStack.size()<=Editor::MAX_UNDO);
-    if(ed.hasSelection()) CHECK(ed.active().selection.has_value());
-    if(!ed.active().selection.has_value()) CHECK(!ed.hasSelection());
-    if(ed.active().selection.has_value()){
-        const Position& a=ed.active().selection->anchor;
-        const Position& p=ed.active().selection->position;
-        CHECK(a.line>=0 && a.line<d.lineCount()); CHECK(a.col>=0 && a.col<=d.lineLength(a.line));
-        CHECK(p.line>=0 && p.line<d.lineCount()); CHECK(p.col>=0 && p.col<=d.lineLength(p.line));
-    }
-    if(ed.active().selection.has_value() && ed.active().selection->anchor==ed.active().selection->position) CHECK(!ed.hasSelection());
-    if(auto norm=ed.selection()) CHECK(norm->start.line<norm->end.line || (norm->start.line==norm->end.line && norm->start.col<=norm->end.col));
-    CHECK(ed.state_==State::Navegacion||ed.state_==State::Interaccion||ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAs||ed.state_==State::FileBrowser||ed.state_==State::Busqueda||ed.state_==State::IrAFila);
-    if(ed.hasSelection()) CHECK(ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAs||ed.state_==State::FileBrowser||ed.state_==State::Busqueda||ed.state_==State::IrAFila);
-    if(ed.state_==State::Seleccion) CHECK(ed.active().selection.has_value());
-    for(auto &l: ed.getClipboardBlock()) CHECK(validUtf8Busq(l));
-}
-
-TEST(busqueda_invariant_entrar) { Editor ed; ed.active().document.restore({"hello"}); assertConsistentBusq(ed); ed.handleEvent(ins('f')); assertConsistentBusq(ed); }
-TEST(busqueda_invariant_escribir) { Editor ed; ed.active().document.restore({"hello world"}); ed.handleEvent(ins('f')); for(char c: std::string("hello")){ ed.handleEvent(ins(c)); assertConsistentBusq(ed); } }
-TEST(busqueda_invariant_backspace) { Editor ed; ed.active().document.restore({"hello"}); ed.handleEvent(ins('f')); typeQ(ed,"hello"); assertConsistentBusq(ed); ed.handleEvent(ev(EventType::Backspace)); assertConsistentBusq(ed); ed.handleEvent(ev(EventType::Backspace)); assertConsistentBusq(ed); }
-TEST(busqueda_invariant_up) { Editor ed; ed.active().document.restore({"hello","hello"}); ed.handleEvent(ins('f')); typeQ(ed,"hello"); assertConsistentBusq(ed); ed.handleEvent(ev(EventType::MoveUp)); assertConsistentBusq(ed); }
-TEST(busqueda_invariant_down) { Editor ed; ed.active().document.restore({"hello","hello"}); ed.handleEvent(ins('f')); typeQ(ed,"hello"); assertConsistentBusq(ed); ed.handleEvent(ev(EventType::MoveDown)); assertConsistentBusq(ed); }
-TEST(busqueda_invariant_esc) { Editor ed; ed.active().document.restore({"hello","hello"}); ed.handleEvent(ins('f')); typeQ(ed,"hello"); ed.handleEvent(ev(EventType::MoveDown)); assertConsistentBusq(ed); ed.handleEvent(ev(EventType::Escape)); assertConsistentBusq(ed); }
-TEST(busqueda_invariant_enter) { Editor ed; ed.active().document.restore({"hello","hello"}); ed.handleEvent(ins('f')); typeQ(ed,"hello"); ed.handleEvent(ev(EventType::MoveDown)); assertConsistentBusq(ed); ed.handleEvent(ev(EventType::InsertNewline)); assertConsistentBusq(ed); }
+TEST(busqueda_invariant_entrar) { Editor ed; ed.active().document.restore({"hello"}); assertStateConsistent(ed); ed.handleEvent(insert('f')); assertStateConsistent(ed); }
+TEST(busqueda_invariant_escribir) { Editor ed; ed.active().document.restore({"hello world"}); ed.handleEvent(insert('f')); for(char c: std::string("hello")){ ed.handleEvent(insert(c)); assertStateConsistent(ed); } }
+TEST(busqueda_invariant_backspace) { Editor ed; ed.active().document.restore({"hello"}); ed.handleEvent(insert('f')); typeBytes(ed,"hello"); assertStateConsistent(ed); ed.handleEvent(ev(EventType::Backspace)); assertStateConsistent(ed); ed.handleEvent(ev(EventType::Backspace)); assertStateConsistent(ed); }
+TEST(busqueda_invariant_up) { Editor ed; ed.active().document.restore({"hello","hello"}); ed.handleEvent(insert('f')); typeBytes(ed,"hello"); assertStateConsistent(ed); ed.handleEvent(ev(EventType::MoveUp)); assertStateConsistent(ed); }
+TEST(busqueda_invariant_down) { Editor ed; ed.active().document.restore({"hello","hello"}); ed.handleEvent(insert('f')); typeBytes(ed,"hello"); assertStateConsistent(ed); ed.handleEvent(ev(EventType::MoveDown)); assertStateConsistent(ed); }
+TEST(busqueda_invariant_esc) { Editor ed; ed.active().document.restore({"hello","hello"}); ed.handleEvent(insert('f')); typeBytes(ed,"hello"); ed.handleEvent(ev(EventType::MoveDown)); assertStateConsistent(ed); ed.handleEvent(ev(EventType::Escape)); assertStateConsistent(ed); }
+TEST(busqueda_invariant_enter) { Editor ed; ed.active().document.restore({"hello","hello"}); ed.handleEvent(insert('f')); typeBytes(ed,"hello"); ed.handleEvent(ev(EventType::MoveDown)); assertStateConsistent(ed); ed.handleEvent(ev(EventType::InsertNewline)); assertStateConsistent(ed); }
 
 TEST(busqueda_match_hola_ola) {
     Editor ed; ed.active().document.restore({"hola"});
@@ -752,8 +716,8 @@ TEST(busqueda_property_random) {
             case 4: e.type=EventType::Escape; break;
             default: e.type=EventType::InsertNewline; break;
         }
-        if(ed.state_!=State::Busqueda && rnd()%3==0) ed.handleEvent(ins('f'));
+        if(ed.state_!=State::Busqueda && rnd()%3==0) ed.handleEvent(insert('f'));
         else ed.handleEvent(e);
-        assertConsistentBusq(ed);
+        assertStateConsistent(ed);
     }
 }

@@ -1295,7 +1295,15 @@ void Editor::handleSelectAllEvent(const Event& event) {
                 b.selectAllPrevious.reset();
                 if (!b.selection.has_value()) clearSelection();
                 b.selectAllActive = false;
-                setStatusMessage("SELECCION");
+                // Si "Seleccionar todo" resultó en selección vacía (ej: documento vacío),
+                // volver a Navegación para evitar quedar atrapado en modo Seleccion.
+                if (b.selection.has_value()) {
+                    state_ = State::Seleccion;
+                    setStatusMessage("SELECCION");
+                } else {
+                    state_ = State::Navegacion;
+                    setStatusMessage("");
+                }
             } else if (event.text == "c" || event.text == "x") {
                 bool hadSelection = hasSelection();
                 if (hadSelection) {

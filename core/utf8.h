@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <algorithm>
@@ -133,6 +134,44 @@ inline std::string_view range(std::string_view line, int fromCol, int toCol) {
     }
     if (col >= toCol) return line.substr(startByte, i - startByte);
     return line.substr(startByte); // hasta el final de la linea
+}
+
+inline bool isValid(std::string_view s) {
+    size_t i = 0;
+    while (i < s.size()) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+        int need;
+        if ((c & 0x80) == 0) need = 0;
+        else if ((c & 0xE0) == 0xC0) need = 1;
+        else if ((c & 0xF0) == 0xE0) need = 2;
+        else if ((c & 0xF8) == 0xF0) need = 3;
+        else return false;
+        if (need == 1 && c < 0xC2) return false; // overlong 2 bytes (C0/C1)
+        if (need == 3 && c >= 0xF5) return false; // >U+10FFFF (F5-FF)
+        if (i + static_cast<size_t>(need) >= s.size()) return false;
+        for (int k = 1; k <= need; ++k) if ((static_cast<unsigned char>(s[i + static_cast<size_t>(k)]) & 0xC0) != 0x80) return false;
+        unsigned char c1 = need >= 1 ? static_cast<unsigned char>(s[i + 1]) : 0;
+        if (need == 2) {
+            if (c == 0xE0 && c1 < 0xA0) return false; // overlong 3 bytes (U+0000-U+07FF)
+            if (c == 0xED && c1 > 0x9F) return false; // surrogates U+D800-U+DFFF
+        } else if (need == 3) {
+            if (c == 0xF0 && c1 < 0x90) return false; // overlong 4 bytes
+            if (c == 0xF4 && c1 > 0x8F) return false; // >U+10FFFF
+        }
+        uint32_t cp = 0;
+        if (need == 1) cp = ((c & 0x1F) << 6) | (c1 & 0x3F);
+        else if (need == 2) cp = ((c & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (static_cast<unsigned char>(s[i + 2]) & 0x3F);
+        else if (need == 3) cp = ((c & 0x07) << 18) | ((c1 & 0x3F) << 12) | ((static_cast<unsigned char>(s[i + 2]) & 0x3F) << 6) | (static_cast<unsigned char>(s[i + 3]) & 0x3F);
+        if (need > 0) {
+            if (cp < 0x80 && need != 0) return false;
+            if (cp < 0x800 && need > 1) return false;
+            if (cp < 0x10000 && need > 2) return false;
+            if (cp >= 0xD800 && cp <= 0xDFFF) return false;
+            if (cp > 0x10FFFF) return false;
+        }
+        i += static_cast<size_t>(need) + 1;
+    }
+    return true;
 }
 
 } // namespace utf8
