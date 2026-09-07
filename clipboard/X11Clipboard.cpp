@@ -173,6 +173,7 @@ void X11Clipboard::handleSelectionRequest(void* evPtr) {
             s.requestor = req->requestor;
             s.property = req->property;
             s.target = req->target;
+            // Copia por requestor: ownership independiente; ver IncrSend::data en .h
             s.data = ownedText_;
             s.offset = 0;
             s.lastActivity = std::chrono::steady_clock::now();

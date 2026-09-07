@@ -16,25 +16,27 @@ InotifyFileWatcher::~InotifyFileWatcher() {
 
 void InotifyFileWatcher::watch(const std::string& path) {
     if (path.empty() || fd_ < 0) return;
-    bool already = trackedFiles_.find(path) != trackedFiles_.end();
-    trackedFiles_.insert(path);
-    if (already && fileWatches_.find(path) != fileWatches_.end()) return;
+    std::string normalized = std::filesystem::path(path).lexically_normal().string();
+    bool already = trackedFiles_.find(normalized) != trackedFiles_.end();
+    trackedFiles_.insert(normalized);
+    if (already && fileWatches_.find(normalized) != fileWatches_.end()) return;
     if (already) {
         // file was tracked but file watch not active (e.g. after delete) - try to re-watch
-        watchFile(path);
+        watchFile(normalized);
         return;
     }
-    watchFile(path);
-    std::string dir = std::filesystem::path(path).parent_path().string();
+    watchFile(normalized);
+    std::string dir = std::filesystem::path(normalized).parent_path().string();
     if (dir.empty()) dir = ".";
     watchDir(dir);
 }
 
 void InotifyFileWatcher::unwatch(const std::string& path) {
     if (path.empty() || fd_ < 0) return;
-    trackedFiles_.erase(path);
-    unwatchFile(path);
-    std::string dir = std::filesystem::path(path).parent_path().string();
+    std::string normalized = std::filesystem::path(path).lexically_normal().string();
+    trackedFiles_.erase(normalized);
+    unwatchFile(normalized);
+    std::string dir = std::filesystem::path(normalized).parent_path().string();
     if (dir.empty()) dir = ".";
     unwatchDir(dir);
 }
@@ -43,25 +45,10 @@ void InotifyFileWatcher::watchFile(const std::string& path) {
     int wd = inotify_add_watch(fd_, path.c_str(), IN_MODIFY | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF);
     if (wd < 0) return;
     auto it = fileWatches_.find(path);
-    if (it != fileWatches_.end()) {
-        if (it->second.first == wd) {
-            auto eit = wdToEntry_.find(wd);
-            auto rcIt = refCount_.find(wd);
-            if (eit != wdToEntry_.end() && eit->second.path == path && !eit->second.isDir && eit->second.gen == it->second.second &&
-                rcIt != refCount_.end() && rcIt->second.first == eit->second.gen) {
-                return;
-            }
-            uint64_t gen = nextGen_++;
-            wdToEntry_[wd] = {path, gen, false};
-            refCount_[wd] = {gen, 1};
-            fileWatches_[path] = {wd, gen};
-            return;
-        }
-    }
-    auto eit = wdToEntry_.find(wd);
-    if (eit != wdToEntry_.end() && eit->second.path == path && !eit->second.isDir) {
-        auto fit = fileWatches_.find(path);
-        if (fit != fileWatches_.end() && fit->second.first == wd) return;
+    if (it != fileWatches_.end() && it->second.first == wd) {
+        // Even if kernel returns same wd, we bump gen to avoid race with IN_IGNORED of previous watch.
+        // The old watch's IN_IGNORED may arrive later and must not destroy the new watch's bookkeeping.
+        // We let the old wd entry be cleaned up when its IN_IGNORED arrives with the old gen.
     }
     uint64_t gen = nextGen_++;
     wdToEntry_[wd] = {path, gen, false};
@@ -72,8 +59,18 @@ void InotifyFileWatcher::watchFile(const std::string& path) {
 void InotifyFileWatcher::watchDir(const std::string& dir) {
     auto it = dirWatches_.find(dir);
     if (it != dirWatches_.end()) {
-        refCount_[it->second.first].second++;
-        return;
+        int wd = it->second.first;
+        uint64_t gen = it->second.second;
+        auto rcIt = refCount_.find(wd);
+        if (rcIt != refCount_.end() && rcIt->second.first == gen) {
+            // Valid existing watch, just increment refcount
+            rcIt->second.second++;
+            return;
+        }
+        // Stale entry (wd invalid or gen mismatch), clean up and fall through to create new watch
+        dirWatches_.erase(it);
+        wdToEntry_.erase(wd);
+        refCount_.erase(wd);
     }
     int wd = inotify_add_watch(fd_, dir.c_str(), IN_CREATE | IN_MOVED_TO);
     if (wd < 0) return;

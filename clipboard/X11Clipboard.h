@@ -82,6 +82,12 @@ private:
     // fantasma.
     static constexpr std::chrono::seconds kIncrStaleTimeout{5};
 
+    // Nota: data se copia por requestor (std::string copy). Para payloads grandes
+    // y muchos requestors concurrentes esto duplica memoria. Tradeoff: simpleza
+    // (ownership independiente, sin shared_ptr/COW) vs memoria. Casos típicos
+    // (texto/código < 1MB, 1-2 requestors) son irrelevantes; si aparecen
+    // payloads masivos + muchos requestors, se puede optimizar con
+    // shared_ptr<string> + copy-on-write.
     struct IncrSend {
         unsigned long requestor = 0;
         unsigned long property = 0;

@@ -917,7 +917,11 @@ TEST(watcher_dir_watches_independent_for_different_dirs) {
     CHECK(w.fileWatches_.find(pathB) != w.fileWatches_.end());
     CHECK(w.dirWatches_.find(dirA) == w.dirWatches_.end());
     CHECK(w.dirWatches_.find(dirB) != w.dirWatches_.end());
-    CHECK_EQ(w.refCount_.at(wdA).second, 0);
+    {
+        std::vector<FileChangeEvent> dummy;
+        pollUntil(w, dummy, [&](const std::vector<FileChangeEvent>&){ return w.refCount_.find(wdA)==w.refCount_.end(); });
+    }
+    CHECK(w.refCount_.find(wdA) == w.refCount_.end());
     CHECK_EQ(w.refCount_.at(wdB).second, 1);
     {
         std::ofstream out(pathB, std::ios::binary | std::ios::trunc);
@@ -1007,18 +1011,73 @@ TEST(watcher_preserves_direct_watch_path) {
         out << "orig\n";
     }
     std::string relDotSlash = "./" + fileName;
+    std::string normPath = std::filesystem::path(relDotSlash).lexically_normal().string();
     InotifyFileWatcher w;
     CHECK(w.fd() >= 0);
     w.watch(relDotSlash);
-    CHECK(w.fileWatches_.find(relDotSlash) != w.fileWatches_.end());
+    CHECK(w.fileWatches_.find(normPath) != w.fileWatches_.end());
     CHECK(writeFile(absPath, "direct_rel\n"));
     std::vector<FileChangeEvent> evs;
     bool got = pollUntil(w, evs, [&](const std::vector<FileChangeEvent>& v){
-        for (auto &e : v) if (e.path == relDotSlash && e.kind == FileChangeKind::Modified) return true;
+        for (auto &e : v) if (e.path == normPath && e.kind == FileChangeKind::Modified) return true;
         return false;
     });
     CHECK(got);
-    w.unwatch(relDotSlash);
+}
+TEST(watcher_recreate_with_relative_path) {
+    std::string cwd = std::filesystem::current_path().string();
+    std::string pid = std::to_string(::getpid());
+    std::string fileName = "test_norm_recreate_" + pid + ".txt";
+    std::string absPath = cwd + "/" + fileName;
+    {
+        std::ofstream out(absPath, std::ios::binary | std::ios::trunc);
+        out << "orig\n";
+    }
+    std::string relDotSlash = "./" + fileName;
+    std::string normPath = std::filesystem::path(relDotSlash).lexically_normal().string();
+    InotifyFileWatcher w;
+    CHECK(w.fd() >= 0);
+    w.watch(relDotSlash);
+    CHECK(w.fileWatches_.find(normPath) != w.fileWatches_.end());
+    CHECK(w.trackedFiles_.find(normPath) != w.trackedFiles_.end());
+    
+    // Delete the file
+    std::filesystem::remove(absPath);
+    std::vector<FileChangeEvent> evDeleted;
+    bool gotDeleted = pollUntil(w, evDeleted, [&](const std::vector<FileChangeEvent>& v){
+        for (auto &e : v) if (e.path==normPath && e.kind==FileChangeKind::Deleted) return true;
+        return false;
+    });
+    CHECK(gotDeleted);
+    
+    // Recreate the file
+    {
+        std::ofstream out(absPath, std::ios::binary | std::ios::trunc);
+        out << "recreated\n";
+    }
+    
+    // Should get Created event with the normalized path
+    std::vector<FileChangeEvent> evCreated;
+    bool gotCreated = pollUntil(w, evCreated, [&](const std::vector<FileChangeEvent>& v){
+        for (auto &e : v) if (e.path==normPath && e.kind==FileChangeKind::Created) return true;
+        return false;
+    });
+    CHECK(gotCreated);
+    
+    // Watch should be re-established
+    CHECK(w.fileWatches_.find(normPath) != w.fileWatches_.end());
+    CHECK(w.trackedFiles_.find(normPath) != w.trackedFiles_.end());
+    
+    // Subsequent modification should be detected
+    CHECK(writeFile(absPath, "modified_after_recreate\n"));
+    std::vector<FileChangeEvent> evModified;
+    bool gotModified = pollUntil(w, evModified, [&](const std::vector<FileChangeEvent>& v){
+        for (auto &e : v) if (e.path==normPath && e.kind==FileChangeKind::Modified) return true;
+        return false;
+    });
+    CHECK(gotModified);
+    
+    w.unwatch(normPath);
     std::filesystem::remove(absPath);
 }
 
