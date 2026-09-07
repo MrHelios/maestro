@@ -40,29 +40,46 @@ void InotifyFileWatcher::unwatch(const std::string& path) {
 }
 
 void InotifyFileWatcher::watchFile(const std::string& path) {
-    auto it = fileWatches_.find(path);
-    if (it != fileWatches_.end()) {
-        return;
-    }
     int wd = inotify_add_watch(fd_, path.c_str(), IN_MODIFY | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF);
     if (wd < 0) return;
+    auto it = fileWatches_.find(path);
+    if (it != fileWatches_.end()) {
+        if (it->second.first == wd) {
+            auto eit = wdToEntry_.find(wd);
+            auto rcIt = refCount_.find(wd);
+            if (eit != wdToEntry_.end() && eit->second.path == path && !eit->second.isDir && eit->second.gen == it->second.second &&
+                rcIt != refCount_.end() && rcIt->second.first == eit->second.gen) {
+                return;
+            }
+            uint64_t gen = nextGen_++;
+            wdToEntry_[wd] = {path, gen, false};
+            refCount_[wd] = {gen, 1};
+            fileWatches_[path] = {wd, gen};
+            return;
+        }
+    }
+    auto eit = wdToEntry_.find(wd);
+    if (eit != wdToEntry_.end() && eit->second.path == path && !eit->second.isDir) {
+        auto fit = fileWatches_.find(path);
+        if (fit != fileWatches_.end() && fit->second.first == wd) return;
+    }
     uint64_t gen = nextGen_++;
     wdToEntry_[wd] = {path, gen, false};
-    refCount_[wd] = 1;
+    refCount_[wd] = {gen, 1};
     fileWatches_[path] = {wd, gen};
 }
 
 void InotifyFileWatcher::watchDir(const std::string& dir) {
     auto it = dirWatches_.find(dir);
     if (it != dirWatches_.end()) {
-        refCount_[it->second.first]++;
+        refCount_[it->second.first].second++;
         return;
     }
     int wd = inotify_add_watch(fd_, dir.c_str(), IN_CREATE | IN_MOVED_TO);
     if (wd < 0) return;
     uint64_t gen = nextGen_++;
     wdToEntry_[wd] = {dir, gen, true};
-    refCount_[wd] = 1;
+    refCount_[wd] = {gen, 1};
     dirWatches_[dir] = {wd, gen};
 }
 
@@ -72,12 +89,12 @@ void InotifyFileWatcher::unwatchFile(const std::string& path) {
     int wd = it->second.first;
     uint64_t gen = it->second.second;
     auto rcIt = refCount_.find(wd);
-    if (rcIt == refCount_.end()) {
+    if (rcIt == refCount_.end() || rcIt->second.first != gen) {
         fileWatches_.erase(it);
         return;
     }
-    rcIt->second--;
-    if (rcIt->second > 0) {
+    rcIt->second.second--;
+    if (rcIt->second.second > 0) {
         fileWatches_.erase(it);
         return;
     }
@@ -92,13 +109,12 @@ void InotifyFileWatcher::unwatchDir(const std::string& dir) {
     int wd = it->second.first;
     uint64_t gen = it->second.second;
     auto rcIt = refCount_.find(wd);
-    if (rcIt == refCount_.end()) {
+    if (rcIt == refCount_.end() || rcIt->second.first != gen) {
         dirWatches_.erase(it);
         return;
     }
-    rcIt->second--;
-    if (rcIt->second > 0) {
-        dirWatches_.erase(it);
+    rcIt->second.second--;
+    if (rcIt->second.second > 0) {
         return;
     }
     if (inotify_rm_watch(fd_, wd) < 0 && errno != EINVAL) {}
@@ -124,19 +140,31 @@ void InotifyFileWatcher::pollEvents(const std::function<void(const FileChangeEve
                 pit->second.pop();
                 if (pit->second.empty()) pending_.erase(pit);
                 auto eit = wdToEntry_.find(wd);
+                auto rcIt = refCount_.find(wd);
                 if (eit != wdToEntry_.end() && eit->second.gen == removedGen) {
                     wdToEntry_.erase(eit);
-                    refCount_.erase(wd);
+                    if (rcIt != refCount_.end() && rcIt->second.first == removedGen) refCount_.erase(rcIt);
+                } else if (rcIt != refCount_.end() && rcIt->second.first == removedGen) {
+                    refCount_.erase(rcIt);
                 }
             } else {
                 auto eit = wdToEntry_.find(wd);
                 if (eit != wdToEntry_.end()) {
                     std::string p = eit->second.path;
                     bool isDir = eit->second.isDir;
+                    uint64_t gen = eit->second.gen;
                     wdToEntry_.erase(eit);
-                    refCount_.erase(wd);
-                    if (isDir) dirWatches_.erase(p);
-                    else fileWatches_.erase(p);
+                    auto rcIt = refCount_.find(wd);
+                    if (rcIt != refCount_.end() && rcIt->second.first == gen) refCount_.erase(rcIt);
+                    if (isDir) {
+                        auto dit = dirWatches_.find(p);
+                        if (dit != dirWatches_.end() && dit->second.first == wd && dit->second.second == gen)
+                            dirWatches_.erase(dit);
+                    } else {
+                        auto fit = fileWatches_.find(p);
+                        if (fit != fileWatches_.end() && fit->second.first == wd && fit->second.second == gen)
+                            fileWatches_.erase(fit);
+                    }
                 }
             }
             ptr += sizeof(struct inotify_event) + ev->len;

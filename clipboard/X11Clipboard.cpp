@@ -30,6 +30,7 @@ bool X11Clipboard::isExpectedClipboardError(const XErrorEvent& error) {
     switch (error.request_code) {
         case X_ChangeWindowAttributes:
         case X_ChangeProperty:
+        case X_GetWindowAttributes:
         case X_SendEvent:
             return true;
         default:
@@ -199,6 +200,12 @@ void X11Clipboard::handlePropertyNotify(void* evPtr) {
             continue;
         if (ev->atom != static_cast<Atom>(it->property))
             continue;
+        XWindowAttributes attr{};
+        if (XGetWindowAttributes(display_, static_cast<Window>(it->requestor), &attr) == 0) {
+            unregisterRequestor(it->requestor);
+            incrSends_.erase(it);
+            return;
+        }
         if (it->offset < it->data.size()) {
             size_t chunk = std::min(incrChunkSize_, it->data.size() - it->offset);
             XChangeProperty(

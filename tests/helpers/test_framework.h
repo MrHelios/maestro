@@ -28,11 +28,27 @@ inline int& failureCount() {
     return c;
 }
 
+inline int& skipCount() {
+    static int c = 0;
+    return c;
+}
+
+inline bool& currentTestSkipped() {
+    static thread_local bool s = false;
+    return s;
+}
+
 inline void report(bool ok, const std::string& cond, const char* file, int line) {
     if (!ok) {
         std::cout << "  [FAIL] " << cond << "   (" << file << ":" << line << ")\n";
         failureCount()++;
     }
+}
+
+inline void reportSkip(const std::string& reason, const char* file, int line) {
+    std::cout << "  [SKIP] " << reason << "   (" << file << ":" << line << ")\n";
+    skipCount()++;
+    currentTestSkipped() = true;
 }
 
 struct Registrar {
@@ -49,6 +65,7 @@ inline int runAll() {
             for (auto& e : std::filesystem::directory_iterator(".")) beforeFiles.insert(e.path().string());
         } catch (...) {}
         const int before = failureCount();
+        currentTestSkipped() = false;
         std::cout << "[RUN] " << t.name << "\n";
         try {
             t.fn();
@@ -65,11 +82,13 @@ inline int runAll() {
                 if (beforeFiles.find(p) == beforeFiles.end()) std::filesystem::remove(p);
             }
         } catch (...) {}
-        if (failureCount() == before)
+        if (currentTestSkipped())
+            std::cout << "  skipped\n";
+        else if (failureCount() == before)
             std::cout << "  ok\n";
     }
     std::cout << "-----------------------------------\n";
-    std::cout << total << " tests, " << failureCount() << " failure(s)\n";
+    std::cout << total << " tests, " << failureCount() << " failure(s), " << skipCount() << " skipped\n";
     return failureCount() == 0 ? 0 : 1;
 }
 
@@ -82,6 +101,9 @@ inline int runAll() {
 
 #define CHECK(cond) \
     do { ::testfw::report(static_cast<bool>(cond), #cond, __FILE__, __LINE__); } while (0)
+
+#define SKIP(reason) \
+    do { ::testfw::reportSkip(reason, __FILE__, __LINE__); return; } while (0)
 
 #define CHECK_EQ(a, b) \
     do { \

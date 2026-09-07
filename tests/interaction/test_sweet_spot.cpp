@@ -303,8 +303,10 @@ TEST(rapid_external_changes) {
 TEST(modify_and_chmod_generates_no_false_warning) {
     TempFile f; f.write("a\n");
     InotifyFileWatcher w;
-    if (w.fd() < 0) return;
+    CHECK(w.fd() >= 0);
     w.watch(f.path);
+    CHECK(w.fileWatches_.find(f.path) != w.fileWatches_.end());
+    CHECK(w.trackedFiles_.find(f.path) != w.trackedFiles_.end());
     writeFile(f.path, "b\n");
     std::filesystem::permissions(f.path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
     writeFile(f.path, "c\n");
@@ -365,7 +367,7 @@ TEST(open_close_many_buffers_does_not_leak_watches) {
     TempFile fa, fb, fc;
     fa.write("A\n"); fb.write("B\n"); fc.write("C\n");
     InotifyFileWatcher probe;
-    if (probe.fd() < 0) return;
+    CHECK(probe.fd() >= 0);
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
     // :e sobre el mismo buffer (sin createBuffer): no debe acumular watches
     // de fa/fb/fc. Tras cerrar, los mapas internos tienen que quedar vacíos.

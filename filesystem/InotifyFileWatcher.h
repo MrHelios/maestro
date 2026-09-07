@@ -31,7 +31,7 @@ private:
     int fd_ = -1;
     uint64_t nextGen_ = 1;
     std::unordered_map<int, Entry> wdToEntry_;
-    std::unordered_map<int, int> refCount_;
+    std::unordered_map<int, std::pair<uint64_t, int>> refCount_;
     std::unordered_map<std::string, std::pair<int, uint64_t>> fileWatches_;
     std::unordered_map<std::string, std::pair<int, uint64_t>> dirWatches_;
     std::unordered_map<int, std::queue<uint64_t>> pending_;
