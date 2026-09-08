@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include "core/utf8.h"
+#include "filesystem/FileSystem.h"
 
 Document::Document() {
     // Un documento nunca esta "vacio del todo": siempre tiene al menos
@@ -15,6 +16,8 @@ Document::Document() {
 }
 
 LoadResult Document::loadFromFile(const std::string& path) {
+    if (auto hook = filesystem::callLoadHook(path); hook.has_value())
+        return *hook;
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
         // Distinguir el archivo "nuevo" (no existe) de un error real. Solo en

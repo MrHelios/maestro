@@ -116,6 +116,20 @@ inline int runAll() {
 
 namespace testfw {
 
+struct TempDir {
+    std::string path;
+    explicit TempDir(std::string p) : path(std::move(p)) {
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+    }
+    ~TempDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+    }
+    TempDir(const TempDir&) = delete;
+    TempDir& operator=(const TempDir&) = delete;
+};
+
 inline std::string tmpPath() {
     static std::atomic<int> n{0};
     return "/tmp/edit_test_" + std::to_string(static_cast<long>(::getpid())) + "_" +
