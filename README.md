@@ -1,36 +1,43 @@
 # Maestro
 
-Editor de texto modal, liviano y sin dependencias gráficas — pensado para usarse con o sin entorno gráfico en Linux/Ubuntu X11. Mayoritariamente *vibecode* con supervisión del creador.
+Editor de texto modal, liviano — pensado para usarse con o sin entorno gráfico en Linux/Ubuntu X11. 
+Mayoritariamente *vibecode* con supervisión del creador.
 
 > **La idea del editor es que tenga la mayor cantidad de funcionalidades posibles pero que a su vez sea lo más liviana posible.**
 
 ## Estado actual
 
-- **Versión:** `v0.8` (alpha)
-- **Estado:** en desarrollo activo, API/atajos pueden cambiar
-- **Plataforma:** Linux/Ubuntu X11 (usa `termios` POSIX + X11 para clipboard)
+- **Versión:** `v0.9` (alpha)
+- **Estado:** en desarrollo activo
+- **Plataforma:** Linux/Ubuntu X11
 
-## Cambios: v0.8
+## Cambios: v0.9
 
-- cuando creas un archivo nuevo y lo modificas agregandole contenido, pero despues lo eliminas todo hasta dejarlo vacio, no te deja cerrar el archivo (deberia poder)
-- cuando se usa control+k f el cursor esta visible y entorpece la visibilidad de la seleccion, en estos casos, deshabilitar la vision del cursor y dejar solo los highlight
-- cuando estas en un archivo y usas el comando control+k o, te debe abrir en la direccion que estas
-- cuando vas a guardar un archivo con el comando control+k control+s: debe autocompletar la ruta actual, actualmente solo te deja modificar el nombre.
-     mismo caso cuando se crea un archivo y despues se guarda, solo se permite modificar el nombre.
-- cuando cambias de archivo, el modo se reseat, por lo tanto siempre se vuelva a navegacion.
-- cuando se usa RePag y AvPag y se esta al borde del archivo, no baja hasta la ultima posicion o no sube hasta la primera posicion
+- se corrigieron todos los test: documetnacion, nombres y Bugs
+- hay muchos test que glitchean feo cuando se los ejecuta (problema menor)
+- falta optimizar utf-8 (critico)
+- entender mejor como se renderiza, para proponer mejoras (ha mejorado pero aun no es top)
+- agregar el comando g: para ir a determinada fila (solo util en navegacion)
+- poder hacer sangria o quitar sangria en navegacion , solo afectaria a fila (mas practico)
+- cuando inicias el editor muestra un mensaje para los comando. 
+- los mensajes no deben tener colores
+- mediante el comando: contro+k l, se puede alternar tema oscuro y tema claro
+- control+k b, no funciona como se espera, hay que revisar
+- se optimizo parcialmente el metodo de guardado de archivos.
+- hay dos carpetas de testing, una en raiz y otra en test, remover la que esta en raiz y verificar que todo los test funcionan
+- nuevo comando: control+k b y vuelve al anterior archivo (si es que se abrio uno nuevo)
+- cursor: cuando estas en modo navegacion, debe permanecer fijo, pero si estas en modo interaccion, debe parpadear.
+- cuando usas comando para abrir un nuevo archivo, te debe poner donde en la direccion del actual archivo. actualmente se utiliza la direccion donde se ejecuta el editor.
 
 ## Características
 
 - Editor modal (Navegación / Interacción / Selección / Prefijo / BufferSelector / SaveAs / FileBrowser / Búsqueda)
-- Selección con anchor fijo y resaltado en video inverso (UTF-8)
-- Multi-buffer (cada buffer con Document + Cursor + viewport + undo/redo + flag modificado)
-- File browser (`Ctrl+K o`) y selector de buffers (`Ctrl+K t`)
+- Multi-buffer 
+- File browser
 - Búsqueda incremental (`Busqueda`)
-- Undo/Redo (`Ctrl+U` / `Ctrl+Y`)
-- UTF-8 byte-safe (round-trip binario exacto, columnas visuales)
-- Clipboard X11 (global a todos los buffers)
-- Barra de estado de 2 filas + mensajes con timeout
+- Undo/Redo
+- UTF-8 byte-safe
+- Clipboard X11
 
 ## Compilar
 
@@ -128,10 +135,9 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 
 ## Documentación
 
-Ver `docs/` (si existe) para diseño por capas (`core/` modelo, `ui/` controlador+vista, `terminal/` input, `clipboard/` X11).
-Arquitectura resumida: `core/` no conoce UI; `ui/Renderer` dibuja sin mutar; `terminal/Event` desacopla tecla física de acción lógica.
+Aun no implementado
 
 ## Licencia
 
-De libre uso y comercialización.
+De libre uso.
 No nos hacemos responsables de los riesgos tomados por el usuario.
