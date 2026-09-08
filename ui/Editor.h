@@ -126,9 +126,6 @@ private:
     void switchToPreviousBuffer();
 
 private:
-    // Helper: guarda el buffer actual como "anterior" y activa `idx`.
-    // Centraliza la logica de actualizacion de previousBuffer_.
-    void doActivateBuffer(int idx);
     // Nombres visibles de todos los buffers, para el selector. Los buffers
     // modificados se marcan con " *" al final.
     std::vector<std::string> bufferNames() const;

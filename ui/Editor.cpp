@@ -552,7 +552,7 @@ void Editor::closeActiveBuffer() {
     }
 }
 
-void Editor::doActivateBuffer(int idx) {
+void Editor::activateBuffer(int idx) {
     if (idx >= 0 && idx < buffers.count() && idx != buffers.activeIndex()) {
         const Buffer& cur = buffers.at(buffers.activeIndex());
         previousBuffer_.valid = true;
@@ -563,10 +563,6 @@ void Editor::doActivateBuffer(int idx) {
     state_ = hasSelection ? State::Seleccion : State::Navegacion;
     setStatusMessage("");
     renderer_.invalidateCache();
-}
-
-void Editor::activateBuffer(int idx) {
-    doActivateBuffer(idx);
 }
 
 void Editor::switchToPreviousBuffer() {
@@ -715,7 +711,7 @@ void Editor::openFileToBuffer(const std::string& path) {
     // crear otro (v0.6.4: no duplicar archivos abiertos).
     for (int i = 0; i < buffers.count(); ++i) {
         if (buffers.at(i).filename == filePath) {
-            doActivateBuffer(i);
+            activateBuffer(i);
             return;
         }
     }
@@ -750,7 +746,7 @@ void Editor::openFileToBuffer(const std::string& path) {
         previousBuffer_.displayName = cur.displayName();
     }
     const int idx = buffers.push(std::move(nuevo));
-    doActivateBuffer(idx);
+    activateBuffer(idx);
     if (result == LoadResult::Success) {
         setStatusMessage("");
     } else {
