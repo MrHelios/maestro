@@ -226,7 +226,7 @@ TEST(watcher_integration_detects_delete_via_poll) {
 TEST(editor_integration_write_poll_reload) {
     TempFile f; f.write("A\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK_EQ(ed.active().document.lineAt(0), "A");
     CHECK(writeFile(f.path, "B\n"));
     bool reloaded = pollEditorUntil(ed, [&]{ return ed.active().document.lineAt(0)=="B"; });
@@ -238,7 +238,7 @@ TEST(editor_integration_write_poll_reload) {
 TEST(editor_external_change_with_local_modifications_preserves_buffer_and_warns) {
     TempFile f; f.write("A\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK_EQ(ed.active().document.lineAt(0), "A");
     ed.active().document.restore({"local"});
     ed.active().modified = true;
@@ -265,7 +265,7 @@ TEST(editor_external_change_with_local_modifications_preserves_buffer_and_warns)
 TEST(editor_dirty_vs_clean_external_change_distinguishes_warning_and_reload) {
     TempFile f; f.write("orig\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     // Phase 1: dirty buffer + external change => warning, preserve local
     ed.active().document.restore({"local_dirty"});
     ed.active().modified = true;
@@ -293,7 +293,7 @@ TEST(editor_dirty_vs_clean_external_change_distinguishes_warning_and_reload) {
 TEST(save_procesa_todos_los_eventos_no_warning) {
     TempFile f; f.write("orig\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     ed.active().document.restore({"nuevo"});
     ed.active().modified = true;
     ed.statusMessage_ = Message{};
@@ -313,7 +313,7 @@ TEST(save_procesa_todos_los_eventos_no_warning) {
 TEST(save_con_modify_y_attrib_no_warning) {
     TempFile f; f.write("orig\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     ed.active().document.restore({"v2"});
     ed.active().modified = true;
     ed.statusMessage_ = Message{};
@@ -342,7 +342,7 @@ TEST(save_con_modify_y_attrib_no_warning) {
 TEST(save_end_to_end_trunc_watch_coupled) {
     TempFile f; f.write("orig\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     struct stat stBefore; CHECK_EQ(stat(f.path.c_str(), &stBefore), 0);
     ed.active().document.restore({"modified_via_save"});
     ed.active().modified = true;
@@ -466,7 +466,7 @@ TEST(watcher_recovery_double_atomic_replace) {
 TEST(editor_recovery_double_atomic_replace) {
     TempFile f; f.write("v1\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK_EQ(ed.active().document.lineAt(0), "v1");
     for (const char* v : {"v2\n", "v3\n"}) {
         std::string tmp = f.path + ".tmp";
@@ -574,9 +574,9 @@ TEST(watcher_shared_directory_watch_survives_one_unwatch) {
 TEST(editor_two_buffers_same_file_share_watch_real) {
     TempFile f; f.write("shared\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     // Construct the second buffer manually because Editor has no public/API
-    // operation to open the same path twice (openFileToBuffer deduplicates).
+    // operation to open the same path twice (openFileInBuffer deduplicates).
     // This is an internal test using private members via #define private public.
     Buffer second = ed.active();
     second.unnamedName = "";
@@ -624,7 +624,7 @@ TEST(save_as_new_file_end_to_end_isNew_hadWatch) {
     TempFile fNew;
     std::filesystem::remove(fNew.path);
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(fOrig.path));
+    CHECK(ed.loadIntoActiveBuffer(fOrig.path));
     ed.active().document.restore({"save_as_content"});
     ed.active().modified = true;
     auto oldIdentity = ed.active().savedIdentity;
@@ -674,7 +674,7 @@ TEST(save_as_existing_file_overwrites_and_updates_watch) {
     TempFile fExisting; fExisting.write("existing\n");
     struct stat stExistingBefore; CHECK_EQ(stat(fExisting.path.c_str(), &stExistingBefore), 0);
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(fOrig.path));
+    CHECK(ed.loadIntoActiveBuffer(fOrig.path));
     ed.active().document.restore({"save_as_overwrite"});
     ed.active().modified = true;
     auto oldIdentity = ed.active().savedIdentity;
@@ -715,7 +715,7 @@ TEST(save_as_existing_file_overwrites_and_updates_watch) {
 TEST(save_as_failure_keeps_buffer_and_watch) {
     TempFile fOrig; fOrig.write("orig\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(fOrig.path));
+    CHECK(ed.loadIntoActiveBuffer(fOrig.path));
     ed.active().document.restore({"new_content"});
     ed.active().modified = true;
     auto oldFilename = ed.active().filename;
@@ -957,7 +957,7 @@ TEST(editor_open_normalizes_dot_path) {
     std::string expectedAbs = std::filesystem::absolute(relDotSlash).lexically_normal().string();
     {
         Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-        CHECK(ed.openFile(relDotSlash));
+        CHECK(ed.loadIntoActiveBuffer(relDotSlash));
         CHECK_EQ(ed.active().filename, expectedAbs);
         auto* w = dynamic_cast<InotifyFileWatcher*>(ed.watcher_.get());
         CHECK(w != nullptr);
@@ -988,7 +988,7 @@ TEST(editor_open_normalizes_dotdot_path) {
     std::string expectedAbs = std::filesystem::absolute(relDotDot).lexically_normal().string();
     {
         Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-        CHECK(ed.openFile(relDotDot));
+        CHECK(ed.loadIntoActiveBuffer(relDotDot));
         CHECK_EQ(ed.active().filename, expectedAbs);
         auto* w = dynamic_cast<InotifyFileWatcher*>(ed.watcher_.get());
         CHECK(w != nullptr);
@@ -1092,8 +1092,8 @@ TEST(editor_destructor_cleans_all_watches) {
         oldFd = watcher->fd();
         CHECK(oldFd >= 0);
         Editor ed(std::make_unique<FakeClipboard>(), std::move(watcher));
-        CHECK(ed.openFile(pathA));
-        ed.openFileToBuffer(pathB);
+        CHECK(ed.loadIntoActiveBuffer(pathA));
+        ed.openFileInBuffer(pathB);
         CHECK_EQ(ed.buffers.count(), 2);
         auto* w = dynamic_cast<InotifyFileWatcher*>(ed.watcher_.get());
         CHECK(w != nullptr);
@@ -1121,4 +1121,62 @@ TEST(editor_destructor_cleans_all_watches) {
         w2.unwatch(pathA);
         w2.unwatch(pathB);
     }
+}
+
+TEST(editor_handleFileChange_atomic_replace_sequence_clean_reloads_once) {
+    TempFile f; f.write("v1\n");
+    Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
+    CHECK(ed.loadIntoActiveBuffer(f.path));
+    CHECK(!ed.active().modified);
+    auto id1 = ed.active().savedIdentity;
+    CHECK(id1.valid);
+    std::string tmp = f.path + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out << "v2\n";
+    }
+    std::filesystem::rename(tmp, f.path);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    FileChangeEvent evDel{f.path, FileChangeKind::Deleted};
+    FileChangeEvent evCre{f.path, FileChangeKind::Created};
+    FileChangeEvent evMod{f.path, FileChangeKind::Modified};
+    ed.handleFileChange(evDel);
+    CHECK_EQ(ed.active().document.lineAt(0), "v2");
+    CHECK(!ed.active().modified);
+    CHECK(ed.active().savedIdentity.valid);
+    CHECK(ed.active().savedIdentity != id1);
+    auto id2 = ed.active().savedIdentity;
+    ed.handleFileChange(evCre);
+    CHECK_EQ(ed.active().document.lineAt(0), "v2");
+    CHECK(ed.active().savedIdentity == id2);
+    ed.handleFileChange(evMod);
+    CHECK_EQ(ed.active().document.lineAt(0), "v2");
+    CHECK(ed.active().savedIdentity == id2);
+}
+
+TEST(editor_handleFileChange_atomic_replace_sequence_dirty_warns_not_reload) {
+    TempFile f; f.write("v1\n");
+    Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
+    CHECK(ed.loadIntoActiveBuffer(f.path));
+    ed.active().document.restore({"local"});
+    ed.active().modified = true;
+    auto id = ed.active().savedIdentity;
+    std::string tmp = f.path + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        out << "v2\n";
+    }
+    std::filesystem::rename(tmp, f.path);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    FileChangeEvent evDel{f.path, FileChangeKind::Deleted};
+    ed.handleFileChange(evDel);
+    CHECK(ed.statusMessage_.text.find("ALERTA") != std::string::npos);
+    CHECK_EQ(ed.active().document.lineAt(0), "local");
+    CHECK(ed.active().modified);
+    CHECK(ed.active().savedIdentity == id);
+    FileChangeEvent evCre{f.path, FileChangeKind::Created};
+    ed.statusMessage_ = Message{};
+    ed.handleFileChange(evCre);
+    CHECK(ed.statusMessage_.text.find("ALERTA") != std::string::npos);
+    CHECK_EQ(ed.active().document.lineAt(0), "local");
 }

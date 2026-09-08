@@ -182,7 +182,7 @@ TEST(buffers_isolate_filename) {
     TempFile f;
     f.write("contenido");
     Editor ed;
-    CHECK(ed.openFile(f.path));        // B0 -> filename f.path
+    CHECK(ed.loadIntoActiveBuffer(f.path));        // B0 -> filename f.path
     newBuffer(ed);                     // B1 sin nombre
     CHECK(ed.active().filename.empty());
     CHECK_EQ(ed.active().unnamedName, "SinNombre1");
@@ -196,7 +196,7 @@ TEST(buffer_display_name_uses_filename_when_present) {
     TempFile f;
     f.write("x");
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     const std::string base = f.path.substr(f.path.find_last_of('/') + 1);
     CHECK_EQ(ed.active().displayName(), base);
     CHECK(ed.active().unnamedName == "SinNombre");
@@ -655,7 +655,7 @@ TEST(ctrl_k_w_modified_buffer_blocked) {
 TEST(ctrl_k_w_modified_blocked_until_save) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "x");
     press(ed, EventType::Escape);
     closeBuffer(ed);                       // bloqueado
@@ -953,7 +953,7 @@ TEST(save_as_copy_prefills_current_file) {
     TempFile f;
     f.write("x");
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     openSaveAs(ed);
     CHECK_EQ(ed.saveAsPath_, f.path);
     CHECK_EQ(ed.statusMessage_, "Save file: " + f.path);
@@ -966,7 +966,7 @@ TEST(save_as_copy_allows_editing_directory) {
     char* dir = mkdtemp(dirTemplate);
     CHECK(dir != nullptr);
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     openSaveAs(ed);
     CHECK_EQ(ed.saveAsPath_, f.path);
     clearPrompt(ed);

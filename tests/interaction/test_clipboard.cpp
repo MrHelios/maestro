@@ -1411,7 +1411,7 @@ TEST(modified_save_copy_paste_undo_returns_clean) {
     TempFile f;
     f.write("hola");
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK(!ed.active().modified);
 
     press(ed, EventType::MoveHome);

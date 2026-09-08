@@ -26,7 +26,7 @@ static bool waitFor(Pred pred, int timeoutMs = 500) {
 TEST(external_change_reloads_clean_buffer) {
     TempFile f; f.write("old\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     writeFile(f.path, "new\n");
     ed.handleFileChange({f.path, FileChangeKind::Modified});
     CHECK_EQ(ed.active().document.lineAt(0), "new");
@@ -37,7 +37,7 @@ TEST(external_change_reloads_clean_buffer) {
 TEST(external_change_preserves_modified_buffer) {
     TempFile f; f.write("A\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     ed.active().document.restore({"A_prime"});
     ed.active().modified = true;
     writeFile(f.path, "B\n");
@@ -50,7 +50,7 @@ TEST(external_change_preserves_modified_buffer) {
 TEST(external_change_updates_saved_lines) {
     TempFile f; f.write("A\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     auto oldSaved = ed.active().originalSnapshot_;
     writeFile(f.path, "B\n");
     ed.handleFileChange({f.path, FileChangeKind::Modified});
@@ -61,7 +61,7 @@ TEST(external_change_updates_saved_lines) {
 TEST(external_change_clamps_cursor) {
     TempFile f; f.write("a\nb\nc\nd\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     ed.active().cursor.line = 3;
     ed.active().cursor.col = 0;
     writeFile(f.path, "a\n");
@@ -77,7 +77,7 @@ TEST(external_change_clamps_cursor) {
 TEST(save_does_not_trigger_external_change) {
     TempFile f; f.write("orig\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     ed.active().document.restore({"mod"});
     ed.active().modified = true;
     ed.save();
@@ -92,7 +92,7 @@ TEST(save_does_not_trigger_external_change) {
 TEST(multiple_saves_do_not_trigger_external_change) {
     TempFile f; f.write("a\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     for (int i = 0; i < 2; ++i) {
         ed.active().document.restore({std::string("v") + std::to_string(i)});
         ed.active().modified = true;
@@ -107,7 +107,7 @@ TEST(multiple_saves_do_not_trigger_external_change) {
 TEST(multiple_external_writes_reload_latest_content) {
     TempFile f; f.write("0\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     writeFile(f.path, "1\n");
     writeFile(f.path, "2\n");
     writeFile(f.path, "final\n");
@@ -119,7 +119,7 @@ TEST(multiple_external_writes_reload_latest_content) {
 TEST(deleted_file_is_detected) {
     TempFile f; f.write("keep\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     std::filesystem::remove(f.path);
     bool got = waitFor([&]{
         auto* w = dynamic_cast<InotifyFileWatcher*>(ed.watcher_.get());
@@ -136,7 +136,7 @@ TEST(deleted_file_is_detected) {
 TEST(deleted_then_recreated_file_is_reloaded) {
     TempFile f; f.write("orig\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     std::filesystem::remove(f.path);
     bool gone = waitFor([&]{
         auto* w = dynamic_cast<InotifyFileWatcher*>(ed.watcher_.get());
@@ -169,7 +169,7 @@ TEST(deleted_then_recreated_file_is_reloaded) {
 TEST(atomic_file_replacement_is_detected) {
     TempFile f; f.write("v1\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     std::string tmp = f.path + ".tmp";
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
@@ -192,7 +192,7 @@ TEST(atomic_file_replacement_is_detected) {
 TEST(closing_buffer_does_not_process_old_path) {
     TempFile f; f.write("x\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     std::string path = ed.active().filename;
     ed.closeActiveBuffer();
     CHECK(ed.active().filename != path);
@@ -204,7 +204,7 @@ TEST(closing_buffer_does_not_process_old_path) {
 TEST(closing_buffer_removes_watch_integration) {
     TempFile f; f.write("x\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     std::string path = ed.active().filename;
     ed.closeActiveBuffer();
     CHECK(ed.active().filename != path);
@@ -225,7 +225,7 @@ TEST(closing_buffer_removes_watch_integration) {
 TEST(same_file_two_buffers_share_watch) {
     TempFile f; f.write("shared\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     Buffer second = ed.active();
     second.unnamedName = "";
     ed.buffers.push(std::move(second));
@@ -242,7 +242,7 @@ TEST(same_file_two_buffers_share_watch) {
 TEST(closing_one_shared_buffer_keeps_watch) {
     TempFile f; f.write("shared\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     Buffer second = ed.active();
     second.unnamedName = "";
     ed.buffers.push(std::move(second));
@@ -262,9 +262,9 @@ TEST(different_files_have_independent_watches) {
     TempFile fa, fb;
     fa.write("A1\n"); fb.write("B1\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(fa.path));
+    CHECK(ed.loadIntoActiveBuffer(fa.path));
     ed.createBuffer();
-    CHECK(ed.openFile(fb.path));
+    CHECK(ed.loadIntoActiveBuffer(fb.path));
     CHECK_EQ(ed.buffers.count(), 2);
     int idxA = -1, idxB = -1;
     for (int i = 0; i < ed.buffers.count(); ++i) {
@@ -294,7 +294,7 @@ TEST(unnamed_buffer_has_no_watch) {
 TEST(rapid_external_changes) {
     TempFile f; f.write("0\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     for (int i = 1; i <= 10; ++i) writeFile(f.path, std::to_string(i) + "\n");
     ed.handleFileChange({f.path, FileChangeKind::Modified});
     CHECK_EQ(ed.active().document.lineAt(0), "10");
@@ -319,7 +319,7 @@ TEST(modify_and_chmod_generates_no_false_warning) {
     CHECK(hasModified);
     w.unwatch(f.path);
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     writeFile(f.path, "d\n");
     std::filesystem::permissions(f.path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
     writeFile(f.path, "e\n");
@@ -339,7 +339,7 @@ TEST(modify_and_chmod_generates_no_false_warning) {
 TEST(save_then_external_change) {
     TempFile f; f.write("orig\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     ed.active().document.restore({"local"});
     ed.active().modified = true;
     ed.save();
@@ -353,7 +353,7 @@ TEST(save_then_external_change) {
 TEST(external_change_then_local_edit) {
     TempFile f; f.write("orig\n");
     Editor ed = makeNullEditor();
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     writeFile(f.path, "ext\n");
     ed.handleFileChange({f.path, FileChangeKind::Modified});
     CHECK_EQ(ed.active().document.lineAt(0), "ext");
@@ -371,12 +371,12 @@ TEST(open_close_many_buffers_does_not_leak_watches) {
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
     // :e sobre el mismo buffer (sin createBuffer): no debe acumular watches
     // de fa/fb/fc. Tras cerrar, los mapas internos tienen que quedar vacíos.
-    ed.openFile(fa.path);
-    ed.openFile(fb.path);
-    ed.openFile(fc.path);
-    ed.openFile(fa.path);
-    ed.openFile(fb.path);
-    ed.openFile(fc.path);
+    ed.loadIntoActiveBuffer(fa.path);
+    ed.loadIntoActiveBuffer(fb.path);
+    ed.loadIntoActiveBuffer(fc.path);
+    ed.loadIntoActiveBuffer(fa.path);
+    ed.loadIntoActiveBuffer(fb.path);
+    ed.loadIntoActiveBuffer(fc.path);
     auto* w = dynamic_cast<InotifyFileWatcher*>(ed.watcher_.get());
     CHECK(w != nullptr);
     CHECK_EQ(w->fileWatches_.size(), 1u);

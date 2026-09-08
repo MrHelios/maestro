@@ -14,7 +14,7 @@ int main(int argc, char* argv[]) {
                          argv[1]);
             return 1;
         }
-        editor.openFile(argv[1]);
+        editor.loadIntoActiveBuffer(argv[1]);
     }
 
     editor.run();

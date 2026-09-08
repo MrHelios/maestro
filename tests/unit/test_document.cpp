@@ -1516,3 +1516,40 @@ TEST(doc_indent_line_preserves_multibyte_content) {
     CHECK(d.indentLine(0, false, 4));
     CHECK_EQ(d.lineAt(0), std::string("\xC3\xA9x"));     // vuelve a "éx"
 }
+
+TEST(doc_preview_indent_delta_cases) {
+    auto check = [](const std::string& line, bool indent, int expected) {
+        Document d;
+        d.restore(Lines({line}));
+        int preview = d.previewIndentDelta(0, indent, 4);
+        CHECK_EQ(preview, expected);
+        std::string before = d.lineAt(0);
+        int delta = d.indentLine(0, indent, 4);
+        CHECK_EQ(delta, expected);
+        if (expected == 0) {
+            CHECK_EQ(d.lineAt(0), before);
+        }
+        // preview no muta: verificar que versión no cambió tras preview solo
+        Document d2;
+        d2.restore(Lines({line}));
+        auto v0 = d2.version();
+        int p = d2.previewIndentDelta(0, indent, 4);
+        CHECK_EQ(p, expected);
+        CHECK_EQ(d2.version(), v0);
+        CHECK_EQ(d2.lineAt(0), line);
+    };
+    check("abc", true, 4);
+    check("abc", false, 0);
+    check("    abc", false, -4);
+    check("  abc", false, -2);
+    check("\tabc", false, -1);
+    check(" \tabc", false, -1);
+    check("", false, 0);
+    // preview debe ser coherente con indentLine en out-of-range / indentLen invalido
+    Document d;
+    d.restore(Lines({"x"}));
+    CHECK_EQ(d.previewIndentDelta(-1, true, 4), 0);
+    CHECK_EQ(d.previewIndentDelta(99, true, 4), 0);
+    CHECK_EQ(d.previewIndentDelta(0, true, 0), 0);
+    CHECK_EQ(d.previewIndentDelta(0, false, 0), 0);
+}

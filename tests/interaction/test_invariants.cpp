@@ -182,7 +182,7 @@ TEST(state_stress_mixed_operations_selection) {
 TEST(state_filename_unchanged_by_edits) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "contenido");
     ed.handleEvent(ev(EventType::Undo));
     ed.handleEvent(ev(EventType::Redo));
@@ -212,7 +212,7 @@ TEST(state_history_coherent_after_sequence) {
 TEST(sequence_open_insert_save_close) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "hola");
     save(ed);
     CHECK(!ed.active().modified);
@@ -230,7 +230,7 @@ TEST(sequence_open_insert_save_close) {
 TEST(sequence_open_edit_undo_redo_save) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "hola mundo");
     ed.handleEvent(ev(EventType::Undo));
     ed.handleEvent(ev(EventType::Redo));
@@ -264,7 +264,7 @@ TEST(sequence_undo_restores_trailing_newline_flag) {
     TempFile f;
     f.write("a\n");
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     CHECK(ed.active().document.endsWithNewline());
     enterInteraccion(ed);
     ed.handleEvent(ev(EventType::MoveEnd));            // cursor al final de "a"
@@ -403,14 +403,14 @@ TEST(edge_cursor_at_absolute_end) {
 TEST(edge_millions_of_chars_roundtrip) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     const int n = 1000000;
     ed.active().document.restore({std::string(n, 'y')});
     save(ed);
     CHECK(!ed.active().modified);
 
     Editor ed2;
-    CHECK(ed2.openFile(f.path));
+    CHECK(ed2.loadIntoActiveBuffer(f.path));
     CHECK_EQ(ed2.active().document.lineLength(0), n);
     for (int i = 0; i < n; i += 10000)
         CHECK_EQ(ed2.active().document.lineAt(0)[i], 'y');
@@ -422,7 +422,7 @@ TEST(edge_millions_of_chars_roundtrip) {
 // Guardar y volver a abrir debe producir exactamente el mismo contenido.
 static void assertRoundTrip(const std::string& path, const Editor& ed) {
     Editor reloaded;
-    CHECK(reloaded.openFile(path));
+    CHECK(reloaded.loadIntoActiveBuffer(path));
     CHECK_EQ(reloaded.active().document.lineCount(), ed.active().document.lineCount());
     for (int i = 0; i < ed.active().document.lineCount(); ++i)
         CHECK_EQ(reloaded.active().document.lineAt(i), ed.active().document.lineAt(i));
@@ -434,7 +434,7 @@ static void assertRoundTrip(const std::string& path, const Editor& ed) {
 TEST(invariant_save_reload_exact) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "primera");
     ed.handleEvent(ev(EventType::InsertNewline));
     type(ed, "segunda");
@@ -448,7 +448,7 @@ TEST(invariant_save_does_not_change_document) {
     TempFile f;
     Editor ed;
 
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "abc");
 
     const std::string before = ed.active().document.lineAt(0);
@@ -500,7 +500,7 @@ TEST(invariant_line_count_matches_content) {
 TEST(invariant_serialize_joins_lines) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "hola");
     ed.handleEvent(ev(EventType::InsertNewline));
     type(ed, "mundo");
@@ -522,7 +522,7 @@ TEST(invariant_no_crash_on_event_sequence) {
     // (que, con un Enter aleatorio, escribira un archivo en el cwd).
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     // Todos los tipos de evento ante un editor recien creado.
     const std::vector<EventType> types = {
         EventType::InsertChar, EventType::InsertNewline, EventType::Backspace,
@@ -554,7 +554,7 @@ TEST(invariant_state_consistent_with_clipboard_and_prefix) {
     // seleccion, estado, clipboard y limites de historial).
     TempFile f;
     Editor ed;
-    ed.openFile(f.path); // nombre real: un Save aleatorio no abre el prompt
+    ed.loadIntoActiveBuffer(f.path); // nombre real: un Save aleatorio no abre el prompt
     ed.active().document.restore({"hola", "mundo", "", "cafe"});
     ed.active().cursor.line = 1;
     ed.active().cursor.col = 2;

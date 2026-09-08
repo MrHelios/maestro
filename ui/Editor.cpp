@@ -33,6 +33,14 @@ constexpr const char* kHelpEmpty = "";
 constexpr const char* kHelpPrefix =
     "command: Ctrl+k";
 constexpr const char* kHelpIrAFila = "ir a fila: ";
+constexpr int kIndentLen = 4;
+inline int shiftColumn(int col, int delta) {
+    return delta > 0 ? col + delta : std::max(0, col + delta);
+}
+inline Edit makeIndentEditForLine(int line, int delta, const std::string& before) {
+    if (delta > 0) return {EditType::Insert, {line, 0}, {line, delta}, std::string(static_cast<size_t>(delta), ' ')};
+    return {EditType::Delete, {line, 0}, {line, -delta}, before.substr(0, static_cast<size_t>(-delta))};
+}
 }
 
 namespace {
@@ -264,9 +272,9 @@ void Editor::registerCommands() {
             setActionMessage("Nada para pegar.", MessageKind::Warning);
             return;
         }
-        auto sel = selection();
         HistoryEntry e = b.beginHistoryEntry();
-        if (sel.has_value()) {
+        if (hasSelection()) {
+            auto sel = selection();
             auto removed = b.document.extractRange(sel->start.line, sel->start.col,
                                                    sel->end.line, sel->end.col);
             b.document.deleteRange(sel->start.line, sel->start.col,
@@ -425,7 +433,7 @@ const Buffer& Editor::active() const {
     return buffers.active();
 }
 
-bool Editor::openFile(const std::string& path) {
+bool Editor::loadIntoActiveBuffer(const std::string& path) {
     // v0.6.2: solo archivos. Una carpeta no se trata como archivo
     // nuevo: se rechaza y el editor queda como estaba.
     if (isDirectory(path)) {
@@ -441,9 +449,9 @@ bool Editor::openFile(const std::string& path) {
     LoadResult result = b.document.loadFromFile(path);
 
     if (result != LoadResult::Success && result != LoadResult::NotFound) {
-        // Error real (permisos, E/S): NO se trata como archivo nuevo y no se
-        // toca el documento, para no aparentar que un archivo existente sin
-        // permisos es nuevo (eso llevaria a sobrescribirlo desde cero).
+        // Error real (permisos, E/S): no se trata como archivo nuevo y
+        // Document::loadFromFile garantiza no tocar el documento en este
+        // camino (ver Document.cpp).
         b.filename = oldFilename;
         setActionMessage((result == LoadResult::PermissionDenied)
                                   ? "Sin permisos de lectura: " + path
@@ -458,17 +466,7 @@ bool Editor::openFile(const std::string& path) {
     b.selection.reset();
     b.selectAllActive = false;
     b.selectAllPrevious.reset();
-    if (oldFilename != b.filename && !oldFilename.empty()) {
-        bool stillNeeded = false;
-        for (int i = 0; i < buffers.count(); ++i) {
-            if (&buffers.at(i) == &b) continue;
-            if (buffers.at(i).filename == oldFilename) { stillNeeded = true; break; }
-        }
-        if (!stillNeeded) {
-            watchedFiles_.erase(oldFilename);
-            if (watcher_) watcher_->unwatch(oldFilename);
-        }
-    }
+    if (oldFilename != b.filename) unwatchFile(oldFilename);
     watchFile(b.filename);
     state_ = State::Navegacion;
     setStatusMessage("");
@@ -517,16 +515,7 @@ void Editor::closeActiveBuffer() {
     int rows, cols;
     terminal_.getWindowSize(rows, cols);
     auto cr = buffers.closeActive(rows, cols);
-    if (cr != CloseResult::ModifiedBlocked && !oldPath.empty()) {
-        bool stillNeeded = false;
-        for (int i = 0; i < buffers.count(); ++i) {
-            if (buffers.at(i).filename == oldPath) { stillNeeded = true; break; }
-        }
-        if (!stillNeeded) {
-            watchedFiles_.erase(oldPath);
-            if (watcher_) watcher_->unwatch(oldPath);
-        }
-    }
+    if (cr != CloseResult::ModifiedBlocked) unwatchFile(oldPath);
     switch (cr) {
         case CloseResult::ModifiedBlocked:
             setActionMessage("Buffer modificado: guarda con Ctrl+K s o restaura.", MessageKind::Warning);
@@ -696,12 +685,12 @@ void Editor::fileBrowserEnterSelected() {
             break;
         }
         case FileBrowser::EnterResult::OpenedFile:
-            openFileToBuffer(fileBrowser.pendingPath());
+            openFileInBuffer(fileBrowser.pendingPath());
             break;
     }
 }
 
-void Editor::openFileToBuffer(const std::string& path) {
+void Editor::openFileInBuffer(const std::string& path) {
     // Normalizar la ruta ANTES de comparar y guardar, para que el chequeo
     // de duplicados funcione aunque dos rutas escriban el mismo archivo de
     // forma distinta ("foo/../bar" == "bar", "." y "..", etc).
@@ -1293,14 +1282,13 @@ void Editor::handleSelectAllEvent(const Event& event) {
             if (event.text == "a") {
                 b.selection = b.selectAllPrevious;
                 b.selectAllPrevious.reset();
-                if (!b.selection.has_value()) clearSelection();
                 b.selectAllActive = false;
-                // Si "Seleccionar todo" resultó en selección vacía (ej: documento vacío),
-                // volver a Navegación para evitar quedar atrapado en modo Seleccion.
-                if (b.selection.has_value()) {
+                const bool restoredSelection = hasSelection();
+                if (restoredSelection) {
                     state_ = State::Seleccion;
                     setStatusMessage("SELECCION");
                 } else {
+                    b.selection.reset();
                     state_ = State::Navegacion;
                     setStatusMessage("");
                 }
@@ -1521,24 +1509,11 @@ void Editor::commitSaveAs() {
     bool isNew = b.filename != path;
     std::string oldPath = b.filename;
     if (b.document.saveToFile(path)) {
-        if (isNew && !oldPath.empty()) {
-            bool stillNeeded = false;
-            for (int i = 0; i < buffers.count(); ++i) {
-                if (&buffers.at(i) == &b) continue;
-                if (buffers.at(i).filename == oldPath) { stillNeeded = true; break; }
-            }
-            if (!stillNeeded) {
-                watchedFiles_.erase(oldPath);
-                if (watcher_) watcher_->unwatch(oldPath);
-            }
-        }
         b.filename = path;
         b.syncSavedState();
         b.savedIdentity = captureIdentity(path);
-        if (watchedFiles_.find(b.filename) == watchedFiles_.end()) {
-            watcher_->watch(b.filename);
-            watchedFiles_.insert(b.filename);
-        }
+        if (isNew) unwatchFile(oldPath);
+        watchFile(b.filename);
         setActionMessage("Guardado: " + path, MessageKind::Success);
         state_ = priorState_;
     } else {
@@ -1843,10 +1818,6 @@ void Editor::indentSelection(bool indent) {
     }
     auto sel = selection();
 
-    // Ancho de una tabulacion (en espacios). Un solo '}' / '{' mueve un
-    // nivel. Si mas adelante se configura ancho de tab, esto es el lugar.
-    constexpr int kIndentLen = 4;
-
     // La tabulacion aplica a las lineas COMPLETAS que toca la seleccion.
     // Como el rango es [start, end) con end exclusivo, la ultima linea
     // (sel->end.line) SOLO cuenta si la seleccion llega hasta dentro de
@@ -1862,24 +1833,9 @@ void Editor::indentSelection(bool indent) {
         --lastLine;
     }
 
-    // Una sola entrada de historial cubre el rango entero, de modo que el
-    // '}' / '{' se deshace en UNA sola operacion. Para no dejar entradas
-    // de undo vacias (p.ej. des-indentar algo que ya no tiene margen),
-    // primero miramos si ALGUNA linea del rango va a cambiar realmente.
-    //
-    // OJO: este criterio de "la linea va a cambiar" debe mantenerse
-    // SINCRONIZADO con lo que indentLine() decide internamente (un tab
-    // inicial cuenta como nivel, o hasta `kIndentLen` espacios iniciales).
-    // No basta con tenerlo solo aqui explicito pero distinto: si indentLine
-    // cambia el criterio de desindentado (tabs mixtos, ancho configurable,
-    // ...) hay que tocar este predicado en el mismo commit. El loop es el
-    // mismo que aplica los cambios abajo, salvo que este es de solo-lectura
-    // y corta apenas encuentra una linea que cambie.
     bool willChange = false;
     for (int l = firstLine; l <= lastLine; ++l) {
-        const std::string& s = b.document.lineAt(l);
-        bool change = indent || (!s.empty() && (s[0] == '\t' || s[0] == ' '));
-        if (change) { willChange = true; break; }
+        if (b.document.previewIndentDelta(l, indent, kIndentLen) != 0) { willChange = true; break; }
     }
     if (!willChange) {
         setActionMessage("Nada que tabular.", MessageKind::Info);
@@ -1891,26 +1847,11 @@ void Editor::indentSelection(bool indent) {
         std::string before = b.document.lineAt(l);
         int delta = b.document.indentLine(l, indent, kIndentLen);
         if (delta == 0) continue;
-        if (delta > 0) {
-            e.edits.push_back({EditType::Insert, {l, 0}, {l, delta},
-                               std::string(static_cast<size_t>(delta), ' ')});
-        } else {
-            e.edits.push_back({EditType::Delete, {l, 0}, {l, -delta},
-                               before.substr(0, static_cast<size_t>(-delta))});
-        }
-        // Desplazar el cursor y los extremos de la seleccion sobre ESTA
-        // linea por el delta que el cambio movio su comienzo (positivo al
-        // indentar, negativo al desindentar). Asi la tabulacion no deja
-        // cursor/seleccion apuntando a offsets viejos, sino sobre el mismo
-        // texto de siempre (respetando las selecciones parciales).
-        auto shift = [delta](int col) {
-            // Al desindentar (< 0) nunca se pasa del inicio: col queda 0.
-            return delta > 0 ? col + delta : std::max(0, col + delta);
-        };
-        if (b.cursor.line == l) b.cursor.col = shift(b.cursor.col);
+        e.edits.push_back(makeIndentEditForLine(l, delta, before));
+        if (b.cursor.line == l) b.cursor.col = shiftColumn(b.cursor.col, delta);
         if (b.selection.has_value()) {
-            if (b.selection->anchor.line == l) b.selection->anchor.col = shift(b.selection->anchor.col);
-            if (b.selection->position.line == l) b.selection->position.col = shift(b.selection->position.col);
+            if (b.selection->anchor.line == l) b.selection->anchor.col = shiftColumn(b.selection->anchor.col, delta);
+            if (b.selection->position.line == l) b.selection->position.col = shiftColumn(b.selection->position.col, delta);
         }
     }
     updateModified(b);
@@ -1921,38 +1862,22 @@ void Editor::indentSelection(bool indent) {
 
 void Editor::indentCurrentLine(bool indent) {
     Buffer& b = active();
-    constexpr int kIndentLen = 4;
     int line = b.cursor.line;
-
-    // Comprobar si la linea va a cambiar realmente
-    const std::string& s = b.document.lineAt(line);
-    bool change = indent || (!s.empty() && (s[0] == '\t' || s[0] == ' '));
-    if (!change) {
+    if (b.document.previewIndentDelta(line, indent, kIndentLen) == 0) {
         setActionMessage("Nada que tabular.", MessageKind::Info);
         return;
     }
 
-    HistoryEntry e = b.beginHistoryEntry();
-    std::string before = s;
+    std::string before = b.document.lineAt(line);
     int delta = b.document.indentLine(line, indent, kIndentLen);
     if (delta == 0) {
         setActionMessage("Nada que tabular.", MessageKind::Info);
         return;
     }
 
-    if (delta > 0) {
-        e.edits.push_back({EditType::Insert, {line, 0}, {line, delta},
-                           std::string(static_cast<size_t>(delta), ' ')});
-    } else {
-        e.edits.push_back({EditType::Delete, {line, 0}, {line, -delta},
-                           before.substr(0, static_cast<size_t>(-delta))});
-    }
-
-    // Desplazar cursor (siempre esta en esta linea, ya que line = b.cursor.line)
-    auto shift = [delta](int col) {
-        return delta > 0 ? col + delta : std::max(0, col + delta);
-    };
-    b.cursor.col = shift(b.cursor.col);
+    HistoryEntry e = b.beginHistoryEntry();
+    e.edits.push_back(makeIndentEditForLine(line, delta, before));
+    b.cursor.col = shiftColumn(b.cursor.col, delta);
 
     updateModified(b);
     b.commitHistoryEntry(std::move(e));
@@ -2051,7 +1976,6 @@ void Editor::handleIrAFilaEvent(const Event& event) {
                         goToLineQuery_.clear();
                     }
                 } catch (const std::out_of_range&) {
-                    // Por seguridad ante desbordamiento de std::stoi
                     setStatusMessage(std::string(kHelpIrAFila) + " [valor invalido]", MessageKind::Error);
                     goToLineQuery_.clear();
                 }

@@ -53,7 +53,7 @@ std::string stateAccent(const Theme& T, State state) {
 
 // Solo para MOSTRAR en la barra de estado: reemplaza el home del usuario
 // por "~" al inicio de la ruta (estilo shell). NO toca filename real: esa
-// sigue siendo la ruta absoluta que usan save()/openFileToBuffer() para
+// sigue siendo la ruta absoluta que usan save()/openFileInBuffer() para
 // guardar y detectar duplicados. Si $HOME no esta seteado, devuelve la
 // ruta sin cambios.
 std::string collapseHome(const std::string& path) {

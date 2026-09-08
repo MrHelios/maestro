@@ -118,7 +118,7 @@ TEST(e2e_01_edit_and_save_byte_exact) {
     writeBytes(f.path, "hola\n");
 
     Editor ed;
-    CHECK(ed.openFile(f.path));                 // open existing file (Success)
+    CHECK(ed.loadIntoActiveBuffer(f.path));                 // open existing file (Success)
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
@@ -196,7 +196,7 @@ TEST(e2e_02_undo_redo_full_byte_exact) {
     writeBytes(f.path, "hola\n");
 
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     // edit 1: 'X' al inicio -> "Xhola"
@@ -266,7 +266,7 @@ TEST(e2e_03_selection_replacement_byte_exact) {
     writeBytes(f.path, "hello world\n");
 
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     // navigate hasta la "w" de "world" (col 6).
@@ -348,7 +348,7 @@ TEST(e2e_04_multiline_selection_delete_undo_redo_byte_exact) {
     writeBytes(f.path, "aaa\nbbb\nccc\n");
 
     Editor ed;
-    CHECK(ed.openFile(f.path));                 // open existing file (Success)
+    CHECK(ed.loadIntoActiveBuffer(f.path));                 // open existing file (Success)
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
@@ -470,7 +470,7 @@ TEST(e2e_05_utf8_workflow_byte_exact) {
     };
 
     Editor ed;
-    CHECK(ed.openFile(f.path));                 // open existing file (Success)
+    CHECK(ed.loadIntoActiveBuffer(f.path));                 // open existing file (Success)
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
@@ -559,13 +559,13 @@ TEST(e2e_05_utf8_workflow_byte_exact) {
 // ===========================================================================
 // E2E-06 — Multi-buffer basico: dos archivos independientes (P0)
 //
-//   open A -> Ctrl+K n -> escribir B -> volver A -> editar A -> volver B
+//   loadIntoActiveBuffer A -> Ctrl+K n -> escribir B -> volver A -> editar A -> volver B
 //       -> editar B -> save A -> save B -> quit
 //   comprobar AMBOS archivos en disco.
 //
 // Workflow concreto y determinista (todo por eventos reales, incluido el
 // selector de buffers Ctrl+K t y el prompt Guardar archivo: para B):
-//   open A      : "AAA\n"  -> buffer 0 activo, Navegacion, modified=false
+//   loadIntoActiveBuffer A      : "AAA\n"  -> buffer 0 activo, Navegacion, modified=false
 //   Ctrl+K n    : buffer B nuevo SIN nombre, activo, Navegacion
 //   escribir B  : 'i' + "BBB"                -> B = "BBB", modified
 //   volver A    : Ctrl+K t (selector) + MoveUp + Enter -> A activo, "AAA"
@@ -588,7 +588,7 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     writeBytes(fileA.path, "AAA\n");
 
     Editor ed;
-    CHECK(ed.openFile(fileA.path));             // open A (buffer 0, activo)
+    CHECK(ed.loadIntoActiveBuffer(fileA.path));             // loadIntoActiveBuffer A (buffer 0, activo)
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
     CHECK(!ed.active().modified);
@@ -676,7 +676,7 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
 // ===========================================================================
 // E2E-07 — Multi-buffer + undo/redo (P0)
 //
-//   open A -> Ctrl+K n (B) -> A edit -> B edit -> A undo -> B undo
+//   loadIntoActiveBuffer A -> Ctrl+K n (B) -> A edit -> B edit -> A undo -> B undo
 //       -> B edit -> A redo -> verificar B
 //
 // El undo/redo vive en CADA buffer: deshacer A no toca B y viceversa; y
@@ -685,7 +685,7 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
 // vaciar el redo de A (solo el propio de B).
 //
 // Workflow determinista (ediciones de UNA letra para que undo/redo sean 1:1):
-//   open A     : "AAA\n"        -> buffer 0 activo, cursor (0,0), modified=false
+//   loadIntoActiveBuffer A     : "AAA\n"        -> buffer 0 activo, cursor (0,0), modified=false
 //   Ctrl+K n   : buffer B nuevo (vacio, sin nombre), activo
 //   A edit     : volver a A (Ctrl+K t ↑ Enter) + MoveEnd + 'X' -> "AAAX"
 //   B edit     : volver a B (Ctrl+K t ↓ Enter) + 'B'          -> "B"
@@ -703,7 +703,7 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
     writeBytes(fileA.path, "AAA\n");
 
     Editor ed;
-    CHECK(ed.openFile(fileA.path));             // buffer A activo
+    CHECK(ed.loadIntoActiveBuffer(fileA.path));             // buffer A activo
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
     CHECK_EQ(ed.active().cursor.col, 0);
     CHECK(!ed.active().modified);
@@ -814,7 +814,7 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
 // ===========================================================================
 // E2E-08 — FileBrowser: navegar directorios y abrir un archivo (P1)
 //
-//   open A -> Ctrl+K o -> navegar directorios -> abrir B -> editar B
+//   loadIntoActiveBuffer A -> Ctrl+K o -> navegar directorios -> openFileInBuffer B -> editar B
 //       -> save -> volver A
 //
 // El explorador arranca en el cwd del proceso, asi que (igual que los tests
@@ -828,10 +828,10 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
 //   beta/
 //     gamma.txt "BBB\n"     (archivo B, se abre desde el explorador)
 //
-//   open A      : openFile(alpha.txt) -> buffer 0 activo, "AAA"
+//   loadIntoActiveBuffer A      : loadIntoActiveBuffer(alpha.txt) -> buffer 0 activo, "AAA"
 //   Ctrl+K o    : entra al explorador; sembramos base/ -> ["..","beta/","alpha.txt"]
 //   navegar     : MoveDown -> "beta/"; Enter (entra) -> ["..","gamma.txt"]
-//   abrir B     : MoveDown -> "gamma.txt"; Enter -> buffer B activo, "BBB"
+//   openFileInBuffer B     : MoveDown -> "gamma.txt"; Enter -> buffer B activo, "BBB"
 //   editar B    : MoveEnd + 'X' -> "BBBX", modified
 //   save        : Ctrl+K Ctrl+S (B tiene nombre) -> modified=false, disco="BBBX\n"
 //   volver A    : Ctrl+K t + MoveUp + Enter -> buffer A, "AAA" (intacto)
@@ -851,7 +851,7 @@ TEST(e2e_08_filebrowser_open_edit_save_switch) {
     writeBytes(pathB, "BBB\n");
 
     Editor ed;
-    CHECK(ed.openFile(pathA));                  // open A
+    CHECK(ed.loadIntoActiveBuffer(pathA));                  // loadIntoActiveBuffer A
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
     CHECK(!ed.active().modified);
 
@@ -878,7 +878,7 @@ TEST(e2e_08_filebrowser_open_edit_save_switch) {
     CHECK_EQ(ed.fileBrowser.displayNames_[0], "../");
     CHECK_EQ(ed.fileBrowser.displayNames_[1], "gamma.txt");
 
-    // abrir B: bajar a "gamma.txt" y Enter.
+    // openFileInBuffer B: bajar a "gamma.txt" y Enter.
     press(ed, EventType::MoveDown);             // 0 -> 1 "gamma.txt"
     ed.handleEvent(enter);                      // abrir archivo -> buffer B
     CHECK_EQ(ed.buffers.count(), 2);            // A + B
@@ -1071,7 +1071,7 @@ TEST(e2e_11_buffer_selector_abc_verify_states) {
     writeBytes(fileA.path, "AAA\n");
 
     Editor ed;
-    CHECK(ed.openFile(fileA.path));             // buffer 0 = A
+    CHECK(ed.loadIntoActiveBuffer(fileA.path));             // buffer 0 = A
     Event enter;
     enter.type = EventType::InsertNewline;
 
@@ -1182,7 +1182,7 @@ TEST(e2e_12_binary_bytes_00_to_ff_roundtrip) {
     writeBytes(f.path, content);
 
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     Buffer& b = ed.active();
 
     // Serializa el documento como se guardaria en disco (lineas unidas por \n,
@@ -1332,13 +1332,13 @@ TEST(e2e_13_save_error_invalid_path) {
 // ===========================================================================
 // E2E-14 — Error al abrir desde el FileBrowser (P1)
 //
-//   open A -> editar (historial) -> seleccionar -> Ctrl+K o -> FileBrowser
+//   loadIntoActiveBuffer A -> editar (historial) -> seleccionar -> Ctrl+K o -> FileBrowser
 //   -> intentar abrir un archivo con error PermissionDenied -> error visible
 //
 // El editor NO debe: crashear, perder el buffer actual, perder la seleccion,
 // perder el historial de undo/redo, ni cambiar accidentalmente de buffer.
 //
-// openFileToBuffer ante un error real (PermissionDenied) no crea buffer ni
+// openFileInBuffer ante un error real (PermissionDenied) no crea buffer ni
 // toca nada: solo pinta el error en la fila de mensajes. La verificacion es
 // que TODO el estado previo sobrevive byte/columna a columna.
 //
@@ -1352,7 +1352,7 @@ TEST(e2e_13_save_error_invalid_path) {
 //   alpha.txt   "AAA\n"     (archivo A, se abre al inicio)
 //   no_perm.txt "SECRET\n"  (inyectado como PermissionDenied via hook)
 //
-//   open A       : openFile(alpha.txt) -> buffer 0 activo, "AAA"
+//   loadIntoActiveBuffer A       : loadIntoActiveBuffer(alpha.txt) -> buffer 0 activo, "AAA"
 //   editar       : MoveEnd + "XYZ" -> "AAAXYZ" (historial de undo/redo)
 //   seleccionar  : ESC (a Navegacion) + 's' (anchor=cursor) + MoveLeft x2
 //   Ctrl+K o     : entra al FileBrowser; sembramos base/
@@ -1378,7 +1378,7 @@ TEST(e2e_14_filebrowser_open_error_preserves_state) {
     struct HookGuard { ~HookGuard(){ filesystem::clearLoadHook(); } } hookGuard;
 
     Editor ed;
-    CHECK(ed.openFile(pathA));                  // buffer 0 = A
+    CHECK(ed.loadIntoActiveBuffer(pathA));                  // buffer 0 = A
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
 
     // editar: crear historial de undo/redo (sin guardar) - sin coalescing.
@@ -1470,7 +1470,7 @@ TEST(e2e_15_indent_selection_save_byte_exact) {
     writeBytes(f.path, "aaa\nbbb\nccc\n");     // LF, con '\n' final
 
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     ed.handleEvent(insert('s'));               // entrar a Seleccion (anchor 0,0)
@@ -1501,7 +1501,7 @@ TEST(e2e_16_delete_to_empty_and_save_byte_exact) {
     writeBytes(f.path, "abc\n");
 
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK_EQ(ed.active().document.lineAt(0), "abc");
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().cursor.line, 0);
@@ -1569,7 +1569,7 @@ TEST(e2e_18_backward_selection_delete_replace_undo) {
     const std::vector<std::string> original = {"hello world", "second line", "third line"};
 
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK(ed.active().document.snapshot() == original);
 
     // ---- backward single-line delete: anchor 8 > position 3 -> [3,8) "lo wo"
@@ -1697,7 +1697,7 @@ TEST(e2e_19_line_merge_backspace_delete) {
     const std::vector<std::string> original = {"aaa", "bbb", "ccc"};
 
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK(ed.active().document.snapshot() == original);
     CHECK(!ed.active().modified);
 
@@ -1780,7 +1780,7 @@ TEST(e2e_20_utf8_backspace_delete) {
     TempFile f;
     writeBytes(f.path, "ma" "\xC3\xB1" "ana\n");
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK_EQ(ed.active().document.lineAt(0), "ma" "\xC3\xB1" "ana");
     CHECK_EQ(ed.active().document.lineAt(0).size(), 7u);
     CHECK(!ed.active().modified);

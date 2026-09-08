@@ -203,6 +203,7 @@ public:
     // Editor corregir cursor/seleccion tras tabular. La linea no cambia
     // si devuelve 0.
     int indentLine(int line, bool indent, int indentLen);
+    int previewIndentDelta(int line, bool indent, int indentLen) const;
 
     uint64_t version() const { return version_; }
 

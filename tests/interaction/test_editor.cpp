@@ -14,10 +14,10 @@ TEST(editor_start_empty) {
 
 TEST(editor_open_nonexistent) {
     // TempFile por defecto NO crea el archivo (write() es lo que lo crea),
-    // asi que esta ruta no existe en disco. openFile() devuelve false.
+    // asi que esta ruta no existe en disco. loadIntoActiveBuffer() devuelve false.
     TempFile f;
     Editor ed;
-    CHECK(!ed.openFile(f.path));
+    CHECK(!ed.loadIntoActiveBuffer(f.path));
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
@@ -25,12 +25,12 @@ TEST(editor_open_nonexistent) {
 }
 
 TEST(editor_open_existing_empty_file) {
-    // El archivo existe pero esta vacio: openFile() devuelve true
+    // El archivo existe pero esta vacio: loadIntoActiveBuffer() devuelve true
     // (el false solo significa "no existia", no "vacio").
     TempFile f;
     f.write("");
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
@@ -40,7 +40,7 @@ TEST(editor_open_existing) {
     TempFile f;
     f.write("one\ntwo\n");
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().document.lineCount(), 2);
     CHECK_EQ(ed.active().document.lineAt(1), "two");
@@ -51,7 +51,7 @@ TEST(editor_open_relative_resolves_absolute) {
     // ruta relativa la resuelve contra cwd(). El archivo no existe, asi
     // que no se toca disco y el nombre queda resuelto.
     Editor ed;
-    CHECK(!ed.openFile("archivo_rel_zz_no_existe.txt"));
+    CHECK(!ed.loadIntoActiveBuffer("archivo_rel_zz_no_existe.txt"));
 
     char cwd[4096];
     CHECK(getcwd(cwd, sizeof cwd) != nullptr);
@@ -72,7 +72,7 @@ TEST(editor_open_normalizes_dotdot) {
 
     Editor ed;
     // El OS resuelve "sub/.." para abrir el archivo real dir/a.txt.
-    CHECK(ed.openFile(dir.path + "/sub/../a.txt"));
+    CHECK(ed.loadIntoActiveBuffer(dir.path + "/sub/../a.txt"));
     CHECK_EQ(ed.active().filename, dir.path + "/a.txt");
 }
 
@@ -86,7 +86,7 @@ TEST(editor_open_normalizes_dot) {
     const std::string withDot = parent + "/./" + name;
 
     Editor ed;
-    CHECK(ed.openFile(withDot));
+    CHECK(ed.loadIntoActiveBuffer(withDot));
     CHECK_EQ(ed.active().filename, parent + "/" + name);
 }
 
@@ -115,7 +115,7 @@ TEST(editor_open_absolute_existing_file) {
     CHECK(f.path.front() == '/');
 
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK_EQ(ed.active().filename, f.path);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "desde absoluta");
@@ -135,7 +135,7 @@ TEST(editor_open_absolute_file_in_other_directory) {
     }
 
     Editor ed;
-    CHECK(ed.openFile(file));
+    CHECK(ed.loadIntoActiveBuffer(file));
     CHECK_EQ(ed.active().filename, file);
     CHECK_EQ(ed.active().document.lineAt(0), "hola desde otra carpeta");
     CHECK(!ed.active().modified);
@@ -149,7 +149,7 @@ TEST(editor_open_absolute_new_file) {
     CHECK(f.path.front() == '/');
 
     Editor ed;
-    CHECK(!ed.openFile(f.path));
+    CHECK(!ed.loadIntoActiveBuffer(f.path));
     CHECK_EQ(ed.active().filename, f.path);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
@@ -164,7 +164,7 @@ TEST(editor_open_directory_rejected) {
 
     Editor ed;
     const std::string before = ed.active().filename;
-    CHECK(!ed.openFile(dir.path));
+    CHECK(!ed.loadIntoActiveBuffer(dir.path));
     CHECK_EQ(ed.active().filename, before);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
@@ -176,7 +176,7 @@ TEST(editor_open_relative_directory_rejected) {
     Editor ed;
     const std::string before = ed.active().filename;
     CHECK(Editor::isDirectory("."));
-    CHECK(!ed.openFile("."));
+    CHECK(!ed.loadIntoActiveBuffer("."));
     CHECK_EQ(ed.active().filename, before);
     CHECK_EQ(ed.active().document.lineCount(), 1);
 }
@@ -614,7 +614,7 @@ TEST(editor_redo_empty_noop) {
 TEST(editor_save_new_document) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "Hi");
     CHECK(ed.active().modified);
     save(ed);
@@ -625,7 +625,7 @@ TEST(editor_save_new_document) {
 TEST(editor_save_empty_document) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     save(ed);
     CHECK(fileContent(f.path).empty());
 }
@@ -636,7 +636,7 @@ TEST(editor_save_overwrites_content) {
     f.write("old");
 
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
 
     // El cursor abre en (0,0): muevo al final, entro en Interaccion para
     // poder borrar "old" y luego escribo "new".
@@ -651,14 +651,14 @@ TEST(editor_save_overwrites_content) {
     CHECK_EQ(fileContent(f.path), "new");
 
     Editor reloaded;
-    CHECK(reloaded.openFile(f.path));
+    CHECK(reloaded.loadIntoActiveBuffer(f.path));
     CHECK_EQ(reloaded.active().document.lineCount(), 1);
     CHECK_EQ(reloaded.active().document.lineAt(0), "new");
 }
 
 TEST(editor_save_error_path) {
     Editor ed;
-    ed.openFile("/no/such/dir/file.txt");
+    ed.loadIntoActiveBuffer("/no/such/dir/file.txt");
     type(ed, "a");
     CHECK(ed.active().modified);
     save(ed);
@@ -673,7 +673,7 @@ TEST(editor_modified_after_change_after_save) {
     //   undo    "a"   modified=false (vuelve al contenido guardado)
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
 
     type(ed, "a");
     save(ed);
@@ -695,7 +695,7 @@ TEST(editor_modified_undo_redo) {
     //   redo               -> "ab"        modified=true
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
 
     type(ed, "a");
     save(ed);
@@ -737,7 +737,7 @@ TEST(editor_quit_illegals_without_prefix) {
 TEST(editor_quit_after_save_via_prefix) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "a");
     save(ed);
     // Quit suelto no sale...

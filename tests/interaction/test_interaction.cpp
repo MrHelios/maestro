@@ -1140,9 +1140,9 @@ TEST(interaction_save_switching_buffers_isolated_modified) {
     testfw::TempFile fileB;
 
     // dos buffers con nombre (save no se desvia a SaveAs).
-    ed.openFile(fileA.path);                           // buffer A
+    ed.loadIntoActiveBuffer(fileA.path);                           // buffer A
     ed.createBuffer();                                 // -> nuevo buffer activo
-    ed.openFile(fileB.path);                           // buffer B (activo)
+    ed.loadIntoActiveBuffer(fileB.path);                           // buffer B (activo)
 
     // A edit: "originalA" -> "originalA+"
     ed.activateBuffer(0);

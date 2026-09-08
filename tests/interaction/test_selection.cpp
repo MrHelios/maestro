@@ -1003,7 +1003,7 @@ TEST(editor_save_with_selection) {
     using testfw::TempFile;
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "hello");
     press(ed, EventType::MoveHome);
     selectPress(ed, EventType::MoveRight); // [h]
@@ -1022,7 +1022,7 @@ TEST(editor_save_after_selection_cancel) {
     using testfw::TempFile;
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "hello");
     press(ed, EventType::MoveHome);
     selectPress(ed, EventType::MoveRight);
@@ -1510,16 +1510,14 @@ TEST(select_all_toggle_back_then_move_right) {
     ed.handleEvent(insert('a')); // toggle de vuelta, cursor intacto
     CHECK(!ed.active().selectAllActive);
     CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().cursor.col, 2); // NO se movio tras el toggle
 
-    press(ed, EventType::MoveRight);      // extiende desde (0,2) -> (0,3)
-    CHECK(ed.hasSelection());
+    press(ed, EventType::MoveRight);      // en Navegacion solo mueve, no extiende (hasSelection false)
+    CHECK(!ed.hasSelection());
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 3);
-    CHECK_EQ(ed.active().selection->anchor.col, 2); // anchor = posicion original
-    auto sel = ed.selection();
-    CHECK_EQ(sel->start.col, 2);
-    CHECK_EQ(sel->end.col, 3);
+    CHECK(!ed.selection().has_value());
 }
 
 TEST(select_all_right_moves_to_eof) {

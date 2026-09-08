@@ -174,7 +174,7 @@ TEST(save_as_copy_prefill_editable_and_moves) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f;
     f.write("hola");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "X");
     press(ed, EventType::Escape);
     press(ed, EventType::Prefix);
@@ -207,7 +207,7 @@ TEST(principal_01_salir_sin_modificados) {
 TEST(principal_02_un_buffer_guardado) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f; f.write("contenido");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK(!ed.active().modified);
     safeQuit(ed);
     CHECK(!ed.running_);
@@ -216,7 +216,7 @@ TEST(principal_02_un_buffer_guardado) {
 TEST(principal_03_un_buffer_modificado_cancela) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f; f.write("a");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "X");
     press(ed, EventType::Escape);
     CHECK(ed.active().modified);
@@ -232,7 +232,7 @@ TEST(principal_03_un_buffer_modificado_cancela) {
 TEST(principal_04_varios_todos_guardados) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f; f.write("a");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     newBuffer(ed);
     CHECK(!ed.buffers.at(0).modified);
     CHECK(!ed.buffers.at(1).modified);
@@ -243,7 +243,7 @@ TEST(principal_04_varios_todos_guardados) {
 TEST(principal_05_varios_uno_sin_guardar) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f; f.write("A");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     newBuffer(ed);
     type(ed, "modB");
     press(ed, EventType::Escape);
@@ -287,7 +287,7 @@ TEST(caso_08_buffer_nuevo_con_contenido) {
 TEST(caso_09_modificar_guardar_q) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f; f.write("a");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "x");
     press(ed, EventType::Escape);
     CHECK(ed.active().modified);
@@ -300,7 +300,7 @@ TEST(caso_09_modificar_guardar_q) {
 TEST(caso_10_modificar_guardar_modificar_nuevamente) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f; f.write("a");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "X");
     press(ed, EventType::Escape);
     save(ed);
@@ -316,7 +316,7 @@ TEST(caso_10_modificar_guardar_modificar_nuevamente) {
 TEST(caso_11_q_no_guarda_automaticamente) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f; f.write("orig");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "MOD");
     press(ed, EventType::Escape);
     auto snap = ed.active().document.snapshot();
@@ -333,7 +333,7 @@ TEST(caso_11_q_no_guarda_automaticamente) {
 TEST(caso_12_salir_despues_de_guardar_manualmente) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f; f.write("a");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "X");
     press(ed, EventType::Escape);
     safeQuit(ed);
@@ -347,7 +347,7 @@ TEST(caso_12_salir_despues_de_guardar_manualmente) {
 TEST(caso_13_activo_guardado_inactivo_modificado) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f; f.write("A");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     newBuffer(ed);
     type(ed, "Bmod");
     press(ed, EventType::Escape);
@@ -361,7 +361,7 @@ TEST(caso_13_activo_guardado_inactivo_modificado) {
 TEST(caso_14_activo_modificado_resto_guardado) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f; f.write("A");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     newBuffer(ed);
     newBuffer(ed);
     ed.buffers.activate(2);
@@ -400,7 +400,7 @@ TEST(caso_16_mensaje_aparece) {
 TEST(caso_17_mensaje_desaparece) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f; f.write("a");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "x");
     press(ed, EventType::Escape);
     safeQuit(ed);
@@ -414,7 +414,7 @@ TEST(caso_17_mensaje_desaparece) {
 TEST(caso_18_regresion_ctrl_k_s) {
     Editor ed(std::make_unique<FakeClipboard>());
     testfw::TempFile f; f.write("orig");
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "MOD");
     press(ed, EventType::Escape);
     CHECK(ed.active().modified);

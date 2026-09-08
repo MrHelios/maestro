@@ -793,7 +793,7 @@ TEST(browser_reopen_matches_absolute_path) {
     CwdGuard g;
     g.enter(t.path);
     Editor ed;
-    CHECK(ed.openFile("a.txt"));               // ruta RELATIVA al abrir
+    CHECK(ed.loadIntoActiveBuffer("a.txt"));               // ruta RELATIVA al abrir
     CHECK_EQ(ed.active().filename, t.path + "/a.txt"); // pero queda absoluta
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
 
@@ -845,7 +845,7 @@ TEST(browser_folder_enter_never_creates_buffer) {
 // 7. Rechazo de carpetas como buffers (lista exhaustiva)
 // ---------------------------------------------------------------------------
 TEST(open_file_rejects_directory) {
-    // (52)(53) Editor::openFile rechaza rutas que son directorios, sean
+    // (52)(53) Editor::loadIntoActiveBuffer rechaza rutas que son directorios, sean
     // relativas o absolutas: no abre nada, no cambia el estado y avisa.
     TempDir t;
     t.dir("carpeta");
@@ -853,12 +853,12 @@ TEST(open_file_rejects_directory) {
     g.enter(t.path);
     Editor ed;
     // ruta RELATIVA
-    CHECK(!ed.openFile("carpeta"));
+    CHECK(!ed.loadIntoActiveBuffer("carpeta"));
     CHECK(ed.active().filename.empty());
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK_EQ(ed.statusMessage_, "No se pueden abrir carpetas.");
     // ruta ABSOLUTA
-    CHECK(!ed.openFile(t.path + "/carpeta"));
+    CHECK(!ed.loadIntoActiveBuffer(t.path + "/carpeta"));
     CHECK(ed.active().filename.empty());
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK_EQ(ed.statusMessage_, "No se pueden abrir carpetas.");
@@ -1116,7 +1116,7 @@ TEST(browser_open_switch_reopen_open) {
 }
 
 // ===========================================================================
-// Interaction: abrir B desde el explorador deja el buffer A intacto.
+// Interaction: openFileInBuffer B desde el explorador deja el buffer A intacto.
 // A (indice 0) con contenido editado; Ctrl+K O -> FileBrowser -> seleccionar
 // B -> Enter: B queda activo y A conserva contenido y bandera modified.
 // ---------------------------------------------------------------------------
@@ -1137,7 +1137,7 @@ TEST(browser_interaction_open_keeps_previous_buffer_intact) {
     CHECK(ed.state_ == State::FileBrowser);
     press(ed, EventType::MoveDown);  // -> A.txt
     press(ed, EventType::MoveDown);  // -> B.txt
-    press(ed, EventType::InsertNewline);   // Enter: abrir B.txt
+    press(ed, EventType::InsertNewline);   // Enter: openFileInBuffer B.txt
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK(ed.active().filename.find("B.txt") != std::string::npos);
     CHECK_EQ(ed.active().document.lineAt(0), "B.txt");   // contenido del archivo
@@ -1163,7 +1163,7 @@ TEST(browser_interaction_reopen_existing_only_activates) {
     g.enter(t.path);
 
     Editor ed;
-    ed.openFile("A.txt");            // reusa buffer 0 = A
+    ed.loadIntoActiveBuffer("A.txt");            // reusa buffer 0 = A
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
 

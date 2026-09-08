@@ -41,7 +41,7 @@ public:
     // relativas o absolutas (p.ej. /home/usuario/Docs/README.md). Si
     // `path` es una carpeta, no abre nada, no cambia el estado y devuelve
     // false.
-    bool openFile(const std::string& path);
+    bool loadIntoActiveBuffer(const std::string& path);
 
     // Corre el ciclo principal:
     //   mientras siga abierto:
@@ -142,7 +142,7 @@ private:
     void fileBrowserEnterSelected();
     // Abre `path` (absoluta) en un buffer NUEVO, o activa el existente
     // si ya hay uno con esa ruta. Sale del explorador a Navegacion.
-    void openFileToBuffer(const std::string& path);
+    void openFileInBuffer(const std::string& path);
 
     Renderer renderer_;
     Terminal terminal_;
@@ -182,6 +182,10 @@ private:
     std::unique_ptr<SystemClipboard> clipboard_;
     static std::string blockToString(const std::vector<std::string>& block);
     static std::vector<std::string> stringToBlock(const std::string& text);
+    // Helpers de portapapeles — solo para testing (acceso via
+    // `#define private public` en tests/). En produccion el editor usa
+    // `clipboard_` directo; aqui no aparecen usos en ui/*.cpp fuera de
+    // sus propias definiciones, lo cual es intencional.
     std::vector<std::string> getClipboardBlock() const;
     void setClipboardBlock(const std::vector<std::string>& block);
     std::string getClipboardText() const;

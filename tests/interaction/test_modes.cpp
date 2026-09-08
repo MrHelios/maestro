@@ -446,7 +446,7 @@ TEST(selection_newline_noop_backspace_delete_borran) {
 TEST(prefix_save_saves_file) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "hola");
     CHECK(ed.active().modified);
     save(ed); // Ctrl+K, Ctrl+S
@@ -457,7 +457,7 @@ TEST(prefix_save_saves_file) {
 TEST(prefix_save_returns_to_navegacion) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "abc");
     press(ed, EventType::Escape); // -> Navegacion
     save(ed);
@@ -469,7 +469,7 @@ TEST(prefix_save_keeps_interaction_mode) {
     // a Interaccion (no a Navegacion).
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "abc");              // Interaccion
     save(ed);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
@@ -525,7 +525,7 @@ TEST(prefix_save_from_selection_keeps_mode) {
     // seleccion activa.
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "hello");
     press(ed, EventType::MoveHome);
     enterSeleccion(ed);
@@ -603,7 +603,7 @@ TEST(open_file_starts_in_navegacion) {
     TempFile f;
     f.write("contenido");
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     ed.handleEvent(insert('x'));  // no se inserta: navegacion
     CHECK_EQ(ed.active().document.lineAt(0), "contenido");
@@ -639,7 +639,7 @@ TEST(initial_state_open_new_file_is_navegacion) {
     // igual en Navegacion.
     TempFile f;
     Editor ed;
-    ed.openFile(f.path); // no existe: devuelve false, lo crea
+    ed.loadIntoActiveBuffer(f.path); // no existe: devuelve false, lo crea
     assertInitialState(ed);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
@@ -651,7 +651,7 @@ TEST(initial_state_open_file_with_content_is_navegacion) {
     TempFile f;
     f.write("primera linea\nsegunda linea");
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     assertInitialState(ed);
     CHECK_EQ(ed.active().document.lineCount(), 2);
     CHECK_EQ(ed.active().document.lineAt(0), "primera linea");
@@ -663,7 +663,7 @@ TEST(initial_state_open_utf8_file_is_navegacion) {
     TempFile f;
     f.write("cafe con \xC3\xB1\xC3\xB1\xC3\xA9 y emoji \xF0\x9F\x98\x80");
     Editor ed;
-    CHECK(ed.openFile(f.path));
+    CHECK(ed.loadIntoActiveBuffer(f.path));
     assertInitialState(ed);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0),
@@ -675,7 +675,7 @@ TEST(initial_state_after_save_is_navegacion) {
     // Navegacion con modified_ == false y sin seleccion.
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     type(ed, "hola");                    // Interaccion
     press(ed, EventType::Escape);        // -> Navegacion
     save(ed); // guarda -> vuelve
@@ -1499,7 +1499,7 @@ TEST(global_redo_from_selection_works) {
 TEST(prefix_from_navegacion_returns_to_navegacion) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     ed.active().document.restore({"abc"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
@@ -1514,7 +1514,7 @@ TEST(prefix_from_navegacion_returns_to_navegacion) {
 TEST(prefix_from_interaccion_returns_to_interaccion) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     ed.active().document.restore({"abc"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
@@ -1530,7 +1530,7 @@ TEST(prefix_from_interaccion_returns_to_interaccion) {
 TEST(prefix_from_seleccion_returns_to_seleccion) {
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     ed.active().document.restore({"abc"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
@@ -1727,7 +1727,7 @@ TEST(prefix_valid_save_command_returns_to_prior_state) {
     // Desde Navegacion: Save valido devuelve a Navegacion.
     TempFile f;
     Editor ed;
-    ed.openFile(f.path);
+    ed.loadIntoActiveBuffer(f.path);
     ed.active().document.restore({"abc"});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
