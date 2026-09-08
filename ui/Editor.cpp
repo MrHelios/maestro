@@ -320,18 +320,20 @@ void Editor::registerCommands() {
     commands_.registerCommand("seleccion.copiar", [this] {
         Buffer& b = active();
         bool hadSelection = hasSelection();
-        bool ok = true;
         if (hadSelection) {
             auto sel = selection();
             auto block = b.document.extractRange(sel->start.line, sel->start.col,
                                                  sel->end.line, sel->end.col);
-            ok = clipboard_->copy(blockToString(block));
+            if (!clipboard_->copy(blockToString(block))) {
+                setActionMessage("Error al copiar al portapapeles.", MessageKind::Error);
+                return;
+            }
         }
         clearSelection();
+        b.selectAllPrevious.reset();
+        b.selectAllActive = false;
         state_ = State::Navegacion;
-        if (!hadSelection) setActionMessage("Nada seleccionado.");
-        else if (!ok) setActionMessage("Error al copiar al portapapeles.", MessageKind::Error);
-        else setActionMessage("Copiado.");
+        setActionMessage(hadSelection ? "Copiado." : "Nada seleccionado.");
     });
     commands_.registerCommand("seleccion.cortar", [this] {
         Buffer& b = active();
@@ -355,6 +357,8 @@ void Editor::registerCommands() {
             b.commitHistoryEntry(std::move(e));
         }
         clearSelection();
+        b.selectAllPrevious.reset();
+        b.selectAllActive = false;
         state_ = State::Navegacion;
         setActionMessage(hadSelection ? "Cortado." : "Nada seleccionado.");
     });
@@ -1305,37 +1309,7 @@ void Editor::handleSelectAllEvent(const Event& event) {
                     setStatusMessage("");
                 }
             } else if (event.text == "c" || event.text == "x") {
-                bool hadSelection = hasSelection();
-                if (hadSelection) {
-                    auto sel = selection();
-                    auto block = b.document.extractRange(sel->start.line,
-                                                         sel->start.col,
-                                                         sel->end.line,
-                                                         sel->end.col);
-                    std::string text = blockToString(block);
-                    if (!clipboard_->copy(text)) {
-                        setActionMessage("Error al copiar al portapapeles.", MessageKind::Error);
-                        return;
-                    }
-                    if (event.text == "x") {
-                        HistoryEntry e = b.beginHistoryEntry();
-                        b.document.deleteRange(sel->start.line, sel->start.col,
-                                               sel->end.line, sel->end.col);
-                        e.edits.push_back({EditType::Delete, sel->start, sel->end,
-                                           text});
-                        b.cursor.line = sel->start.line;
-                        b.cursor.col = sel->start.col;
-                        updateModified(b);
-                        b.commitHistoryEntry(std::move(e));
-                    }
-                }
-                clearSelection();
-                b.selectAllPrevious.reset();
-                b.selectAllActive = false;
-                state_ = State::Navegacion;
-                setActionMessage(hadSelection ? (event.text == "x" ? "Cortado."
-                                                                    : "Copiado.")
-                                              : "Nada seleccionado.");
+                commands_.execute(event.text == "c" ? "seleccion.copiar" : "seleccion.cortar");
             } else if (event.text == "}") {
                 // Tabulacion sobre el archivo ENTERO (la seleccion total es
                 // una seleccion real): indentar todo. indentSelection deja
