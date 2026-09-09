@@ -79,6 +79,8 @@ public:
                           int width,
                           int height);
 
+    // Precondición FileBrowser: 0 <= scroll <= names.size(), 0 <= selected < names.size() (si no vacío)
+    // y selected en [scroll, scroll+height). El caller (Editor) debe clampear antes de renderizar.
     std::string buildFileListScreen(const std::vector<std::string>& names,
                                      int selected,
                                      int scroll,
@@ -115,6 +117,7 @@ private:
 
     Layout calculateLayout(int contentRows, int width) const;
 
+    // Sobrecarga para tests/bench sin searchHighlight; delega en la de 7 args con searchSel = nullopt.
     void renderEditorContent(std::string& out,
                               const Document& doc,
                               const Cursor& cursor,
@@ -122,6 +125,7 @@ private:
                               const std::optional<Normalized>& sel,
                               const Rect& area,
                               int gutterW) const;
+    // Núcleo: renderiza el contenido en `area` con gutter `gutterW` aplicando sel y searchSel.
     void renderEditorContent(std::string& out,
                               const Document& doc,
                               const Cursor& cursor,
@@ -146,6 +150,7 @@ private:
                                   int selected,
                                   const Rect& area) const;
 
+    // Requiere las mismas invariantes de scroll/selected que buildFileListScreen().
     void renderFileListContent(std::string& out,
                                 const std::vector<std::string>& names,
                                 int selected,
@@ -190,9 +195,7 @@ private:
                                      const std::string& filename,
                                      bool modified,
                                      const Message& message,
-                                     State state,
-                                     const std::optional<Selection>& selection,
-                                     const std::optional<Selection>& searchHighlight);
+                                     State state);
 
     void rebuildCache(const Document& doc, const Cursor& cursor, const Viewport& viewport,
                       const std::string& filename, bool modified, const Message& message,
@@ -212,6 +215,11 @@ private:
                           const Cursor& cursor,
                           const Viewport& viewport,
                           int& outRow, int& outCol) const;
+    void editorCursorPos(const Document& doc,
+                          const Cursor& cursor,
+                          const Viewport& viewport,
+                          const EditorGeometry& g,
+                          int& outRow, int& outCol) const;
 
     void moveCursorTo(std::string& out, int row, int col) const;
 
@@ -220,6 +228,8 @@ private:
     void hideCursor(std::string& out) const;
     void showCursor(std::string& out) const;
     void setCursorStyle(std::string& out, State state) const;
+    void updateCacheState(const Viewport& viewport, const Cursor& cursor,
+                          const Document& doc);
 
     static void splitRows(const std::string& body, std::vector<std::string_view>* rows);
 

@@ -45,6 +45,17 @@ struct StatusBarData {
     int totalLines = 0;      // lineas del documento (porcentaje vertical)
 };
 
+inline bool operator==(const StatusBarData& a, const StatusBarData& b) {
+    return a.name == b.name && a.path == b.path && a.estado == b.estado &&
+           a.estadoAccent == b.estadoAccent && a.message.text == b.message.text &&
+           a.message.kind == b.message.kind && a.right == b.right && a.modified == b.modified &&
+           a.cursorLine == b.cursorLine && a.cursorCol == b.cursorCol && a.totalLines == b.totalLines;
+}
+
+inline bool operator!=(const StatusBarData& a, const StatusBarData& b) {
+    return !(a == b);
+}
+
 // Componente de la barra comun. Dibuja la fila fija (barra de estado) y la
 // fila de mensajes dentro del area que le da el Renderer. Es la ultima
 // fila del frame: Ninguna pantalla decide por si misma donde termina el

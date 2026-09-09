@@ -864,8 +864,7 @@ void Editor::renderFrame() {
         renderer_.renderBufferList(bufferNames(), bufferSelectorIndex_,
                                    b.viewport.width, b.viewport.height);
     } else if (state_ == State::FileBrowser) {
-        // Pantalla del explorador de archivos: la lista con la ruta
-        // actual en la barra de estado y la ayuda en la fila de mensajes.
+        fileBrowser.clampScroll(b.viewport.height);
         renderer_.renderFileList(fileBrowser.displayNames_,
                                  fileBrowser.index_, fileBrowser.scroll_,
                                  fileBrowser.path_, statusMessage_,
