@@ -2,6 +2,7 @@
 #include "core/Layout.h"
 
 #include <algorithm>
+#include <cassert>
 
 BufferManager::BufferManager() {
     // Invariante 1 y 2 (v0.6.3): siempre existe al menos un buffer y hay
@@ -26,10 +27,12 @@ int BufferManager::count() const {
 }
 
 Buffer& BufferManager::at(int idx) {
+    assert(idx >= 0 && idx < count());
     return buffers_[static_cast<size_t>(idx)];
 }
 
 const Buffer& BufferManager::at(int idx) const {
+    assert(idx >= 0 && idx < count());
     return buffers_[static_cast<size_t>(idx)];
 }
 
@@ -37,7 +40,7 @@ int BufferManager::activeIndex() const {
     return activeBuffer_;
 }
 
-int BufferManager::push(Buffer buffer) {
+int BufferManager::push(Buffer&& buffer) {
     buffer.id = nextBufferId_++;
     buffers_.push_back(std::move(buffer));
     activeBuffer_ = static_cast<int>(buffers_.size()) - 1;
@@ -106,6 +109,7 @@ CloseResult BufferManager::closeActive(int rows, int cols) {
 }
 
 bool BufferManager::activate(int idx) {
+    assert(idx >= 0 && idx < count());
     activeBuffer_ = idx;
     // Devuelve si el buffer activado tiene seleccion NO vacia, para que el
     // Editor reconcilie el modo global (Seleccion vs Navegacion).

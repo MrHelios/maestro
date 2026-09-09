@@ -42,7 +42,7 @@ public:
     int activeIndex() const;
 
     // Agrega un buffer y lo activa. Devuelve el indice nuevo.
-    int push(Buffer buffer);
+    int push(Buffer&& buffer);
 
     // Nombre "SinNombre[n]" de la sesion. Nunca se reutiliza un nombre ya
     // entregado (aunque se cierre el buffer que lo llevaba).

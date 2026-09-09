@@ -26,57 +26,70 @@ LoadResult Document::loadFromFile(const std::string& path) {
         // sin permisos es un archivo nuevo, que es exactamente lo que llevaria
         // a sobrescribirlo desde cero).
         std::error_code ec;
-        if (!std::filesystem::exists(path, ec)) {
+        bool exists = std::filesystem::exists(path, ec);
+        if (ec) return LoadResult::IoError;
+        if (!exists) {
             lines_.clear();
             lines_.push_back("");
             endsWithNewline_ = false;
-            lineEnding_ = LineEnding::LF; // un archivo nuevo empieza en LF
+            lineEnding_ = LineEnding::LF;
             bumpVersion();
             return LoadResult::NotFound;
         }
-        if (errno == EACCES) {
-            return LoadResult::PermissionDenied;
-        }
+        if (errno == EACCES) return LoadResult::PermissionDenied;
         return LoadResult::IoError;
     }
 
     // Leemos todo el contenido para poder detectar si el archivo
     // terminaba en '\n' (el modelo de lineas, via getline, no refleja
     // esa nueva linea final y sin esto se perderia al volver a guardar).
+    // Detección de formato de newline:
+    // - CRLF si existe "\r\n" en el archivo (prioridad máxima)
+    // - CR si NO hay '\n' y SÍ hay '\r' (Mac clásico)
+    // - LF en cualquier otro caso
+    // Archivos con finales mixtos se interpretan según el formato dominante
+    // detectado (prioridad: CRLF > CR > LF). Los separadores no detectados
+    // como finales de línea pueden quedar dentro de las líneas como caracteres.
     std::ostringstream ss;
     ss << file.rdbuf();
     std::string content = ss.str();
-    endsWithNewline_ = !content.empty() && content.back() == '\n';
-
-    // Conservar el formato de nueva linea para no alterarlo al guardar:
-    // si el archivo usa \r\n (Windows) en cualquier linea, se guardara
-    // como CRLF; si no, como LF.
-    lineEnding_ = (content.find("\r\n") != std::string::npos)
-                      ? LineEnding::CRLF
-                      : LineEnding::LF;
+    if (content.find("\r\n") != std::string::npos) lineEnding_ = LineEnding::CRLF;
+    else if (content.find('\n') == std::string::npos && content.find('\r') != std::string::npos)
+        lineEnding_ = LineEnding::CR;
+    else lineEnding_ = LineEnding::LF;
+    endsWithNewline_ = !content.empty() &&
+                       (lineEnding_ == LineEnding::CR ? content.back() == '\r' : content.back() == '\n');
 
     lines_.clear();
-    std::string line;
-    std::istringstream in(content);
-    while (std::getline(in, line)) {
-        // getline ya nos da la linea sin el '\n'.
-        // Si el archivo usa \r\n, sacamos el \r final.
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
+    if (lineEnding_ == LineEnding::CR) {
+        size_t start = 0;
+        for (size_t i = 0; i < content.size();) {
+            if (content[i] == '\r') {
+                lines_.push_back(content.substr(start, i - start));
+                ++i;
+                start = i;
+            } else {
+                ++i;
+            }
         }
-        lines_.push_back(line);
+        if (start < content.size()) lines_.push_back(content.substr(start));
+    } else {
+        std::string line;
+        std::istringstream in(content);
+        while (std::getline(in, line)) {
+            if (!line.empty() && line.back() == '\r') line.pop_back();
+            lines_.push_back(line);
+        }
     }
-
-    if (lines_.empty()) {
-        lines_.push_back("");
-    }
+    if (lines_.empty()) lines_.push_back("");
+    normalizeEndsWithNewline();
 
     bumpVersion();
     return LoadResult::Success;
 }
 
 bool Document::saveToFile(const std::string& path) const {
-    std::ofstream file(path, std::ios::trunc);
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
     if (!file.is_open()) {
         return false;
     }
@@ -91,20 +104,24 @@ bool Document::saveToFile(const std::string& path) const {
 
     for (size_t i = 0; i < lines_.size(); ++i) {
         file << lines_[i];
-        if (i + 1 < lines_.size()) {
-            file << term;
-        }
+        if (i + 1 < lines_.size()) file << term;
     }
-
-    // Respetar el salto de linea final del archivo original: sin esto,
-    // abrir y guardar un archivo que terminaba en '\n' lo dejaria sin
-    // su nueva linea final (perdida silenciosa del terminador).
-    if (!lines_.empty() && endsWithNewline_) {
+    // Terminador final:
+    // - endsWithNewline_ (p.ej. "abc\n" o un archivo que es solo "\n"), o
+    // - linea vacia final con mas de una linea (p.ej. "abc\n\n" -> {"abc",""}).
+    // Un documento de una sola linea vacia y flag en false es el archivo
+    // vacio: no se escribe terminador.
+    if (endsWithNewline_ || (lines_.size() > 1 && lines_.back().empty()))
         file << term;
-    }
 
-    return true;
+    file.flush();
+    if (!file.good()) return false;
+    file.close();
+    return !file.fail();
 }
+
+// Nota futura: idealmente guardar a temporal + rename atómico para evitar
+// truncamiento en disco lleno; por ahora se verifica flush/close.
 
 Document::LineEnding Document::lineEnding() const {
     return lineEnding_;
@@ -126,11 +143,15 @@ void Document::setEndsWithNewline(bool ends) {
 }
 
 void Document::normalizeEndsWithNewline() {
-    // Invariante: un '\n' final se representa UNA vez. Si lines_ termina
-    // en una linea vacia, esa linea ya serializa el '\n' (separa la ultima
-    // linea de la nada), asi que el flag debe ser false. Si quedara true,
-    // saveToFile escribira el '\n' del separador MAS el '\n' del flag:
-    // el archivo ganaria una linea vacia al guardar.
+    // Canonical representation:
+    // - a trailing empty line in lines_ represents the final newline separator;
+    // - endsWithNewline_ is true only when the final newline is represented
+    //   independently of a trailing empty line.
+    //
+    // Examples:
+    //   "abc\n"    -> lines_={"abc"}, endsWithNewline_=true
+    //   "abc\n\n"  -> lines_={"abc", ""}, endsWithNewline_=false
+    //   "abc"      -> lines_={"abc"}, endsWithNewline_=false
     if (lines_.size() > 1 && lines_.back().empty()) {
         endsWithNewline_ = false;
     }
@@ -317,6 +338,7 @@ Position Document::insertText(int line, int col, const std::string& text) {
     std::string& target = lines_[line];
     if (col < 0) col = 0;
     if (col > static_cast<int>(target.size())) col = static_cast<int>(target.size());
+    col = alignStart(target, col);
     target.insert(col, text);
     normalizeEndsWithNewline();
     notifyTouched(line, line);
@@ -329,6 +351,7 @@ void Document::splitLine(int line, int col) {
     std::string& target = lines_[line];
     if (col < 0) col = 0;
     if (col > static_cast<int>(target.size())) col = static_cast<int>(target.size());
+    col = alignStart(target, col);
 
     std::string rest = target.substr(col);
     target.erase(col);
@@ -341,7 +364,7 @@ void Document::splitLine(int line, int col) {
 bool Document::mergeLine(int line) {
     if (line < 0 || line + 1 >= lineCount()) return false;
 
-    std::string next = lines_[line + 1];
+    std::string next = std::move(lines_[line + 1]);
     lines_.erase(lines_.begin() + line + 1);
     lines_[line] += next;
     normalizeEndsWithNewline();
@@ -480,6 +503,7 @@ Position Document::insertBlock(int line, int col, const std::vector<std::string>
     std::string& target = lines_[line];
     if (col < 0) col = 0;
     if (col > static_cast<int>(target.size())) col = static_cast<int>(target.size());
+    col = alignStart(target, col);
 
     if (block.size() == 1) {
         target.insert(col, block[0]);

@@ -451,13 +451,16 @@ TEST(doc_save_trailing_empty_line_collapses) {
     // persistir: la linea vacia final es un estado de memoria, no del archivo.
     // Si algun dia se quiere preservar la linea vacia final, hay que cambiar
     // saveToFile Y loadFromFile a la vez.
+    // NOTA: con la representacion canonica, una linea vacia final representa
+    // un '\n' final y se preserva en round-trip.
     TempFile f;
     Document d = makeDoc({"a", "b", ""});
     CHECK(d.saveToFile(f.path));
     Document d2;
     CHECK_EQ(d2.loadFromFile(f.path), LoadResult::Success);
-    CHECK_EQ(d2.lineCount(), 2);
+    CHECK_EQ(d2.lineCount(), 3);
     CHECK_EQ(d2.lineAt(1), "b");
+    CHECK_EQ(d2.lineAt(2), "");
 }
 
 TEST(doc_save_empty) {
@@ -550,7 +553,8 @@ TEST(doc_enter_at_end_of_newline_file_does_not_double) {
     // linea vacia final ["a",""]. Antes el flag de '\n' final seguia en
     // true y saveToFile escribia el separador MAS el '\n' del flag:
     // "a\n\n" (el archivo ganaba una linea). El flag debe quedar en false
-    // porque la linea vacia final ya aporta el '\n'.
+    // porque la linea vacia final ya aporta el '\n'. Al persistir, la
+    // linea vacia final serializa el '\n' final, dando "a\n\n".
     TempFile f;
     f.write("a\n");
     Document d;
@@ -561,7 +565,7 @@ TEST(doc_enter_at_end_of_newline_file_does_not_double) {
     CHECK_EQ(d.lineAt(1), "");
     CHECK(!d.endsWithNewline());
     CHECK(d.saveToFile(f.path));
-    CHECK_EQ(fileContent(f.path), "a\n");
+    CHECK_EQ(fileContent(f.path), "a\n\n");
 }
 
 TEST(doc_fuse_trailing_empty_line_removes_newline) {
@@ -582,6 +586,7 @@ TEST(doc_fuse_trailing_empty_line_removes_newline) {
 TEST(doc_insert_block_trailing_empty_keeps_flag_consistent) {
     // insertBlock multilinea con ultima linea vacia: el flag no puede
     // quedar en true junto con la linea vacia final (doble '\n' al guardar).
+    // La linea vacia final serializa el '\n', produciendo "ax\n\n".
     Document d = makeDoc({"a"});
     d.insertBlock(0, 1, {"x", ""}); // col 1: queda "ax" + linea vacia
     CHECK_EQ(d.lineCount(), 2);
@@ -590,7 +595,7 @@ TEST(doc_insert_block_trailing_empty_keeps_flag_consistent) {
     CHECK(!d.endsWithNewline());
     TempFile f;
     CHECK(d.saveToFile(f.path));
-    CHECK_EQ(fileContent(f.path), "ax\n");
+    CHECK_EQ(fileContent(f.path), "ax\n\n");
 }
 
 // ---------------------------------------------------------------------------

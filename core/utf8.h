@@ -136,6 +136,59 @@ inline std::string_view range(std::string_view line, int fromCol, int toCol) {
     return line.substr(startByte); // hasta el final de la linea
 }
 
+// Encuentra el byte de inicio de la celda que contiene `pos`.
+// Si `pos` ya es inicio de celda, lo devuelve; si es byte de continuacion,
+// retrocede hasta el lead valido mas cercano (o inicio de buffer).
+// Verifica que el numero de continuaciones no exceda lo que el lead espera.
+inline int cellStartBefore(std::string_view line, int pos) {
+    if (pos <= 0) return 0;
+    int start = pos - 1;
+    int i = start;
+    while (i > 0 && (static_cast<unsigned char>(line[i]) & 0xC0) == 0x80) --i;
+    // Si `i` es lead valido o byte invalido/inicio, es inicio de celda.
+    if (i == 0) return 0;
+    if ((static_cast<unsigned char>(line[i]) & 0xC0) != 0x80) {
+        // `i` es un lead: verifica cuantas continuaciones espera.
+        unsigned char lead = static_cast<unsigned char>(line[i]);
+        int expect = 0;
+        if ((lead & 0xE0) == 0xC0) expect = 1;
+        else if ((lead & 0xF0) == 0xE0) expect = 2;
+        else if ((lead & 0xF8) == 0xF0) expect = 3;
+        int conts = start - i;
+        if (conts > expect) return start; // continuaciones extra: orfanas, celda propia
+        return i;
+    }
+    // `i` es byte de continuacion huerfano: es su propio inicio.
+    return i;
+}
+
+// Normaliza `col` al inicio de la celda que contiene.
+// Si `col` ya es inicio de celda (o fuera de rango), lo deja intacto.
+inline int alignStart(std::string_view line, int col) {
+    if (col <= 0 || col >= static_cast<int>(line.size())) return col;
+    if (isCellStart(line, col)) return col;
+    return cellStartBefore(line, col);
+}
+
+// Normaliza `col` al final (exclusivo) de la celda que contiene.
+// Si `col` ya es inicio de celda, devuelve `col` (rango vacio).
+inline int alignEnd(std::string_view line, int col) {
+    if (col <= 0 || col >= static_cast<int>(line.size())) return col;
+    if (isCellStart(line, col)) return col;
+    int start = cellStartBefore(line, col);
+    unsigned char c = static_cast<unsigned char>(line[start]);
+    int expect = 0;
+    if ((c & 0xE0) == 0xC0) expect = 1;
+    else if ((c & 0xF0) == 0xE0) expect = 2;
+    else if ((c & 0xF8) == 0xF0) expect = 3;
+    int end = start + 1;
+    while (expect > 0 && end < static_cast<int>(line.size()) && (static_cast<unsigned char>(line[end]) & 0xC0) == 0x80) {
+        --expect;
+        ++end;
+    }
+    return end;
+}
+
 inline bool isValid(std::string_view s) {
     size_t i = 0;
     while (i < s.size()) {
@@ -169,7 +222,7 @@ inline bool isValid(std::string_view s) {
             if (cp >= 0xD800 && cp <= 0xDFFF) return false;
             if (cp > 0x10FFFF) return false;
         }
-        i += static_cast<size_t>(need) + 1;
+i += static_cast<size_t>(need) + 1;
     }
     return true;
 }

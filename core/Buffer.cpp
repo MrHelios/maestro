@@ -92,20 +92,27 @@ void Buffer::syncSavedState() {
 }
 
 void Buffer::recordWatch(int rowStart, int rowEnd) {
+    if (rowStart > rowEnd) return;
     if (!watcher_.empty()) {
         auto& last = watcher_.back();
+        // Coalesce opportunista: fusiona solo con el último intervalo si
+        // hay solapamiento/adyacencia. No es normalización global completa.
+        if (last.rowEnd + 1 >= rowStart) {
+            last.rowEnd = std::max(last.rowEnd, rowEnd);
+            return;
+        }
         if (last.rowStart == rowStart && last.rowEnd == rowEnd) return;
     }
     watcher_.push_back({rowStart, rowEnd});
 }
 
 bool Buffer::isModified() const {
+    if (document.endsWithNewline() != savedEndsWithNewline) return true;
     const auto& orig = originalSnapshot_;
     int origCount = static_cast<int>(orig.size());
     int curCount = document.lineCount();
     if (curCount != origCount) return true;
     if (watcher_.empty()) return false;
-    std::vector<char> seen(static_cast<size_t>(curCount), 0);
     for (auto &e : watcher_) {
         int a = e.rowStart;
         int b = e.rowEnd;
@@ -113,8 +120,6 @@ bool Buffer::isModified() const {
         if (b >= curCount) b = curCount - 1;
         if (a > b) continue;
         for (int l = a; l <= b; ++l) {
-            if (seen[static_cast<size_t>(l)]) continue;
-            seen[static_cast<size_t>(l)] = 1;
             if (document.lineAt(l) != orig[static_cast<size_t>(l)]) return true;
         }
     }
@@ -282,6 +287,13 @@ void Buffer::restoreSelection(std::optional<Selection> sel) {
             selection->position.line >= document.lineCount() ||
             selection->anchor.col > document.lineLength(selection->anchor.line) ||
             selection->position.col > document.lineLength(selection->position.line);
-        if (outOfRange) selection.reset();
+        if (outOfRange) {
+            selection.reset();
+        } else {
+            if (selection->anchor.line < document.lineCount())
+                selection->anchor.col = utf8::alignStart(document.lineAt(selection->anchor.line), selection->anchor.col);
+            if (selection->position.line < document.lineCount())
+                selection->position.col = utf8::alignStart(document.lineAt(selection->position.line), selection->position.col);
+        }
     }
 }

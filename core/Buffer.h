@@ -106,8 +106,8 @@ public:
     std::vector<WatcherEntry> watcher_;
     void recordWatch(int rowStart, int rowEnd);
 
-    // Ultimo contenido persistido (o el inicial si nunca se guardo).
-    // modified = (contenido actual != originalSnapshot_).
+    // Estado guardado (para isModified): originalSnapshot_ + savedEndsWithNewline.
+    // modified = (lines != originalSnapshot_) || (endsWithNewline != savedEndsWithNewline).
     bool savedEndsWithNewline = false;
 
     std::vector<HistoryEntry> undoStack;

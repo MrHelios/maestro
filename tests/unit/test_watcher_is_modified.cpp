@@ -108,7 +108,7 @@ TEST(watcher_G_varias_ops_mismas_filas_dedup) {
     b.document.insertChar(6,0,'Q');
     b.recalcModified();
     CHECK(b.isModified());
-    CHECK_EQ(b.watcher_.size(), size_t(3));
+    CHECK_EQ(b.watcher_.size(), size_t(1));
     b.document.restore({"a","b","c","d","e","f","g","h","i","j"});
     b.recalcModified();
     CHECK(!b.isModified());

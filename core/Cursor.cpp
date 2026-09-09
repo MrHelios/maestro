@@ -136,6 +136,7 @@ void Cursor::moveToPreviousWord(const Document& doc) {
 
 void Cursor::clampToLine(const Document& doc) {
     col = std::min(col, doc.lineLength(line));
+    if (line < doc.lineCount()) col = utf8::alignStart(doc.lineAt(line), col);
 }
 
 void Cursor::applyPreferredCol(const Document& doc) {
