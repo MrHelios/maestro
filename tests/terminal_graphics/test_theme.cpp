@@ -86,7 +86,8 @@ TEST(theme_default_matches_legacy_colors) {
 
 // ---------------------------------------------------------------------------
 // El Theme por defecto define los estilos del lenguaje visual v1.3:
-// gutter, marcador, item activo de listas, prompts, indicador [modificado]
+// gutter, marcador, item activo de listas, prompts, indicador [*]
+// (v1.4: antes [modificado])
 // y los accents por estado.
 // ---------------------------------------------------------------------------
 TEST(theme_defaults_new_visual_language) {

@@ -95,7 +95,7 @@ StatusBarData editorBarData(const std::string& filename, bool modified,
     return data;
 }
 
-// La barra de estado fija + fila de mensajes (buildChrome, buildBarLeft,
+// La barra de estado fija + fila de mensajes (buildChrome, layoutLeftBlock,
 // BarLeft, y las constantes de la barra) se movio a ui/StatusBar.cpp: el
 // Renderer ya no dibuja la barra comun, solo calcula su Layout y arma el
 // StatusBarData.

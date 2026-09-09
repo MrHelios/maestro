@@ -39,7 +39,7 @@ struct StatusBarData {
                               // (v1.3); vacio => usa statusBarAccent del Theme
     Message message;         // fila de mensajes (fila propia, coloreada por tipo)
     std::string right;       // overrlde del bloque derecho; vacio = calcular
-    bool modified = false;   // fila [modificado] junto al nombre
+    bool modified = false;   // indicador [*] junto al nombre (v1.4: antes [modificado])
     int cursorLine = 0;      // fila del cursor (0-indexada, para {fila,col} y %)
     int cursorCol = 0;       // columna del cursor (0-indexada, para {fila,col})
     int totalLines = 0;      // lineas del documento (porcentaje vertical)

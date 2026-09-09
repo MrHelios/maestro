@@ -10,9 +10,9 @@ namespace {
 
 // Estilo de la fila de mensajes segun el tipo (paso 8). El tipo lo decide
 // la pantalla/el Editor cuando produce el Message; aqui se traduce al color
-// del Theme. Info es el caso base (sin color); Prompt resalta la entrada
-// del usuario en negrita (v1.3).
-std::string messageStyle(const Theme& theme, MessageKind kind) {
+// del Theme. Info usa el estilo de mensaje base del Theme; Prompt resalta
+// la entrada del usuario en negrita (v1.3).
+const std::string& messageStyle(const Theme& theme, MessageKind kind) {
     switch (kind) {
         case MessageKind::Info:    return theme.message;
         case MessageKind::Success: return theme.success;
@@ -27,72 +27,71 @@ std::string messageStyle(const Theme& theme, MessageKind kind) {
 constexpr int kNameMax    = 30;   // columnas maximas del nombre
 constexpr int kPathMax    = 40;   // columnas maximas de la ruta
 constexpr int kNamePathMax = 60;  // tope combinado nombre + ruta
+constexpr std::string_view kSeparator = " - ";
+constexpr std::string_view kModifiedMarker = " [*]";
 
-// Une `name SEP path` dentro de `budget` columnas, respetando la
-// prioridad de sacrificio: la ruta se agota primero (truncada por la
-// IZQUIERDA, con "..." al inicio) y el nombre se toca solo como ultimo
-// recurso. Para eso se RESERVA el nombre (fijo, sin truncarlo si se
-// puede evitar), se resta del presupuesto y el resto entero se da a la
-// ruta. Devuelve la parte que cabe del bloque (sin la etiqueta de
-// estado).
-// Piezas del bloque izquierdo de la barra fija: `name` (nombre[ - ruta])
-// y `estado`, devueltos POR SEPARADO para poder colorearlos distinto en
-// buildChrome (nombre en blanco, estado en negrita dorada). Respeta los
-// limites fijos y, ante falta de espacio (terminal chica), sacrifica primero
-// la ruta y despues el nombre. `onlyEstado` queda true cuando no hay sitio
-// para nombre+ruta: se muestra solo el estado (sin separador) para no
-// exceder el presupuesto.
+// Construye el bloque izquierdo respetando los límites de nombre/ruta y
+// el presupuesto disponible. La ruta se sacrifica antes que el nombre;
+// si tampoco cabe el nombre, solo conserva el estado.
+// Piezas `name`/`status` separadas para aplicar estilos del Theme
+// (T.statusBarName, T.statusBarPath, T.statusBarModified y accent).
+//
+// CONTRATO DE ANCHO:
+// layoutLeftBlock() garantiza que el bloque que render() construye a partir
+// de BarLeft no supera `budget` columnas visibles. render() usa el mismo
+// calculo para determinar el relleno restante de la barra.
 struct BarLeft {
-    std::string name;     // nombre[ [modificado]], sin estilo; vacio si onlyEstado
-    std::string path;     // ruta, sin estilo; vacia si no cabe / no aplica
-    std::string estado;   // etiqueta de estado, sin estilo
-    bool onlyEstado;      // true => no hubo lugar para el contenido
+    std::string name;
+    std::string path;
+    std::string status;
+    bool modified;
+    bool showMarker;
+    bool statusOnly;
 };
 
-BarLeft buildBarLeft(const std::string& rawName, const std::string& rawPath,
-                     const std::string& estado, bool modified, int budget) {
-    if (budget <= 0) return {"", "", utf8::truncate(estado, 0), true};
+BarLeft layoutLeftBlock(const std::string& rawName, const std::string& rawPath,
+                     const std::string& status, bool modified, int budget) {
+    if (budget <= 0) return {"", "", utf8::truncate(status, 0), false, false, true};
 
     std::string name = rawName;
     if (name.empty()) name = "[sin nombre]";
-    const std::string modificado = " [modificado]";
 
     std::string path = rawPath;
 
-    // Limites fijos (columnas visuales). El sufijo [modificado] se
-    // RESERVA entero: se trunca el nombre (no el indicador) para que
-    // jamás se pierda la señal de "cambios sin guardar" en pantalla.
-    int nameBudget = kNameMax - (modified ? colCount(modificado) : 0);
+    int markerW = modified ? colCount(kModifiedMarker) : 0;
+    int nameBudget = kNameMax - markerW;
     name = utf8::truncate(name, nameBudget);
-    if (modified) name += modificado;
-    // La ruta se acorta por la izquierda: se pierde el inicio cuando
-    // excede, manteniendo la cola (donde esta el nombre de archivo).
     if (colCount(path) > kPathMax)
         path = utf8TruncateFront(path, kPathMax);
-    if (colCount(name) + colCount(path) > kNamePathMax)
-        path = utf8TruncateFront(path, std::max(0, kNamePathMax - colCount(name)));
+    if (colCount(name) + markerW + colCount(path) > kNamePathMax)
+        path = utf8TruncateFront(path, std::max(0, kNamePathMax - colCount(name) - markerW));
 
-    int estadoW = colCount(estado);
-    const std::string sep = " - ";
-    // Reservamos el espacio del estado (a la derecha) y el separador
-    // anterior; el resto es para nombre + ruta. Si no cabe ni el separador
-    // entero (partsBudget negativo), se muestra solo el estado.
-    int partsBudget = budget - estadoW - static_cast<int>(sep.size());
-    if (budget <= estadoW || partsBudget < 0)
-        return {"", "", utf8::truncate(estado, budget), true};
+    int statusW = colCount(status);
+    int sepW = colCount(kSeparator);
+    int partsBudget = budget - statusW - sepW;
+    if (budget <= statusW || partsBudget <= 0)
+        return {"", "", utf8::truncate(status, budget), false, false, true};
 
     int nameW = colCount(name);
-    if (nameW >= partsBudget) {
-        // El nombre consume el presupuesto entero: se trunca, sin ruta.
+    int effectiveNameW = nameW + markerW;
+    if (effectiveNameW >= partsBudget) {
+        if (modified) {
+            if (partsBudget < markerW) {
+                // Borde extremadamente angosto: no cabe [*] completo.
+                name = utf8::truncate(name, partsBudget);
+                return {name, "", status, true, false, false};
+            }
+            name = utf8::truncate(name, partsBudget - markerW);
+            return {name, "", status, true, true, false};
+        }
         name = utf8::truncate(name, partsBudget);
-        return {name, "", estado, false};
+        return {name, "", status, false, false, false};
     }
 
-    // El nombre cabe; la ruta toma lo que sobra (con su separador). Si no
-    // queda sitio, se omite la ruta (solo nombre + estado).
-    int pathBudget = partsBudget - nameW - static_cast<int>(sep.size());
-    if (path.empty() || pathBudget <= 0) return {name, "", estado, false};
-    return {name, utf8TruncateFront(path, pathBudget), estado, false};
+    int pathBudget = partsBudget - effectiveNameW - sepW;
+    if (path.empty() || pathBudget <= 0) return {name, "", status, modified, modified, false};
+    return {name, utf8TruncateFront(path, pathBudget),
+            status, modified, modified, false};
 }
 
 } // namespace
@@ -102,10 +101,11 @@ std::string StatusBar::render(const Rect& area, const StatusBarData& data) {
     const Theme& T = theme_;
     std::ostringstream out;
 
-    // Fila fija (barra de estado): fondo gris 60%. El contenido es
-    // "  BLANCO[nombre] NEGRO[ - ruta] DORADO[ - comando] relleno  {pct}%".
+    // Fila fija de la barra de estado. El fondo y los estilos de cada segmento
+    // provienen del Theme. El contenido se compone de nombre, ruta, estado,
+    // relleno y bloque derecho anclado al borde.
     out << "\x1b[K";
-    out << T.statusBar; // base: negro sobre gris 60%
+    out << T.statusBar;
 
     // Bloque derecho: si hay un `right` explicito (pantallas sin documento:
     // selector, explorador) se usa tal cual; si no, se calcula la posicion
@@ -128,7 +128,7 @@ std::string StatusBar::render(const Rect& area, const StatusBarData& data) {
     // la terminal. En una terminal demasiado angosta el contenido fijo
     // (paddings + bloque derecho) no cabe entero; el pad derecho cede
     // primero, luego el bloque derecho (el bloque izquierdo ya sacrifica
-    // dentro de su presupuesto, ver buildBarLeft). Con esto se garantiza
+    // dentro de su presupuesto, ver layoutLeftBlock). Con esto se garantiza
     // que la fila fija ocupe EXACTAMENTE `width` columnas (nada mas).
     const int padL = std::min(kStatusBarPadLeft, width);
     const int padR = std::min(kStatusBarPadRight, std::max(0, width - padL));
@@ -139,53 +139,38 @@ std::string StatusBar::render(const Rect& area, const StatusBarData& data) {
     }
 
     int leftBudget = std::max(0, width - padL - padR - rightW);
-    BarLeft left = buildBarLeft(data.name, data.path, data.estado,
+    BarLeft left = layoutLeftBlock(data.name, data.path, data.estado,
                                 data.modified, leftBudget);
 
-    // Ancho VISIBLE (sin ANSI) de todo a la izquierda del relleno, para que
-    // el relleno consiga exactamente `width` columnas y el bloque derecho
-    // (fila,columnapct%) quede anclado a la derecha.
-    const std::string sep = " - ";
     int plainW;
-    if (left.onlyEstado) {
-        plainW = colCount(left.estado);
+    if (left.statusOnly) {
+        plainW = colCount(left.status);
     } else {
-        // "nombre[ - ruta] - estado": un separador si no hay ruta, dos si la
-        // hay, y el texto de nombre + ruta + estado.
         int sepCount = left.path.empty() ? 1 : 2;
-        plainW = colCount(left.name) + colCount(left.path) +
-                 colCount(left.estado) +
-                 sepCount * static_cast<int>(sep.size());
+        int markerW = left.showMarker ? colCount(kModifiedMarker) : 0;
+        int sepW = colCount(kSeparator);
+        plainW = colCount(left.name) + markerW + colCount(left.path) +
+                 colCount(left.status) + sepCount * sepW;
     }
 
     for (int i = 0; i < padL; ++i) out << ' ';
 
-    // Accent de la etiqueta de estado: el EstadoData puede traer el color
-    // propio del estado activo (v1.3); si no, se usa el fallback del Theme.
     const std::string accent = data.estadoAccent.empty() ? T.statusBarAccent
-                                                         : data.estadoAccent;
+                                                           : data.estadoAccent;
 
-    // El sufijo [modificado] se identifica y pinta por separado (v1.3): el
-    // nombre va en statusBarName y el indicador en statusBarModified. Se
-    // conservan exactamente las columnas de left.name (nameText + marker),
-    // asi el calculo de ancho/relleno sigue siendo correcto.
-    const std::string modMarker = " [modificado]";
-    std::string nameText = left.name;
-    bool hasMod = data.modified &&
-                  nameText.size() >= modMarker.size() &&
-                  nameText.compare(nameText.size() - modMarker.size(),
-                                   modMarker.size(), modMarker) == 0;
-    if (hasMod) nameText = nameText.substr(0, nameText.size() - modMarker.size());
-
-    if (left.onlyEstado) {
-        out << accent << left.estado << T.reset << T.statusBar;
+    if (left.statusOnly) {
+        out << accent << left.status << T.reset << T.statusBar;
     } else {
-        out << T.statusBarName << nameText << T.reset << T.statusBar;
-        if (hasMod) out << T.statusBarModified << modMarker << T.reset << T.statusBar;
-        if (!left.path.empty()) {
-            out << T.statusBarPath << sep << left.path << T.reset << T.statusBar;
+        if (left.modified && !left.showMarker) {
+            out << T.statusBarModified << left.name << T.reset << T.statusBar;
+        } else {
+            out << T.statusBarName << left.name << T.reset << T.statusBar;
+            if (left.showMarker) out << T.statusBarModified << kModifiedMarker << T.reset << T.statusBar;
         }
-        out << accent << sep << left.estado << T.reset << T.statusBar;
+        if (!left.path.empty()) {
+            out << T.statusBarPath << kSeparator << left.path << T.reset << T.statusBar;
+        }
+        out << accent << kSeparator << left.status << T.reset << T.statusBar;
     }
 
     int fill = std::max(0, width - padL - plainW - padR - rightW);
@@ -208,7 +193,7 @@ std::string StatusBar::render(const Rect& area, const StatusBarData& data) {
         const int msgPadR = std::min(kStatusBarPadRight,
                                      std::max(0, width - msgPadL));
         for (int i = 0; i < msgPadL; ++i) out << ' ';
-        const std::string style = messageStyle(T, data.message.kind);
+        const std::string& style = messageStyle(T, data.message.kind);
         out << style;
         out << utf8::truncate(data.message.text,
                               std::max(0, width - msgPadL - msgPadR));

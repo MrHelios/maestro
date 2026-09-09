@@ -273,7 +273,7 @@ TEST(statusbar_estado_accent_from_data) {
 }
 
 // ---------------------------------------------------------------------------
-// v1.3: el indicador "[modificado]" se pinta con statusBarModified (no con
+// v1.4: el indicador "[*]" se pinta con statusBarModified (no con
 // statusBarName), distinto del nombre y nunca presente si no hay cambios.
 // ---------------------------------------------------------------------------
 TEST(statusbar_modified_indicator_styled) {
@@ -290,11 +290,11 @@ TEST(statusbar_modified_indicator_styled) {
     d.totalLines = 1;
 
     const std::string out = bar.render(area, d);
-    CHECK(out.find(t.statusBarModified + " [modificado]") != std::string::npos);
+    CHECK(out.find(t.statusBarModified + " [*]") != std::string::npos);
 
     StatusBarData c = d;
     c.modified = false;
-    CHECK(bar.render(area, c).find(" [modificado]") == std::string::npos);
+    CHECK(bar.render(area, c).find(" [*]") == std::string::npos);
 }
 
 // ---------------------------------------------------------------------------

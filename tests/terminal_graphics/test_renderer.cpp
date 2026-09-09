@@ -9,6 +9,7 @@
 // usamos construimos un Document/Cursor/Viewport de nivel bajo.
 #include "ui/Renderer.h"
 #include "ui/Editor.h"
+#include "core/Theme.h"
 
 // Secuencias ANSI usadas por el renderer.
 #define ANSI_INV "\x1b[48;5;60m"   // seleccion azul grisáceo (kSelectionStyle)
@@ -591,28 +592,26 @@ TEST(statusbar_left_format_name_path_estado) {
 }
 
 TEST(statusbar_modified_indicator) {
-    // Un cambio sin guardar agrega [modificado] junto al nombre.
+    // Un cambio sin guardar agrega [*] junto al nombre (v1.4: antes [modificado]).
     std::string out = barFrame("/home/a/x.cc", true, "", State::Navegacion, 200);
-    CHECK(contains(stripAnsi(out), "x.cc [modificado] - /home/a - NAVEGACION"));
+    CHECK(contains(stripAnsi(out), "x.cc [*] - /home/a - NAVEGACION"));
 }
 
 TEST(statusbar_modified_indicator_survives_long_name) {
-    // Un nombre de archivo largo + modified=true: el sufijo [modificado]
-    // se RESERVA entero y NO debe perderse ni cortarse. La parte del
-    // nombre es la que cede (se trunca), nunca el indicador, para que el
-    // usuario siempre sepa que hay cambios sin guardar.
+    // Un nombre de archivo largo + modified=true: el sufijo [*] (antes
+    // [modificado], v1.4) se RESERVA entero y NO debe perderse ni cortarse.
+    // La parte del nombre es la que cede (se trunca), nunca el indicador,
+    // para que el usuario siempre sepa que hay cambios sin guardar.
     const std::string nombre = "un_archivo_muy_muy_largo_para_verificar_"
                                "el_indicador_de_modificado_en_la_barra.txt";
     std::string out = barFrame("/dir/" + nombre, true, "", State::Navegacion, 200);
 
-    // El indicador aparece completo (nunca cortado a "modificad").
-    CHECK(contains(out, "[modificado]"));
-    // Se sacrifica el final del nombre, no el marcador.
-    CHECK(!contains(out, "modificad" ANSI_RESET));
+    CHECK(contains(out, "[*]"));
+    CHECK(!contains(out, "[*" ANSI_RESET));
 
     // Con el mismo nombre pero sin cambios, el indicador no debe estar.
     std::string limpio = barFrame("/dir/" + nombre, false, "", State::Navegacion, 200);
-    CHECK(!contains(limpio, "[modificado]"));
+    CHECK(!contains(limpio, "[*]"));
 }
 
 namespace {
@@ -629,6 +628,20 @@ int barVisibleCols(const std::string& frame) {
 }
 
 } // namespace
+
+TEST(statusbar_modified_marker_exact_fit) {
+    std::string out = barFrame("/a/x.cc", true, "", State::Navegacion, 29);
+    CHECK(contains(out, " [*]"));
+    CHECK(contains(stripAnsi(out), "NAVEGACION"));
+    CHECK_EQ(barVisibleCols(out), 29);
+}
+
+TEST(statusbar_modified_marker_no_room_uses_modified_color) {
+    std::string out = barFrame("/a/x.cc", true, "", State::Navegacion, 28);
+    CHECK(!contains(stripAnsi(out), " [*]"));
+    CHECK(contains(out, std::string(kStatusBarModified)));
+    CHECK_EQ(barVisibleCols(out), 28);
+}
 
 TEST(statusbar_label_fills_whole_width_edge) {
     // Caso extremo de la revision: ancho de terminal apenas mayor que la
@@ -963,9 +976,9 @@ TEST(statusbar_state_label_all_states) {
 
 TEST(statusbar_state_label_persists_across_modified) {
     // La etiqueta de estado no se pierde ni se convierte en otra cosa
-    // cuando hay [modificado]: ambos coexisten.
+    // cuando hay [*] (v1.4: antes [modificado]): ambos coexisten.
     std::string out = barFrame("/a/b.txt", true, "", State::Interaccion, 200);
-    CHECK(contains(out, "[modificado]"));
+    CHECK(contains(out, "[*]"));
     CHECK(contains(out, "INTERACCION"));
 }
 
@@ -1001,7 +1014,7 @@ TEST(statusbar_state_label_with_long_filename) {
 
 TEST(statusbar_state_and_modified_each_state) {
     // Combinacion estado + modified: con cualquiera de los 4 estados la
-    // barra muestra [modificado] y la etiqueta correcta a la vez.
+    // barra muestra [*] (v1.4: antes [modificado]) y la etiqueta correcta a la vez.
     struct Case { State s; const char* label; };
     Case cases[] = {
         {State::Navegacion, "NAVEGACION"},
@@ -1011,7 +1024,7 @@ TEST(statusbar_state_and_modified_each_state) {
     };
     for (const auto& c : cases) {
         std::string out = barFrame("/a/b.txt", true, "", c.s, 200);
-        CHECK(contains(out, "[modificado]"));
+        CHECK(contains(out, "[*]"));
         CHECK(contains(out, " - " + std::string(c.label)));
     }
 }

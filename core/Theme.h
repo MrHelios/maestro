@@ -44,7 +44,7 @@ struct Theme {
     std::string statusBarName;    // nombre de archivo en la barra
     std::string statusBarPath;    // ruta en la barra
     std::string statusBarAccent;  // etiqueta de estado por defecto (fallback de estadoAccent)
-    std::string statusBarModified;// indicador "[modificado]" en la barra
+    std::string statusBarModified; // indicador "[*]" en la barra (v1.4: antes "[modificado]")
     std::string message;          // fila de mensajes (Info/ayuda, sin color)
     std::string prompt;           // prompts de entrada (p.ej. "Guardar archivo:")
     std::string success;          // mensajes de exito (verde)
@@ -78,8 +78,9 @@ struct Theme {
 //                       (RGB(102,102,102) en truecolor, 0.4*255).
 //   - name            : blanco;   path : negro;  accent (fallback) : bold
 //                       dorado (paleta 256, 38;5;178).
-//   - statusBarModified: "[modificado]" en negrita amarillo claro (aviso
-//                       de cambios sin guardar, nunca se trunca).
+//   - statusBarModified: "[*]" en negrita amarillo claro (v1.4: antes
+//                       "[modificado]") aviso de cambios sin guardar,
+//                       nunca se trunca).
 //   - prompt          : prompts de entrada en negrita.
 //   - accents         : negrita + color 256 suave, legible sobre el gris 60%
 //                       de la barra: azul (navegacion), verde (interaccion),
