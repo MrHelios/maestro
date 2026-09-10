@@ -433,22 +433,25 @@ Position Document::insertBlock(int line, int col, const std::vector<std::string>
         return {line, col + static_cast<int>(block[0].size())};
     }
 
-    // Multilinea: partimos la linea actual en col (igual que splitLine),
-    // la primera linea del bloque se pega a la cola izquierda, las
-    // intermedias se insertan como lineas nuevas completas, y la ultima se
-    // une con la cola derecha de la linea original (lo que quedaba tras col).
+    // A partir de aqui block.size() >= 2; el caso de una sola linea
+    // se resuelve mediante el early-return anterior.
     std::string right = target.substr(col);
     std::string left = target.substr(0, col);
 
     std::vector<std::string> newLines;
+    newLines.reserve(block.size());
     newLines.push_back(left + block.front());
     for (size_t i = 1; i + 1 < block.size(); ++i) {
         newLines.push_back(block[i]);
     }
     newLines.push_back(block.back() + right);
 
-    lines_.erase(lines_.begin() + line);
-    lines_.insert(lines_.begin() + line, newLines.begin(), newLines.end());
+    // Reserva capacidad para evitar una reallocacion durante el insert.
+    // Primero insertamos las lineas adicionales y solo despues reemplazamos
+    // la linea original con la primera linea resultante.
+    lines_.reserve(lines_.size() + newLines.size() - 1);
+    lines_.insert(lines_.begin() + line + 1, newLines.begin() + 1, newLines.end());
+    lines_[line] = std::move(newLines[0]);
     normalizeEndsWithNewline();
     notifyTouched(line, line + static_cast<int>(block.size()) - 1);
     bumpVersion();

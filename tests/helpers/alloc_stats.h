@@ -174,41 +174,41 @@ inline void report(const char* title) {
 
 // --- Overrides globales de new/delete (afectan TODO el binario de tests) ---
 
-void* operator new(std::size_t sz) {
+inline void* operator new(std::size_t sz) {
     void* p = std::malloc(sz ? sz : 1);
     if (!p) throw std::bad_alloc();
     alloc_stats::detail::recordAlloc(alloc_stats::detail::usableSize(p));
     return p;
 }
 
-void* operator new[](std::size_t sz) { return ::operator new(sz); }
+inline void* operator new[](std::size_t sz) { return ::operator new(sz); }
 
-void* operator new(std::size_t sz, const std::nothrow_t&) noexcept {
+inline void* operator new(std::size_t sz, const std::nothrow_t&) noexcept {
     void* p = std::malloc(sz ? sz : 1);
     if (p) alloc_stats::detail::recordAlloc(alloc_stats::detail::usableSize(p));
     return p;
 }
 
-void* operator new[](std::size_t sz, const std::nothrow_t&) noexcept {
+inline void* operator new[](std::size_t sz, const std::nothrow_t&) noexcept {
     return ::operator new(sz, std::nothrow);
 }
 
-void operator delete(void* p) noexcept {
+inline void operator delete(void* p) noexcept {
     if (!p) return;
     alloc_stats::detail::recordFree(alloc_stats::detail::usableSize(p));
     std::free(p);
 }
 
-void operator delete[](void* p) noexcept { ::operator delete(p); }
+inline void operator delete[](void* p) noexcept { ::operator delete(p); }
 
-void operator delete(void* p, std::size_t) noexcept { ::operator delete(p); }
+inline void operator delete(void* p, std::size_t) noexcept { ::operator delete(p); }
 
-void operator delete[](void* p, std::size_t) noexcept { ::operator delete(p); }
+inline void operator delete[](void* p, std::size_t) noexcept { ::operator delete(p); }
 
-void operator delete(void* p, const std::nothrow_t&) noexcept {
+inline void operator delete(void* p, const std::nothrow_t&) noexcept {
     ::operator delete(p);
 }
 
-void operator delete[](void* p, const std::nothrow_t&) noexcept {
+inline void operator delete[](void* p, const std::nothrow_t&) noexcept {
     ::operator delete(p);
 }
