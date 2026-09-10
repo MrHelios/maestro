@@ -145,20 +145,16 @@ inline int cellStartBefore(std::string_view line, int pos) {
     int start = pos - 1;
     int i = start;
     while (i > 0 && (static_cast<unsigned char>(line[i]) & 0xC0) == 0x80) --i;
-    // Si `i` es lead valido o byte invalido/inicio, es inicio de celda.
-    if (i == 0) return 0;
-    if ((static_cast<unsigned char>(line[i]) & 0xC0) != 0x80) {
-        // `i` es un lead: verifica cuantas continuaciones espera.
-        unsigned char lead = static_cast<unsigned char>(line[i]);
-        int expect = 0;
-        if ((lead & 0xE0) == 0xC0) expect = 1;
-        else if ((lead & 0xF0) == 0xE0) expect = 2;
-        else if ((lead & 0xF8) == 0xF0) expect = 3;
-        int conts = start - i;
-        if (conts > expect) return start; // continuaciones extra: orfanas, celda propia
+    if ((static_cast<unsigned char>(line[i]) & 0xC0) == 0x80) {
         return i;
     }
-    // `i` es byte de continuacion huerfano: es su propio inicio.
+    unsigned char lead = static_cast<unsigned char>(line[i]);
+    int expect = 0;
+    if ((lead & 0xE0) == 0xC0) expect = 1;
+    else if ((lead & 0xF0) == 0xE0) expect = 2;
+    else if ((lead & 0xF8) == 0xF0) expect = 3;
+    int conts = start - i;
+    if (conts > expect) return start;
     return i;
 }
 
@@ -222,7 +218,7 @@ inline bool isValid(std::string_view s) {
             if (cp >= 0xD800 && cp <= 0xDFFF) return false;
             if (cp > 0x10FFFF) return false;
         }
-i += static_cast<size_t>(need) + 1;
+        i += static_cast<size_t>(need) + 1;
     }
     return true;
 }

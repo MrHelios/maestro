@@ -1,5 +1,6 @@
 #include "core/Buffer.h"
 
+#include <algorithm>
 #include <cassert>
 
 #include "core/utf8.h"
@@ -95,13 +96,13 @@ void Buffer::recordWatch(int rowStart, int rowEnd) {
     if (rowStart > rowEnd) return;
     if (!watcher_.empty()) {
         auto& last = watcher_.back();
-        // Coalesce opportunista: fusiona solo con el último intervalo si
+        // Coalesce oportunista: fusiona solo con el último intervalo si
         // hay solapamiento/adyacencia. No es normalización global completa.
-        if (last.rowEnd + 1 >= rowStart) {
+        if (rowStart <= last.rowEnd + 1 && last.rowStart <= rowEnd + 1) {
+            last.rowStart = std::min(last.rowStart, rowStart);
             last.rowEnd = std::max(last.rowEnd, rowEnd);
             return;
         }
-        if (last.rowStart == rowStart && last.rowEnd == rowEnd) return;
     }
     watcher_.push_back({rowStart, rowEnd});
 }
@@ -113,7 +114,18 @@ bool Buffer::isModified() const {
     int curCount = document.lineCount();
     if (curCount != origCount) return true;
     if (watcher_.empty()) return false;
-    for (auto &e : watcher_) {
+    std::vector<WatcherEntry> merged(watcher_.begin(), watcher_.end());
+    std::sort(merged.begin(), merged.end(), [](const auto& a, const auto& b) { return a.rowStart < b.rowStart; });
+    int writeIdx = 0;
+    for (int i = 1; i < static_cast<int>(merged.size()); ++i) {
+        if (merged[i].rowStart <= merged[writeIdx].rowEnd + 1) {
+            merged[writeIdx].rowEnd = std::max(merged[writeIdx].rowEnd, merged[i].rowEnd);
+        } else {
+            merged[++writeIdx] = merged[i];
+        }
+    }
+    merged.resize(writeIdx + 1);
+    for (auto& e : merged) {
         int a = e.rowStart;
         int b = e.rowEnd;
         if (a < 0) a = 0;

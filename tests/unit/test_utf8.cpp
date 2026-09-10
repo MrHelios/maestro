@@ -462,6 +462,17 @@ TEST(range_never_produces_invalid_utf8) {
     }
 }
 
+TEST(cellStartBefore_orphan_overflow_at_zero_consistent) {
+    std::string s0 = std::string("\xC3\x80\x80", 3);
+    std::string s1 = std::string("a\xC3\x80\x80", 4);
+    CHECK_EQ(utf8::cellStartBefore(s0, 3), 2);
+    CHECK_EQ(utf8::cellStartBefore(s1, 4), 3);
+    CHECK_EQ(utf8::alignStart(s0, 2), 2);
+    CHECK_EQ(utf8::alignStart(s1, 3), 3);
+    CHECK_EQ(utf8::isCellStart(s0, 2), true);
+    CHECK_EQ(utf8::isCellStart(s1, 3), true);
+}
+
 TEST(isValid_empty_and_ascii) {
     CHECK(utf8::isValid(""));
     CHECK(utf8::isValid("hello"));

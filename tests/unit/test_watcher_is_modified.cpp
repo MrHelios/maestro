@@ -187,6 +187,27 @@ TEST(watcher_save_limpia_y_nuevo_snapshot) {
     CHECK(b.isModified());
 }
 
+TEST(watcher_K_solapados_no_adyacentes_al_ultimo) {
+    // NOTA perf: el bug original era de performance (re-comparacion redundante
+    // por solapes no coalescados). Este test solo verifica CORRECCION tras el
+    // refactor sort+merge: que un watcher fragmentado siga detectando la
+    // modificacion y que el restore siga dando !isModified. No instrumenta
+    // tiempo/conteo de comparaciones; para medir el ahorro haria falta
+    // benchmark con watcher grande y conteo de lineas comparadas.
+    Buffer b = makeBuffer({"a","b","c","d","e","f","g","h","i","j","k"});
+    b.watcher_.clear();
+    b.watcher_.push_back({0, 2});
+    b.watcher_.push_back({10, 10});
+    b.watcher_.push_back({1, 3});
+    b.document.deleteRange(1, 0, 1, 1);
+    b.document.insertText(1, 0, "X");
+    b.recalcModified();
+    CHECK(b.isModified());
+    b.document.restore({"a","b","c","d","e","f","g","h","i","j","k"});
+    b.recalcModified();
+    CHECK(!b.isModified());
+}
+
 TEST(watcher_performance_100k_lineas_1000_edits) {
     std::vector<std::string> big(100000, "linea base");
     Buffer b = makeBuffer(big);

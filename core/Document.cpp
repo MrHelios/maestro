@@ -198,101 +198,21 @@ void Document::insertChar(int line, int col, char c) {
 
 namespace {
 
-// 1. cellStartBefore: Optimizado y semánticamente idéntico al original.
-// Incluye la corrección crítica (conts > expect) para manejar bytes huérfanos
-// que aparecen después de una secuencia UTF-8 válida completada.
 int cellStartBefore(const std::string& s, int col) {
-    if (col <= 0) return 0;
-    int start = col - 1;
-    unsigned char c = static_cast<unsigned char>(s[start]);
-    
-    // Si es ASCII o byte líder, ya es el inicio de la celda.
-    if (c < 0x80 || (c & 0xC0) != 0x80) {
-        return start;
-    }
-    
-    // Es un byte de continuación: buscamos el byte líder hacia atrás una sola vez.
-    int j = start - 1;
-    while (j >= 0 && (static_cast<unsigned char>(s[j]) & 0xC0) == 0x80) {
-        j--;
-    }
-    
-    if (j < 0) return start; // Sin líder previo: es huérfano, él mismo es inicio.
-    
-    unsigned char lead = static_cast<unsigned char>(s[j]);
-    int expect = 0;
-    if ((lead & 0xE0) == 0xC0) expect = 1;
-    else if ((lead & 0xF0) == 0xE0) expect = 2;
-    else if ((lead & 0xF8) == 0xF0) expect = 3;
-    
-    int conts = start - j; // Bytes de continuación desde el líder hasta 'start'
-    
-    // CORRECCIÓN CLAVE: Si hay MÁS continuaciones de las esperadas, la secuencia
-    // previa ya se completó. Este byte es "huérfano" y empieza su propia celda.
-    if (conts > expect) {
-        return start;
-    }
-    
-    // De lo contrario, pertenece a la secuencia válida que comienza en 'j'.
-    return j;
+    return utf8::cellStartBefore(s, col);
 }
 
-// 2. cellEndAt: Optimizado asumiendo el invariante del editor (col es inicio de celda).
-// Es O(1) para el caso común. Si por alguna anomalía 'col' cae en un byte de 
-// continuación, el fallback lo trata como una celda de 1 byte (seguro y byte-safe).
 int cellEndAt(const std::string& s, int col) {
     if (col >= static_cast<int>(s.size())) return static_cast<int>(s.size());
-    
-    unsigned char c = static_cast<unsigned char>(s[col]);
-    
-    // Si es ASCII o byte de continuación, la celda termina en el siguiente byte.
-    // (Bajo el invariante, si es continuación, es porque es huérfano/corrupto).
-    if (c < 0x80 || (c & 0xC0) == 0x80) {
-        return col + 1;
-    }
-    
-    // Es un byte líder válido. Contamos cuántas continuaciones debe consumir.
-    int expect = 0;
-    if ((c & 0xE0) == 0xC0) expect = 1;
-    else if ((c & 0xF0) == 0xE0) expect = 2;
-    else if ((c & 0xF8) == 0xF0) expect = 3;
-    
-    int end = col + 1;
-    while (end < static_cast<int>(s.size()) && expect > 0 &&
-           (static_cast<unsigned char>(s[end]) & 0xC0) == 0x80) {
-        ++end;
-        --expect;
-    }
-    
-    return end;
+    return col + utf8::cellLen(s, col, static_cast<int>(s.size()));
 }
 
-// NUEVO: Normaliza un offset para que apunte al inicio de la celda que lo contiene.
-// Si el offset ya es un límite de celda válido (o está en los extremos), se deja intacto.
 int alignStart(const std::string& s, int col) {
-    if (col <= 0 || col >= static_cast<int>(s.size())) return col;
-    // Si ya es el inicio de una celda (o un byte huérfano que actúa como inicio),
-    // no hay nada que alinear hacia atrás.
-    if (utf8::isCellStart(s, col)) return col;
-    
-    // Si llegamos aquí, 'col' es un byte de continuación válido.
-    // El inicio de esa secuencia está en o antes de col-1.
-    return cellStartBefore(s, col);
+    return utf8::alignStart(s, col);
 }
 
-// NUEVO: Normaliza un offset para que apunte al final exclusivo de la celda que lo contiene.
-// Dado que los rangos en C++ son [start, end), si 'col' cae en medio de una celda,
-// debemos avanzar 'end' hasta el final de esa celda para no cortarla.
 int alignEnd(const std::string& s, int col) {
-    if (col <= 0 || col >= static_cast<int>(s.size())) return col;
-    // Si 'col' ya es el inicio de una celda, significa que la celda anterior
-    // ya está completa. No necesitamos avanzar 'col'.
-    if (utf8::isCellStart(s, col)) return col;
-    
-    // 'col' es un byte de continuación. Para encontrar el final de SU celda,
-    // primero debemos encontrar dónde empieza esa celda y luego calcular su longitud.
-    int start = cellStartBefore(s, col);
-    return cellEndAt(s, start);
+    return utf8::alignEnd(s, col);
 }
 
 } // namespace

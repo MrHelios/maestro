@@ -442,17 +442,11 @@ TEST(doc_save_roundtrip) {
     CHECK_EQ(d2.lineAt(2), "tres");
 }
 
-TEST(doc_save_trailing_empty_line_collapses) {
-    // DECISION DE DISENO (especificacion, no accidente):
-    // Una ultima linea vacia no tiene representacion en disco. saveToFile
-    // escribe separadores ENTRE lineas (nunca uno tras la ultima), asi que
-    // {"a","b",""} se guarda como "a\nb"; y loadFromFile de "a\nb" devuelve
-    // 2 lineas. Por lo tanto {"a","b",""} y {"a","b"} son equivalentes al
-    // persistir: la linea vacia final es un estado de memoria, no del archivo.
-    // Si algun dia se quiere preservar la linea vacia final, hay que cambiar
-    // saveToFile Y loadFromFile a la vez.
-    // NOTA: con la representacion canonica, una linea vacia final representa
-    // un '\n' final y se preserva en round-trip.
+TEST(doc_save_preserves_trailing_empty_line) {
+    // Representacion canonica: una linea vacia final serializa el '\n' final
+    // y se preserva en round-trip. {"a","b",""} -> "a\nb\n" en disco ->
+    // load devuelve {"a","b",""}. saveToFile y loadFromFile tratan el
+    // terminador de forma coordinada para conservarlo.
     TempFile f;
     Document d = makeDoc({"a", "b", ""});
     CHECK(d.saveToFile(f.path));
@@ -548,13 +542,10 @@ TEST(doc_roundtrip_trailing_newline_after_edit) {
     CHECK_EQ(fileContent(f.path), "ab\n");
 }
 
-TEST(doc_enter_at_end_of_newline_file_does_not_double) {
-    // REGRESION (bug real): abrir "a\n" y apretar Enter al final crea una
-    // linea vacia final ["a",""]. Antes el flag de '\n' final seguia en
-    // true y saveToFile escribia el separador MAS el '\n' del flag:
-    // "a\n\n" (el archivo ganaba una linea). El flag debe quedar en false
-    // porque la linea vacia final ya aporta el '\n'. Al persistir, la
-    // linea vacia final serializa el '\n' final, dando "a\n\n".
+TEST(doc_enter_at_end_of_newline_file_adds_blank_line) {
+    // Enter al final de "a\n" crea ["a",""]: la linea vacia serializa el
+    // '\n' previo y la nueva linea vacia agrega un '\n' adicional -> "a\n\n".
+    // El flag queda en false (la linea vacia aporta el terminador).
     TempFile f;
     f.write("a\n");
     Document d;

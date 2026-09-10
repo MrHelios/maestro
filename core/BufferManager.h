@@ -42,6 +42,9 @@ public:
     int activeIndex() const;
 
     // Agrega un buffer y lo activa. Devuelve el indice nuevo.
+    // Requiere rvalue: llamar con std::move(buf) o temporal (Buffer{}).
+    // No acepta lvalues para evitar copias implicitas costosas de Buffer
+    // (Document + undo/redo). Para duplicar: Buffer copy = orig; push(std::move(copy));
     int push(Buffer&& buffer);
 
     // Nombre "SinNombre[n]" de la sesion. Nunca se reutiliza un nombre ya
