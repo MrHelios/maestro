@@ -39,6 +39,8 @@ constexpr int kFatalSignalCount = static_cast<int>(sizeof(kFatalSignals) / sizeo
 
 termios* g_origTermios = nullptr;
 volatile sig_atomic_t g_rawActive = 0;
+volatile sig_atomic_t g_mouseActive = 0;
+volatile sig_atomic_t g_altActive = 0;
 
 volatile sig_atomic_t g_resized = 0;
 struct sigaction g_oldWinchAction;
@@ -55,12 +57,17 @@ struct SavedAction {
 SavedAction g_savedActions[kFatalSignalCount];
 
 void fatalSignalHandler(int sig) {
-    // Restaurar la terminal antes de morir. write() a un fd conocido es
-    // razonablemente seguro aqui (mismo criterio que tcsetattr en este
-    // handler): devolver el cursor a su forma por defecto, ya que el raw
-    // mode deja la terminal en cursor de bloque fijo.
+    // Restaurar la terminal antes de morir. Debe espejar el estado activo:
+    // mouse tracking y alt-screen son modos independientes de raw y deben
+    // limpiarse aunque el crash ocurra tras enableMouseTracking().
+    if (g_mouseActive) {
+        write(STDOUT_FILENO, "\x1b[?1006l\x1b[?1000l", sizeof("\x1b[?1006l\x1b[?1000l") - 1);
+    }
+    if (g_altActive) {
+        write(STDOUT_FILENO, "\x1b[?1049l", sizeof("\x1b[?1049l") - 1);
+    }
     if (g_rawActive) {
-        write(STDOUT_FILENO, "\x1b[0 q", 5);
+        write(STDOUT_FILENO, "\x1b[0 q", sizeof("\x1b[0 q") - 1);
     }
     if (g_rawActive && g_origTermios) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, g_origTermios);
@@ -104,6 +111,8 @@ Terminal::Terminal() {
 }
 
 Terminal::~Terminal() {
+    if (mouseTrackingEnabled_) disableMouseTracking();
+    if (altScreenActive_) leaveAlternateScreen();
     if (rawModeEnabled_) {
         disableRawMode();
     }
@@ -141,7 +150,7 @@ void Terminal::enableRawMode() {
     // Cursor en bloque fijo (DECSCUSR). Se emite solo tras aplicar el raw
     // mode con exito: si tcsetattr fallo no estamos en raw mode y no tiene
     // sentido cambiar la forma del cursor.
-    write(STDOUT_FILENO, "\x1b[2 q", 5);
+    write(STDOUT_FILENO, "\x1b[2 q", sizeof("\x1b[2 q") - 1);
 
     // Raw mode activo: instalar el handler de restauracion de senales.
     // enable/disable deben llamarse en pares estrictos; guard contra
@@ -184,7 +193,7 @@ void Terminal::disableRawMode() {
 
     // Restaurar la forma por defecto del cursor antes de devolver la
     // terminal al shell (el raw mode la deja en bloque fijo).
-    write(STDOUT_FILENO, "\x1b[0 q", 5);
+    write(STDOUT_FILENO, "\x1b[0 q", sizeof("\x1b[0 q") - 1);
 
     termios* orig = static_cast<termios*>(origTermios_);
     // Restaurar el estado original. Aunque falle (poco probable), dejamos de
@@ -194,6 +203,42 @@ void Terminal::disableRawMode() {
     g_rawActive = 0;
     g_origTermios = nullptr;
 }
+
+void Terminal::enableMouseTracking() {
+    // El flag se publica despues del write(); existe una ventana minima
+    // en la que el signal handler aun no conoce este estado.
+    if (mouseTrackingEnabled_) return;
+    write(STDOUT_FILENO, "\x1b[?1000h\x1b[?1006h", sizeof("\x1b[?1000h\x1b[?1006h") - 1);
+    mouseTrackingEnabled_ = true;
+    g_mouseActive = 1;
+}
+
+void Terminal::disableMouseTracking() {
+    if (!mouseTrackingEnabled_) return;
+    write(STDOUT_FILENO, "\x1b[?1006l\x1b[?1000l", sizeof("\x1b[?1006l\x1b[?1000l") - 1);
+    mouseTrackingEnabled_ = false;
+    g_mouseActive = 0;
+}
+
+void Terminal::enterAlternateScreen() {
+    // El flag se publica despues del write(); existe una ventana minima
+    // en la que el signal handler aun no conoce este estado.
+    if (altScreenActive_) return;
+    write(STDOUT_FILENO, "\x1b[?1049h", sizeof("\x1b[?1049h") - 1);
+    altScreenActive_ = true;
+    g_altActive = 1;
+}
+
+void Terminal::leaveAlternateScreen() {
+    if (!altScreenActive_) return;
+    write(STDOUT_FILENO, "\x1b[?1049l", sizeof("\x1b[?1049l") - 1);
+    altScreenActive_ = false;
+    g_altActive = 0;
+}
+
+bool Terminal::isMouseActiveForTest() { return g_mouseActive != 0; }
+bool Terminal::isAltActiveForTest() { return g_altActive != 0; }
+bool Terminal::isRawActiveForTest() { return g_rawActive != 0; }
 
 bool Terminal::hasResized() {
     if (g_resized) {
@@ -278,6 +323,47 @@ static std::string simpleEscapeForm(const std::string& contents) {
     return std::string(1, prefix) + final; // "[1;2A" -> "[A"
 }
 
+bool Terminal::parseMouseSgr(std::string_view seq, Event& e) {
+    // SGR mouse: "[<Cb;Cx;CyM" sin ESC inicial. Validacion minima:
+    // requiere dos ';' y final 'M' (press); 'm' (release) no genera scroll
+    // — la rueda solo envia press, un 'm' con Cb 64/65 seria un release
+    // espurio y se ignora como None. Cx/Cy se ignoran (solo importa scroll).
+    //  - Cb base 64=wheel up, 65=wheel down; se enmascaran bits Shift(4),
+    //    Alt(8), Ctrl(16) => 68(64+Shift) sigue siendo ScrollUp, etc.
+    //  - Cualquier Cb distinto de 64/65 (clicks 0, drag, otros) => None
+    //    silencioso (no es error, solo no nos interesa).
+    size_t p1 = seq.find(';', 2);
+    size_t p2 = (p1 == std::string_view::npos) ? std::string_view::npos
+                                                : seq.find(';', p1 + 1);
+    char finalCh = seq.empty() ? 0 : seq.back();
+
+    if (p1 == std::string_view::npos || p2 == std::string_view::npos ||
+        (finalCh != 'M' && finalCh != 'm')) {
+        e.type = EventType::None;
+        return true;
+    }
+
+    int cb = 0;
+    try {
+        cb = std::stoi(std::string(seq.substr(2, p1 - 2)));
+    } catch (const std::exception&) {
+        e.type = EventType::None;
+        return true;
+    }
+
+    int baseButton = cb & ~0x1C;
+
+    if (finalCh != 'M') {
+        e.type = EventType::None;
+        return true;
+    }
+    if (baseButton == 64) { e.type = EventType::ScrollUp; return true; }
+    if (baseButton == 65) { e.type = EventType::ScrollDown; return true; }
+
+    e.type = EventType::None;
+    return true;
+}
+
 Event Terminal::readEvent() {
     Event e;
     readEvent(e, -1); // -1: bloquea indefinidamente
@@ -331,6 +417,11 @@ bool Terminal::readEvent(Event& e, int timeoutMs) {
             raw.push_back(b);
             // El caracter final es cualquier cosa distinta de digitos, ';', '[' y '<' (SGR mouse: ESC[<Cb;Cx;CyM).
             if (b != '[' && b != '<' && !(b >= '0' && b <= '9') && b != ';') break;
+        }
+
+        // Secuencia de mouse SGR: "[<Cb;Cx;CyM" o "...m" (release).
+        if (contents.size() >= 3 && contents[0] == '[' && contents[1] == '<') {
+            return parseMouseSgr(contents, e);
         }
 
         // Solo el prefijo [ y O preceden a los parametros. Las demas

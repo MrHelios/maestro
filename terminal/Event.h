@@ -43,6 +43,15 @@ enum class EventType {
     // ESC suelto (no seguido de una secuencia de flecha/Home/...).
     // Tipico uso: cancelar la seleccion activa o salir de Interaccion.
     Escape,
+    // Rueda del mouse. Mueve exclusivamente el viewport (±3 lineas) sin
+    // cambiar la posicion del cursor. No reutiliza navegacion de cursor
+    // (MoveUp/Down/PageUp) y debe mantener cursor quieto. Clampeado en
+    // BOF/EOF (top en [0, maxTop]), no configurable por ahora. Valido en
+    // Navegacion/Interaccion/Seleccion (solo viewport, sin extender
+    // seleccion); en FileBrowser/BufferSelector mueve indice y en
+    // Busqueda se ignora (no rompe el modo).
+    ScrollUp,
+    ScrollDown,
 };
 
 struct Event {

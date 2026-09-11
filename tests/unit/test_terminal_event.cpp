@@ -288,3 +288,81 @@ TEST(terminal_utf8_mixed_with_plain_keys) {
         CHECK_EQ(static_cast<int>(arrow.type), static_cast<int>(EventType::MoveLeft));
     }
 }
+
+TEST(terminal_scroll_up_basic) {
+    Event e = parse("\x1b[<64;12;5M");
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::ScrollUp));
+}
+
+TEST(terminal_scroll_then_char) {
+    PipedStdin p;
+    p.feed(std::string("\x1b[<64;12;5M") + "a");
+    Terminal t;
+    Event s = t.readEvent();
+    Event c = t.readEvent();
+    CHECK_EQ(static_cast<int>(s.type), static_cast<int>(EventType::ScrollUp));
+    CHECK_EQ(static_cast<int>(c.type), static_cast<int>(EventType::InsertChar));
+    CHECK_EQ(c.text, "a");
+}
+
+TEST(terminal_char_scroll_char) {
+    PipedStdin p;
+    p.feed(std::string("a\x1b[<64;12;5M") + "b");
+    Terminal t;
+    Event a = t.readEvent();
+    Event s = t.readEvent();
+    Event b = t.readEvent();
+    CHECK_EQ(static_cast<int>(a.type), static_cast<int>(EventType::InsertChar));
+    CHECK_EQ(a.text, "a");
+    CHECK_EQ(static_cast<int>(s.type), static_cast<int>(EventType::ScrollUp));
+    CHECK_EQ(static_cast<int>(b.type), static_cast<int>(EventType::InsertChar));
+    CHECK_EQ(b.text, "b");
+}
+
+TEST(parse_mouse_sgr_direct_up) {
+    Event e;
+    Terminal::parseMouseSgr("[<64;10;5M", e);
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::ScrollUp));
+}
+
+TEST(parse_mouse_sgr_direct_down) {
+    Event e;
+    Terminal::parseMouseSgr("[<65;10;5M", e);
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::ScrollDown));
+}
+
+TEST(parse_mouse_sgr_direct_with_modifiers) {
+    Event e;
+    Terminal::parseMouseSgr("[<68;10;5M", e);
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::ScrollUp));
+}
+
+TEST(parse_mouse_sgr_direct_release_ignored) {
+    Event e;
+    Terminal::parseMouseSgr("[<64;10;5m", e);
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+}
+
+TEST(parse_mouse_sgr_direct_click_ignored) {
+    Event e;
+    Terminal::parseMouseSgr("[<0;10;5M", e);
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+}
+
+TEST(parse_mouse_sgr_direct_unknown) {
+    Event e;
+    Terminal::parseMouseSgr("[<99;10;5M", e);
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+}
+
+TEST(parse_mouse_sgr_direct_malformed) {
+    Event e;
+    Terminal::parseMouseSgr("[<64M", e);
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+}
+
+TEST(parse_mouse_sgr_direct_down_with_ctrl) {
+    Event e;
+    Terminal::parseMouseSgr("[<81;10;5M", e);
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::ScrollDown));
+}

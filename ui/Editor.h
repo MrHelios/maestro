@@ -285,6 +285,14 @@ private:
     // avanza (AvPag). Antes de los bordes el cursor se clampa para que
     // nunca quede fuera del documento ni el viewport mas alla del EOF.
     void applyPage(int dir);
+    // Scroll de rueda: desplaza exclusivamente el viewport (±3 lineas).
+    // No reutiliza navegacion de cursor (MoveUp/PageUp) y no debe llamar
+    // a logica de movimiento de cursor; cursor permanece quieto (puede
+    // quedar off-screen). Clampeado en [0, maxTop]. Activa
+    // suppressScrollToCursor_ para que renderFrame no lo deshaga via
+    // scrollToCursor en el siguiente frame.
+    void applyScroll(int delta);
+    bool suppressScrollToCursor_ = false;
 
     // Indenta / desindenta el rango seleccionado actual (todas las lineas
     // que toca). `indent` true tabula hacia adentro ('}'), `indent` false

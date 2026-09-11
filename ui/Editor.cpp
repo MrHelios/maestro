@@ -607,6 +607,13 @@ void Editor::handleBufferSelectorEvent(const Event& event) {
             if (bufferSelectorIndex_ + 1 < buffers.count())
                 bufferSelectorIndex_++;
             break;
+        case EventType::ScrollUp:
+            if (bufferSelectorIndex_ > 0) bufferSelectorIndex_--;
+            break;
+        case EventType::ScrollDown:
+            if (bufferSelectorIndex_ + 1 < buffers.count())
+                bufferSelectorIndex_++;
+            break;
         case EventType::InsertNewline: // Enter: abrir el buffer seleccionado
             activateBuffer(bufferSelectorIndex_);
             break;
@@ -653,6 +660,14 @@ void Editor::handleFileBrowserEvent(const Event& event) {
             fileBrowser.clampScroll(active().viewport.height);
             break;
         case EventType::MoveDown:
+            fileBrowser.moveDown();
+            fileBrowser.clampScroll(active().viewport.height);
+            break;
+        case EventType::ScrollUp:
+            fileBrowser.moveUp();
+            fileBrowser.clampScroll(active().viewport.height);
+            break;
+        case EventType::ScrollDown:
             fileBrowser.moveDown();
             fileBrowser.clampScroll(active().viewport.height);
             break;
@@ -749,6 +764,8 @@ void Editor::run() {
     }
 
     terminal_.enableRawMode();
+    terminal_.enterAlternateScreen();
+    terminal_.enableMouseTracking();
 
     sigset_t blockMask, origMask;
     sigemptyset(&blockMask);
@@ -852,8 +869,10 @@ void Editor::run() {
     }
 
     sigprocmask(SIG_SETMASK, &origMask, nullptr);
+    terminal_.disableMouseTracking();
+    terminal_.leaveAlternateScreen();
     terminal_.disableRawMode();
-    write(STDOUT_FILENO, "\x1b[0m\x1b[39m\x1b[49m\x1b[?25h\x1b[2J\x1b[H\x1b[0 q", 32);
+    write(STDOUT_FILENO, "\x1b[0m\x1b[39m\x1b[49m\x1b[?25h\x1b[2J\x1b[H\x1b[0 q", sizeof("\x1b[0m\x1b[39m\x1b[49m\x1b[?25h\x1b[2J\x1b[H\x1b[0 q") - 1);
 }
 
 void Editor::renderFrame() {
@@ -870,7 +889,11 @@ void Editor::renderFrame() {
                                  fileBrowser.path_, statusMessage_,
                                  b.viewport.width, b.viewport.height);
     } else {
-        b.viewport.scrollToCursor(b.cursor, b.document, textWidthFor(b.viewport, b.document.lineCount()));
+        if (suppressScrollToCursor_) {
+            suppressScrollToCursor_ = false;
+        } else {
+            b.viewport.scrollToCursor(b.cursor, b.document, textWidthFor(b.viewport, b.document.lineCount()));
+        }
         renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
                                    b.filename, b.modified, statusMessage_,
                                    state_, b.selection, searchHighlight_);
@@ -999,6 +1022,8 @@ void Editor::handleNavegacionEvent(const Event& event) {
         case EventType::MoveEnd: b.cursor.moveEnd(b.document); break;
         case EventType::PageUp: applyPage(-1); break;
         case EventType::PageDown: applyPage(+1); break;
+        case EventType::ScrollUp: applyScroll(-3); break;
+        case EventType::ScrollDown: applyScroll(3); break;
 
         // InsertNewline/Backspace/Delete y Escape: no-op (no hay edicion
         // posible y ya estamos en navegacion, no hay a donde volver).
@@ -1127,6 +1152,8 @@ void Editor::handleInteraccionEvent(const Event& event) {
         case EventType::MoveEnd: b.cursor.moveEnd(b.document); break;
         case EventType::PageUp: applyPage(-1); break;
         case EventType::PageDown: applyPage(+1); break;
+        case EventType::ScrollUp: applyScroll(-3); break;
+        case EventType::ScrollDown: applyScroll(3); break;
 
         default:
             break;
@@ -1163,6 +1190,10 @@ void Editor::handleSeleccionEvent(const Event& event) {
             beginSelection(); applyPage(-1); updateSelectionPosition(); break;
         case EventType::PageDown:
             beginSelection(); applyPage(+1); updateSelectionPosition(); break;
+        case EventType::ScrollUp:
+            applyScroll(-3); break;
+        case EventType::ScrollDown:
+            applyScroll(3); break;
 
         // 'c' copia el rango al buffer y 'x' lo copia y lo borra; ambos
         // terminan la seleccion y vuelven a navegacion. Si la seleccion
@@ -1764,6 +1795,21 @@ void Editor::applyPage(int dir) {
     // Clamp final de seguridad: el cursor nunca queda fuera de los limites.
     b.cursor.line = std::min(std::max(b.cursor.line, 0), count - 1);
     b.cursor.clampToLine(b.document);
+}
+
+void Editor::applyScroll(int delta) {
+    Buffer& b = active();
+    const int count = b.document.lineCount();
+    const int h = b.viewport.height;
+    if (h <= 0) return;
+    if (h >= count) {
+        b.viewport.top = 0;
+        return;
+    }
+    const int maxTop = count - h;
+    const int oldTop = b.viewport.top;
+    b.viewport.top = std::min(std::max(b.viewport.top + delta, 0), maxTop);
+    if (b.viewport.top != oldTop) suppressScrollToCursor_ = true;
 }
 
 void Editor::clearSelection() {

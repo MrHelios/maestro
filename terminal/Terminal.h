@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string_view>
+
 #include "terminal/Event.h"
 #include "terminal/Keymap.h"
 
@@ -24,6 +26,17 @@ public:
     // Restaura la configuracion original de la terminal.
     void disableRawMode();
 
+    // Mouse tracking SGR (?1000h/?1006h): clicks y rueda como eventos.
+    // Separado de raw input para testabilidad y para no mezclar
+    // responsabilidades (raw vs mouse vs alt-screen).
+    void enableMouseTracking();
+    void disableMouseTracking();
+
+    // Alternate screen (?1049h): buffer visual propio del editor.
+    // No se activa automaticamente con mouse; es modo UI independiente.
+    void enterAlternateScreen();
+    void leaveAlternateScreen();
+
     // Bloquea hasta leer una tecla y la traduce a un Event de alto
     // nivel (esta es la unica funcion que "sabe" de teclas). Bloquea
     // indefinidamente.
@@ -46,8 +59,16 @@ public:
     // / keymap().bindControl(...)) sin tocar la logica del Editor.
     Keymap& keymap() { return keymap_; }
 
+    static bool parseMouseSgr(std::string_view seq, Event& e);
+
+    static bool isMouseActiveForTest();
+    static bool isAltActiveForTest();
+    static bool isRawActiveForTest();
+
 private:
     bool rawModeEnabled_ = false;
+    bool mouseTrackingEnabled_ = false;
+    bool altScreenActive_ = false;
     // true si EDIT_DEBUG_KEYS esta definida: vuelca a stderr los bytes
     // crudos de las teclas no reconocidas (util para diagnosticar como
     // emite la terminal las secuencias, p.ej. Shift+Flecha).
