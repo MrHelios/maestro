@@ -329,8 +329,8 @@ bool Terminal::readEvent(Event& e, int timeoutMs) {
             }
             contents.push_back(b);
             raw.push_back(b);
-            // El caracter final es cualquier cosa distinta de digitos, ';' y ESC.
-            if (b != '[' && !(b >= '0' && b <= '9') && b != ';') break;
+            // El caracter final es cualquier cosa distinta de digitos, ';', '[' y '<' (SGR mouse: ESC[<Cb;Cx;CyM).
+            if (b != '[' && b != '<' && !(b >= '0' && b <= '9') && b != ';') break;
         }
 
         // Solo el prefijo [ y O preceden a los parametros. Las demas
