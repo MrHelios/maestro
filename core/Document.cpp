@@ -7,6 +7,7 @@
 
 #include "core/utf8.h"
 #include "filesystem/FileSystem.h"
+#include <vector>
 
 Document::Document() {
     // Un documento nunca esta "vacio del todo": siempre tiene al menos
@@ -20,11 +21,6 @@ LoadResult Document::loadFromFile(const std::string& path) {
         return *hook;
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
-        // Distinguir el archivo "nuevo" (no existe) de un error real. Solo en
-        // el primer caso se resetea el documento a uno vacio; ante permisos
-        // o E/S falla no se toca (p.ej. no aparentar que un archivo existente
-        // sin permisos es un archivo nuevo, que es exactamente lo que llevaria
-        // a sobrescribirlo desde cero).
         std::error_code ec;
         bool exists = std::filesystem::exists(path, ec);
         if (ec) return LoadResult::IoError;
@@ -39,51 +35,163 @@ LoadResult Document::loadFromFile(const std::string& path) {
         if (errno == EACCES) return LoadResult::PermissionDenied;
         return LoadResult::IoError;
     }
-
-    // Leemos todo el contenido para poder detectar si el archivo
-    // terminaba en '\n' (el modelo de lineas, via getline, no refleja
-    // esa nueva linea final y sin esto se perderia al volver a guardar).
-    // Detección de formato de newline:
-    // - CRLF si existe "\r\n" en el archivo (prioridad máxima)
-    // - CR si NO hay '\n' y SÍ hay '\r' (Mac clásico)
-    // - LF en cualquier otro caso
-    // Archivos con finales mixtos se interpretan según el formato dominante
-    // detectado (prioridad: CRLF > CR > LF). Los separadores no detectados
-    // como finales de línea pueden quedar dentro de las líneas como caracteres.
-    std::ostringstream ss;
-    ss << file.rdbuf();
-    std::string content = ss.str();
-    if (content.find("\r\n") != std::string::npos) lineEnding_ = LineEnding::CRLF;
-    else if (content.find('\n') == std::string::npos && content.find('\r') != std::string::npos)
-        lineEnding_ = LineEnding::CR;
-    else lineEnding_ = LineEnding::LF;
-    endsWithNewline_ = !content.empty() &&
-                       (lineEnding_ == LineEnding::CR ? content.back() == '\r' : content.back() == '\n');
-
-    lines_.clear();
-    if (lineEnding_ == LineEnding::CR) {
-        size_t start = 0;
-        for (size_t i = 0; i < content.size();) {
-            if (content[i] == '\r') {
-                lines_.push_back(content.substr(start, i - start));
-                ++i;
-                start = i;
-            } else {
-                ++i;
+    {
+        std::error_code ec;
+        if (std::filesystem::is_directory(path, ec)) return LoadResult::IoError;
+        if (ec) return LoadResult::IoError;
+    }
+    bool seekable = false;
+    {
+        file.seekg(0, std::ios::end);
+        if (file.good()) {
+            auto endPos = file.tellg();
+            if (endPos != static_cast<std::streampos>(-1)) {
+                seekable = true;
             }
         }
-        if (start < content.size()) lines_.push_back(content.substr(start));
+        file.clear();
+        file.seekg(0, std::ios::beg);
+        if (!file.good()) return LoadResult::IoError;
+    }
+    bool hasCRLF = false;
+    bool hasLF = false;
+    bool hasCR = false;
+    char scanLastByte = 0;
+    bool hasScanByte = false;
+    if (seekable) {
+        constexpr size_t SCAN_CHUNK = 256 * 1024;
+        std::vector<char> scanBuf(SCAN_CHUNK);
+        bool prevWasCR = false;
+        while (true) {
+            file.read(scanBuf.data(), static_cast<std::streamsize>(SCAN_CHUNK));
+            std::streamsize n = file.gcount();
+            if (n <= 0) break;
+            for (std::streamsize i = 0; i < n; ++i) {
+                char c = scanBuf[static_cast<size_t>(i)];
+                if (prevWasCR && c == '\n') hasCRLF = true;
+                if (c == '\n') hasLF = true;
+                if (c == '\r') hasCR = true;
+                prevWasCR = (c == '\r');
+            }
+            scanLastByte = scanBuf[static_cast<size_t>(n - 1)];
+            hasScanByte = true;
+            if (!file.good() && !file.eof()) return LoadResult::IoError;
+            if (file.eof()) break;
+        }
+        file.clear();
+        file.seekg(0, std::ios::beg);
+        if (!file.good()) return LoadResult::IoError;
     } else {
-        std::string line;
-        std::istringstream in(content);
-        while (std::getline(in, line)) {
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            lines_.push_back(line);
+        hasLF = true;
+    }
+    // Deteccion de terminador: CRLF si existe algun "\r\n", CR solo si hay
+    // '\r' sin ningun '\n' (legacy Mac), LF en cualquier otro caso. En
+    // archivos mixtos el parser en modo LF solo elimina '\r' cuando precede
+    // inmediatamente a '\n' (CRLF -> salto); un '\r' aislado (ej. "a\r\nb\nc\r")
+    // queda como byte literal dentro de la linea, no como delimitador.
+    // Asi se conserva round-trip binariamente seguro sin normalizar mixtos.
+    LineEnding newLineEnding;
+    if (hasCRLF) newLineEnding = LineEnding::CRLF;
+    else if (hasCR && !hasLF) newLineEnding = LineEnding::CR;
+    else newLineEnding = LineEnding::LF;
+    bool isCRMode = (newLineEnding == LineEnding::CR);
+    constexpr size_t CHUNK_SIZE = 256 * 1024;
+    std::vector<char> chunk(CHUNK_SIZE);
+    std::string currentLine;
+    std::vector<std::string> newLines;
+    bool lastStoreWasDelimiter = false;
+    bool pendingCR = false;
+    auto storeLine = [&](bool isDelimiter) {
+        newLines.push_back(std::move(currentLine));
+        currentLine.clear();
+        lastStoreWasDelimiter = isDelimiter;
+    };
+    if (isCRMode) {
+        while (true) {
+            file.read(chunk.data(), static_cast<std::streamsize>(CHUNK_SIZE));
+            std::streamsize bytesRead = file.gcount();
+            if (bytesRead <= 0) break;
+            const char* data = chunk.data();
+            size_t segmentStart = 0;
+            for (size_t i = 0; i < static_cast<size_t>(bytesRead); ++i) {
+                if (data[i] == '\r') {
+                    currentLine.append(data + segmentStart, i - segmentStart);
+                    storeLine(true);
+                    segmentStart = i + 1;
+                }
+            }
+            if (segmentStart < static_cast<size_t>(bytesRead)) {
+                currentLine.append(data + segmentStart, static_cast<size_t>(bytesRead) - segmentStart);
+            }
+            if (!file.good() && !file.eof()) return LoadResult::IoError;
+        }
+        if (!currentLine.empty() || newLines.empty()) {
+            if (!currentLine.empty()) storeLine(false);
+            else if (newLines.empty()) storeLine(false);
+        }
+    } else {
+        while (true) {
+            file.read(chunk.data(), static_cast<std::streamsize>(CHUNK_SIZE));
+            std::streamsize bytesRead = file.gcount();
+            size_t start = 0;
+            // Contrato pendingCR: el chunk anterior termino en '\r' y ese '\r'
+            // ya esta apendeado en currentLine. Aqui determinamos si era
+            // CRLF partido entre chunks ("...\r" | "\n..."): si el chunk
+            // actual empieza en '\n', ese '\r' era parte del delimitador y
+            // se hace pop_back()+storeLine(); si no, el '\r' queda como
+            // byte literal dentro de la linea (archivo mixto).
+            if (pendingCR) {
+                pendingCR = false;
+                if (bytesRead > 0 && chunk[0] == '\n') {
+                    if (!currentLine.empty() && currentLine.back() == '\r') currentLine.pop_back();
+                    storeLine(true);
+                    start = 1;
+                }
+            }
+            if (bytesRead <= 0) break;
+            const char* data = chunk.data();
+            size_t segmentStart = start;
+            bool chunkEndsWithCR = false;
+            for (size_t i = start; i < static_cast<size_t>(bytesRead); ++i) {
+                if (data[i] == '\n') {
+                    currentLine.append(data + segmentStart, i - segmentStart);
+                    if (!currentLine.empty() && currentLine.back() == '\r') currentLine.pop_back();
+                    storeLine(true);
+                    segmentStart = i + 1;
+                }
+            }
+            if (segmentStart < static_cast<size_t>(bytesRead)) {
+                currentLine.append(data + segmentStart, static_cast<size_t>(bytesRead) - segmentStart);
+                // Solo difiere CRLF partido si el chunk se lleno y no es EOF:
+                // el '\r' final queda en currentLine y pendingCR resolvera
+                // en la proxima iteracion si sigue '\n'.
+                if (!currentLine.empty() && currentLine.back() == '\r' && static_cast<size_t>(bytesRead) == CHUNK_SIZE && !file.eof()) {
+                    chunkEndsWithCR = true;
+                }
+            }
+            if (chunkEndsWithCR) pendingCR = true;
+            if (!file.good() && !file.eof()) return LoadResult::IoError;
+        }
+        if (!currentLine.empty() || newLines.empty()) {
+            if (!currentLine.empty()) {
+                if (!currentLine.empty() && currentLine.back() == '\r') currentLine.pop_back();
+                storeLine(false);
+            } else if (newLines.empty()) {
+                storeLine(false);
+            }
         }
     }
-    if (lines_.empty()) lines_.push_back("");
+    bool newEndsWithNewline = false;
+    if (seekable && hasScanByte) {
+        newEndsWithNewline = isCRMode ? (scanLastByte == '\r') : (scanLastByte == '\n');
+    } else if (!seekable) {
+        newEndsWithNewline = lastStoreWasDelimiter;
+    }
+    if (newLines.empty()) newLines.push_back("");
+    lines_.swap(newLines);
+    lineEnding_ = newLineEnding;
+    endsWithNewline_ = newEndsWithNewline;
     normalizeEndsWithNewline();
-
     bumpVersion();
     return LoadResult::Success;
 }
