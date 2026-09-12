@@ -30,6 +30,7 @@ LoadResult Document::loadFromFile(const std::string& path) {
             endsWithNewline_ = false;
             lineEnding_ = LineEnding::LF;
             bumpVersion();
+            notifyTouched(0, 0);
             return LoadResult::NotFound;
         }
         if (errno == EACCES) return LoadResult::PermissionDenied;
@@ -193,6 +194,7 @@ LoadResult Document::loadFromFile(const std::string& path) {
     endsWithNewline_ = newEndsWithNewline;
     normalizeEndsWithNewline();
     bumpVersion();
+    notifyTouched(0, lineCount() - 1);
     return LoadResult::Success;
 }
 
@@ -291,6 +293,7 @@ void Document::restore(const std::vector<std::string>& lines) {
     }
     normalizeEndsWithNewline();
     bumpVersion();
+    notifyTouched(0, lineCount() - 1);
 }
 
 void Document::insertChar(int line, int col, char c) {

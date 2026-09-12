@@ -2,6 +2,7 @@
 #include <string>
 
 #include "test_framework.h"
+#include "core/Cursor.h"
 #include "core/utf8.h"
 
 #define U_E "\xc3\xa9"
@@ -487,4 +488,117 @@ TEST(isValid_rejects_overlong_and_surrogates) {
     CHECK(!utf8::isValid("\xF4\x90\x80\x80"));
     CHECK(!utf8::isValid("\xC3"));
     CHECK(!utf8::isValid("\x80"));
+}
+
+TEST(columnCache_invalidation_explicit_same_storage) {
+    std::string line = "aaaaaaaaaa";
+    line.reserve(32);
+    Cursor cur;
+    cur.col = 10;
+    CHECK_EQ(cur.visualColumn(line), 10);
+    const char* oldData = line.data();
+    int oldSize = (int)line.size();
+    line[5] = char(0xC3);
+    line[6] = char(0xA9);
+    CHECK_EQ(line.data(), oldData);
+    CHECK_EQ((int)line.size(), oldSize);
+    CHECK_EQ(utf8::columnOf(line, 10), 9);
+    CHECK_EQ(cur.visualColumn(line), 10);
+    cur.invalidateColumnCache();
+    CHECK_EQ(cur.visualColumn(line), 9);
+    CHECK_EQ(cur.visualColumn(line), utf8::columnOf(line, 10));
+}
+
+TEST(columnCache_contract_caller_must_invalidate) {
+    std::string line = "abcdefgh";
+    Cursor cur;
+    cur.col = 8;
+    CHECK_EQ(cur.visualColumn(line), 8);
+    std::string mutated = "abcd";
+    mutated += "\xC3\xA9";
+    mutated += "fg";
+    line.assign(mutated);
+    CHECK_EQ((int)line.size(), 8);
+    CHECK_EQ(cur.visualColumn(line), 8);
+    cur.invalidateColumnCache();
+    CHECK_EQ(cur.visualColumn(line), 7);
+}
+
+TEST(columnCache_reallocation_no_false_hit) {
+    std::string line = "abcdefgh";
+    line.reserve(16);
+    Cursor cur;
+    cur.col = 8;
+    CHECK_EQ(cur.visualColumn(line), 8);
+    const char* oldData = line.data();
+    int oldSize = (int)line.size();
+    line.append(100, 'x');
+    CHECK(line.data() != oldData);
+    CHECK((int)line.size() != oldSize);
+    CHECK_EQ(cur.visualColumn(line), utf8::columnOf(line, 8));
+    cur.col = (int)line.size();
+    CHECK_EQ(cur.visualColumn(line), utf8::columnOf(line, (int)line.size()));
+}
+
+TEST(columnCache_correctness_exhaustive) {
+    auto makeMixed = [](int cols) {
+        std::string s;
+        s.reserve(cols * 3);
+        for (int i = 0; i < cols; ++i) {
+            if (i % 4 == 0) s += "a";
+            else if (i % 4 == 1) s += "\xC3\xA9";
+            else if (i % 4 == 2) s += "\xE2\x80\x94";
+            else s += "\xF0\x9F\x98\x80";
+        }
+        return s;
+    };
+    auto verify = [&](const std::string& line, int startByte) {
+        startByte = std::min(startByte, (int)line.size());
+        startByte = utf8::alignStart(line, startByte);
+        std::vector<int> steps;
+        int b = startByte;
+        for (int k = 0; k < 100 && b > 0; ++k) {
+            int prev = utf8::cellStartBefore(line, b);
+            if (prev == b) break;
+            steps.push_back(prev);
+            b = prev;
+        }
+        if (steps.empty()) return;
+        Cursor cur;
+        cur.col = startByte;
+        CHECK_EQ(cur.visualColumn(line), utf8::columnOf(line, startByte));
+        for (int v : steps) {
+            cur.col = v;
+            CHECK_EQ(cur.visualColumn(line), utf8::columnOf(line, v));
+        }
+        std::vector<int> jumps;
+        jumps.push_back(startByte);
+        if (!steps.empty()) { jumps.push_back(steps[0]); jumps.push_back(steps.back()); }
+        jumps.push_back((int)line.size() / 2);
+        jumps.push_back(0);
+        jumps.push_back(80);
+        jumps.push_back(1000);
+        jumps.push_back((int)line.size());
+        jumps.push_back((int)line.size() - 1);
+        jumps.push_back(1);
+        jumps.push_back(50000);
+        if ((int)line.size() > 10) { jumps.push_back(10); jumps.push_back((int)line.size() - 10); }
+        for (int iter = 0; iter < 2; ++iter) {
+            jumps.push_back(startByte);
+            for (int v : steps) jumps.push_back(v);
+            jumps.push_back((int)line.size() / 2);
+            for (int k = 0; k < 5 && (int)steps.size() > k; ++k) jumps.push_back(steps[k]);
+            jumps.push_back(0); jumps.push_back(80); jumps.push_back((int)line.size());
+        }
+        for (int raw : jumps) {
+            int v = utf8::alignStart(line, std::min(std::max(raw, 0), (int)line.size()));
+            cur.col = v;
+            CHECK_EQ(cur.visualColumn(line), utf8::columnOf(line, v));
+        }
+    };
+    std::string ascii100k(100000, 'a');
+    std::string utf8_100k = makeMixed(40000);
+    verify(ascii100k, 50000);
+    verify(utf8_100k, 50000);
+    verify(utf8_100k, (int)utf8_100k.size());
 }

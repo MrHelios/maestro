@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <algorithm>
@@ -88,12 +89,40 @@ inline int cellLen(std::string_view line, int pos, int n) {
     return len;
 }
 
+// Encuentra el byte de inicio de la celda que contiene pos.
+// Si pos==0 devuelve 0; si pos apunta dentro de una celda multibyte
+// devuelve el lead de esa celda; si es continuación huérfana la trata
+// como celda propia (modelo byte-safe).
+inline int cellStartBefore(std::string_view line, int pos) {
+    if (pos <= 0) return 0;
+    int start = pos - 1;
+    int i = start;
+    while (i > 0 && (static_cast<unsigned char>(line[i]) & 0xC0) == 0x80) --i;
+    if ((static_cast<unsigned char>(line[i]) & 0xC0) == 0x80) {
+        return i;
+    }
+    unsigned char lead = static_cast<unsigned char>(line[i]);
+    int expect = 0;
+    if ((lead & 0xE0) == 0xC0) expect = 1;
+    else if ((lead & 0xF0) == 0xE0) expect = 2;
+    else if ((lead & 0xF8) == 0xF0) expect = 3;
+    int conts = start - i;
+    if (conts > expect) return start;
+    return i;
+}
+
 inline int columnOf(std::string_view line, int byteCol) {
     int n = static_cast<int>(line.size());
     int limit = byteCol < n ? byteCol : n;
+    if (limit <= 0) return 0;
     int col = 0;
     int i = 0;
     while (i < limit) {
+        if (i + 8 <= limit) {
+            uint64_t v;
+            std::memcpy(&v, line.data() + i, 8);
+            if ((v & 0x8080808080808080ULL) == 0) { col += 8; i += 8; continue; }
+        }
         ++col;
         i += cellLen(line, i, n);
     }
@@ -134,28 +163,6 @@ inline std::string_view range(std::string_view line, int fromCol, int toCol) {
     }
     if (col >= toCol) return line.substr(startByte, i - startByte);
     return line.substr(startByte); // hasta el final de la linea
-}
-
-// Encuentra el byte de inicio de la celda que contiene `pos`.
-// Si `pos` ya es inicio de celda, lo devuelve; si es byte de continuacion,
-// retrocede hasta el lead valido mas cercano (o inicio de buffer).
-// Verifica que el numero de continuaciones no exceda lo que el lead espera.
-inline int cellStartBefore(std::string_view line, int pos) {
-    if (pos <= 0) return 0;
-    int start = pos - 1;
-    int i = start;
-    while (i > 0 && (static_cast<unsigned char>(line[i]) & 0xC0) == 0x80) --i;
-    if ((static_cast<unsigned char>(line[i]) & 0xC0) == 0x80) {
-        return i;
-    }
-    unsigned char lead = static_cast<unsigned char>(line[i]);
-    int expect = 0;
-    if ((lead & 0xE0) == 0xC0) expect = 1;
-    else if ((lead & 0xF0) == 0xE0) expect = 2;
-    else if ((lead & 0xF8) == 0xF0) expect = 3;
-    int conts = start - i;
-    if (conts > expect) return start;
-    return i;
 }
 
 // Normaliza `col` al inicio de la celda que contiene.

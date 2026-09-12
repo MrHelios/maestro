@@ -6,7 +6,7 @@
 #include "core/utf8.h"
 
 void Buffer::rebindCallback() {
-    document.setTouchedCallback([this](int a,int b){ recordWatch(a,b); });
+    document.setTouchedCallback([this](int a,int b){ recordWatch(a,b); cursor.invalidateColumnCache(); });
 }
 
 Buffer::Buffer() {

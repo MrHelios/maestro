@@ -2,7 +2,6 @@
 
 #include "core/Cursor.h"
 #include "core/Document.h"
-#include "core/utf8.h"
 
 class Viewport {
 public:
@@ -41,10 +40,7 @@ public:
     }
 
     void scrollToCursor(const Cursor& cursor, const Document& doc, int textWidth) {
-        int absoluteCol = 0;
-        if (cursor.line >= 0 && cursor.line < doc.lineCount()) {
-            absoluteCol = utf8::columnOf(doc.lineAt(cursor.line), cursor.col);
-        }
+        int absoluteCol = cursor.visualColumn(doc);
         scrollToCursor(cursor, absoluteCol, textWidth);
     }
 };

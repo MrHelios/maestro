@@ -265,7 +265,7 @@ void Renderer::editorCursorPos(const Document& doc,
                                const EditorGeometry& g,
                                int& outRow, int& outCol) const {
     outRow = cursor.line - viewport.top + 1;
-    int absoluteCol = utf8::columnOf(doc.lineAt(cursor.line), cursor.col);
+    int absoluteCol = cursor.visualColumn(doc);
     int visibleCol = absoluteCol - viewport.left;
     outCol = g.gutterW + visibleCol + 1 + g.layout.content.col;
 }
