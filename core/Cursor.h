@@ -25,7 +25,8 @@ public:
     void clampToLine(const Document& doc);
 
     int visualColumn(std::string_view line) const {
-        return columnOfCached(line, col, columnCache_);
+        int byteCol = utf8::alignStart(line, col);
+        return columnOfCached(line, byteCol, columnCache_);
     }
     int visualColumn(const Document& doc) const {
         if (line < 0 || line >= doc.lineCount()) return 0;
@@ -55,11 +56,6 @@ private:
     static inline int columnOfCached(std::string_view line, int byteCol, ColumnCache& cache) {
         int n = static_cast<int>(line.size());
         int limit = byteCol < n ? byteCol : n;
-        // Precondición: el byte offset efectivo (clamped a [0, size]) está
-        // alineado al inicio de una celda (isCellStart || 0 || size). Cursor
-        // siempre mantiene posiciones alineadas; columnOf() acepta offsets
-        // arbitrarios pero el camino inverso cellStartBefore(--col) solo es
-        // correcto para offsets alineados.
         assert(limit == 0 || limit == n || utf8::isCellStart(line, limit));
         if (limit <= 0) { cache.data = line.data(); cache.size = n; cache.byteCol = 0; cache.col = 0; return 0; }
         if (cache.data == line.data() && cache.size == n && cache.byteCol >= 0 && cache.byteCol <= n) {
@@ -69,7 +65,11 @@ private:
                 if (distance < limit) {
                     int col = cache.col;
                     int i = cache.byteCol;
-                    while (i < limit) { ++col; i += utf8::cellLen(line, i, n); }
+                    while (i < limit) {
+                        if (line[i] == '\t') col = ((col / utf8::TAB_WIDTH) + 1) * utf8::TAB_WIDTH;
+                        else ++col;
+                        i += utf8::cellLen(line, i, n);
+                    }
                     cache.byteCol = limit; cache.col = col;
                     return col;
                 }
@@ -77,7 +77,15 @@ private:
             if (limit < cache.byteCol && cache.byteCol - limit < limit) {
                 int col = cache.col;
                 int i = cache.byteCol;
-                while (i > limit) { i = utf8::cellStartBefore(line, i); --col; }
+                while (i > limit) {
+                    int prev = utf8::cellStartBefore(line, i);
+                    int w = 1;
+                    int ccol = utf8::columnOf(line, prev);
+                    if (line[prev] == '\t') w = ((ccol / utf8::TAB_WIDTH) + 1) * utf8::TAB_WIDTH - ccol;
+                    else w = 1;
+                    col -= w;
+                    i = prev;
+                }
                 cache.byteCol = limit; cache.col = col;
                 return col;
             }

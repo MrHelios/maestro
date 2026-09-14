@@ -552,8 +552,26 @@ TEST(columnCache_correctness_exhaustive) {
         }
         return s;
     };
+    auto buildExpected = [](const std::string& line) {
+        std::vector<int> expected(line.size() + 1);
+        int col = 0;
+        int i = 0;
+        int n = static_cast<int>(line.size());
+        while (i < n) {
+            expected[i] = col;
+            if (line[i] == '\t')
+                col = ((col / utf8::TAB_WIDTH) + 1) * utf8::TAB_WIDTH;
+            else
+                ++col;
+            i += utf8::cellLen(line, i, n);
+        }
+        expected[n] = col;
+        return expected;
+    };
     auto verify = [&](const std::string& line, int startByte) {
-        startByte = std::min(startByte, (int)line.size());
+        const int n = static_cast<int>(line.size());
+        const auto expected = buildExpected(line);
+        startByte = std::min(startByte, n);
         startByte = utf8::alignStart(line, startByte);
         std::vector<int> steps;
         int b = startByte;
@@ -566,39 +584,48 @@ TEST(columnCache_correctness_exhaustive) {
         if (steps.empty()) return;
         Cursor cur;
         cur.col = startByte;
-        CHECK_EQ(cur.visualColumn(line), utf8::columnOf(line, startByte));
+        CHECK_EQ(cur.visualColumn(line), expected[startByte]);
         for (int v : steps) {
             cur.col = v;
-            CHECK_EQ(cur.visualColumn(line), utf8::columnOf(line, v));
+            CHECK_EQ(cur.visualColumn(line), expected[v]);
         }
         std::vector<int> jumps;
+        jumps.reserve(32 + steps.size() * 2);
         jumps.push_back(startByte);
-        if (!steps.empty()) { jumps.push_back(steps[0]); jumps.push_back(steps.back()); }
-        jumps.push_back((int)line.size() / 2);
+        if (!steps.empty()) {
+            jumps.push_back(steps.front());
+            jumps.push_back(steps.back());
+        }
+        jumps.push_back(n / 2);
         jumps.push_back(0);
         jumps.push_back(80);
         jumps.push_back(1000);
-        jumps.push_back((int)line.size());
-        jumps.push_back((int)line.size() - 1);
+        jumps.push_back(n);
+        jumps.push_back(n - 1);
         jumps.push_back(1);
         jumps.push_back(50000);
-        if ((int)line.size() > 10) { jumps.push_back(10); jumps.push_back((int)line.size() - 10); }
+        if (n > 10) {
+            jumps.push_back(10);
+            jumps.push_back(n - 10);
+        }
         for (int iter = 0; iter < 2; ++iter) {
             jumps.push_back(startByte);
             for (int v : steps) jumps.push_back(v);
-            jumps.push_back((int)line.size() / 2);
-            for (int k = 0; k < 5 && (int)steps.size() > k; ++k) jumps.push_back(steps[k]);
-            jumps.push_back(0); jumps.push_back(80); jumps.push_back((int)line.size());
+            jumps.push_back(n / 2);
+            for (int k = 0; k < 5 && k < static_cast<int>(steps.size()); ++k) jumps.push_back(steps[k]);
+            jumps.push_back(0);
+            jumps.push_back(80);
+            jumps.push_back(n);
         }
         for (int raw : jumps) {
-            int v = utf8::alignStart(line, std::min(std::max(raw, 0), (int)line.size()));
+            int v = utf8::alignStart(line, std::min(std::max(raw, 0), n));
             cur.col = v;
-            CHECK_EQ(cur.visualColumn(line), utf8::columnOf(line, v));
+            CHECK_EQ(cur.visualColumn(line), expected[v]);
         }
     };
     std::string ascii100k(100000, 'a');
     std::string utf8_100k = makeMixed(40000);
     verify(ascii100k, 50000);
     verify(utf8_100k, 50000);
-    verify(utf8_100k, (int)utf8_100k.size());
+    verify(utf8_100k, static_cast<int>(utf8_100k.size()));
 }

@@ -111,6 +111,9 @@ inline int cellStartBefore(std::string_view line, int pos) {
     return i;
 }
 
+inline constexpr int TAB_WIDTH = 4;
+inline constexpr int kTabWidth = TAB_WIDTH;
+
 inline int columnOf(std::string_view line, int byteCol) {
     int n = static_cast<int>(line.size());
     int limit = byteCol < n ? byteCol : n;
@@ -121,12 +124,37 @@ inline int columnOf(std::string_view line, int byteCol) {
         if (i + 8 <= limit) {
             uint64_t v;
             std::memcpy(&v, line.data() + i, 8);
-            if ((v & 0x8080808080808080ULL) == 0) { col += 8; i += 8; continue; }
+            if ((v & 0x8080808080808080ULL) == 0) {
+                bool hasTab = false;
+                for (int k = 0; k < 8; ++k) if (line[i + k] == '\t') { hasTab = true; break; }
+                if (!hasTab) { col += 8; i += 8; continue; }
+            }
         }
-        ++col;
+        if (line[i] == '\t') {
+            col = ((col / TAB_WIDTH) + 1) * TAB_WIDTH;
+        } else {
+            ++col;
+        }
         i += cellLen(line, i, n);
     }
     return col;
+}
+
+inline int byteForColumn(std::string_view line, int targetCol) {
+    int n = static_cast<int>(line.size());
+    if (targetCol <= 0) return 0;
+    int col = 0;
+    int i = 0;
+    while (i < n) {
+        int w = 1;
+        if (line[i] == '\t') w = ((col / TAB_WIDTH) + 1) * TAB_WIDTH - col;
+        if (col + w > targetCol) return i;
+        col += w;
+        int next = i + cellLen(line, i, n);
+        if (col >= targetCol) return next;
+        i = next;
+    }
+    return n;
 }
 
 // Trunca `line` a lo sumo `maxCols` COLUMNAS VISUALES, sin cortar una
@@ -135,12 +163,14 @@ inline int columnOf(std::string_view line, int byteCol) {
 inline std::string truncate(std::string_view line, int maxCols) {
     int col = 0;
     size_t i = 0;
+    int n = static_cast<int>(line.size());
     while (i < line.size()) {
-        if (isCellStart(line, static_cast<int>(i))) {
-            if (col >= maxCols) break;
-            col++;
-        }
-        i++;
+        if (!isCellStart(line, static_cast<int>(i))) { ++i; continue; }
+        int w = 1;
+        if (line[i] == '\t') w = ((col / TAB_WIDTH) + 1) * TAB_WIDTH - col;
+        if (col + w > maxCols) break;
+        col += w;
+        i += cellLen(line, static_cast<int>(i), n);
     }
     return std::string(line.substr(0, i));
 }
@@ -148,21 +178,49 @@ inline std::string truncate(std::string_view line, int maxCols) {
 // Devuelve los bytes de `line` cuyas COLUMNAS VISUALES caen dentro de
 // [fromCol, toCol). No corta celdas por la mitad. Si el rango llega al
 // final de la linea devuelve hasta el ultimo byte.
+inline std::string expandTabs(std::string_view line) {
+    std::string out;
+    out.reserve(line.size() + 8);
+    int col = 0;
+    int n = static_cast<int>(line.size());
+    int i = 0;
+    while (i < n) {
+        if (line[i] == '\t') {
+            int w = ((col / TAB_WIDTH) + 1) * TAB_WIDTH - col;
+            out.append(w, ' ');
+            col += w;
+            i += 1;
+        } else {
+            int len = cellLen(line, i, n);
+            out.append(line.data() + i, len);
+            col += 1;
+            i += len;
+        }
+    }
+    return out;
+}
+
 inline std::string_view range(std::string_view line, int fromCol, int toCol) {
     if (toCol <= fromCol) return "";
+    int n = static_cast<int>(line.size());
     int col = 0;
     size_t startByte = line.size();
-    size_t i = 0;
-    while (i < line.size()) {
-        if (isCellStart(line, static_cast<int>(i))) {
-            if (col == fromCol) startByte = i;
-            if (col >= toCol) break;
-            col++;
-        }
-        i++;
+    size_t endByte = line.size();
+    int i = 0;
+    while (i < n) {
+        if (col >= fromCol && startByte == line.size()) startByte = i;
+        if (col >= toCol) { endByte = i; break; }
+        int w = 1;
+        if (line[i] == '\t') w = ((col / TAB_WIDTH) + 1) * TAB_WIDTH - col;
+        col += w;
+        i += cellLen(line, i, n);
+        if (col >= toCol && endByte == line.size()) { endByte = i; break; }
     }
-    if (col >= toCol) return line.substr(startByte, i - startByte);
-    return line.substr(startByte); // hasta el final de la linea
+    if (startByte == line.size()) return "";
+    if (endByte == line.size() && col < toCol) endByte = line.size();
+    if (col < fromCol) return "";
+    if (startByte > endByte) return "";
+    return line.substr(startByte, endByte - startByte);
 }
 
 // Normaliza `col` al inicio de la celda que contiene.

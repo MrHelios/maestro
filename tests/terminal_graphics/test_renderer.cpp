@@ -1079,10 +1079,10 @@ TEST(renderer_selection_utf8_cafe_accent) {
 }
 
 TEST(renderer_selection_utf8_cafe_accent_cursor_break_pos) {
-    // Cursor en el byte INTERMEDIO del é (byte 4) no debe "caer dentro"
-    // de la inversion: el render clampa a la columna visual del lead.
+    // Cursor en el byte de continuación del é. El renderer no debe
+    // dibujarlo dentro de la celda UTF-8: lo clampa al final de la celda.
     std::string out = selCurFrame("caf\xc3\xa9", 4, std::nullopt);
-    CHECK_EQ(cursorVisibleCol(out), 5);   // byte 4 == byte 5 visualmente
+    CHECK_EQ(cursorVisibleCol(out), 4);
 }
 
 TEST(renderer_selection_utf8_mixed_em_dash_emoji) {
