@@ -79,11 +79,12 @@ private:
                 int i = cache.byteCol;
                 while (i > limit) {
                     int prev = utf8::cellStartBefore(line, i);
-                    int w = 1;
-                    int ccol = utf8::columnOf(line, prev);
-                    if (line[prev] == '\t') w = ((ccol / utf8::TAB_WIDTH) + 1) * utf8::TAB_WIDTH - ccol;
-                    else w = 1;
-                    col -= w;
+                    if (line[prev] == '\t') {
+                        col = utf8::columnOf(line, limit);
+                        i = limit;
+                        break;
+                    }
+                    --col;
                     i = prev;
                 }
                 cache.byteCol = limit; cache.col = col;
