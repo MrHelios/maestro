@@ -2,11 +2,14 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
+#include <fnmatch.h>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
 #include <set>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -57,9 +60,57 @@ struct Registrar {
     }
 };
 
-inline int runAll() {
-    const int total = static_cast<int>(registry().size());
+inline std::vector<std::string> split(const std::string& s, char delim) {
+    std::vector<std::string> out;
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, delim)) out.push_back(item);
+    return out;
+}
+
+inline bool matchesFilter(const std::string& name, const std::string& filter) {
+    if (filter.empty()) return true;
+    std::string posPart = filter;
+    std::string negPart;
+    auto dash = filter.find('-');
+    if (dash != std::string::npos) {
+        posPart = filter.substr(0, dash);
+        negPart = filter.substr(dash + 1);
+    }
+    if (posPart.empty()) posPart = "*";
+    bool posMatch = false;
+    for (auto& pat : split(posPart, ':')) {
+        if (pat.empty()) continue;
+        if (fnmatch(pat.c_str(), name.c_str(), 0) == 0) { posMatch = true; break; }
+    }
+    if (!posMatch) return false;
+    if (!negPart.empty()) {
+        for (auto& pat : split(negPart, ':')) {
+            if (pat.empty()) continue;
+            if (fnmatch(pat.c_str(), name.c_str(), 0) == 0) return false;
+        }
+    }
+    return true;
+}
+
+inline int runAll(const std::string& filter = {}) {
+    std::string eff = filter;
+    if (eff.empty()) {
+        if (const char* e = std::getenv("FILTER")) eff = e;
+    }
+    int total = 0;
+    int run = 0;
     for (const Test& t : registry()) {
+        if (!matchesFilter(t.name, eff)) continue;
+        run++;
+    }
+    if (run == 0 && !eff.empty()) {
+        std::cout << "No tests match filter \"" << eff << "\" (" << registry().size() << " total)\n";
+        return 0;
+    }
+    for (const Test& t : registry()) {
+        if (!matchesFilter(t.name, eff)) continue;
+        total++;
         std::set<std::string> beforeFiles;
         try {
             for (auto& e : std::filesystem::directory_iterator(".")) beforeFiles.insert(e.path().string());

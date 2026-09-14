@@ -77,6 +77,11 @@ SAN_TEST_BIN := build-san/edit_tests
 SAN_TEST_BIN_ALL := build-san/edit_tests_all
 SAN_TEST_BIN_PERF := build-san/edit_tests_performance
 SAN_TEST_BIN_TERM := build-san/edit_tests_terminal
+TEST_ONE_BIN_DEFAULT = $(if $(SAN),$(SAN_TEST_BIN),$(TEST_BIN))
+TEST_ONE_BIN_ALL = $(if $(SAN),$(SAN_TEST_BIN_ALL),$(TEST_BIN_ALL))
+TEST_ONE_BIN_TERM = $(if $(SAN),$(SAN_TEST_BIN_TERM),$(TEST_BIN_TERM))
+TEST_ONE_BIN_PERF = $(if $(SAN),$(SAN_TEST_BIN_PERF),$(TEST_BIN_PERF))
+TEST_ONE_BIN = $(if $(filter all,$(SUITE)),$(TEST_ONE_BIN_ALL),$(if $(filter term terminal,$(SUITE)),$(TEST_ONE_BIN_TERM),$(if $(filter perf performance,$(SUITE)),$(TEST_ONE_BIN_PERF),$(TEST_ONE_BIN_ALL))))
 SAN_OBJ := $(addprefix build-san/,$(notdir $(SRC:.cpp=.o)))
 SAN_TEST_OBJ := $(addprefix build-san/,$(notdir $(TEST_SRC:.cpp=.o)))
 SAN_TEST_OBJ_ALL := $(addprefix build-san/,$(notdir $(TEST_SRC_ALL:.cpp=.o)))
@@ -192,20 +197,30 @@ $(TEST_BIN_PERF): $(TEST_OBJ_PERF) $(OBJ_NO_MAIN) | build
 $(TEST_BIN_TERM): $(TEST_OBJ_TERM) $(OBJ_NO_MAIN) | build
 	$(CXX) $(TEST_OBJ_TERM) $(OBJ_NO_MAIN) -o $(TEST_BIN_TERM) -lX11 -pthread
 
-edit-san: $(SAN_OBJ) | build-san
+$(SAN_BIN): $(SAN_OBJ) | build-san
 	$(CXX) $(SANFLAGS) $(SAN_OBJ) -o $(SAN_BIN) -lX11 -pthread
 
-test-san: $(SAN_TEST_OBJ) $(SAN_OBJ_NO_MAIN) | build-san
+$(SAN_TEST_BIN): $(SAN_TEST_OBJ) $(SAN_OBJ_NO_MAIN) | build-san
 	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN) -lX11 -pthread
 
-test-san-all: $(SAN_TEST_OBJ_ALL) $(SAN_OBJ_NO_MAIN) | build-san
+$(SAN_TEST_BIN_ALL): $(SAN_TEST_OBJ_ALL) $(SAN_OBJ_NO_MAIN) | build-san
 	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ_ALL) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN_ALL) -lX11 -pthread
 
-test-san-perf: $(SAN_TEST_OBJ_PERF) $(SAN_OBJ_NO_MAIN) | build-san
+$(SAN_TEST_BIN_PERF): $(SAN_TEST_OBJ_PERF) $(SAN_OBJ_NO_MAIN) | build-san
 	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ_PERF) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN_PERF) -lX11 -pthread
 
-test-san-term: $(SAN_TEST_OBJ_TERM) $(SAN_OBJ_NO_MAIN) | build-san
+$(SAN_TEST_BIN_TERM): $(SAN_TEST_OBJ_TERM) $(SAN_OBJ_NO_MAIN) | build-san
 	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ_TERM) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN_TERM) -lX11 -pthread
+
+edit-san: $(SAN_BIN)
+
+test-san: $(SAN_TEST_BIN)
+
+test-san-all: $(SAN_TEST_BIN_ALL)
+
+test-san-perf: $(SAN_TEST_BIN_PERF)
+
+test-san-term: $(SAN_TEST_BIN_TERM)
 
 sanitize: edit-san test-san
 
@@ -236,6 +251,46 @@ test-sanitize-performance: test-san-perf
 test-sanitize-terminal-graphics: test-san-term
 	./$(SAN_TEST_BIN_TERM)
 
+test-one-one-bin = $(if $(SAN),build-san/edit_tests_one,build/edit_tests_one)
+test-one-core-objs = $(if $(SAN),$(SAN_OBJ_NO_MAIN),$(OBJ_NO_MAIN))
+test-one-build-dir = $(if $(SAN),build-san,build)
+test-one-flags = $(if $(SAN),$(CXXFLAGS) $(SANFLAGS),$(CXXFLAGS))
+
+test-one: $(test-one-core-objs) | $(test-one-build-dir)
+	@if [ -z "$(FILTER)" ]; then \
+		echo "Error: Debes especificar FILTER. Ejemplo: make test-one FILTER='renderer_no_selection'"; \
+		echo "  FILTER usa patron gtest ( * : - ). Ej: '*renderer*', 'renderer_*:-*utf8*'"; \
+		echo "  Opcional: SAN=1 para sanitizers"; \
+		exit 1; \
+	fi
+	@set -e; \
+	CORE="$$FILTER"; \
+	KEY=$$(echo "$(FILTER)" | sed -E 's/[^a-zA-Z0-9_]+/ /g' | awk '{print $$1}'); \
+	if [ -z "$$KEY" ]; then KEY="*"; fi; \
+	FILES=""; \
+	if [ "$$KEY" != "*" ]; then \
+		FILES=$$(grep -rl "TEST[[:space:]]*($$KEY" tests --include="*.cpp" 2>/dev/null | tr '\n' ' '); \
+		if [ -z "$$FILES" ]; then FILES=$$(grep -rl "$$KEY" tests --include="*.cpp" 2>/dev/null | tr '\n' ' '); fi; \
+		if [ -z "$$FILES" ]; then FILES=$$(find tests -type f -name "*$$KEY*.cpp" 2>/dev/null | tr '\n' ' '); fi; \
+	fi; \
+	if [ -z "$$FILES" ]; then \
+		echo "No se detecto archivo para '$$KEY', compilando suite completa..."; \
+		$(MAKE) --no-print-directory $(TEST_ONE_BIN) SAN="$(SAN)" SUITE="$(SUITE)"; \
+		./$(TEST_ONE_BIN) --gtest_filter="$(FILTER)"; \
+		exit 0; \
+	fi; \
+	echo "Compilando solo: $$FILES"; \
+	OBJS=""; \
+	for f in $$FILES tests/test_main.cpp; do \
+		o="$(test-one-build-dir)/$$(basename $${f%.cpp}.o)"; \
+		echo "  CC $$f -> $$o"; \
+		$(CXX) $(test-one-flags) $(TEST_INC) -c "$$f" -o "$$o"; \
+		OBJS="$$OBJS $$o"; \
+	done; \
+	echo "  LINK $(test-one-one-bin)"; \
+	$(CXX) $(if $(SAN),$(SANFLAGS),) $$OBJS $(test-one-core-objs) -o $(test-one-one-bin) -lX11 -pthread; \
+	./$(test-one-one-bin) --gtest_filter="$(FILTER)"
+
 INSTALL_DIR := $(HOME)/.local/bin
 INSTALL_BIN := $(INSTALL_DIR)/maestro
 
@@ -255,4 +310,4 @@ clean:
 
 -include $(OBJ:.o=.d) $(TEST_OBJ:.o=.d) $(TEST_OBJ_ALL:.o=.d) $(TEST_OBJ_PERF:.o=.d) $(TEST_OBJ_TERM:.o=.d) $(SAN_OBJ:.o=.d) $(SAN_TEST_OBJ:.o=.d) $(SAN_TEST_OBJ_ALL:.o=.d) $(SAN_TEST_OBJ_PERF:.o=.d) $(SAN_TEST_OBJ_TERM:.o=.d)
 
-.PHONY: all test test-all test-performance test-terminal-graphics sanitize test-sanitize test-sanitize-all test-sanitize-performance test-sanitize-terminal-graphics clean edit-san test-san test-san-all test-san-perf test-san-term install uninstall
+.PHONY: all test test-all test-performance test-terminal-graphics sanitize test-sanitize test-sanitize-all test-sanitize-performance test-sanitize-terminal-graphics clean edit-san test-san test-san-all test-san-perf test-san-term install uninstall test-one
