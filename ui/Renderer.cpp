@@ -349,8 +349,8 @@ void Renderer::renderEditorRow(std::string& out,
             out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
             int absoluteVisStart = viewport.left;
             int absoluteVisEnd = absoluteVisStart + textWidth;
-            std::string expanded = utf8::expandTabs(line);
-            std::string_view visible = utf8::range(expanded, absoluteVisStart, absoluteVisEnd);
+            std::string_view visibleRaw = utf8::range(line, absoluteVisStart, absoluteVisEnd);
+            std::string visible = utf8::expandTabs(visibleRaw);
             renderPlainLine(out, theme_, visible, textWidth, isCurrentLine);
             return;
         }
@@ -406,8 +406,8 @@ void Renderer::renderEditorRow(std::string& out,
 
         int absoluteVisStart = viewport.left;
         int absoluteVisEnd = absoluteVisStart + textWidth;
-        std::string expanded = utf8::expandTabs(line);
-        std::string_view visible = utf8::range(expanded, absoluteVisStart, absoluteVisEnd);
+        std::string_view visibleRaw = utf8::range(line, absoluteVisStart, absoluteVisEnd);
+        std::string visible = utf8::expandTabs(visibleRaw);
 
         if (mergedCount == 0) {
             renderPlainLine(out, theme_, visible, textWidth, isCurrentLine);

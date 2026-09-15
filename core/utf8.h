@@ -125,8 +125,9 @@ inline int columnOf(std::string_view line, int byteCol) {
             uint64_t v;
             std::memcpy(&v, line.data() + i, 8);
             if ((v & 0x8080808080808080ULL) == 0) {
-                bool hasTab = false;
-                for (int k = 0; k < 8; ++k) if (line[i + k] == '\t') { hasTab = true; break; }
+                constexpr uint64_t kTab = 0x0909090909090909ULL;
+                uint64_t x = v ^ kTab;
+                bool hasTab = ((x - 0x0101010101010101ULL) & ~x & 0x8080808080808080ULL) != 0;
                 if (!hasTab) { col += 8; i += 8; continue; }
             }
         }
