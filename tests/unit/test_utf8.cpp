@@ -62,16 +62,16 @@ TEST(utf8column_three_byte_char) {
     const std::string s = "\xe4\xbd\xa0\xe5\xa5\xbd";
     CHECK_EQ(s.size(), 6u);
     CHECK_EQ(colAt(s, 0), 0);
-    CHECK_EQ(colAt(s, 3), 1);
-    CHECK_EQ(colAt(s, 6), 2);
+    CHECK_EQ(colAt(s, 3), 2);
+    CHECK_EQ(colAt(s, 6), 4);
 }
 
 TEST(utf8column_four_byte_char) {
     const std::string s = U_EMOJI;
     CHECK_EQ(s.size(), 4u);
     CHECK_EQ(colAt(s, 0), 0);
-    CHECK_EQ(colAt(s, 1), 1);
-    CHECK_EQ(colAt(s, 4), 1);
+    CHECK_EQ(colAt(s, 1), 2);
+    CHECK_EQ(colAt(s, 4), 2);
 }
 
 TEST(utf8column_ascii_then_utf8) {
@@ -176,7 +176,7 @@ TEST(cell_mixed_valid_orphan_valid_longer) {
     CHECK_EQ(utf8::isCellStart(s, 3), true);
     CHECK_EQ(utf8::isCellStart(s, 4), false);
     CHECK_EQ(utf8::isCellStart(s, 5), false);
-    CHECK_EQ(utf8::columnOf(s, 6), 3);
+    CHECK_EQ(utf8::columnOf(s, 6), 4);
 }
 
 TEST(column_orphan_at_start_with_valid) {
@@ -185,7 +185,7 @@ TEST(column_orphan_at_start_with_valid) {
     CHECK_EQ(utf8::isCellStart(s, 1), true);
     CHECK_EQ(utf8::isCellStart(s, 2), false);
     CHECK_EQ(utf8::isCellStart(s, 3), true);
-    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 3);
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 4);
 }
 
 TEST(column_mixed_orphan_interleaved_counts_correctly) {
@@ -193,9 +193,9 @@ TEST(column_mixed_orphan_interleaved_counts_correctly) {
     CHECK_EQ(s.size(), 8u);
     CHECK_EQ(utf8::isCellStart(s, 2), true);
     CHECK_EQ(utf8::isCellStart(s, 6), true);
-    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 5);
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 6);
     CHECK_EQ(utf8::columnOf(s, 3), 2);
-    CHECK_EQ(utf8::columnOf(s, 6), 3);
+    CHECK_EQ(utf8::columnOf(s, 6), 4);
 }
 
 TEST(column_byteCol_zero_and_size) {
@@ -206,7 +206,7 @@ TEST(column_byteCol_zero_and_size) {
     CHECK_EQ(utf8::columnOf("abc", 3), 3);
     const std::string s = U_E U_DASH U_EMOJI;
     CHECK_EQ(utf8::columnOf(s, 0), 0);
-    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 3);
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 4);
     const std::string inv = "A\x81\xff";
     CHECK_EQ(utf8::columnOf(inv, 0), 0);
     CHECK_EQ(utf8::columnOf(inv, static_cast<int>(inv.size())), 3);
@@ -243,12 +243,12 @@ TEST(column_mezcla_ascii_utf8_bordes) {
     CHECK_EQ(utf8::columnOf(s, 6), 4);
     CHECK_EQ(utf8::columnOf(s, 7), 4);
     CHECK_EQ(utf8::columnOf(s, 8), 5);
-    CHECK_EQ(utf8::columnOf(s, 9), 6);
-    CHECK_EQ(utf8::columnOf(s, 10), 6);
-    CHECK_EQ(utf8::columnOf(s, 11), 6);
-    CHECK_EQ(utf8::columnOf(s, 12), 6);
-    CHECK_EQ(utf8::columnOf(s, 13), 7);
-    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 7);
+    CHECK_EQ(utf8::columnOf(s, 9), 7);
+    CHECK_EQ(utf8::columnOf(s, 10), 7);
+    CHECK_EQ(utf8::columnOf(s, 11), 7);
+    CHECK_EQ(utf8::columnOf(s, 12), 7);
+    CHECK_EQ(utf8::columnOf(s, 13), 8);
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 8);
 }
 
 // ---------------------------------------------------------------------------
@@ -307,18 +307,19 @@ TEST(truncate_three_byte_char) {
 
 TEST(truncate_three_byte_two_chars) {
     const std::string t = "\xe4\xbd\xa0" U_DASH;
-    CHECK_EQ(cols(t), 2);
-    CHECK_EQ(utf8::truncate(t, 1), "\xe4\xbd\xa0");
-    CHECK_EQ(utf8::truncate(t, 1).size(), 3u);
-    CHECK_EQ(utf8::truncate(t, 2), t);
+    CHECK_EQ(cols(t), 3);
+    CHECK_EQ(utf8::truncate(t, 1), "");
+    CHECK_EQ(utf8::truncate(t, 2), "\xe4\xbd\xa0");
+    CHECK_EQ(utf8::truncate(t, 2).size(), 3u);
+    CHECK_EQ(utf8::truncate(t, 3), t);
 }
 
 TEST(truncate_four_byte_char) {
     const std::string s = U_EMOJI;
-    CHECK_EQ(cols(s), 1);
-    CHECK_EQ(utf8::truncate(s, 1), s);
-    CHECK_EQ(utf8::truncate(s, 1).size(), 4u);
+    CHECK_EQ(cols(s), 2);
+    CHECK_EQ(utf8::truncate(s, 1), "");
     CHECK_EQ(utf8::truncate(s, 2), s);
+    CHECK_EQ(utf8::truncate(s, 2).size(), 4u);
     CHECK_EQ(utf8::truncate(s, 0), "");
 }
 
@@ -341,18 +342,20 @@ TEST(truncate_mixed_utf8_len3) {
 
 TEST(truncate_mixed_utf8_len4) {
     const std::string s = "abc" U_EMOJI "def";
-    CHECK_EQ(cols(s), 7);
+    CHECK_EQ(cols(s), 8);
     CHECK_EQ(utf8::truncate(s, 3), "abc");
-    CHECK_EQ(utf8::truncate(s, 4), "abc" U_EMOJI);
+    CHECK_EQ(utf8::truncate(s, 4), "abc");
+    CHECK_EQ(utf8::truncate(s, 5), "abc" U_EMOJI);
     CHECK_EQ(utf8::truncate(s, 8), s);
 }
 
 TEST(truncate_all_multibyte) {
     const std::string s = U_E U_DASH U_EMOJI;
-    CHECK_EQ(cols(s), 3);
+    CHECK_EQ(cols(s), 4);
     CHECK_EQ(utf8::truncate(s, 1), U_E);
     CHECK_EQ(utf8::truncate(s, 2), U_E U_DASH);
-    CHECK_EQ(utf8::truncate(s, 3), s);
+    CHECK_EQ(utf8::truncate(s, 3), U_E U_DASH);
+    CHECK_EQ(utf8::truncate(s, 4), s);
 }
 
 TEST(truncate_non_positive_limits) {
@@ -421,7 +424,7 @@ TEST(range_mixed_starts_before_utf8) {
 
 TEST(range_mixed_ends_after_utf8) {
     const std::string s = "abc" U_E U_DASH U_EMOJI "xyz";
-    CHECK_EQ(utf8::range(s, 0, 9), "abc" U_E U_DASH U_EMOJI "xyz");
+    CHECK_EQ(utf8::range(s, 0, 10), "abc" U_E U_DASH U_EMOJI "xyz");
     CHECK_EQ(utf8::range(s, 2, 6), "c" U_E U_DASH U_EMOJI);
 }
 
@@ -562,7 +565,7 @@ TEST(columnCache_correctness_exhaustive) {
             if (line[i] == '\t')
                 col = ((col / utf8::TAB_WIDTH) + 1) * utf8::TAB_WIDTH;
             else
-                ++col;
+                col += utf8::cellWidth(line, i, n);
             i += utf8::cellLen(line, i, n);
         }
         expected[n] = col;
@@ -628,4 +631,44 @@ TEST(columnCache_correctness_exhaustive) {
     verify(ascii100k, 50000);
     verify(utf8_100k, 50000);
     verify(utf8_100k, static_cast<int>(utf8_100k.size()));
+}
+
+TEST(columnCache_consistency_wide) {
+    std::string line = "a\xE2\x9D\x8C" "bc\xF0\x9F\x98\x80" "\xE4\xB8\xAD";
+    Document doc; doc.restore({line});
+    int n = static_cast<int>(line.size());
+    std::vector<int> cells;
+    for (int i = 0; i < n; ) {
+        if (!utf8::isCellStart(line, i)) { ++i; continue; }
+        cells.push_back(i);
+        i += utf8::cellLen(line, i, n);
+    }
+    cells.push_back(n);
+    Cursor cur;
+    for (int pos : cells) {
+        cur.col = pos;
+        cur.invalidateColumnCache();
+        int cached = cur.visualColumn(line);
+        int direct = utf8::columnOf(line, pos);
+        CHECK_EQ(cached, direct);
+    }
+    cur.col = 0;
+    cur.invalidateColumnCache();
+    for (size_t k = 0; k < cells.size(); ++k) {
+        int pos = cells[k];
+        cur.col = pos;
+        int cached = cur.visualColumn(line);
+        int direct = utf8::columnOf(line, pos);
+        CHECK_EQ(cached, direct);
+    }
+    cur.col = n;
+    cur.invalidateColumnCache();
+    (void)cur.visualColumn(line);
+    for (int k = static_cast<int>(cells.size()) - 1; k >= 0; --k) {
+        int pos = cells[k];
+        cur.col = pos;
+        int cached = cur.visualColumn(line);
+        int direct = utf8::columnOf(line, pos);
+        CHECK_EQ(cached, direct);
+    }
 }

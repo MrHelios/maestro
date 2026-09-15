@@ -67,7 +67,7 @@ private:
                     int i = cache.byteCol;
                     while (i < limit) {
                         if (line[i] == '\t') col = ((col / utf8::TAB_WIDTH) + 1) * utf8::TAB_WIDTH;
-                        else ++col;
+                        else col += utf8::cellWidth(line, i, n);
                         i += utf8::cellLen(line, i, n);
                     }
                     cache.byteCol = limit; cache.col = col;
@@ -84,7 +84,7 @@ private:
                         i = limit;
                         break;
                     }
-                    --col;
+                    col -= utf8::cellWidth(line, prev, n);
                     i = prev;
                 }
                 cache.byteCol = limit; cache.col = col;

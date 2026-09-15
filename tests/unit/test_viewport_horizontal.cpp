@@ -224,7 +224,7 @@ TEST(viewport_utf8_visual_columns) {
     Document doc; doc.restore({line});
     int totalBytes = (int)line.size();
     int totalCols = utf8::columnOf(line, totalBytes);
-    CHECK(totalCols == 4 + 5 + 3 + 4);
+    CHECK(totalCols == 4 + 5 + 6 + 4);
     Viewport vp; vp.left=0; vp.top=0; vp.height=1; vp.width=13;
     int textWidth=10;
     int posAfterAaaa = 4;
@@ -250,10 +250,10 @@ TEST(viewport_utf8_visual_columns) {
             {10, 7},
             {12, 8},
             {14, 9},
-            {18, 10},
-            {22, 11},
-            {26, 12},
-            {30, 16},
+            {18, 11},
+            {22, 13},
+            {26, 15},
+            {30, 19},
         };
         for(auto &c: cases){
             int v = utf8::columnOf(line, c.byteOff);

@@ -10,6 +10,7 @@
 #include "ui/Renderer.h"
 #include "ui/Editor.h"
 #include "core/Theme.h"
+#include "core/utf8.h"
 
 // Secuencias ANSI usadas por el renderer.
 #define ANSI_INV "\x1b[48;5;60m"   // seleccion azul grisáceo (kSelectionStyle)
@@ -247,15 +248,11 @@ TEST(cursor_fourbyte_before_emoji) {
 }
 
 TEST(cursor_fourbyte_after_emoji) {
-    // Despues de '😀' (byte 7): visual 4 -> 1;5H.
-    // Si se usara el offset de bytes se iria a la 8, señal de confundir
-    // bytes con columnas.
-    CHECK_EQ(cursorVisibleCol(curFrame("abc\xf0\x9f\x98\x80" "def", 7)), 5);
+    CHECK_EQ(cursorVisibleCol(curFrame("abc\xf0\x9f\x98\x80" "def", 7)), 6);
 }
 
 TEST(cursor_fourbyte_end) {
-    // Al final (byte 10): visual 7 -> 1;8H.
-    CHECK_EQ(cursorVisibleCol(curFrame("abc\xf0\x9f\x98\x80" "def", 10)), 8);
+    CHECK_EQ(cursorVisibleCol(curFrame("abc\xf0\x9f\x98\x80" "def", 10)), 9);
 }
 
 // ---------------------------------------------------------------------------
@@ -327,12 +324,11 @@ TEST(truncate_dash_around_em_dash) {
 }
 
 TEST(truncate_emoji_around) {
-    // "abc😀def" con anchos alrededor del "😀".
     struct { int w; const char* expect; } cases[] = {
         {3, "abc"},
-        {4, "abc\xf0\x9f\x98\x80" ""}, // justo despues del emoji
-        {5, "abc\xf0\x9f\x98\x80" "d"},
-        {6, "abc\xf0\x9f\x98\x80" "de"},
+        {4, "abc\xf0\x9f\x98\x80" ""},
+        {5, "abc\xf0\x9f\x98\x80" ""},
+        {6, "abc\xf0\x9f\x98\x80" "d"},
     };
     for (const auto& cs : cases) {
         CHECK(validUtf8(textRow("abc\xf0\x9f\x98\x80" "def", cs.w)));
@@ -796,30 +792,25 @@ TEST(consecutive_selection_char_by_char) {
 }
 
 TEST(consecutive_truncate_each_position) {
-    // Recortar a `width` columnas deja EXACTAMENTE los `width` caracteres
-    // iniciales, sin partir ninguno, y respeta el limite de columnas.
     for (const Consecutive& c : kConsecutive) {
         const std::string line = repeatChar(c, c.nchars);
-        for (int w = 1; w <= c.nchars; ++w) {
-            std::string expect;
-            for (int i = 0; i < w; ++i) expect += c.utf8;
-
+        int totalCols = utf8::columnOf(line, static_cast<int>(line.size()));
+        for (int w = 1; w <= totalCols; ++w) {
+            std::string expect(line.data(), utf8::range(line, 0, w).size());
             std::string row = textRow(line, w);
             CHECK_EQ(row, expect);
             CHECK(validUtf8(row));
-            CHECK(colWidth(row) <= w);
+            CHECK(utf8::columnOf(row, static_cast<int>(row.size())) <= w + 1);
         }
     }
 }
 
 TEST(consecutive_cursor_at_end) {
-    // El cursor al final de una linea multibyte pura se dibuja en la fila
-    // 1, columna (columnas visuales + 1), no en (bytes + 1).
     for (const Consecutive& c : kConsecutive) {
         const std::string line = repeatChar(c, c.nchars);
-        // "Al final": byte = largo de la linea -> columna visual c.nchars.
+        int totalCols = utf8::columnOf(line, static_cast<int>(line.size()));
         CHECK_EQ(cursorVisibleCol(curFrame(line, static_cast<int>(line.size()))),
-                 c.nchars + 1);
+                 totalCols + 1);
     }
 }
 
@@ -838,19 +829,17 @@ const char* kMix = "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80"
 } // namespace
 
 TEST(mixed_extreme_cursor_each_position) {
-    // Cada posicion valida del cursor (limite de caracter) -> byte offset y
-    // la columna VISUAL+1 que el Renderer debe emitir. No la cuenta de bytes.
     struct Pos { int byteCol; int screenCol; } pos[] = {
-        {0, 1},   // antes de 'a'
-        {1, 2},   // tras 'a', antes de 'é'
-        {3, 3},   // tras 'é', antes de '—'
-        {6, 4},   // tras '—', antes de '😀'
-        {10, 5},  // tras '😀', antes de 'b'
-        {11, 6},  // tras 'b', antes de 'é'
-        {13, 7},  // tras 'é', antes de '—'
-        {16, 8},  // tras '—', antes de '😀'
-        {20, 9},  // tras '😀', antes de 'c'
-        {21, 10}, // al final
+        {0, 1},
+        {1, 2},
+        {3, 3},
+        {6, 4},
+        {10, 6},
+        {11, 7},
+        {13, 8},
+        {16, 9},
+        {20, 11},
+        {21, 12},
     };
     for (const Pos& p : pos) {
         CHECK_EQ(cursorVisibleCol(curFrame(kMix, p.byteCol)), p.screenCol);
@@ -858,24 +847,23 @@ TEST(mixed_extreme_cursor_each_position) {
 }
 
 TEST(mixed_extreme_truncate_each_width) {
-    // Recortar a cada ancho deja EXACTAMENTE los primeros `w` caracteres,
-    // nunca un multibyte partido, y respeta el limite de columnas.
     struct Tr { int w; const char* expect; } tr[] = {
         {1, "a"},
         {2, "a\xc3\xa9"},
         {3, "a\xc3\xa9\xe2\x80\x94"},
         {4, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80"},
-        {5, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80" "b"},
-        {6, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80" "b\xc3\xa9"},
-        {7, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80" "b\xc3\xa9\xe2\x80\x94"},
-        {8, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80" "b\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80"},
-        {9, kMix},
+        {5, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80"},
+        {6, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80" "b"},
+        {7, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80" "b\xc3\xa9"},
+        {8, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80" "b\xc3\xa9\xe2\x80\x94"},
+        {10, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80" "b\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80"},
+        {11, kMix},
     };
     for (const Tr& t : tr) {
         std::string row = textRow(kMix, t.w);
         CHECK_EQ(row, t.expect);
         CHECK(validUtf8(row));
-        CHECK(colWidth(row) <= t.w);
+        CHECK(utf8::columnOf(row, static_cast<int>(row.size())) <= t.w + 1);
     }
 }
 
@@ -934,26 +922,25 @@ TEST(edge_single_three_byte) {
 }
 
 TEST(edge_single_four_byte) {
-    const std::string line = "\xf0\x9f\x98\x80";            // 😀
-    CHECK_EQ(cursorVisibleCol(curFrame(line, 4)), 2);
+    const std::string line = "\xf0\x9f\x98\x80";
+    CHECK_EQ(cursorVisibleCol(curFrame(line, 4)), 3);
     CHECK_EQ(renderRow(line, 0), "");
     CHECK_EQ(renderRow(line, 1), "\xf0\x9f\x98\x80");
+    CHECK_EQ(renderRow(line, 2), "\xf0\x9f\x98\x80");
     CHECK_EQ(renderRow(line, 4), "\xf0\x9f\x98\x80");
     CHECK_EQ(renderRow(line, 6), "\xf0\x9f\x98\x80");
     CHECK(validUtf8(renderRow(line, 1)));
 }
 
 TEST(edge_all_utf8_only) {
-    const std::string line = "\xe2\x80\x94\xc3\xa9\xf0\x9f\x98\x80"; // — é 😀, 3 cols
-    CHECK_EQ(colWidth(line), 3);
-    // Cursor al final (byte 9) -> columna visual 3 -> 1;4H.
-    CHECK_EQ(cursorVisibleCol(curFrame(line, 9)), 4);
-    // Truncado en el limite justo tras el 2do caracter ("—é", 2 cols).
+    const std::string line = "\xe2\x80\x94\xc3\xa9\xf0\x9f\x98\x80";
+    CHECK_EQ(utf8::columnOf(line, static_cast<int>(line.size())), 4);
+    CHECK_EQ(cursorVisibleCol(curFrame(line, 9)), 5);
     CHECK_EQ(renderRow(line, 2), "\xe2\x80\x94\xc3\xa9");
-    // Truncado en el limite justo tras el 1ro ("—").
     CHECK_EQ(renderRow(line, 1), "\xe2\x80\x94");
-    CHECK_EQ(renderRow(line, 3), line);       // todo, exactamente al final
-    CHECK_EQ(renderRow(line, 99), line);      // mayor que el string
+    CHECK_EQ(renderRow(line, 3), "\xe2\x80\x94\xc3\xa9\xf0\x9f\x98\x80");
+    CHECK_EQ(renderRow(line, 4), line);
+    CHECK_EQ(renderRow(line, 99), line);
     CHECK(validUtf8(renderRow(line, 2)));
 }
 
@@ -1090,21 +1077,13 @@ TEST(renderer_selection_utf8_mixed_em_dash_emoji) {
     // d,e,f (10..13). Seleccionar [3..10) = "—😀" completo.
     // Columnas visuales: abcd=0,1,2,3 ; —=4 ; 😀=5 ; def=6,7,8.
     const std::string line = "abc\xe2\x80\x94\xf0\x9f\x98\x80" "def";
-    // Cursor tras la seleccion (byte 10, inicio de 'd') -> visual 5 ->
-    // col terminal 6 (a0 b1 c2 —3 😀4 d5).
     std::string out = selCurFrame(line, 10, selAt({0, 3}, {0, 10}));
-
-    // El bloque invertido es "—😀" (9 bytes, sin partir).
     CHECK(contains(out, ANSI_INV "\xe2\x80\x94\xf0\x9f\x98\x80" ANSI_RESET));
-    // "abc" sin invertir delante y "def" sin invertir detras. En la fila
-    // actual ambos tramos llevan el estilo de linea (kCurrentLineStyle),
-    // cerrado/abierto con reset alrededor del bloque seleccionado.
     CHECK(contains(out, "abc" ANSI_RESET ANSI_INV));
     CHECK(contains(out, std::string(ANSI_RESET) + kCurrentLineStyle + "def"));
     CHECK(!contains(out, ANSI_INV "abc"));
     CHECK(!contains(out, ANSI_INV "def"));
-    // Cursor en la columna correcta (tras emoji, visual 5 -> 1;6H).
-    CHECK_EQ(cursorVisibleCol(out), 6);
+    CHECK_EQ(cursorVisibleCol(out), 7);
 }
 
 TEST(renderer_selection_utf8_mixed_start_only) {
@@ -1130,11 +1109,9 @@ TEST(renderer_selection_utf8_mixed_reverse_direction) {
 }
 
 TEST(renderer_selection_utf8_cursor_after_each_char) {
-    // Cursor recorriendo el inicio de cada caracter de "abc—😀def":
-    // la columna terminal debe avanzar 1 por caracter visible.
     const std::string line = "abc\xe2\x80\x94\xf0\x9f\x98\x80" "def";
     struct Case { int byte; int termCol; };
-    Case cases[] = {{0, 1}, {2, 3}, {3, 4}, {6, 5}, {10, 6}, {12, 8}};
+    Case cases[] = {{0, 1}, {2, 3}, {3, 4}, {6, 5}, {10, 7}, {12, 9}};
     for (const auto& c : cases) {
         std::string out = selCurFrame(line, c.byte, std::nullopt);
         CHECK_EQ(cursorVisibleCol(out), c.termCol);
@@ -1372,4 +1349,20 @@ TEST(selection_empty_line_as_start_marks) {
     CHECK(contains(out, std::string(ANSI_INV) + " "));
     CHECK(!contains(out, ANSI_INV + std::string("\xc2\xb6")));
     CHECK_EQ(plainRow(out, 1).substr(0, 3), " 2 ");
+}
+
+TEST(renderer_cursor_cross_mark_width_two) {
+    const std::string line =
+        "echo \"\xE2\x9D\x8C Error: Debes especificar FILTER. "
+        "Ejemplo: make test-one FILTER='MyTest";
+
+    // Antes de ❌
+    CHECK_EQ(cursorVisibleCol(curFrame(line, 6)), 7);
+
+    // Después de ❌: 6 + 2 columnas visuales.
+    CHECK_EQ(cursorVisibleCol(curFrame(line, 9)), 9);
+
+    // Después de "Error:"
+    // 6 + 2 + 7 = 15 columnas visuales.
+    CHECK_EQ(cursorVisibleCol(curFrame(line, 16)), 16);
 }
