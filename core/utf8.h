@@ -48,13 +48,13 @@ inline bool isCellStart(std::string_view line, int i) {
 
 // Cuenta cuantas COLUMNAS VISUALES ocupan los primeros `byteCol` bytes
 // de `line`. TAB se expande a la siguiente tabstop (TAB_WIDTH), el resto
-// usa cellWidth() -> codepointWidth(): 1 para latin, 2 para CJK/emoji
-// ancho (EastAsianWidth W/F) via tabla Unicode determinista.
+// usa cellWidth() -> codepointWidth().
 //
-// LIMITACION DOCUMENTADA (v0.x): `width 0` (combinantes) aun no se
-// soporta: p.ej. "e" + U+0301 se cuenta como 2 cols en vez de 1.
-// Requiere segmentacion por grafemas (UAX #29) y afecta cursor/seleccion,
-// por eso se deja como segunda fase despues de 1/2.
+// Actualmente Maestro opera por codepoint/celda UTF-8.
+// Las marcas combinantes se contabilizan como ancho 1.
+// Las secuencias de grafemas (combining marks, ZWJ, variation selectors,
+// regional-indicator flags, etc.) todavía no se modelan como una unidad
+// visual.
 inline int cellLen(std::string_view line, int pos, int n) {
     unsigned char c = static_cast<unsigned char>(line[pos]);
     if (c < 0x80) return 1;
@@ -90,66 +90,33 @@ inline int cellStartBefore(std::string_view line, int pos) {
     return i;
 }
 
+// Maestro terminal-width policy (Unicode 17):
+// - ASCII/control: 1
+// - EAW W/F and selected emoji: 2
+// - EAW A/N/H: 1
+// - Combining marks: currently 1; grapheme-width handling is phase 2.
+// - Regional Indicator pairs / ZWJ / VS16 remain outside the codepoint-width model and will be handled with grapheme segmentation.
+struct WidthRange { uint32_t first; uint32_t last; };
 inline int codepointWidth(uint32_t cp) {
     if (cp < 0x1100) return 1;
-    if (cp <= 0x115F) return 2;
-    if (cp == 0x2329 || cp == 0x232A) return 2;
-    if (cp >= 0x23E9 && cp <= 0x23EC) return 2;
-    if (cp == 0x23F0 || cp == 0x23F3) return 2;
-    if (cp >= 0x25FD && cp <= 0x25FE) return 2;
-    if (cp >= 0x2614 && cp <= 0x2615) return 2;
-    if (cp >= 0x2648 && cp <= 0x2653) return 2;
-    if (cp == 0x267F || cp == 0x2693 || cp == 0x26A1) return 2;
-    if (cp >= 0x26AA && cp <= 0x26AB) return 2;
-    if (cp >= 0x26BD && cp <= 0x26BE) return 2;
-    if (cp >= 0x26C4 && cp <= 0x26C5) return 2;
-    if (cp == 0x26CE || cp == 0x26D4 || cp == 0x26EA) return 2;
-    if (cp >= 0x26F2 && cp <= 0x26F3) return 2;
-    if (cp == 0x26F5 || cp == 0x26FA || cp == 0x26FD) return 2;
-    if (cp == 0x2705 || (cp >= 0x270A && cp <= 0x270B) || cp == 0x2728 || cp == 0x2746) return 2;
-    if (cp >= 0x274C && cp <= 0x274E) return 2;
-    if (cp >= 0x2753 && cp <= 0x2755) return 2;
-    if (cp == 0x2757 || (cp >= 0x2795 && cp <= 0x2797) || cp == 0x27B0 || cp == 0x27BF) return 2;
-    if (cp >= 0x2B1B && cp <= 0x2B1C) return 2;
-    if (cp == 0x2B50 || cp == 0x2B55) return 2;
-    if (cp >= 0x2E80 && cp <= 0x303E) return 2;
-    if (cp >= 0x3040 && cp <= 0x3247) return 2;
-    if (cp >= 0x3250 && cp <= 0x4DBF) return 2;
-    if (cp >= 0x4E00 && cp <= 0xA4CF) return 2;
-    if (cp >= 0xA960 && cp <= 0xA97C) return 2;
-    if (cp >= 0xAC00 && cp <= 0xD7A3) return 2;
-    if (cp >= 0xF900 && cp <= 0xFAFF) return 2;
-    if (cp >= 0xFE10 && cp <= 0xFE19) return 2;
-    if (cp >= 0xFE30 && cp <= 0xFE6F) return 2;
-    if (cp >= 0xFF00 && cp <= 0xFF60) return 2;
-    if (cp >= 0xFFE0 && cp <= 0xFFE6) return 2;
-    if (cp == 0x1F004 || cp == 0x1F0CF) return 2;
-    if (cp >= 0x1F18E && cp <= 0x1F18E) return 2;
-    if (cp >= 0x1F191 && cp <= 0x1F19A) return 2;
-    if (cp >= 0x1F1E6 && cp <= 0x1F1FF) return 2;
-    if (cp >= 0x1F201 && cp <= 0x1F27A) return 2;
-    if (cp >= 0x1F30D && cp <= 0x1F335) return 2;
-    if (cp >= 0x1F337 && cp <= 0x1F37C) return 2;
-    if (cp >= 0x1F37E && cp <= 0x1F393) return 2;
-    if (cp >= 0x1F3A0 && cp <= 0x1F3CA) return 2;
-    if (cp >= 0x1F3CF && cp <= 0x1F3D3) return 2;
-    if (cp >= 0x1F3E0 && cp <= 0x1F3F0) return 2;
-    if (cp == 0x1F3F4 || (cp >= 0x1F3F8 && cp <= 0x1F43E) || cp == 0x1F440) return 2;
-    if (cp >= 0x1F442 && cp <= 0x1F4FC) return 2;
-    if (cp >= 0x1F4FF && cp <= 0x1F53D) return 2;
-    if (cp >= 0x1F54B && cp <= 0x1F54E) return 2;
-    if (cp >= 0x1F550 && cp <= 0x1F567) return 2;
-    if (cp == 0x1F57A || (cp >= 0x1F595 && cp <= 0x1F596) || cp == 0x1F5A4) return 2;
-    if (cp >= 0x1F5FB && cp <= 0x1F64F) return 2;
-    if (cp >= 0x1F680 && cp <= 0x1F6C5) return 2;
-    if (cp == 0x1F6CC || (cp >= 0x1F6D0 && cp <= 0x1F6D2) || (cp >= 0x1F6EB && cp <= 0x1F6EC)) return 2;
-    if (cp >= 0x1F6F4 && cp <= 0x1F6F8) return 2;
-    if (cp >= 0x1F910 && cp <= 0x1F93E) return 2;
-    if (cp >= 0x1F940 && cp <= 0x1F96B) return 2;
-    if (cp >= 0x1F980 && cp <= 0x1F99E) return 2;
-    if (cp == 0x1F9C0 || (cp >= 0x1F9D0 && cp <= 0x1F9E6)) return 2;
-    if (cp >= 0x20000 && cp <= 0x2FFFD) return 2;
-    if (cp >= 0x30000 && cp <= 0x3FFFD) return 2;
+    static constexpr WidthRange wide[] = {
+        {0x1100, 0x115F}, {0x2329, 0x232A}, {0x23E9, 0x23EC}, {0x23F0, 0x23F0}, {0x23F3, 0x23F3},
+        {0x25FD, 0x25FE}, {0x2614, 0x2615}, {0x2648, 0x2653}, {0x267F, 0x267F}, {0x2693, 0x2693}, {0x26A1, 0x26A1},
+        {0x26AA, 0x26AB}, {0x26BD, 0x26BE}, {0x26C4, 0x26C5}, {0x26CE, 0x26CE}, {0x26D4, 0x26D4}, {0x26EA, 0x26EA},
+        {0x26F2, 0x26F3}, {0x26F5, 0x26F5}, {0x26FA, 0x26FA}, {0x26FD, 0x26FD}, {0x2705, 0x2705}, {0x270A, 0x270B},
+        {0x2728, 0x2728}, {0x2746, 0x2746}, {0x274C, 0x274E}, {0x2753, 0x2755}, {0x2757, 0x2757}, {0x2795, 0x2797},
+        {0x27B0, 0x27B0}, {0x27BF, 0x27BF}, {0x2B1B, 0x2B1C}, {0x2B50, 0x2B50}, {0x2B55, 0x2B55}, {0x2E80, 0x303E},
+        {0x3040, 0x3247}, {0x3250, 0x4DBF}, {0x4E00, 0xA4CF}, {0xA960, 0xA97C}, {0xAC00, 0xD7A3}, {0xF900, 0xFAFF},
+        {0xFE10, 0xFE19}, {0xFE30, 0xFE6F}, {0xFF00, 0xFF60}, {0xFFE0, 0xFFE6}, {0x1F004, 0x1F004}, {0x1F0CF, 0x1F0CF},
+        {0x1F18E, 0x1F18E}, {0x1F191, 0x1F19A}, {0x1F1E6, 0x1F1FF}, {0x1F200, 0x1F202}, {0x1F210, 0x1F23B}, {0x1F240, 0x1F248}, {0x1F250, 0x1F251}, {0x1F260, 0x1F265}, {0x1F300, 0x1F320}, {0x1F32D, 0x1F335},
+        {0x1F337, 0x1F37C}, {0x1F37E, 0x1F393}, {0x1F3A0, 0x1F3CA}, {0x1F3CF, 0x1F3D3}, {0x1F3E0, 0x1F3F0}, {0x1F3F4, 0x1F3F4},
+        {0x1F3F8, 0x1F43E}, {0x1F440, 0x1F440}, {0x1F442, 0x1F4FC}, {0x1F4FF, 0x1F53D}, {0x1F54B, 0x1F54E}, {0x1F550, 0x1F567},
+        {0x1F57A, 0x1F57A}, {0x1F595, 0x1F596}, {0x1F5A4, 0x1F5A4}, {0x1F5FB, 0x1F64F}, {0x1F680, 0x1F6C5}, {0x1F6CC, 0x1F6CC},
+        {0x1F6D0, 0x1F6D2}, {0x1F6D5, 0x1F6D5}, {0x1F6EB, 0x1F6EC}, {0x1F6F4, 0x1F6F8}, {0x1F7E0, 0x1F7E0}, {0x1F7F0, 0x1F7F0}, {0x1F90C, 0x1F90C}, {0x1F910, 0x1F93A}, {0x1F93C, 0x1F93E}, {0x1F940, 0x1F945}, {0x1F947, 0x1F96B},
+        {0x1F980, 0x1F99E}, {0x1F99F, 0x1F99F}, {0x1F9C0, 0x1F9C0}, {0x1F9D0, 0x1F9E6}, {0x1FA70, 0x1FA7C}, {0x1FA80, 0x1FA8A}, {0x1FA8E, 0x1FAC6},
+        {0x1FAEF, 0x1FAF8}, {0x20000, 0x2FFFD}, {0x30000, 0x3FFFD},
+    };
+    for (auto r : wide) if (cp >= r.first && cp <= r.last) return 2;
     return 1;
 }
 

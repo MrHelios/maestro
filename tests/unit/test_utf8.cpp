@@ -446,6 +446,19 @@ TEST(range_reversed_bounds_returns_empty) {
     CHECK_EQ(utf8::range(s, 5, 3), "");
 }
 
+TEST(range_wide_before_inside_after) {
+    const std::string s = "abc" U_EMOJI "def";
+    CHECK_EQ(utf8::range(s, 0, 3), "abc");
+    CHECK_EQ(utf8::range(s, 0, 4), "abc" U_EMOJI);
+    CHECK_EQ(utf8::range(s, 0, 5), "abc" U_EMOJI);
+    CHECK_EQ(utf8::range(s, 0, 6), "abc" U_EMOJI "d");
+    CHECK_EQ(utf8::range(s, 3, 4), U_EMOJI);
+    CHECK_EQ(utf8::range(s, 3, 5), U_EMOJI);
+    CHECK_EQ(utf8::range(s, 4, 5), "");
+    CHECK_EQ(utf8::range(s, 4, 6), "d");
+    CHECK_EQ(utf8::range(s, 5, 6), "d");
+}
+
 TEST(range_never_produces_invalid_utf8) {
     const std::string cases[] = {
         "caf" U_E,
@@ -635,7 +648,6 @@ TEST(columnCache_correctness_exhaustive) {
 
 TEST(columnCache_consistency_wide) {
     std::string line = "a\xE2\x9D\x8C" "bc\xF0\x9F\x98\x80" "\xE4\xB8\xAD";
-    Document doc; doc.restore({line});
     int n = static_cast<int>(line.size());
     std::vector<int> cells;
     for (int i = 0; i < n; ) {
@@ -672,3 +684,96 @@ TEST(columnCache_consistency_wide) {
         CHECK_EQ(cached, direct);
     }
 }
+
+TEST(codepointWidth_boundaries_fixed) {
+    CHECK_EQ(utf8::codepointWidth(0x1F320), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F321), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1F32C), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1F32D), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F93A), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F93B), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1F93C), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1FA70), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1FA7C), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1FA7D), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1FA80), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1FA8A), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1FA8B), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1FA8E), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1FAC6), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1FAC7), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1FAEF), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1FAF8), 2);
+}
+
+TEST(codepointWidth_direct) {
+    CHECK_EQ(utf8::codepointWidth('A'), 1);
+    CHECK_EQ(utf8::codepointWidth(0xE9), 1);
+    CHECK_EQ(utf8::codepointWidth(0x2014), 1);
+    CHECK_EQ(utf8::codepointWidth(0x4E2D), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F600), 2);
+    CHECK_EQ(utf8::codepointWidth(0x274C), 2);
+    CHECK_EQ(utf8::codepointWidth(0xFF21), 2);
+    CHECK_EQ(utf8::codepointWidth(0xD55C), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F321), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1F32D), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F3CB), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1F3CF), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F93B), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1F93C), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1FA70), 2);
+}
+
+TEST(byteForColumn_wide) {
+    const std::string s = "abc" U_EMOJI;
+    CHECK_EQ(utf8::byteForColumn(s, 0), 0);
+    CHECK_EQ(utf8::byteForColumn(s, 1), 1);
+    CHECK_EQ(utf8::byteForColumn(s, 2), 2);
+    CHECK_EQ(utf8::byteForColumn(s, 3), 3);
+    CHECK_EQ(utf8::byteForColumn(s, 4), 3);
+    CHECK_EQ(utf8::byteForColumn(s, 5), 7);
+}
+
+TEST(apis_concordance_ae_dash_emoji_zhong) {
+    const std::string line = "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80\xe4\xb8\xad" "b";
+    struct Case { int bytePos; int col; };
+    Case cases[] = {
+        {0, 0},
+        {1, 1},
+        {3, 2},
+        {6, 3},
+        {10, 5},
+        {13, 7},
+        {14, 8},
+    };
+    for (auto c : cases) {
+        CHECK_EQ(utf8::columnOf(line, c.bytePos), c.col);
+        CHECK_EQ(utf8::byteForColumn(line, c.col), c.bytePos);
+        Cursor cur; cur.col = c.bytePos; cur.invalidateColumnCache();
+        CHECK_EQ(cur.visualColumn(line), c.col);
+        CHECK_EQ(utf8::columnOf(line, utf8::byteForColumn(line, c.col)), c.col);
+    }
+    CHECK_EQ(utf8::columnOf(line, 4), 3);
+    CHECK_EQ(utf8::byteForColumn(line, 4), 6);
+}
+
+TEST(codepointWidth_eaw_gap_boundaries) {
+    CHECK_EQ(utf8::codepointWidth(0x1F202), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F203), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1F20F), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1F210), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F265), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F266), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1F6D5), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F6D9), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1F7E0), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F7F0), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F90B), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1F90C), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F945), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F946), 1);
+    CHECK_EQ(utf8::codepointWidth(0x1F947), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1F99F), 2);
+    CHECK_EQ(utf8::codepointWidth(0x1FA00), 1);
+}
+

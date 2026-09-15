@@ -794,13 +794,20 @@ TEST(consecutive_selection_char_by_char) {
 TEST(consecutive_truncate_each_position) {
     for (const Consecutive& c : kConsecutive) {
         const std::string line = repeatChar(c, c.nchars);
-        int totalCols = utf8::columnOf(line, static_cast<int>(line.size()));
+        int charW = (c.nbytes == 4 ? 2 : 1);
+        int totalCols = c.nchars * charW;
         for (int w = 1; w <= totalCols; ++w) {
-            std::string expect(line.data(), utf8::range(line, 0, w).size());
-            std::string row = textRow(line, w);
+            std::string expect;
+            int col = 0;
+            for (int i = 0; i < c.nchars; ++i) {
+                if (col + charW > w) break;
+                expect += c.utf8;
+                col += charW;
+            }
+            std::string row = utf8::truncate(line, w);
             CHECK_EQ(row, expect);
             CHECK(validUtf8(row));
-            CHECK(utf8::columnOf(row, static_cast<int>(row.size())) <= w + 1);
+            CHECK(utf8::columnOf(row, static_cast<int>(row.size())) <= w);
         }
     }
 }
@@ -851,7 +858,7 @@ TEST(mixed_extreme_truncate_each_width) {
         {1, "a"},
         {2, "a\xc3\xa9"},
         {3, "a\xc3\xa9\xe2\x80\x94"},
-        {4, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80"},
+        {4, "a\xc3\xa9\xe2\x80\x94"},
         {5, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80"},
         {6, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80" "b"},
         {7, "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80" "b\xc3\xa9"},
@@ -860,10 +867,10 @@ TEST(mixed_extreme_truncate_each_width) {
         {11, kMix},
     };
     for (const Tr& t : tr) {
-        std::string row = textRow(kMix, t.w);
+        std::string row = utf8::truncate(kMix, t.w);
         CHECK_EQ(row, t.expect);
         CHECK(validUtf8(row));
-        CHECK(utf8::columnOf(row, static_cast<int>(row.size())) <= t.w + 1);
+        CHECK(utf8::columnOf(row, static_cast<int>(row.size())) <= t.w);
     }
 }
 
