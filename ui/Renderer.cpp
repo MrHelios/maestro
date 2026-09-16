@@ -217,15 +217,13 @@ SyntaxState Renderer::syntaxStateAt(const Document& doc, int targetLine) const {
     if (syntaxHighlighter_.language() == SyntaxLanguage::None) return init;
     if (targetLine <= 0) return init;
     int t = std::min(targetLine, doc.lineCount());
-    if (syntaxStatesLang_ != syntaxHighlighter_.language() || syntaxStatesVersion_ != doc.version()) {
+    if (syntaxStatesDoc_ != &doc || syntaxStatesLang_ != syntaxHighlighter_.language() || syntaxStatesVersion_ != doc.version()) {
         syntaxStates_.clear();
         syntaxStates_.reserve(doc.lineCount() + 1);
         syntaxStates_.push_back(init);
+        syntaxStatesDoc_ = &doc;
         syntaxStatesVersion_ = doc.version();
         syntaxStatesLang_ = syntaxHighlighter_.language();
-    }
-    if ((int)syntaxStates_.size() > doc.lineCount() + 1) {
-        syntaxStates_.resize(doc.lineCount() + 1);
     }
     if ((int)syntaxStates_.size() > t) return syntaxStates_[t];
     std::vector<SyntaxSpan> buf;
@@ -408,7 +406,7 @@ void Renderer::renderEditorRow(std::string& out,
     SyntaxState st = syntaxStateAt(doc, docLine);
     SyntaxState nxt;
     std::vector<SyntaxSpan> spans;
-    if (docLine < doc.lineCount()) syntaxHighlighter_.highlight(doc.lineAt(docLine), st, nxt, spans);
+    syntaxHighlighter_.highlight(doc.lineAt(docLine), st, nxt, spans);
     renderEditorRow(out, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth, spans);
 }
 
@@ -517,6 +515,9 @@ void Renderer::renderEditorRow(std::string& out,
         return;
     }
 
+    // Estrategia: los breakpoints se arman a partir de los rangos de selección
+    // y de los spans de sintaxis; al iterar por segmentos la selección tiene
+    // prioridad visual sobre el color de sintaxis.
     std::vector<int> bounds;
     bounds.reserve(2 + visibleSelCount*2 + synVis.size()*2 + 2);
     bounds.push_back(0);

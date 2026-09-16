@@ -5,6 +5,10 @@
 #include <string>
 #include <vector>
 
+static const char* langName(SyntaxLanguage l) {
+    return l == SyntaxLanguage::Cpp ? "Cpp" : l == SyntaxLanguage::C ? "C" : "None";
+}
+
 static void benchOneReturn(const char* label, SyntaxLanguage lang, std::string_view line, int iters) {
     SyntaxHighlighter hl;
     hl.setLanguage(lang);
@@ -22,7 +26,7 @@ static void benchOneReturn(const char* label, SyntaxLanguage lang, std::string_v
     }
     const auto& st = alloc_stats::statsFor(alloc_stats::kRenderFrame);
     std::printf("[return] %-28s lang=%-4s iters=%5d  allocs=%6llu  perIter %.2f  +%8llu  spans=%zu  line=\"%.40s\"\n",
-        label, lang == SyntaxLanguage::Cpp ? "Cpp" : lang == SyntaxLanguage::C ? "C" : "None", iters, st.allocs, st.allocs/double(iters), st.bytesAllocated, sampleSpans, std::string(line).c_str());
+        label, langName(lang), iters, st.allocs, st.allocs/double(iters), st.bytesAllocated, sampleSpans, std::string(line).c_str());
 }
 
 static void benchOneReuse(const char* label, SyntaxLanguage lang, std::string_view line, int iters) {
@@ -45,7 +49,14 @@ static void benchOneReuse(const char* label, SyntaxLanguage lang, std::string_vi
     }
     const auto& st = alloc_stats::statsFor(alloc_stats::kRenderFrame);
     std::printf("[reuse ] %-28s lang=%-4s iters=%5d  allocs=%6llu  perIter %.4f  +%8llu  spans=%zu  line=\"%.40s\"\n",
-        label, lang == SyntaxLanguage::Cpp ? "Cpp" : "None", iters, st.allocs, st.allocs/double(iters), st.bytesAllocated, sampleSpans, std::string(line).c_str());
+        label, langName(lang), iters, st.allocs, st.allocs/double(iters), st.bytesAllocated, sampleSpans, std::string(line).c_str());
+    std::string lbl(label);
+    if (lbl.find("vacia")!=std::string::npos || lbl.find("muchos_ident")!=std::string::npos || lbl.find("linea_larga_80x")!=std::string::npos || lbl.find("None")!=std::string::npos) {
+        CHECK(st.allocs==0);
+    } else {
+        CHECK(st.allocs <= 10);
+        CHECK(st.allocs/double(iters) < 0.01);
+    }
 }
 
 static void benchFrameReturn(const char* label, SyntaxLanguage lang, const std::vector<std::string>& lines, int iters) {
@@ -56,7 +67,7 @@ static void benchFrameReturn(const char* label, SyntaxLanguage lang, const std::
         for(int k=0;k<iters;++k){ SyntaxState st{}; for(auto& l:lines){ SyntaxState out{}; auto spans=hl.highlight(l,st,out); sink+=spans.size(); st=out; } } (void)sink; }
     const auto& st=alloc_stats::statsFor(alloc_stats::kRenderFrame);
     int total=iters*(int)lines.size();
-    std::printf("[return] %-28s lang=%-4s frames=%4d lines=%2zu total=%6d  allocs=%7llu  perCall %.2f perFrame %.1f\n", label, lang==SyntaxLanguage::Cpp?"Cpp":"None", iters, lines.size(), total, st.allocs, st.allocs/double(total), st.allocs/double(iters));
+    std::printf("[return] %-28s lang=%-4s frames=%4d lines=%2zu total=%6d  allocs=%7llu  perCall %.2f perFrame %.1f\n", label, langName(lang), iters, lines.size(), total, st.allocs, st.allocs/double(total), st.allocs/double(iters));
 }
 static void benchFrameReuse(const char* label, SyntaxLanguage lang, const std::vector<std::string>& lines, int iters) {
     SyntaxHighlighter hl; hl.setLanguage(lang);
@@ -67,7 +78,8 @@ static void benchFrameReuse(const char* label, SyntaxLanguage lang, const std::v
         for(int k=0;k<iters;++k){ SyntaxState st{}; for(auto& l:lines){ SyntaxState out{}; hl.highlight(l,st,out,buf); sink+=buf.size(); st=out; } } (void)sink; }
     const auto& st=alloc_stats::statsFor(alloc_stats::kRenderFrame);
     int total=iters*(int)lines.size();
-    std::printf("[reuse ] %-28s lang=%-4s frames=%4d lines=%2zu total=%6d  allocs=%7llu  perCall %.4f perFrame %.2f\n", label, lang==SyntaxLanguage::Cpp?"Cpp":"None", iters, lines.size(), total, st.allocs, st.allocs/double(total), st.allocs/double(iters));
+    std::printf("[reuse ] %-28s lang=%-4s frames=%4d lines=%2zu total=%6d  allocs=%7llu  perCall %.4f perFrame %.2f\n", label, langName(lang), iters, lines.size(), total, st.allocs, st.allocs/double(total), st.allocs/double(iters));
+    CHECK(st.allocs/double(total) < 0.01);
 }
 
 TEST(highlight_alloc_benchmark) {
@@ -91,6 +103,12 @@ TEST(highlight_alloc_benchmark) {
     benchOneReuse("coment_linea", SyntaxLanguage::Cpp, "// comment with int for while", N);
     benchOneReturn("numeros", SyntaxLanguage::Cpp, "42 0xFF 0b1010 3.14 1e10 123_u 0xDEADBEEF", N);
     benchOneReuse("numeros", SyntaxLanguage::Cpp, "42 0xFF 0b1010 3.14 1e10 123_u 0xDEADBEEF", N);
+    benchOneReturn("raw_simple", SyntaxLanguage::Cpp, "auto s = R\"(hello)\";", N);
+    benchOneReuse("raw_simple", SyntaxLanguage::Cpp, "auto s = R\"(hello)\";", N);
+    benchOneReturn("raw_delim", SyntaxLanguage::Cpp, "auto s = R\"delim(Hello \"world\")delim\";", N);
+    benchOneReuse("raw_delim", SyntaxLanguage::Cpp, "auto s = R\"delim(Hello \"world\")delim\";", N);
+    benchOneReturn("raw_multiline_start", SyntaxLanguage::Cpp, "auto s = R\"foo(", N);
+    benchOneReuse("raw_multiline_start", SyntaxLanguage::Cpp, "auto s = R\"foo(", N);
 
     std::printf("\n== frame 11 líneas / 24 líneas / 1524 líneas ==\n");
     std::vector<std::string> cppFile = {
@@ -116,6 +134,16 @@ TEST(highlight_alloc_benchmark) {
     benchFrameReuse("1524 líneas", SyntaxLanguage::Cpp, big1524, 200);
     benchFrameReturn("1524 líneas", SyntaxLanguage::None, big1524, 200);
     benchFrameReuse("1524 líneas", SyntaxLanguage::None, big1524, 200);
+
+    std::vector<std::string> rawFile = {
+        "auto s = R\"(hello \"world\")\";",
+        "auto t = R\"delim(Hello)delim\";",
+        "auto u = R\"foo(multiline",
+        "still raw)foo\";",
+        "int x = 42;",
+    };
+    benchFrameReturn("raw 5 líneas", SyntaxLanguage::Cpp, rawFile, 2000);
+    benchFrameReuse("raw 5 líneas", SyntaxLanguage::Cpp, rawFile, 2000);
 
     std::printf("\n== None vs Cpp (reuse) sanity ==\n");
     benchOneReuse("vacia None", SyntaxLanguage::None, "", N);

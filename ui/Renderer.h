@@ -103,11 +103,12 @@ public:
 private:
     Theme theme_ = defaultTheme();
     mutable SyntaxHighlighter syntaxHighlighter_;
-    // Mutable cache: syntax state is derived from Document::version()
-    // and language; rebuilding it does not change rendering semantics.
+    // Mutable cache: syntax state is derived from Document identity,
+    // version() and language; rebuilding it does not change rendering semantics.
     mutable std::vector<SyntaxState> syntaxStates_;
     mutable uint64_t syntaxStatesVersion_ = UINT64_MAX;
     mutable SyntaxLanguage syntaxStatesLang_ = SyntaxLanguage::None;
+    mutable const Document* syntaxStatesDoc_ = nullptr;
 
     mutable std::deque<std::string> rowCache_;   // una entrada por fila de contenido: "\x1b[K" + bytes
     mutable std::string statusCache_;            // status bar cacheado, filas separadas por "\r\n"

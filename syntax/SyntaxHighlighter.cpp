@@ -1,3 +1,7 @@
+/**
+ * @file SyntaxHighlighter.cpp
+ * @brief Implementación del wrapper: early-out para None y delegación a CLike.
+ */
 #include "syntax/SyntaxHighlighter.h"
 
 std::vector<SyntaxSpan> SyntaxHighlighter::highlight(std::string_view line) const {
