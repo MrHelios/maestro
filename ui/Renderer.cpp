@@ -8,6 +8,7 @@
 
 #include "core/utf8.h"
 #include "ui/RenderUtil.h"
+#include "syntax/SyntaxLanguage.h"
 
 namespace {
 
@@ -191,7 +192,59 @@ void renderPlainLine(std::string& out,
     renderFilledRow(out, line, width, isCurrentLine ? T.currentLine : "", T.reset);
 }
 
+const std::string& rendererSyntaxStyleFor(const Theme& T, SyntaxToken tok) {
+    switch (tok) {
+        case SyntaxToken::Keyword:      return T.syntaxKeyword;
+        case SyntaxToken::Type:         return T.syntaxType;
+        case SyntaxToken::Preprocessor: return T.syntaxPreprocessor;
+        case SyntaxToken::String:       return T.syntaxString;
+        case SyntaxToken::Character:    return T.syntaxCharacter;
+        case SyntaxToken::Number:       return T.syntaxNumber;
+        case SyntaxToken::Comment:      return T.syntaxComment;
+    }
+    return T.syntaxKeyword;
+}
+
 } // namespace
+
+const std::string& Renderer::syntaxStyleFor(SyntaxToken tok) const {
+    return rendererSyntaxStyleFor(theme_, tok);
+}
+
+SyntaxState Renderer::syntaxStateAt(const Document& doc, int targetLine) const {
+    SyntaxState init;
+    init.inBlockComment = false;
+    if (syntaxHighlighter_.language() == SyntaxLanguage::None) return init;
+    if (targetLine <= 0) return init;
+    int t = std::min(targetLine, doc.lineCount());
+    if (syntaxStatesLang_ != syntaxHighlighter_.language() || syntaxStatesVersion_ != doc.version()) {
+        syntaxStates_.clear();
+        syntaxStates_.reserve(doc.lineCount() + 1);
+        syntaxStates_.push_back(init);
+        syntaxStatesVersion_ = doc.version();
+        syntaxStatesLang_ = syntaxHighlighter_.language();
+    }
+    if ((int)syntaxStates_.size() > doc.lineCount() + 1) {
+        syntaxStates_.resize(doc.lineCount() + 1);
+    }
+    if ((int)syntaxStates_.size() > t) return syntaxStates_[t];
+    std::vector<SyntaxSpan> buf;
+    for (int l = (int)syntaxStates_.size() - 1; l < t; ++l) {
+        SyntaxState nxt;
+        syntaxHighlighter_.highlight(doc.lineAt(l), syntaxStates_[l], nxt, buf);
+        syntaxStates_.push_back(nxt);
+    }
+    return syntaxStates_[t];
+}
+
+void Renderer::updateSyntaxLanguage(const std::string& filename) const {
+    auto lang = languageFromFilename(filename);
+    if (lang != syntaxHighlighter_.language()) {
+        syntaxHighlighter_.setLanguage(lang);
+        hasCache_ = false;
+        hasLastStatusData_ = false;
+    }
+}
 
 std::string Renderer::buildScreen(const Document& doc,
                                    const Cursor& cursor,
@@ -202,6 +255,7 @@ std::string Renderer::buildScreen(const Document& doc,
                                    State state,
                                    const std::optional<Selection>& selection,
                                    const std::optional<Selection>& searchHighlight) {
+    updateSyntaxLanguage(filename);
     std::string out;
     beginFrame(out);
     out += buildEditorBody(doc, cursor, viewport, filename, modified, message,
@@ -234,6 +288,7 @@ std::string Renderer::buildEditorBody(const Document& doc,
                                        State state,
                                        const std::optional<Selection>& selection,
                                        const std::optional<Selection>& searchHighlight) const {
+    updateSyntaxLanguage(filename);
     std::string out;
     std::optional<Normalized> sel = selection.has_value() ? normalize(*selection)
                                                           : std::nullopt;
@@ -341,135 +396,194 @@ void Renderer::renderEditorRow(std::string& out,
                              int docLine,
                              int gutterW,
                              int textWidth) const {
-    if (docLine < doc.lineCount()) {
-        const std::string& line = doc.lineAt(docLine);
-        bool isCurrentLine = (docLine == cursor.line);
-
-        if (!sel.has_value() && !searchSel.has_value()) {
-            out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
-            int absoluteVisStart = viewport.left;
-            int absoluteVisEnd = absoluteVisStart + textWidth;
-            std::string_view visibleRaw = utf8::range(line, absoluteVisStart, absoluteVisEnd);
-            std::string visible = utf8::expandTabs(visibleRaw);
-            renderPlainLine(out, theme_, visible, textWidth, isCurrentLine);
-            return;
-        }
-
-        std::pair<int,int> intervals[2];
-        int intervalCount = 0;
-        bool lineBreakSelected = false;
-
-        auto addInterval = [&](const std::optional<Normalized>& nrm) {
-            if (!nrm.has_value()) return;
-            if (docLine < nrm->start.line || docLine > nrm->end.line) return;
-            if (nrm->start.line == nrm->end.line) {
-                intervals[intervalCount++] = {nrm->start.col, nrm->end.col};
-            } else if (docLine == nrm->start.line) {
-                intervals[intervalCount++] = {nrm->start.col, static_cast<int>(line.size())};
-            } else if (docLine == nrm->end.line) {
-                intervals[intervalCount++] = {0, nrm->end.col};
-            } else {
-                intervals[intervalCount++] = {0, static_cast<int>(line.size())};
-            }
-        };
-        addInterval(sel);
-        addInterval(searchSel);
-
-        auto isLineBreak = [&](const std::optional<Normalized>& nrm) -> bool {
-            if (!nrm.has_value() || !line.empty()) return false;
-            if (docLine < nrm->start.line || docLine > nrm->end.line) return false;
-            bool singleLine = (nrm->start.line == nrm->end.line);
-            bool endsAtStart = (docLine == nrm->end.line && nrm->end.col == 0);
-            return !singleLine && !endsAtStart;
-        };
-        if (isLineBreak(sel) || isLineBreak(searchSel)) lineBreakSelected = true;
-
-        if (line.empty() && lineBreakSelected) {
-            out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
-            out += theme_.selection;
-            for (int i = 0; i < textWidth; ++i) out += ' ';
+    if (docLine >= doc.lineCount()) {
+        out += renderGutterBlank(gutterW);
+        if (textWidth > 0) {
+            out += theme_.marker;
+            out += "~";
             out += theme_.reset;
-            return;
         }
+        return;
+    }
+    SyntaxState st = syntaxStateAt(doc, docLine);
+    SyntaxState nxt;
+    std::vector<SyntaxSpan> spans;
+    if (docLine < doc.lineCount()) syntaxHighlighter_.highlight(doc.lineAt(docLine), st, nxt, spans);
+    renderEditorRow(out, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth, spans);
+}
 
-        if (intervalCount == 2 && intervals[0] > intervals[1]) std::swap(intervals[0], intervals[1]);
-        std::pair<int,int> merged[2];
-        int mergedCount = 0;
-        for (int i = 0; i < intervalCount; ++i) {
-            auto p = intervals[i];
-            if (p.first >= p.second) continue;
-            if (mergedCount == 0 || p.first > merged[mergedCount-1].second) merged[mergedCount++] = p;
-            else merged[mergedCount-1].second = std::max(merged[mergedCount-1].second, p.second);
+void Renderer::renderEditorRow(std::string& out,
+                             const Document& doc,
+                             const Cursor& cursor,
+                             const Viewport& viewport,
+                             const std::optional<Normalized>& sel,
+                             const std::optional<Normalized>& searchSel,
+                             int docLine,
+                             int gutterW,
+                             int textWidth,
+                             const std::vector<SyntaxSpan>& spans) const {
+    if (docLine >= doc.lineCount()) {
+        out += renderGutterBlank(gutterW);
+        if (textWidth > 0) {
+            out += theme_.marker;
+            out += "~";
+            out += theme_.reset;
         }
+        return;
+    }
+    const std::string& line = doc.lineAt(docLine);
+    bool isCurrentLine = (docLine == cursor.line);
 
+    std::pair<int,int> intervals[2];
+    int intervalCount = 0;
+    bool lineBreakSelected = false;
+
+    auto addInterval = [&](const std::optional<Normalized>& nrm) {
+        if (!nrm.has_value()) return;
+        if (docLine < nrm->start.line || docLine > nrm->end.line) return;
+        if (nrm->start.line == nrm->end.line) {
+            intervals[intervalCount++] = {nrm->start.col, nrm->end.col};
+        } else if (docLine == nrm->start.line) {
+            intervals[intervalCount++] = {nrm->start.col, static_cast<int>(line.size())};
+        } else if (docLine == nrm->end.line) {
+            intervals[intervalCount++] = {0, nrm->end.col};
+        } else {
+            intervals[intervalCount++] = {0, static_cast<int>(line.size())};
+        }
+    };
+    addInterval(sel);
+    addInterval(searchSel);
+
+    auto isLineBreak = [&](const std::optional<Normalized>& nrm) -> bool {
+        if (!nrm.has_value() || !line.empty()) return false;
+        if (docLine < nrm->start.line || docLine > nrm->end.line) return false;
+        bool singleLine = (nrm->start.line == nrm->end.line);
+        bool endsAtStart = (docLine == nrm->end.line && nrm->end.col == 0);
+        return !singleLine && !endsAtStart;
+    };
+    if (isLineBreak(sel) || isLineBreak(searchSel)) lineBreakSelected = true;
+
+    if (line.empty() && lineBreakSelected) {
         out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
+        out += theme_.selection;
+        for (int i = 0; i < textWidth; ++i) out += ' ';
+        out += theme_.reset;
+        return;
+    }
 
-        int absoluteVisStart = viewport.left;
-        int absoluteVisEnd = absoluteVisStart + textWidth;
-        std::string_view visibleRaw = utf8::range(line, absoluteVisStart, absoluteVisEnd);
-        std::string visible = utf8::expandTabs(visibleRaw);
+    if (intervalCount == 2 && intervals[0] > intervals[1]) std::swap(intervals[0], intervals[1]);
+    std::pair<int,int> merged[2];
+    int mergedCount = 0;
+    for (int i = 0; i < intervalCount; ++i) {
+        auto p = intervals[i];
+        if (p.first >= p.second) continue;
+        if (mergedCount == 0 || p.first > merged[mergedCount-1].second) merged[mergedCount++] = p;
+        else merged[mergedCount-1].second = std::max(merged[mergedCount-1].second, p.second);
+    }
 
-        if (mergedCount == 0) {
-            renderPlainLine(out, theme_, visible, textWidth, isCurrentLine);
-            return;
-        }
+    out += renderGutterCell(theme_, docLine + 1, gutterW, isCurrentLine);
 
-        std::pair<int,int> visibleIntervals[2];
-        int visibleCount = 0;
-        for (int i = 0; i < mergedCount; ++i) {
-            auto p = merged[i];
-            int absoluteSc = utf8::columnOf(line, p.first);
-            int absoluteEc = utf8::columnOf(line, p.second);
-            if (absoluteEc <= absoluteVisStart || absoluteSc >= absoluteVisEnd) continue;
-            int visibleSc = std::max(absoluteSc, absoluteVisStart) - absoluteVisStart;
-            int visibleEc = std::min(absoluteEc, absoluteVisEnd) - absoluteVisStart;
-            if (visibleSc < visibleEc) visibleIntervals[visibleCount++] = {visibleSc, visibleEc};
-        }
-        if (visibleCount == 0) {
-            renderPlainLine(out, theme_, visible, textWidth, isCurrentLine);
-            return;
-        }
+    int absoluteVisStart = viewport.left;
+    int absoluteVisEnd = absoluteVisStart + textWidth;
+    std::string_view visibleRaw = utf8::range(line, absoluteVisStart, absoluteVisEnd);
+    std::string visible = utf8::expandTabs(visibleRaw);
 
-        int visibleCur = 0;
-        int used = 0;
-        for (int i = 0; i < visibleCount; ++i) {
-            int visibleSc = visibleIntervals[i].first;
-            int visibleEc = visibleIntervals[i].second;
-            if (visibleCur < visibleSc) {
-                std::string_view seg = utf8::range(visible, visibleCur, visibleSc);
-                if (isCurrentLine) out += theme_.currentLine;
-                out += seg;
-                if (isCurrentLine) out += theme_.reset;
-                used += colCount(seg);
-            }
-            {
-                std::string_view seg = utf8::range(visible, visibleSc, visibleEc);
+    std::pair<int,int> visibleSel[2];
+    int visibleSelCount = 0;
+    for (int i = 0; i < mergedCount; ++i) {
+        auto p = merged[i];
+        int absoluteSc = utf8::columnOf(line, p.first);
+        int absoluteEc = utf8::columnOf(line, p.second);
+        if (absoluteEc <= absoluteVisStart || absoluteSc >= absoluteVisEnd) continue;
+        int visibleSc = std::max(absoluteSc, absoluteVisStart) - absoluteVisStart;
+        int visibleEc = std::min(absoluteEc, absoluteVisEnd) - absoluteVisStart;
+        if (visibleSc < visibleEc) visibleSel[visibleSelCount++] = {visibleSc, visibleEc};
+    }
+
+    struct SynVis { int s; int e; SyntaxToken tok; };
+    std::vector<SynVis> synVis;
+    synVis.reserve(spans.size());
+    for (auto& sp : spans) {
+        int aSc = utf8::columnOf(line, static_cast<int>(sp.begin));
+        int aEc = utf8::columnOf(line, static_cast<int>(sp.end));
+        if (aEc <= absoluteVisStart || aSc >= absoluteVisEnd) continue;
+        int vs = std::max(aSc, absoluteVisStart) - absoluteVisStart;
+        int ve = std::min(aEc, absoluteVisEnd) - absoluteVisStart;
+        if (vs < ve) synVis.push_back({vs, ve, sp.token});
+    }
+
+    if (visibleSelCount == 0 && synVis.empty()) {
+        renderPlainLine(out, theme_, visible, textWidth, isCurrentLine);
+        return;
+    }
+
+    std::vector<int> bounds;
+    bounds.reserve(2 + visibleSelCount*2 + synVis.size()*2 + 2);
+    bounds.push_back(0);
+    bounds.push_back(textWidth);
+    for (int i=0;i<visibleSelCount;++i){ bounds.push_back(visibleSel[i].first); bounds.push_back(visibleSel[i].second); }
+    for (auto& sv: synVis){ bounds.push_back(sv.s); bounds.push_back(sv.e); }
+    std::sort(bounds.begin(), bounds.end());
+    bounds.erase(std::unique(bounds.begin(), bounds.end()), bounds.end());
+    std::vector<int> clipped;
+    clipped.reserve(bounds.size());
+    for(int v: bounds) if(v>=0 && v<=textWidth) clipped.push_back(v);
+    bounds.swap(clipped);
+    if(bounds.empty()){ bounds.push_back(0); bounds.push_back(textWidth); }
+
+    int used = 0;
+    for (size_t i=0;i+1<bounds.size();++i){
+        int segS = bounds[i];
+        int segE = bounds[i+1];
+        if(segS>=segE) continue;
+        if(segS>=textWidth) break;
+        if(segE>textWidth) segE=textWidth;
+        bool inSel=false;
+        for(int k=0;k<visibleSelCount;++k) if(segS>=visibleSel[k].first && segS<visibleSel[k].second){ inSel=true; break; }
+        std::string_view seg = utf8::range(visible, segS, segE);
+        bool beyondContent = seg.empty() && segS >= colCount(visible);
+        if (beyondContent) continue;
+        if(inSel){
+            if(!seg.empty()){
                 out += theme_.selection;
                 out += seg;
                 out += theme_.reset;
                 used += colCount(seg);
             }
-            visibleCur = visibleEc;
-        }
-        if (visibleCur < textWidth) {
-            std::string_view tail = utf8::range(visible, visibleCur, textWidth);
-            if (isCurrentLine) out += theme_.currentLine;
-            out += tail;
-            if (isCurrentLine) {
-                used += colCount(tail);
-                for (int c = used; c < textWidth; ++c) out += ' ';
-                out += theme_.reset;
+        } else {
+            SyntaxToken tok=SyntaxToken::Keyword; bool hasSyn=false;
+            for(auto& sv: synVis) if(segS>=sv.s && segS<sv.e){ hasSyn=true; tok=sv.tok; break; }
+            if(seg.empty()) continue;
+            if(hasSyn){
+                const std::string& st = syntaxStyleFor(tok);
+                if(isCurrentLine){
+                    out += theme_.currentLine;
+                    if(!st.empty()) out += st;
+                    out += seg;
+                    out += theme_.reset;
+                } else {
+                    if(!st.empty()) out += st;
+                    out += seg;
+                    if(!st.empty()) out += theme_.reset;
+                }
+                used += colCount(seg);
+            } else {
+                if(isCurrentLine){
+                    out += theme_.currentLine;
+                    out += seg;
+                    out += theme_.reset;
+                } else {
+                    out += seg;
+                }
+                used += colCount(seg);
             }
-        } else if (isCurrentLine) {
-            for (int c = used; c < textWidth; ++c) out += ' ';
-            out += theme_.reset;
         }
-        return;
     }
-    out += renderGutterBlank(gutterW);
-    if (textWidth > 0) {
-        out += theme_.marker;
-        out += "~";
+    int visW = colCount(visible);
+    if (used < visW) used = visW;
+    if(isCurrentLine && used < textWidth){
+        out += theme_.currentLine;
+        for(int c=used;c<textWidth;++c) out+=' ';
         out += theme_.reset;
     }
 }
@@ -483,10 +597,19 @@ void Renderer::renderEditorContent(std::string& out,
                              const Rect& area,
                              int gutterW) const {
     int textWidth = std::max(0, area.width - gutterW);
+    SyntaxState state = syntaxStateAt(doc, viewport.top);
+    std::vector<SyntaxSpan> spans;
     for (int row = 0; row < area.height; ++row) {
         int docLine = viewport.top + row;
         out += "\x1b[K";
-        renderEditorRow(out, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth);
+        if (docLine < doc.lineCount()) {
+            SyntaxState nxt;
+            syntaxHighlighter_.highlight(doc.lineAt(docLine), state, nxt, spans);
+            renderEditorRow(out, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth, spans);
+            state = nxt;
+        } else {
+            renderEditorRow(out, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth, {});
+        }
         out += "\r\n";
     }
 }
@@ -559,6 +682,7 @@ void Renderer::rebuildCache(const Document& doc, const Cursor& cursor, const Vie
                             const std::string& filename, bool modified, const Message& message,
                             State state, const std::optional<Selection>& selection,
                             const std::optional<Selection>& searchHighlight) {
+    updateSyntaxLanguage(filename);
     const EditorGeometry g = editorGeometry(doc, viewport);
     const int contentH = g.layout.content.height;
     const int gutterW = g.gutterW;
@@ -567,10 +691,19 @@ void Renderer::rebuildCache(const Document& doc, const Cursor& cursor, const Vie
     std::optional<Normalized> searchSel = searchHighlight.has_value() ? normalize(*searchHighlight) : std::nullopt;
 
     rowCache_.clear();
+    SyntaxState cstate = syntaxStateAt(doc, viewport.top);
+    std::vector<SyntaxSpan> spans;
     for (int row = 0; row < contentH; ++row) {
+        int dl = viewport.top + row;
         std::string full = "\x1b[K";
-        renderEditorRow(full, doc, cursor, viewport, sel, searchSel,
-                        viewport.top + row, gutterW, textWidth);
+        if (dl < doc.lineCount()) {
+            SyntaxState nxt;
+            syntaxHighlighter_.highlight(doc.lineAt(dl), cstate, nxt, spans);
+            renderEditorRow(full, doc, cursor, viewport, sel, searchSel, dl, gutterW, textWidth, spans);
+            cstate = nxt;
+        } else {
+            renderEditorRow(full, doc, cursor, viewport, sel, searchSel, dl, gutterW, textWidth, {});
+        }
         rowCache_.push_back(std::move(full));
     }
 
@@ -591,6 +724,7 @@ void Renderer::rebuildCache(const Document& doc, const Cursor& cursor, const Vie
 std::string Renderer::buildCursorMoveFrame(const Document& doc, const Cursor& cursor,
                                            const Viewport& viewport, const std::string& filename,
                                            bool modified, const Message& message, State state) {
+    updateSyntaxLanguage(filename);
     const EditorGeometry g = editorGeometry(doc, viewport);
     const Layout& layout = g.layout;
     const int contentH = layout.content.height;
@@ -696,6 +830,7 @@ std::string Renderer::buildScrollFrame(const Document& doc, const Cursor& cursor
                                         const std::optional<Selection>& selection,
                                         const std::optional<Selection>& searchHighlight,
                                         int deltaTop) {
+    updateSyntaxLanguage(filename);
     const EditorGeometry g = editorGeometry(doc, viewport);
     const int contentH = g.layout.content.height;
     const int absDelta = std::abs(deltaTop);
@@ -775,6 +910,7 @@ std::string Renderer::buildDiffFrame(const Document& doc,
                                        State state,
                                        const std::optional<Selection>& selection,
                                        const std::optional<Selection>& searchHighlight) {
+    updateSyntaxLanguage(filename);
     const Layout layout = calculateLayout(viewport.height, viewport.width);
     const int contentH = layout.content.height;
 

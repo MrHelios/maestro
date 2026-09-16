@@ -13,6 +13,9 @@
 #include "ui/EditorState.h"
 #include "ui/Message.h"
 #include "ui/StatusBar.h"
+#include "syntax/SyntaxHighlighter.h"
+#include "syntax/SyntaxLanguage.h"
+#include "syntax/SyntaxSpan.h"
 
 class Renderer {
 public:
@@ -99,21 +102,27 @@ public:
 
 private:
     Theme theme_ = defaultTheme();
+    mutable SyntaxHighlighter syntaxHighlighter_;
+    // Mutable cache: syntax state is derived from Document::version()
+    // and language; rebuilding it does not change rendering semantics.
+    mutable std::vector<SyntaxState> syntaxStates_;
+    mutable uint64_t syntaxStatesVersion_ = UINT64_MAX;
+    mutable SyntaxLanguage syntaxStatesLang_ = SyntaxLanguage::None;
 
-    std::deque<std::string> rowCache_;   // una entrada por fila de contenido: "\x1b[K" + bytes
-    std::string statusCache_;            // status bar cacheado, filas separadas por "\r\n"
-    bool hasCache_ = false;
-    int cachedContentH_ = -1;
-    int lastViewportW_ = -1;
-    int lastViewportH_ = -1;
-    int lastViewportTop_ = 0;
-    int lastViewportLeft_ = 0;
-    int lastCursorLine_ = 0;
-    int lastCursorCol_ = 0;
-    uint64_t lastVersion_ = 0;
-    int lastLineCount_ = 0;
-    StatusBarData lastStatusData_;
-    bool hasLastStatusData_ = false;
+    mutable std::deque<std::string> rowCache_;   // una entrada por fila de contenido: "\x1b[K" + bytes
+    mutable std::string statusCache_;            // status bar cacheado, filas separadas por "\r\n"
+    mutable bool hasCache_ = false;
+    mutable int cachedContentH_ = -1;
+    mutable int lastViewportW_ = -1;
+    mutable int lastViewportH_ = -1;
+    mutable int lastViewportTop_ = 0;
+    mutable int lastViewportLeft_ = 0;
+    mutable int lastCursorLine_ = 0;
+    mutable int lastCursorCol_ = 0;
+    mutable uint64_t lastVersion_ = 0;
+    mutable int lastLineCount_ = 0;
+    mutable StatusBarData lastStatusData_;
+    mutable bool hasLastStatusData_ = false;
 
     Layout calculateLayout(int contentRows, int width) const;
 
@@ -144,6 +153,20 @@ private:
                          int docLine,
                          int gutterW,
                          int textWidth) const;
+    void renderEditorRow(std::string& out,
+                         const Document& doc,
+                         const Cursor& cursor,
+                         const Viewport& viewport,
+                         const std::optional<Normalized>& sel,
+                         const std::optional<Normalized>& searchSel,
+                         int docLine,
+                         int gutterW,
+                         int textWidth,
+                         const std::vector<SyntaxSpan>& spans) const;
+
+    SyntaxState syntaxStateAt(const Document& doc, int targetLine) const;
+    void updateSyntaxLanguage(const std::string& filename) const;
+    const std::string& syntaxStyleFor(SyntaxToken tok) const;
 
     void renderBufferListContent(std::string& out,
                                   const std::vector<std::string>& names,

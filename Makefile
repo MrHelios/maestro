@@ -14,7 +14,7 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -I. -MMD -MP -pthread
 # DENTRO de build/ evita que colisione en el filesystem con ese script.
 BIN := build/maestro
 # Program sources por capa (modelo / ui / terminal / clipboard / filesystem).
-SRC := $(wildcard core/*.cpp ui/*.cpp terminal/*.cpp clipboard/*.cpp filesystem/*.cpp)
+SRC := $(wildcard core/*.cpp ui/*.cpp terminal/*.cpp clipboard/*.cpp filesystem/*.cpp syntax/*.cpp)
 
 # --- Tests ---
 # Los tests se agrupan por nivel: unit/ (core puro), interaction/ (usan
@@ -113,6 +113,9 @@ build/%.o: terminal/%.cpp | build
 build/%.o: filesystem/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+build/%.o: syntax/%.cpp | build
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
 build/%.o: tests/%.cpp | build
 	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
 
@@ -150,6 +153,9 @@ build-san/%.o: terminal/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
 build-san/%.o: filesystem/%.cpp | build-san
+	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
+
+build-san/%.o: syntax/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
 build-san/%.o: tests/%.cpp | build-san
