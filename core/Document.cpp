@@ -19,12 +19,12 @@ Document::Document() : instanceId_(s_nextInstanceId.fetch_add(1, std::memory_ord
 }
 
 Document::Document(const Document& other)
-    : lines_(other.lines_),
+    : instanceId_(s_nextInstanceId.fetch_add(1, std::memory_order_relaxed)),
+      lines_(other.lines_),
       touchedCallback_(other.touchedCallback_),
       version_(other.version_),
       lineEnding_(other.lineEnding_),
-      endsWithNewline_(other.endsWithNewline_),
-      instanceId_(s_nextInstanceId.fetch_add(1, std::memory_order_relaxed)) {}
+      endsWithNewline_(other.endsWithNewline_) {}
 
 Document& Document::operator=(const Document& other) {
     if (this != &other) {
@@ -40,12 +40,12 @@ Document& Document::operator=(const Document& other) {
 }
 
 Document::Document(Document&& other) noexcept
-    : lines_(std::move(other.lines_)),
+    : instanceId_(other.instanceId_),
+      lines_(std::move(other.lines_)),
       touchedCallback_(std::move(other.touchedCallback_)),
       version_(other.version_),
       lineEnding_(other.lineEnding_),
-      endsWithNewline_(other.endsWithNewline_),
-      instanceId_(other.instanceId_) {
+      endsWithNewline_(other.endsWithNewline_) {
     other.version_ = 0;
     other.instanceId_ = s_nextInstanceId.fetch_add(1, std::memory_order_relaxed);
 }
