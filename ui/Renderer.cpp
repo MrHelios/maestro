@@ -211,6 +211,18 @@ const std::string& Renderer::syntaxStyleFor(SyntaxToken tok) const {
     return rendererSyntaxStyleFor(theme_, tok);
 }
 
+void Renderer::normalizeBracketPair(const std::optional<BracketPair>& pair,
+                                    std::optional<Normalized>& outOpen,
+                                    std::optional<Normalized>& outClose) {
+    outOpen = std::nullopt;
+    outClose = std::nullopt;
+    if (!pair) return;
+    Selection so{pair->open, {pair->open.line, pair->open.col + 1}};
+    Selection sc{pair->close, {pair->close.line, pair->close.col + 1}};
+    outOpen = normalize(so);
+    outClose = normalize(sc);
+}
+
 SyntaxState Renderer::syntaxStateAt(const Document& doc, int targetLine) const {
     SyntaxState init;
     init.inBlockComment = false;
@@ -252,12 +264,13 @@ std::string Renderer::buildScreen(const Document& doc,
                                    const Message& message,
                                    State state,
                                    const std::optional<Selection>& selection,
-                                   const std::optional<Selection>& searchHighlight) {
+                                   const std::optional<Selection>& searchHighlight,
+                                   const std::optional<BracketPair>& bracketPair) {
     updateSyntaxLanguage(filename);
     std::string out;
     beginFrame(out);
     out += buildEditorBody(doc, cursor, viewport, filename, modified, message,
-                           state, selection, searchHighlight);
+                           state, selection, searchHighlight, bracketPair);
     if (state == State::Busqueda) {
         return out;
     }
@@ -285,15 +298,18 @@ std::string Renderer::buildEditorBody(const Document& doc,
                                        const Message& message,
                                        State state,
                                        const std::optional<Selection>& selection,
-                                       const std::optional<Selection>& searchHighlight) const {
+                                       const std::optional<Selection>& searchHighlight,
+                                       const std::optional<BracketPair>& bracketPair) const {
     updateSyntaxLanguage(filename);
     std::string out;
     std::optional<Normalized> sel = selection.has_value() ? normalize(*selection)
                                                           : std::nullopt;
     std::optional<Normalized> searchSel = searchHighlight.has_value() ? normalize(*searchHighlight)
                                                                       : std::nullopt;
+    std::optional<Normalized> bracketOpen, bracketClose;
+    normalizeBracketPair(bracketPair, bracketOpen, bracketClose);
     const EditorGeometry g = editorGeometry(doc, viewport);
-    renderEditorContent(out, doc, cursor, viewport, sel, searchSel, g.layout.content,
+    renderEditorContent(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, g.layout.content,
                         g.gutterW);
     const auto presentation = statePresentation(theme_, state);
     StatusBarData data =
@@ -382,7 +398,7 @@ void Renderer::renderEditorContent(std::string& out,
                              const std::optional<Normalized>& sel,
                              const Rect& area,
                              int gutterW) const {
-    renderEditorContent(out, doc, cursor, viewport, sel, std::nullopt, area, gutterW);
+    renderEditorContent(out, doc, cursor, viewport, sel, std::nullopt, std::nullopt, std::nullopt, area, gutterW);
 }
 
 void Renderer::renderEditorRow(std::string& out,
@@ -391,6 +407,8 @@ void Renderer::renderEditorRow(std::string& out,
                              const Viewport& viewport,
                              const std::optional<Normalized>& sel,
                              const std::optional<Normalized>& searchSel,
+                             const std::optional<Normalized>& bracketOpen,
+                             const std::optional<Normalized>& bracketClose,
                              int docLine,
                              int gutterW,
                              int textWidth) const {
@@ -407,7 +425,7 @@ void Renderer::renderEditorRow(std::string& out,
     SyntaxState nxt;
     std::vector<SyntaxSpan> spans;
     syntaxHighlighter_.highlight(doc.lineAt(docLine), st, nxt, spans);
-    renderEditorRow(out, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth, spans);
+    renderEditorRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, docLine, gutterW, textWidth, spans);
 }
 
 void Renderer::renderEditorRow(std::string& out,
@@ -416,6 +434,8 @@ void Renderer::renderEditorRow(std::string& out,
                              const Viewport& viewport,
                              const std::optional<Normalized>& sel,
                              const std::optional<Normalized>& searchSel,
+                             const std::optional<Normalized>& bracketOpen,
+                             const std::optional<Normalized>& bracketClose,
                              int docLine,
                              int gutterW,
                              int textWidth,
@@ -451,6 +471,19 @@ void Renderer::renderEditorRow(std::string& out,
     };
     addInterval(sel);
     addInterval(searchSel);
+
+    // brackets: two 1-char intervals (open/close)
+    std::pair<int,int> bracketIntervals[2];
+    int bracketCount = 0;
+    auto addBracket = [&](const std::optional<Normalized>& nrm) {
+        if (!nrm.has_value()) return;
+        if (docLine < nrm->start.line || docLine > nrm->end.line) return;
+        if (nrm->start.line == nrm->end.line) {
+            bracketIntervals[bracketCount++] = {nrm->start.col, nrm->end.col};
+        }
+    };
+    addBracket(bracketOpen);
+    addBracket(bracketClose);
 
     auto isLineBreak = [&](const std::optional<Normalized>& nrm) -> bool {
         if (!nrm.has_value() || !line.empty()) return false;
@@ -498,6 +531,18 @@ void Renderer::renderEditorRow(std::string& out,
         if (visibleSc < visibleEc) visibleSel[visibleSelCount++] = {visibleSc, visibleEc};
     }
 
+    std::pair<int,int> visibleBracket[2];
+    int visibleBracketCount = 0;
+    for (int i=0;i<bracketCount;++i){
+        auto p = bracketIntervals[i];
+        int absoluteSc = utf8::columnOf(line, p.first);
+        int absoluteEc = utf8::columnOf(line, p.second);
+        if (absoluteEc <= absoluteVisStart || absoluteSc >= absoluteVisEnd) continue;
+        int visibleSc = std::max(absoluteSc, absoluteVisStart) - absoluteVisStart;
+        int visibleEc = std::min(absoluteEc, absoluteVisEnd) - absoluteVisStart;
+        if (visibleSc < visibleEc) visibleBracket[visibleBracketCount++] = {visibleSc, visibleEc};
+    }
+
     struct SynVis { int s; int e; SyntaxToken tok; };
     std::vector<SynVis> synVis;
     synVis.reserve(spans.size());
@@ -510,19 +555,18 @@ void Renderer::renderEditorRow(std::string& out,
         if (vs < ve) synVis.push_back({vs, ve, sp.token});
     }
 
-    if (visibleSelCount == 0 && synVis.empty()) {
+    if (visibleSelCount == 0 && visibleBracketCount == 0 && synVis.empty()) {
         renderPlainLine(out, theme_, visible, textWidth, isCurrentLine);
         return;
     }
 
-    // Estrategia: los breakpoints se arman a partir de los rangos de selección
-    // y de los spans de sintaxis; al iterar por segmentos la selección tiene
-    // prioridad visual sobre el color de sintaxis.
+    // Estrategia: breakpoints de selección, bracket y sintaxis; prioridad: selección > bracket > sintaxis
     std::vector<int> bounds;
-    bounds.reserve(2 + visibleSelCount*2 + synVis.size()*2 + 2);
+    bounds.reserve(2 + visibleSelCount*2 + visibleBracketCount*2 + synVis.size()*2 + 2);
     bounds.push_back(0);
     bounds.push_back(textWidth);
     for (int i=0;i<visibleSelCount;++i){ bounds.push_back(visibleSel[i].first); bounds.push_back(visibleSel[i].second); }
+    for (int i=0;i<visibleBracketCount;++i){ bounds.push_back(visibleBracket[i].first); bounds.push_back(visibleBracket[i].second); }
     for (auto& sv: synVis){ bounds.push_back(sv.s); bounds.push_back(sv.e); }
     std::sort(bounds.begin(), bounds.end());
     bounds.erase(std::unique(bounds.begin(), bounds.end()), bounds.end());
@@ -541,12 +585,21 @@ void Renderer::renderEditorRow(std::string& out,
         if(segE>textWidth) segE=textWidth;
         bool inSel=false;
         for(int k=0;k<visibleSelCount;++k) if(segS>=visibleSel[k].first && segS<visibleSel[k].second){ inSel=true; break; }
+        bool inBracket=false;
+        if (!inSel) for(int k=0;k<visibleBracketCount;++k) if(segS>=visibleBracket[k].first && segS<visibleBracket[k].second){ inBracket=true; break; }
         std::string_view seg = utf8::range(visible, segS, segE);
         bool beyondContent = seg.empty() && segS >= colCount(visible);
         if (beyondContent) continue;
         if(inSel){
             if(!seg.empty()){
                 out += theme_.selection;
+                out += seg;
+                out += theme_.reset;
+                used += colCount(seg);
+            }
+        } else if(inBracket){
+            if(!seg.empty()){
+                out += theme_.bracketMatch;
                 out += seg;
                 out += theme_.reset;
                 used += colCount(seg);
@@ -595,6 +648,8 @@ void Renderer::renderEditorContent(std::string& out,
                              const Viewport& viewport,
                              const std::optional<Normalized>& sel,
                              const std::optional<Normalized>& searchSel,
+                             const std::optional<Normalized>& bracketOpen,
+                             const std::optional<Normalized>& bracketClose,
                              const Rect& area,
                              int gutterW) const {
     int textWidth = std::max(0, area.width - gutterW);
@@ -606,10 +661,10 @@ void Renderer::renderEditorContent(std::string& out,
         if (docLine < doc.lineCount()) {
             SyntaxState nxt;
             syntaxHighlighter_.highlight(doc.lineAt(docLine), state, nxt, spans);
-            renderEditorRow(out, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth, spans);
+            renderEditorRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, docLine, gutterW, textWidth, spans);
             state = nxt;
         } else {
-            renderEditorRow(out, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth, {});
+            renderEditorRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, docLine, gutterW, textWidth, {});
         }
         out += "\r\n";
     }
@@ -628,13 +683,15 @@ void Renderer::renderStatusBar(std::string& out,
 
 bool Renderer::patchContentRow(std::string& out, const Document& doc, const Cursor& cursor,
                                const Viewport& viewport, const std::optional<Normalized>& sel,
-                               const std::optional<Normalized>& searchSel, int docLine,
+                               const std::optional<Normalized>& searchSel,
+                               const std::optional<Normalized>& bracketOpen,
+                               const std::optional<Normalized>& bracketClose, int docLine,
                                int gutterW, int textWidth, int contentH) {
     const int row = docLine - viewport.top;
     if (row < 0 || row >= contentH || row >= static_cast<int>(rowCache_.size())) return false;
     std::string full;
     full += "\x1b[K";
-    renderEditorRow(full, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth);
+    renderEditorRow(full, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, docLine, gutterW, textWidth);
     // rowCache_ stores the exact terminal sequence used to paint each content
     // row, including the leading CSI K clear-line command. Therefore equality
     // with `full` is sufficient to know whether the row needs repainting.
@@ -682,7 +739,8 @@ void Renderer::patchStatusBar(std::string& out, const Document& doc, const Curso
 void Renderer::rebuildCache(const Document& doc, const Cursor& cursor, const Viewport& viewport,
                             const std::string& filename, bool modified, const Message& message,
                             State state, const std::optional<Selection>& selection,
-                            const std::optional<Selection>& searchHighlight) {
+                            const std::optional<Selection>& searchHighlight,
+                            const std::optional<BracketPair>& bracketPair) {
     updateSyntaxLanguage(filename);
     const EditorGeometry g = editorGeometry(doc, viewport);
     const int contentH = g.layout.content.height;
@@ -690,6 +748,8 @@ void Renderer::rebuildCache(const Document& doc, const Cursor& cursor, const Vie
     const int textWidth = std::max(0, g.layout.content.width - gutterW);
     std::optional<Normalized> sel = selection.has_value() ? normalize(*selection) : std::nullopt;
     std::optional<Normalized> searchSel = searchHighlight.has_value() ? normalize(*searchHighlight) : std::nullopt;
+    std::optional<Normalized> bracketOpen, bracketClose;
+    normalizeBracketPair(bracketPair, bracketOpen, bracketClose);
 
     rowCache_.clear();
     SyntaxState cstate = syntaxStateAt(doc, viewport.top);
@@ -700,10 +760,10 @@ void Renderer::rebuildCache(const Document& doc, const Cursor& cursor, const Vie
         if (dl < doc.lineCount()) {
             SyntaxState nxt;
             syntaxHighlighter_.highlight(doc.lineAt(dl), cstate, nxt, spans);
-            renderEditorRow(full, doc, cursor, viewport, sel, searchSel, dl, gutterW, textWidth, spans);
+            renderEditorRow(full, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, dl, gutterW, textWidth, spans);
             cstate = nxt;
         } else {
-            renderEditorRow(full, doc, cursor, viewport, sel, searchSel, dl, gutterW, textWidth, {});
+            renderEditorRow(full, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, dl, gutterW, textWidth, {});
         }
         rowCache_.push_back(std::move(full));
     }
@@ -720,6 +780,8 @@ void Renderer::rebuildCache(const Document& doc, const Cursor& cursor, const Vie
     cachedContentH_ = contentH;
     lastVersion_ = doc.version();
     lastLineCount_ = doc.lineCount();
+    lastBracketPair_ = bracketPair;
+    hasLastBracketPair_ = true;
 }
 
 std::string Renderer::buildCursorMoveFrame(const Document& doc, const Cursor& cursor,
@@ -735,14 +797,16 @@ std::string Renderer::buildCursorMoveFrame(const Document& doc, const Cursor& cu
     const int textWidth = std::max(0, layout.content.width - gutterW);
     const std::optional<Normalized> sel = std::nullopt;
     const std::optional<Normalized> searchSel = std::nullopt;
+    const std::optional<Normalized> bracketOpen = std::nullopt;
+    const std::optional<Normalized> bracketClose = std::nullopt;
 
     std::string out;
     hideCursor(out);
     if (lastCursorLine_ == cursor.line) {
-        patchContentRow(out, doc, cursor, viewport, sel, searchSel, cursor.line, gutterW, textWidth, contentH);
+        patchContentRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, cursor.line, gutterW, textWidth, contentH);
     } else {
-        patchContentRow(out, doc, cursor, viewport, sel, searchSel, lastCursorLine_, gutterW, textWidth, contentH);
-        patchContentRow(out, doc, cursor, viewport, sel, searchSel, cursor.line, gutterW, textWidth, contentH);
+        patchContentRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, lastCursorLine_, gutterW, textWidth, contentH);
+        patchContentRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, cursor.line, gutterW, textWidth, contentH);
     }
     patchStatusBar(out, doc, cursor, filename, modified, message, state, layout, contentH);
 
@@ -785,9 +849,10 @@ void Renderer::renderScreen(const Document& doc,
                              const Message& message,
                              State state,
                              const std::optional<Selection>& selection,
-                             const std::optional<Selection>& searchHighlight) {
+                             const std::optional<Selection>& searchHighlight,
+                             const std::optional<BracketPair>& bracketPair) {
     std::string buffer = buildScreen(doc, cursor, viewport, filename,
-                                     modified, message, state, selection, searchHighlight);
+                                     modified, message, state, selection, searchHighlight, bracketPair);
     writeAll(STDOUT_FILENO, buffer);
 }
 
@@ -816,9 +881,10 @@ void Renderer::renderScreenDiff(const Document& doc,
                                   const Message& message,
                                   State state,
                                   const std::optional<Selection>& selection,
-                                  const std::optional<Selection>& searchHighlight) {
+                                  const std::optional<Selection>& searchHighlight,
+                                  const std::optional<BracketPair>& bracketPair) {
     const std::string out = buildDiffFrame(doc, cursor, viewport, filename,
-                                             modified, message, state, selection, searchHighlight);
+                                             modified, message, state, selection, searchHighlight, bracketPair);
     if (!writeAll(STDOUT_FILENO, out)) hasCache_ = false;
 }
 
@@ -830,6 +896,7 @@ std::string Renderer::buildScrollFrame(const Document& doc, const Cursor& cursor
                                         bool modified, const Message& message, State state,
                                         const std::optional<Selection>& selection,
                                         const std::optional<Selection>& searchHighlight,
+                                        const std::optional<BracketPair>& bracketPair,
                                         int deltaTop) {
     updateSyntaxLanguage(filename);
     const EditorGeometry g = editorGeometry(doc, viewport);
@@ -842,6 +909,8 @@ std::string Renderer::buildScrollFrame(const Document& doc, const Cursor& cursor
     const int textWidth = std::max(0, g.layout.content.width - gutterW);
     std::optional<Normalized> sel = selection.has_value() ? normalize(*selection) : std::nullopt;
     std::optional<Normalized> searchSel = searchHighlight.has_value() ? normalize(*searchHighlight) : std::nullopt;
+    std::optional<Normalized> bracketOpen, bracketClose;
+    normalizeBracketPair(bracketPair, bracketOpen, bracketClose);
 
     std::string out;
     hideCursor(out);
@@ -858,7 +927,7 @@ std::string Renderer::buildScrollFrame(const Document& doc, const Cursor& cursor
         for (int i = 0; i < absDelta; ++i) {
             const int docLine = viewport.top + contentH - absDelta + i;
             std::string full = "\x1b[K";
-            renderEditorRow(full, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth);
+            renderEditorRow(full, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, docLine, gutterW, textWidth);
             rowCache_.push_back(std::move(full));
         }
         for (int i = 0; i < absDelta; ++i) {
@@ -872,7 +941,7 @@ std::string Renderer::buildScrollFrame(const Document& doc, const Cursor& cursor
         for (int i = 0; i < absDelta; ++i) {
             const int docLine = viewport.top + absDelta - 1 - i;
             std::string full = "\x1b[K";
-            renderEditorRow(full, doc, cursor, viewport, sel, searchSel, docLine, gutterW, textWidth);
+            renderEditorRow(full, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, docLine, gutterW, textWidth);
             rowCache_.push_front(std::move(full));
         }
         for (int i = 0; i < absDelta; ++i) {
@@ -883,10 +952,10 @@ std::string Renderer::buildScrollFrame(const Document& doc, const Cursor& cursor
     }
 
     if (lastCursorLine_ == cursor.line) {
-        patchContentRow(out, doc, cursor, viewport, sel, searchSel, cursor.line, gutterW, textWidth, contentH);
+        patchContentRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, cursor.line, gutterW, textWidth, contentH);
     } else {
-        patchContentRow(out, doc, cursor, viewport, sel, searchSel, lastCursorLine_, gutterW, textWidth, contentH);
-        patchContentRow(out, doc, cursor, viewport, sel, searchSel, cursor.line, gutterW, textWidth, contentH);
+        patchContentRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, lastCursorLine_, gutterW, textWidth, contentH);
+        patchContentRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, cursor.line, gutterW, textWidth, contentH);
     }
     patchStatusBar(out, doc, cursor, filename, modified, message, state, g.layout, contentH);
 
@@ -910,14 +979,18 @@ std::string Renderer::buildDiffFrame(const Document& doc,
                                        const Message& message,
                                        State state,
                                        const std::optional<Selection>& selection,
-                                       const std::optional<Selection>& searchHighlight) {
+                                       const std::optional<Selection>& searchHighlight,
+                                       const std::optional<BracketPair>& bracketPair) {
     updateSyntaxLanguage(filename);
     const Layout layout = calculateLayout(viewport.height, viewport.width);
     const int contentH = layout.content.height;
 
+    bool bracketChanged = false;
+    if (!hasLastBracketPair_) bracketChanged = true;
+    else if (lastBracketPair_ != bracketPair) bracketChanged = true;
     if (!hasCache_ || viewport.width != lastViewportW_ || viewport.height != lastViewportH_
-        || cachedContentH_ != contentH) {
-        rebuildCache(doc, cursor, viewport, filename, modified, message, state, selection, searchHighlight);
+        || cachedContentH_ != contentH || bracketChanged) {
+        rebuildCache(doc, cursor, viewport, filename, modified, message, state, selection, searchHighlight, bracketPair);
         lastViewportW_ = viewport.width;
         lastViewportH_ = viewport.height;
         updateCacheState(viewport, cursor, doc);
@@ -936,7 +1009,7 @@ std::string Renderer::buildDiffFrame(const Document& doc,
 
     const int deltaTop = viewport.top - lastViewportTop_;
     const int deltaLeft = viewport.left - lastViewportLeft_;
-    const bool noHighlight = !selection.has_value() && !searchHighlight.has_value();
+    const bool noHighlight = !selection.has_value() && !searchHighlight.has_value() && !bracketPair.has_value();
 
     // Fast scroll path:
     // - only one-row vertical scroll;
@@ -947,7 +1020,7 @@ std::string Renderer::buildDiffFrame(const Document& doc,
     if ((deltaTop == 1 || deltaTop == -1) && deltaLeft == 0 && noHighlight) {
         const std::string scrollFrame = buildScrollFrame(doc, cursor, viewport, filename,
                                                          modified, message, state,
-                                                         selection, searchHighlight,
+                                                         selection, searchHighlight, bracketPair,
                                                          deltaTop);
         if (!scrollFrame.empty()) return scrollFrame;
     }
@@ -964,10 +1037,10 @@ std::string Renderer::buildDiffFrame(const Document& doc,
         }
     }
 
-    // Camino lento: selección/búsqueda activa, o los caminos rápidos declinaron.
+    // Camino lento: selección/búsqueda/bracket activa, o los caminos rápidos declinaron.
     const std::string fresh = buildEditorBody(doc, cursor, viewport, filename,
                                               modified, message, state,
-                                              selection, searchHighlight);
+                                              selection, searchHighlight, bracketPair);
     std::vector<std::string_view> newRows;
     splitRows(fresh, &newRows);
     std::vector<std::string_view> oldStatusRows;
@@ -1003,6 +1076,8 @@ std::string Renderer::buildDiffFrame(const Document& doc,
         lastStatusData_ = data;
         hasLastStatusData_ = true;
     }
+    lastBracketPair_ = bracketPair;
+    hasLastBracketPair_ = true;
 
     if (state == State::Busqueda) {
         updateCacheState(viewport, cursor, doc);

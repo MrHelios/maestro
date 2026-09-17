@@ -419,6 +419,33 @@ void Editor::registerCommands() {
     commands_.registerCommand("theme.toggle", [this] {
         toggleTheme();
     });
+    commands_.registerCommand("bracket.jump", [this] {
+        if (!bracketPair_) {
+            setActionMessage("Sin bracket.", MessageKind::Warning);
+            state_ = priorState_;
+            return;
+        }
+        Position target;
+        if (nextBracketJump_ == BracketJumpTarget::Open) {
+            target = bracketPair_->open;
+        } else {
+            target = bracketPair_->close;
+        }
+        Buffer& b = active();
+        b.cursor.line = target.line;
+        b.cursor.col = target.col;
+        b.cursor.clampToLine(b.document);
+        centerViewportOnCursor();
+        clearSelection();
+        // invert toggle
+        nextBracketJump_ = (nextBracketJump_ == BracketJumpTarget::Open)
+                               ? BracketJumpTarget::Close
+                               : BracketJumpTarget::Open;
+        bracketJumpPendingPreserve_ = true;
+        refreshBracketAfterJump();
+        state_ = priorState_;
+        setActionMessage("Bracket.", MessageKind::Info);
+    });
 }
 
 bool Editor::isDirectory(const std::string& path) {
@@ -889,6 +916,15 @@ void Editor::renderFrame() {
                                  fileBrowser.path_, statusMessage_,
                                  b.viewport.width, b.viewport.height);
     } else {
+        // Bracket highlight: viewport-independent, preserve toggle if just jumped
+        // Siempre visible (incluso dentro del rango), excepto en modo Seleccion donde se oculta pero el comando sigue activo
+        if (bracketJumpPendingPreserve_) {
+            refreshBracketAfterJump();
+            bracketJumpPendingPreserve_ = false;
+        } else {
+            updateBracketHighlight();
+        }
+        std::optional<BracketPair> toRender = (state_ == State::Seleccion) ? std::nullopt : bracketPair_;
         if (suppressScrollToCursor_) {
             suppressScrollToCursor_ = false;
         } else {
@@ -896,7 +932,7 @@ void Editor::renderFrame() {
         }
         renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
                                    b.filename, b.modified, statusMessage_,
-                                   state_, b.selection, searchHighlight_);
+                                   state_, b.selection, searchHighlight_, toRender);
     }
 }
 
@@ -1461,6 +1497,10 @@ void Editor::handlePrefixKey(const Event& event) {
             }
             if (event.text == "l" || event.text == "L") { // Ctrl+K l: alternar tema claro/oscuro
                 commands_.execute("theme.toggle");
+                break;
+            }
+            if (event.text == "m" || event.text == "M") { // Ctrl+K m: salto bracket
+                commands_.execute("bracket.jump");
                 break;
             }
             // Cualquier otra letra: cae en el cancel del default.
@@ -2036,4 +2076,58 @@ void Editor::handleIrAFilaEvent(const Event& event) {
             // Cualquier otra tecla es no-op (se descarta)
             break;
     }
+}
+
+void Editor::updateBracketHighlight() {
+    Buffer& b = active();
+    Position cur{b.cursor.line, b.cursor.col};
+    // Fast path: nada cambió -> evitar scan completo + allocations de sintaxis
+    if (cur == lastBracketCursor_ && b.document.version() == lastBracketVersion_ && &b.document == lastBracketDoc_) {
+        return;
+    }
+    SyntaxLanguage lang = languageFromFilename(b.filename);
+    if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
+    auto p = findMatchingBracket(b.document, cur, lang);
+    if (!p) {
+        bracketPair_.reset();
+        nextBracketJump_ = BracketJumpTarget::Open;
+        lastBracketCursor_ = cur;
+        lastBracketVersion_ = b.document.version();
+        lastBracketDoc_ = &b.document;
+        return;
+    }
+    bool samePair = bracketPair_ && *bracketPair_ == *p;
+    bool cursorMoved = (lastBracketCursor_.line != cur.line || lastBracketCursor_.col != cur.col);
+    if (!bracketPair_ || !samePair) {
+        bracketPair_ = p;
+        nextBracketJump_ = BracketJumpTarget::Open;
+    } else {
+        // same pair
+        if (cursorMoved) nextBracketJump_ = BracketJumpTarget::Open;
+        bracketPair_ = p;
+    }
+    lastBracketCursor_ = cur;
+    lastBracketVersion_ = b.document.version();
+    lastBracketDoc_ = &b.document;
+}
+
+void Editor::refreshBracketAfterJump() {
+    Buffer& b = active();
+    Position cur{b.cursor.line, b.cursor.col};
+    SyntaxLanguage lang = languageFromFilename(b.filename);
+    if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
+    auto p = findMatchingBracket(b.document, cur, lang);
+    if (!p) {
+        bracketPair_.reset();
+        nextBracketJump_ = BracketJumpTarget::Open;
+        lastBracketCursor_ = cur;
+        lastBracketVersion_ = b.document.version();
+        lastBracketDoc_ = &b.document;
+        return;
+    }
+    bracketPair_ = p;
+    lastBracketCursor_ = cur;
+    lastBracketVersion_ = b.document.version();
+    lastBracketDoc_ = &b.document;
+    // keep nextBracketJump_ as toggled (do not reset)
 }

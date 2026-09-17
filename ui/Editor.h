@@ -1,11 +1,13 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include "core/BracketMatcher.h"
 #include "core/Buffer.h"
 #include "core/BufferManager.h"
 #include "clipboard/SystemClipboard.h"
@@ -231,6 +233,17 @@ private:
     std::string goToLineQuery_;
     void startGoToLine();
     void handleIrAFilaEvent(const Event& event);
+
+    // ---- Bracket matching (feature h) ----
+    std::optional<BracketPair> bracketPair_;
+    enum class BracketJumpTarget { Open, Close };
+    BracketJumpTarget nextBracketJump_ = BracketJumpTarget::Open;
+    bool bracketJumpPendingPreserve_ = false;
+    Position lastBracketCursor_{-1, -1};
+    std::uint64_t lastBracketVersion_{UINT64_MAX};
+    const Document* lastBracketDoc_{nullptr};
+    void updateBracketHighlight();
+    void refreshBracketAfterJump();
 
     // ---- Seleccion total ('a') ----
     // Nota: selectAllActive_/selectAllPrevious_ viven en el Buffer (cada

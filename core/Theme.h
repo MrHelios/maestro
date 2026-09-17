@@ -68,6 +68,7 @@ struct Theme {
     std::string syntaxCharacter;
     std::string syntaxNumber;
     std::string syntaxComment;
+    std::string bracketMatch;
 };
 
 // ---------------------------------------------------------------------------
@@ -128,6 +129,7 @@ inline constexpr const char* kSyntaxString       = "\x1b[38;5;114m";
 inline constexpr const char* kSyntaxCharacter    = "\x1b[38;5;114m";
 inline constexpr const char* kSyntaxNumber       = "\x1b[38;5;214m";
 inline constexpr const char* kSyntaxComment      = "\x1b[38;5;242m";
+inline constexpr const char* kBracketMatch       = "\x1b[48;5;221m\x1b[38;5;235m";
 
 inline constexpr const char* kLightBackground        = "\x1b[48;5;255m";
 inline constexpr const char* kLightForeground        = "\x1b[38;5;235m";
@@ -162,6 +164,7 @@ inline constexpr const char* kLightSyntaxString       = "\x1b[38;5;22m";
 inline constexpr const char* kLightSyntaxCharacter    = "\x1b[38;5;22m";
 inline constexpr const char* kLightSyntaxNumber       = "\x1b[38;5;166m";
 inline constexpr const char* kLightSyntaxComment      = "\x1b[38;5;242m";
+inline constexpr const char* kLightBracketMatch       = "\x1b[48;5;221m\x1b[38;5;235m";
 
 inline Theme darkTheme() {
     Theme t;
@@ -198,6 +201,7 @@ inline Theme darkTheme() {
     t.syntaxCharacter   = kSyntaxCharacter;
     t.syntaxNumber      = kSyntaxNumber;
     t.syntaxComment     = kSyntaxComment;
+    t.bracketMatch      = kBracketMatch;
     return t;
 }
 
@@ -236,6 +240,7 @@ inline Theme lightTheme() {
     t.syntaxCharacter   = kLightSyntaxCharacter;
     t.syntaxNumber      = kLightSyntaxNumber;
     t.syntaxComment     = kLightSyntaxComment;
+    t.bracketMatch      = kLightBracketMatch;
     return t;
 }
 
@@ -260,7 +265,7 @@ inline bool operator==(const Theme& a, const Theme& b) {
            a.syntaxKeyword == b.syntaxKeyword && a.syntaxType == b.syntaxType &&
            a.syntaxPreprocessor == b.syntaxPreprocessor && a.syntaxString == b.syntaxString &&
            a.syntaxCharacter == b.syntaxCharacter && a.syntaxNumber == b.syntaxNumber &&
-           a.syntaxComment == b.syntaxComment;
+           a.syntaxComment == b.syntaxComment && a.bracketMatch == b.bracketMatch;
 }
 
 inline bool operator!=(const Theme& a, const Theme& b) { return !(a == b); }
