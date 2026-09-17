@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <atomic>
 #include <cstdint>
 #include "core/Position.h"
 
@@ -63,6 +64,12 @@ public:
     enum class LineEnding { LF, CRLF, CR };
 
     Document();
+    Document(const Document& other);
+    Document& operator=(const Document& other);
+    Document(Document&& other) noexcept;
+    Document& operator=(Document&& other) noexcept;
+
+    uint64_t instanceId() const { return instanceId_; }
 
     // Terminador de linea actual del documento.
     LineEnding lineEnding() const;
@@ -208,6 +215,8 @@ public:
     uint64_t version() const { return version_; }
 
 private:
+    static std::atomic<uint64_t> s_nextInstanceId;
+    uint64_t instanceId_ = 0;
     std::vector<std::string> lines_;
     std::function<void(int,int)> touchedCallback_;
     void notifyTouched(int a,int b) { if (touchedCallback_) touchedCallback_(a,b); }

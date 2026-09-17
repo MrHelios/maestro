@@ -57,13 +57,11 @@ std::vector<std::vector<SyntaxSpan>> buildSpans(const Document& doc, SyntaxLangu
 }
 
 std::optional<BracketPair> findEnclosingBracket(const Document& doc, Position pos, const std::vector<std::vector<SyntaxSpan>>& spansPerLine) {
-    // Optimización: solo stack de aperturas hasta pos, luego buscar cierre del top
     std::vector<std::pair<char, Position>> stack;
     for (int l = 0; l < doc.lineCount(); ++l) {
         if (l > pos.line) break;
         const std::string& ln = doc.lineAt(l);
         int limit = (l == pos.line) ? pos.col : (int)ln.size();
-        // Para pos en medio de línea, solo hasta pos (exclusivo) -> open < pos
         for (int c = 0; c < limit; ++c) {
             char ch = ln[c];
             if (!isOpen(ch) && !isClose(ch)) continue;
@@ -77,8 +75,7 @@ std::optional<BracketPair> findEnclosingBracket(const Document& doc, Position po
                 if (matchingClose(topChar) == ch) {
                     stack.pop_back();
                 } else {
-                    stack.pop_back();
-                    continue;
+                    return std::nullopt;
                 }
             }
         }
@@ -117,9 +114,8 @@ std::optional<BracketPair> findEnclosingBracket(const Document& doc, Position po
 }
 } // namespace
 
-std::optional<BracketPair> findMatchingBracket(const Document& doc, Position pos, SyntaxLanguage lang) {
-    // Build spans for filtering (if lang==None -> no filtering)
-    auto spansPerLine = buildSpans(doc, lang);
+std::optional<BracketPair> findMatchingBracket(const Document& doc, Position pos, SyntaxLanguage lang, const std::vector<std::vector<SyntaxSpan>>& spansPerLine) {
+    (void)lang;
     auto isIgnored = [&](Position p){ return isIgnoredPos(spansPerLine, p); };
 
     if (doc.lineCount() == 0) return std::nullopt;
@@ -128,13 +124,9 @@ std::optional<BracketPair> findMatchingBracket(const Document& doc, Position pos
     int col = pos.col;
     if (col < 0) return std::nullopt;
     if (col > (int)line.size()) col = (int)line.size();
-    // Si el cursor está dentro de string/char/comment, no hay highlight estructural
     if (col < (int)line.size() && isIgnored(pos)) {
         return std::nullopt;
     }
-    // También si la posición entre caracteres está conceptualmente dentro de string:
-    // por ejemplo cursor justo después de " pero antes de contenido, col-1 podría estar dentro de string.
-    // Consideramos pos como byte del caracter bajo cursor, por lo que el chequeo anterior basta.
 
     char bracket = 0;
     Position bracketPos = pos;
@@ -236,6 +228,11 @@ std::optional<BracketPair> findMatchingBracket(const Document& doc, Position pos
         }
         return std::nullopt;
     }
+}
+
+std::optional<BracketPair> findMatchingBracket(const Document& doc, Position pos, SyntaxLanguage lang) {
+    auto spansPerLine = buildSpans(doc, lang);
+    return findMatchingBracket(doc, pos, lang, spansPerLine);
 }
 
 std::optional<BracketPair> findMatchingBracket(const Document& doc, Position pos, const std::string& filename) {

@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "core/utf8.h"
+#include "syntax/SyntaxHighlighter.h"
 #include "clipboard/FakeClipboard.h"
 #include "clipboard/X11Clipboard.h"
 #include "filesystem/InotifyFileWatcher.h"
@@ -2082,18 +2083,19 @@ void Editor::updateBracketHighlight() {
     Buffer& b = active();
     Position cur{b.cursor.line, b.cursor.col};
     // Fast path: nada cambió -> evitar scan completo + allocations de sintaxis
-    if (cur == lastBracketCursor_ && b.document.version() == lastBracketVersion_ && &b.document == lastBracketDoc_) {
+    if (cur == lastBracketCursor_ && b.document.version() == lastBracketVersion_ && b.document.instanceId() == lastBracketInstanceId_) {
         return;
     }
     SyntaxLanguage lang = languageFromFilename(b.filename);
     if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
-    auto p = findMatchingBracket(b.document, cur, lang);
+    const auto& spans = getBracketSpans(b.document, lang);
+    auto p = findMatchingBracket(b.document, cur, lang, spans);
     if (!p) {
         bracketPair_.reset();
         nextBracketJump_ = BracketJumpTarget::Open;
         lastBracketCursor_ = cur;
         lastBracketVersion_ = b.document.version();
-        lastBracketDoc_ = &b.document;
+        lastBracketInstanceId_ = b.document.instanceId();
         return;
     }
     bool samePair = bracketPair_ && *bracketPair_ == *p;
@@ -2108,26 +2110,56 @@ void Editor::updateBracketHighlight() {
     }
     lastBracketCursor_ = cur;
     lastBracketVersion_ = b.document.version();
-    lastBracketDoc_ = &b.document;
+    lastBracketInstanceId_ = b.document.instanceId();
 }
 
 void Editor::refreshBracketAfterJump() {
     Buffer& b = active();
     Position cur{b.cursor.line, b.cursor.col};
+    if (cur == lastBracketCursor_ && b.document.version() == lastBracketVersion_ && b.document.instanceId() == lastBracketInstanceId_) {
+        return;
+    }
     SyntaxLanguage lang = languageFromFilename(b.filename);
     if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
-    auto p = findMatchingBracket(b.document, cur, lang);
+    const auto& spans = getBracketSpans(b.document, lang);
+    auto p = findMatchingBracket(b.document, cur, lang, spans);
     if (!p) {
         bracketPair_.reset();
         nextBracketJump_ = BracketJumpTarget::Open;
         lastBracketCursor_ = cur;
         lastBracketVersion_ = b.document.version();
-        lastBracketDoc_ = &b.document;
+        lastBracketInstanceId_ = b.document.instanceId();
         return;
     }
     bracketPair_ = p;
     lastBracketCursor_ = cur;
     lastBracketVersion_ = b.document.version();
-    lastBracketDoc_ = &b.document;
+    lastBracketInstanceId_ = b.document.instanceId();
     // keep nextBracketJump_ as toggled (do not reset)
+}
+
+const std::vector<std::vector<SyntaxSpan>>& Editor::getBracketSpans(const Document& doc, SyntaxLanguage lang) {
+    if (bracketSpansCache_.empty() || bracketSpansVersion_ != doc.version() || bracketSpansInstanceId_ != doc.instanceId() || bracketSpansLang_ != lang || (int)bracketSpansCache_.size() != doc.lineCount()) {
+        bracketSpansCache_.clear();
+        bracketSpansCache_.resize(doc.lineCount());
+        if (lang != SyntaxLanguage::None && doc.lineCount() > 0) {
+            SyntaxHighlighter hl;
+            hl.setLanguage(lang);
+            SyntaxState state;
+            state.inBlockComment = false;
+            state.inRawString = false;
+            state.rawDelimLen = 0;
+            for (int l = 0; l < doc.lineCount(); ++l) {
+                std::vector<SyntaxSpan> spans;
+                SyntaxState nxt;
+                hl.highlight(doc.lineAt(l), state, nxt, spans);
+                bracketSpansCache_[l] = std::move(spans);
+                state = nxt;
+            }
+        }
+        bracketSpansVersion_ = doc.version();
+        bracketSpansInstanceId_ = doc.instanceId();
+        bracketSpansLang_ = lang;
+    }
+    return bracketSpansCache_;
 }

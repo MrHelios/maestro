@@ -9,11 +9,59 @@
 #include "filesystem/FileSystem.h"
 #include <vector>
 
-Document::Document() {
+std::atomic<uint64_t> Document::s_nextInstanceId{1};
+
+Document::Document() : instanceId_(s_nextInstanceId.fetch_add(1, std::memory_order_relaxed)) {
     // Un documento nunca esta "vacio del todo": siempre tiene al menos
     // una linea (posiblemente vacia). Esto simplifica muchisimo el
     // resto del codigo (cursor, renderer, etc).
     lines_.push_back("");
+}
+
+Document::Document(const Document& other)
+    : lines_(other.lines_),
+      touchedCallback_(other.touchedCallback_),
+      version_(other.version_),
+      lineEnding_(other.lineEnding_),
+      endsWithNewline_(other.endsWithNewline_),
+      instanceId_(s_nextInstanceId.fetch_add(1, std::memory_order_relaxed)) {}
+
+Document& Document::operator=(const Document& other) {
+    if (this != &other) {
+        lines_ = other.lines_;
+        touchedCallback_ = other.touchedCallback_;
+        version_ = other.version_;
+        lineEnding_ = other.lineEnding_;
+        endsWithNewline_ = other.endsWithNewline_;
+        // nueva identidad para evitar colisión de cache por reutilización de dirección
+        instanceId_ = s_nextInstanceId.fetch_add(1, std::memory_order_relaxed);
+    }
+    return *this;
+}
+
+Document::Document(Document&& other) noexcept
+    : lines_(std::move(other.lines_)),
+      touchedCallback_(std::move(other.touchedCallback_)),
+      version_(other.version_),
+      lineEnding_(other.lineEnding_),
+      endsWithNewline_(other.endsWithNewline_),
+      instanceId_(other.instanceId_) {
+    other.version_ = 0;
+    other.instanceId_ = s_nextInstanceId.fetch_add(1, std::memory_order_relaxed);
+}
+
+Document& Document::operator=(Document&& other) noexcept {
+    if (this != &other) {
+        lines_ = std::move(other.lines_);
+        touchedCallback_ = std::move(other.touchedCallback_);
+        version_ = other.version_;
+        lineEnding_ = other.lineEnding_;
+        endsWithNewline_ = other.endsWithNewline_;
+        instanceId_ = other.instanceId_;
+        other.version_ = 0;
+        other.instanceId_ = s_nextInstanceId.fetch_add(1, std::memory_order_relaxed);
+    }
+    return *this;
 }
 
 LoadResult Document::loadFromFile(const std::string& path) {

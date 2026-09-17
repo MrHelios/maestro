@@ -10,6 +10,7 @@
 #include "core/BracketMatcher.h"
 #include "core/Buffer.h"
 #include "core/BufferManager.h"
+#include "syntax/SyntaxSpan.h"
 #include "clipboard/SystemClipboard.h"
 #include "filesystem/FileWatcher.h"
 #include "ui/CommandMap.h"
@@ -241,7 +242,13 @@ private:
     bool bracketJumpPendingPreserve_ = false;
     Position lastBracketCursor_{-1, -1};
     std::uint64_t lastBracketVersion_{UINT64_MAX};
-    const Document* lastBracketDoc_{nullptr};
+    std::uint64_t lastBracketInstanceId_{0};
+    // Cache de spans para brackets: evita reconstruir SyntaxHighlighter en cada cursor move
+    std::vector<std::vector<SyntaxSpan>> bracketSpansCache_;
+    std::uint64_t bracketSpansVersion_{UINT64_MAX};
+    std::uint64_t bracketSpansInstanceId_{0};
+    SyntaxLanguage bracketSpansLang_{SyntaxLanguage::None};
+    const std::vector<std::vector<SyntaxSpan>>& getBracketSpans(const Document& doc, SyntaxLanguage lang);
     void updateBracketHighlight();
     void refreshBracketAfterJump();
 

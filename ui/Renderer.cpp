@@ -1009,6 +1009,8 @@ std::string Renderer::buildDiffFrame(const Document& doc,
 
     const int deltaTop = viewport.top - lastViewportTop_;
     const int deltaLeft = viewport.left - lastViewportLeft_;
+    // Bracket highlighting disables the scroll fast path because the overlay
+    // may require repainting either endpoint.
     const bool noHighlight = !selection.has_value() && !searchHighlight.has_value() && !bracketPair.has_value();
 
     // Fast scroll path:
