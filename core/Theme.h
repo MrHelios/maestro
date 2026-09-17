@@ -122,11 +122,11 @@ inline constexpr const char* kAccentGuardar      = "\x1b[1m\x1b[38;5;81m";
 inline constexpr const char* kAccentAbrir        = "\x1b[1m\x1b[38;5;81m";
 
 inline constexpr const char* kSyntaxKeyword      = "\x1b[38;5;81m";
-inline constexpr const char* kSyntaxType         = "\x1b[38;5;75m";
+inline constexpr const char* kSyntaxType         = "\x1b[38;5;141m";
 inline constexpr const char* kSyntaxPreprocessor = "\x1b[38;5;208m";
 inline constexpr const char* kSyntaxString       = "\x1b[38;5;114m";
 inline constexpr const char* kSyntaxCharacter    = "\x1b[38;5;114m";
-inline constexpr const char* kSyntaxNumber       = "\x1b[38;5;221m";
+inline constexpr const char* kSyntaxNumber       = "\x1b[38;5;214m";
 inline constexpr const char* kSyntaxComment      = "\x1b[38;5;242m";
 
 inline constexpr const char* kLightBackground        = "\x1b[48;5;255m";
@@ -156,11 +156,11 @@ inline constexpr const char* kLightAccentGuardar     = "\x1b[1m\x1b[38;5;25m";
 inline constexpr const char* kLightAccentAbrir       = "\x1b[1m\x1b[38;5;25m";
 
 inline constexpr const char* kLightSyntaxKeyword      = "\x1b[38;5;25m";
-inline constexpr const char* kLightSyntaxType         = "\x1b[38;5;19m";
+inline constexpr const char* kLightSyntaxType         = "\x1b[38;5;55m";
 inline constexpr const char* kLightSyntaxPreprocessor = "\x1b[38;5;130m";
 inline constexpr const char* kLightSyntaxString       = "\x1b[38;5;22m";
 inline constexpr const char* kLightSyntaxCharacter    = "\x1b[38;5;22m";
-inline constexpr const char* kLightSyntaxNumber       = "\x1b[38;5;90m";
+inline constexpr const char* kLightSyntaxNumber       = "\x1b[38;5;166m";
 inline constexpr const char* kLightSyntaxComment      = "\x1b[38;5;242m";
 
 inline Theme darkTheme() {
