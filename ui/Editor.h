@@ -243,12 +243,14 @@ private:
     Position lastBracketCursor_{-1, -1};
     std::uint64_t lastBracketVersion_{UINT64_MAX};
     std::uint64_t lastBracketInstanceId_{0};
-    // Cache de spans para brackets: evita reconstruir SyntaxHighlighter en cada cursor move
+    // Cache de spans para brackets: ahora delega al SyntaxCache incremental por Buffer (antes reconstruía 20k líneas por tecla)
+    // Se mantiene por compatibilidad con tests, pero el path caliente usa Buffer::syntaxCache
     std::vector<std::vector<SyntaxSpan>> bracketSpansCache_;
     std::uint64_t bracketSpansVersion_{UINT64_MAX};
     std::uint64_t bracketSpansInstanceId_{0};
     SyntaxLanguage bracketSpansLang_{SyntaxLanguage::None};
     const std::vector<std::vector<SyntaxSpan>>& getBracketSpans(const Document& doc, SyntaxLanguage lang);
+    const std::vector<std::vector<SyntaxSpan>>& getBracketSpansForBuffer(Buffer& buf, SyntaxLanguage lang);
     void updateBracketHighlight();
     void refreshBracketAfterJump();
 

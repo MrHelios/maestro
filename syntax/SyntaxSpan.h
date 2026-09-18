@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <string_view>
 #include "syntax/SyntaxToken.h"
 
 struct SyntaxSpan {

@@ -49,7 +49,14 @@ inline std::ostream& operator<<(std::ostream& os, LoadResult r) {
 // UTF-8) y utf8.h.
 class Document {
 public:
-    void setTouchedCallback(std::function<void(int,int)> cb) { touchedCallback_ = std::move(cb); }
+    void setTouchedCallback(std::function<void(int,int)> cb) {
+        touchedCallbacks_.clear();
+        if (cb) touchedCallbacks_.push_back(std::move(cb));
+    }
+    void addTouchedCallback(std::function<void(int,int)> cb) {
+        if (cb) touchedCallbacks_.push_back(std::move(cb));
+    }
+    void clearTouchedCallbacks() { touchedCallbacks_.clear(); }
 
     // Terminador de linea detectado al CARGAR un archivo y usado al GUARDAR.
     // Se conserva para que abrir+guardar NO cambie silenciosamente el
@@ -218,8 +225,8 @@ private:
     static std::atomic<uint64_t> s_nextInstanceId;
     uint64_t instanceId_ = 0;
     std::vector<std::string> lines_;
-    std::function<void(int,int)> touchedCallback_;
-    void notifyTouched(int a,int b) { if (touchedCallback_) touchedCallback_(a,b); }
+    std::vector<std::function<void(int,int)>> touchedCallbacks_;
+    void notifyTouched(int a,int b) { for (auto& cb : touchedCallbacks_) if (cb) cb(a,b); }
     uint64_t version_ = 0;
     void bumpVersion() { ++version_; }
 

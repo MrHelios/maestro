@@ -11,6 +11,7 @@
 #include "core/Selection.h"
 #include "core/SmallVec.h"
 #include "core/Viewport.h"
+#include "syntax/SyntaxCache.h"
 
 // Tipo de operacion atomica registrada en una entrada de historial. Cada
 // Edit es REVERSIBLE: guarda que hacer y como deshacerlo, sin copiar el
@@ -112,6 +113,8 @@ public:
 
     std::vector<HistoryEntry> undoStack;
     std::vector<HistoryEntry> redoStack;
+
+    SyntaxCache syntaxCache;
 
     struct FileIdentity {
         bool valid = false;

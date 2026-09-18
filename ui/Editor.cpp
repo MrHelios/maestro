@@ -917,6 +917,14 @@ void Editor::renderFrame() {
                                  fileBrowser.path_, statusMessage_,
                                  b.viewport.width, b.viewport.height);
     } else {
+        // Sincroniza lenguaje del cache con el buffer activo antes de bracket/render
+        {
+            SyntaxLanguage lang = languageFromFilename(b.filename);
+            if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
+            // Para brackets y render se usa el mismo cache del Buffer
+            if (b.syntaxCache.language() != lang) b.syntaxCache.setLanguage(lang);
+            renderer_.setExternalSyntaxCache(&b.syntaxCache);
+        }
         // Bracket highlight: viewport-independent, preserve toggle if just jumped
         // Siempre visible (incluso dentro del rango), excepto en modo Seleccion donde se oculta pero el comando sigue activo
         if (bracketJumpPendingPreserve_) {
@@ -934,6 +942,7 @@ void Editor::renderFrame() {
         renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
                                    b.filename, b.modified, statusMessage_,
                                    state_, b.selection, searchHighlight_, toRender);
+        renderer_.setExternalSyntaxCache(nullptr);
     }
 }
 
@@ -2088,7 +2097,7 @@ void Editor::updateBracketHighlight() {
     }
     SyntaxLanguage lang = languageFromFilename(b.filename);
     if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
-    const auto& spans = getBracketSpans(b.document, lang);
+    const auto& spans = getBracketSpansForBuffer(b, lang);
     auto p = findMatchingBracket(b.document, cur, lang, spans);
     if (!p) {
         bracketPair_.reset();
@@ -2121,7 +2130,7 @@ void Editor::refreshBracketAfterJump() {
     }
     SyntaxLanguage lang = languageFromFilename(b.filename);
     if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
-    const auto& spans = getBracketSpans(b.document, lang);
+    const auto& spans = getBracketSpansForBuffer(b, lang);
     auto p = findMatchingBracket(b.document, cur, lang, spans);
     if (!p) {
         bracketPair_.reset();
@@ -2139,6 +2148,8 @@ void Editor::refreshBracketAfterJump() {
 }
 
 const std::vector<std::vector<SyntaxSpan>>& Editor::getBracketSpans(const Document& doc, SyntaxLanguage lang) {
+    // Legacy API para tests que crean Document sin Buffer: mantiene cache local incremental via bracketSpansCache_
+    // Para el path normal (Editor), se usa getBracketSpansForBuffer que delega al SyntaxCache del Buffer.
     if (bracketSpansCache_.empty() || bracketSpansVersion_ != doc.version() || bracketSpansInstanceId_ != doc.instanceId() || bracketSpansLang_ != lang || (int)bracketSpansCache_.size() != doc.lineCount()) {
         bracketSpansCache_.clear();
         bracketSpansCache_.resize(doc.lineCount());
@@ -2162,4 +2173,13 @@ const std::vector<std::vector<SyntaxSpan>>& Editor::getBracketSpans(const Docume
         bracketSpansLang_ = lang;
     }
     return bracketSpansCache_;
+}
+
+const std::vector<std::vector<SyntaxSpan>>& Editor::getBracketSpansForBuffer(Buffer& buf, SyntaxLanguage lang) {
+    // Path incremental: usa el SyntaxCache del Buffer compartido con Renderer
+    auto& cache = buf.syntaxCache;
+    if (cache.language() != lang) cache.setLanguage(lang);
+    // ensureValid incremental hasta lineCount con convergencia
+    cache.ensureValid(buf.document, buf.document.lineCount());
+    return cache.allSpans();
 }

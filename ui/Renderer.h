@@ -17,6 +17,7 @@
 #include "syntax/SyntaxHighlighter.h"
 #include "syntax/SyntaxLanguage.h"
 #include "syntax/SyntaxSpan.h"
+#include "syntax/SyntaxCache.h"
 
 class Renderer {
 public:
@@ -108,12 +109,8 @@ public:
 private:
     Theme theme_ = defaultTheme();
     mutable SyntaxHighlighter syntaxHighlighter_;
-    // Mutable cache: syntax state is derived from Document identity,
-    // version() and language; rebuilding it does not change rendering semantics.
-    mutable std::vector<SyntaxState> syntaxStates_;
-    mutable uint64_t syntaxStatesVersion_ = UINT64_MAX;
-    mutable SyntaxLanguage syntaxStatesLang_ = SyntaxLanguage::None;
-    mutable const Document* syntaxStatesDoc_ = nullptr;
+    mutable SyntaxCache syntaxCache_;
+    mutable SyntaxCache* externalCache_ = nullptr;
 
     mutable std::deque<std::string> rowCache_;   // una entrada por fila de contenido: "\x1b[K" + bytes
     mutable std::string statusCache_;            // status bar cacheado, filas separadas por "\r\n"
@@ -178,6 +175,11 @@ private:
 
     SyntaxState syntaxStateAt(const Document& doc, int targetLine) const;
     void updateSyntaxLanguage(const std::string& filename) const;
+public:
+    void setExternalSyntaxCache(SyntaxCache* c) { externalCache_ = c; }
+    SyntaxCache* externalSyntaxCache() const { return externalCache_; }
+    SyntaxCache& activeCache() const { return externalCache_ ? *externalCache_ : syntaxCache_; }
+private:
     const std::string& syntaxStyleFor(SyntaxToken tok) const;
     static void normalizeBracketPair(const std::optional<BracketPair>& pair,
                                      std::optional<Normalized>& outOpen,

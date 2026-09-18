@@ -224,27 +224,13 @@ void Renderer::normalizeBracketPair(const std::optional<BracketPair>& pair,
 }
 
 SyntaxState Renderer::syntaxStateAt(const Document& doc, int targetLine) const {
-    SyntaxState init;
-    init.inBlockComment = false;
-    if (syntaxHighlighter_.language() == SyntaxLanguage::None) return init;
-    if (targetLine <= 0) return init;
+    // Usa SyntaxCache incremental con convergencia; garantiza hasta targetLine sin reparsear todo.
+    if (targetLine <= 0) return SyntaxState{};
     int t = std::min(targetLine, doc.lineCount());
-    if (syntaxStatesDoc_ != &doc || syntaxStatesLang_ != syntaxHighlighter_.language() || syntaxStatesVersion_ != doc.version()) {
-        syntaxStates_.clear();
-        syntaxStates_.reserve(doc.lineCount() + 1);
-        syntaxStates_.push_back(init);
-        syntaxStatesDoc_ = &doc;
-        syntaxStatesVersion_ = doc.version();
-        syntaxStatesLang_ = syntaxHighlighter_.language();
-    }
-    if ((int)syntaxStates_.size() > t) return syntaxStates_[t];
-    std::vector<SyntaxSpan> buf;
-    for (int l = (int)syntaxStates_.size() - 1; l < t; ++l) {
-        SyntaxState nxt;
-        syntaxHighlighter_.highlight(doc.lineAt(l), syntaxStates_[l], nxt, buf);
-        syntaxStates_.push_back(nxt);
-    }
-    return syntaxStates_[t];
+    auto& cache = activeCache();
+    // language ya sincronizado en updateSyntaxLanguage
+    const_cast<SyntaxCache&>(cache).ensureValid(doc, t);
+    return cache.stateBefore(t);
 }
 
 void Renderer::updateSyntaxLanguage(const std::string& filename) const {
@@ -253,6 +239,14 @@ void Renderer::updateSyntaxLanguage(const std::string& filename) const {
         syntaxHighlighter_.setLanguage(lang);
         hasCache_ = false;
         hasLastStatusData_ = false;
+    }
+    auto& cache = activeCache();
+    if (cache.language() != lang) {
+        const_cast<SyntaxCache&>(cache).setLanguage(lang);
+    }
+    // Mantener también el cache interno sincronizado cuando hay externo, para tests standalone
+    if (externalCache_ && syntaxCache_.language() != lang) {
+        syntaxCache_.setLanguage(lang);
     }
 }
 
@@ -421,10 +415,9 @@ void Renderer::renderEditorRow(std::string& out,
         }
         return;
     }
-    SyntaxState st = syntaxStateAt(doc, docLine);
-    SyntaxState nxt;
-    std::vector<SyntaxSpan> spans;
-    syntaxHighlighter_.highlight(doc.lineAt(docLine), st, nxt, spans);
+    auto& cache = activeCache();
+    const_cast<SyntaxCache&>(cache).ensureValid(doc, docLine + 1);
+    const auto& spans = cache.spansFor(docLine);
     renderEditorRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, docLine, gutterW, textWidth, spans);
 }
 
@@ -653,16 +646,19 @@ void Renderer::renderEditorContent(std::string& out,
                              const Rect& area,
                              int gutterW) const {
     int textWidth = std::max(0, area.width - gutterW);
-    SyntaxState state = syntaxStateAt(doc, viewport.top);
-    std::vector<SyntaxSpan> spans;
+    // Asegurar cache hasta el final del viewport para que spans estén listos sin re-highlight por línea
+    {
+        auto& cache = activeCache();
+        int need = viewport.top + area.height;
+        if (need > doc.lineCount()) need = doc.lineCount();
+        if (need > 0) const_cast<SyntaxCache&>(cache).ensureValid(doc, need);
+    }
     for (int row = 0; row < area.height; ++row) {
         int docLine = viewport.top + row;
         out += "\x1b[K";
         if (docLine < doc.lineCount()) {
-            SyntaxState nxt;
-            syntaxHighlighter_.highlight(doc.lineAt(docLine), state, nxt, spans);
+            const auto& spans = activeCache().spansFor(docLine);
             renderEditorRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, docLine, gutterW, textWidth, spans);
-            state = nxt;
         } else {
             renderEditorRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, docLine, gutterW, textWidth, {});
         }
@@ -752,16 +748,18 @@ void Renderer::rebuildCache(const Document& doc, const Cursor& cursor, const Vie
     normalizeBracketPair(bracketPair, bracketOpen, bracketClose);
 
     rowCache_.clear();
-    SyntaxState cstate = syntaxStateAt(doc, viewport.top);
-    std::vector<SyntaxSpan> spans;
+    {
+        auto& cache = activeCache();
+        int need = viewport.top + contentH;
+        if (need > doc.lineCount()) need = doc.lineCount();
+        if (need > 0) const_cast<SyntaxCache&>(cache).ensureValid(doc, need);
+    }
     for (int row = 0; row < contentH; ++row) {
         int dl = viewport.top + row;
         std::string full = "\x1b[K";
         if (dl < doc.lineCount()) {
-            SyntaxState nxt;
-            syntaxHighlighter_.highlight(doc.lineAt(dl), cstate, nxt, spans);
+            const auto& spans = activeCache().spansFor(dl);
             renderEditorRow(full, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, dl, gutterW, textWidth, spans);
-            cstate = nxt;
         } else {
             renderEditorRow(full, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, dl, gutterW, textWidth, {});
         }

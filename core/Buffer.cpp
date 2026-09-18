@@ -6,7 +6,37 @@
 #include "core/utf8.h"
 
 void Buffer::rebindCallback() {
-    document.setTouchedCallback([this](int a,int b){ recordWatch(a,b); cursor.invalidateColumnCache(); });
+    document.setTouchedCallback([this](int a,int b){
+        recordWatch(a,b);
+        cursor.invalidateColumnCache();
+        // Splice handling para SyntaxCache: detectar delta de lineCount
+        int newCount = document.lineCount();
+        int oldCount = (int)syntaxCache.size();
+        // size() == 0 significa cache aún no inicializado -> no splice, solo dirty
+        if (oldCount != 0 && oldCount != newCount) {
+            int delta = newCount - oldCount;
+            // Restore/replace total: todo el documento (a==0 && b==newCount-1) cambia contenido arbitrario
+            bool isFullRestore = (a == 0 && b == newCount - 1);
+            if (isFullRestore) {
+                syntaxCache.invalidateAll();
+                return;
+            } else if (delta > 0) {
+                int at = a + 1;
+                if (at < 0) at = 0;
+                if (at > oldCount) at = oldCount;
+                syntaxCache.onInsertLines(at, delta);
+                // onInsert ya marca dirty, no hace falta markDirty extra
+                return;
+            } else {
+                int at = a + 1;
+                if (at < 0) at = 0;
+                int rem = -delta;
+                syntaxCache.onRemoveLines(at, rem);
+                return;
+            }
+        }
+        syntaxCache.markDirty(a);
+    });
 }
 
 Buffer::Buffer() {
@@ -23,6 +53,7 @@ Buffer::Buffer(const Buffer& other)
       watcher_(other.watcher_), savedEndsWithNewline(other.savedEndsWithNewline),
       undoStack(other.undoStack), redoStack(other.redoStack),
       savedIdentity(other.savedIdentity) {
+    syntaxCache.invalidateAll();
     rebindCallback();
 }
 
@@ -34,6 +65,7 @@ Buffer::Buffer(Buffer&& other) noexcept
       watcher_(std::move(other.watcher_)), savedEndsWithNewline(other.savedEndsWithNewline),
       undoStack(std::move(other.undoStack)), redoStack(std::move(other.redoStack)),
       savedIdentity(other.savedIdentity) {
+    syntaxCache.invalidateAll();
     rebindCallback();
     other.document.setTouchedCallback(nullptr);
     other.id = 0;
@@ -57,6 +89,7 @@ Buffer& Buffer::operator=(const Buffer& other) {
     undoStack = other.undoStack;
     redoStack = other.redoStack;
     savedIdentity = other.savedIdentity;
+    syntaxCache.invalidateAll();
     rebindCallback();
     return *this;
 }
@@ -79,6 +112,7 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept {
     undoStack = std::move(other.undoStack);
     redoStack = std::move(other.redoStack);
     savedIdentity = other.savedIdentity;
+    syntaxCache.invalidateAll();
     rebindCallback();
     other.document.setTouchedCallback(nullptr);
     other.id = 0;
