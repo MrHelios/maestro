@@ -25,4 +25,5 @@ edit_tests
 *.exe
 
 # Artefactos de CTest (se crean si alguien corre `ctest` por error)
+build/
 Testing/
