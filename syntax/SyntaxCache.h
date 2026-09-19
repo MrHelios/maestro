@@ -41,6 +41,7 @@ public:
 
     // Para tests/debug
     int dirtyFrom() const { return dirtyFrom_; }
+    int parsedUpTo() const { return parsedUpTo_; }
     size_t size() const { return spans_.size(); }
 
 private:
@@ -55,6 +56,6 @@ private:
     const Document* docPtr_ = nullptr;
     uint64_t docInstanceId_ = 0;
     uint64_t docVersion_ = UINT64_MAX;
-
+    int parsedUpTo_ = 0;  // Líneas [
     void ensureSize(const Document& doc);
 };

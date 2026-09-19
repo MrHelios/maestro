@@ -123,8 +123,8 @@ TEST(bracket_viewport_open_visible_close_outside) {
     ed.active().viewport.left = 0;
     ed.active().cursor.line = 0; ed.active().cursor.col = 0;
     ed.updateBracketHighlight();
-    CHECK(ed.bracketPair_.has_value());
-    CHECK(ed.bracketPair_->close.line > 4);
+    // Nuevo diseño viewport-only: el close está fuera del viewport, no hay highlight.
+    CHECK(!ed.bracketPair_.has_value());
     ed.handleEvent(ev(EventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.line, 0);
@@ -145,8 +145,8 @@ TEST(bracket_viewport_open_outside_close_visible) {
     ed.active().viewport.top = 48;
     ed.active().cursor.line = 51; ed.active().cursor.col = 0;
     ed.updateBracketHighlight();
-    CHECK(ed.bracketPair_.has_value());
-    CHECK(ed.bracketPair_->open.line == 0);
+    // Nuevo diseño viewport-only: el open está fuera del viewport, no hay highlight.
+    CHECK(!ed.bracketPair_.has_value());
     ed.handleEvent(ev(EventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.line, 0);
@@ -164,7 +164,8 @@ TEST(bracket_viewport_both_outside_initially) {
     ed.active().viewport.top = 40;
     ed.active().cursor.line = 40; ed.active().cursor.col = 2;
     ed.updateBracketHighlight();
-    CHECK(ed.bracketPair_.has_value());
+    // Envolvente real existe, pero el open está fuera del viewport: sin highlight.
+    CHECK(!ed.bracketPair_.has_value());
     ed.handleEvent(ev(EventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.line, 0);
@@ -280,4 +281,119 @@ TEST(bracket_tab_before) {
     Cursor cur = ed.active().cursor;
     std::string out = r.buildScreen(ed.active().document, cur, vp, "t.cpp", false, Message{}, State::Navegacion, std::nullopt, std::nullopt, ed.bracketPair_);
     CHECK(out.find("\x1b[48;5;221m") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Nuevos tests viewport / incremental
+// ---------------------------------------------------------------------------
+
+TEST(bracket_no_highlight_when_match_outside_viewport) {
+    Editor ed;
+    std::vector<std::string> big;
+    big.push_back("{");
+    for (int i = 0; i < 30; ++i) big.push_back("  x");
+    big.push_back("}");
+
+    ed.active().document.restore(big);
+    ed.active().viewport.height = 5;
+    ed.active().viewport.width = 40;
+    ed.active().viewport.top = 0;
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 0;
+
+    ed.updateBracketHighlight();
+    CHECK(!ed.bracketPair_.has_value());
+}
+
+TEST(bracket_no_enclosing_highlight_when_open_outside_viewport) {
+    Editor ed;
+    std::vector<std::string> big;
+    big.push_back("{");
+    for (int i = 0; i < 100; ++i) big.push_back("  x");
+    big.push_back("}");
+
+    ed.active().document.restore(big);
+    ed.active().viewport.height = 5;
+    ed.active().viewport.width = 40;
+    ed.active().viewport.top = 40;
+    ed.active().cursor.line = 40;
+    ed.active().cursor.col = 2;
+
+    ed.updateBracketHighlight();
+    CHECK(!ed.bracketPair_.has_value());
+}
+
+TEST(bracket_jump_no_bracket_message) {
+    Editor ed;
+    ed.active().document.restore({"abc"});
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 1;
+
+    ed.updateBracketHighlight();
+    CHECK(!ed.bracketPair_.has_value());
+
+    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(insert('m'));
+
+    CHECK_EQ(ed.active().cursor.col, 1);
+    CHECK(ed.statusMessage_.text == "Sin bracket.");
+}
+
+TEST(bracket_wheel_scroll_invalidates_fast_path) {
+    Editor ed;
+
+    std::vector<std::string> lines = {"{", " x", "}"};
+    for (int i = 0; i < 30; ++i) lines.push_back("y");
+
+    ed.active().document.restore(lines);
+    ed.active().viewport.height = 5;
+    ed.active().viewport.width = 40;
+    ed.active().viewport.top = 0;
+    ed.active().cursor.line = 1;
+    ed.active().cursor.col = 1;
+
+    ed.updateBracketHighlight();
+    CHECK(ed.bracketPair_.has_value());
+
+    // Wheel scroll mueve viewport sin mover cursor.
+    ed.applyScroll(3);
+    CHECK_EQ(ed.active().viewport.top, 3);
+
+    // El fast path debe invalidarse por viewport.top distinto.
+    ed.updateBracketHighlight();
+
+    // El cursor quedó fuera del viewport: sin highlight.
+    CHECK(!ed.bracketPair_.has_value());
+}
+
+TEST(bracket_jump_incremental_long_distance) {
+    Editor ed;
+    std::vector<std::string> big;
+    big.push_back("{");
+    for (int i = 0; i < 100; ++i) big.push_back("  x");
+    big.push_back("}");
+
+    ed.active().document.restore(big);
+    ed.active().viewport.height = 5;
+    ed.active().viewport.width = 40;
+    ed.active().viewport.top = 0;
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 0;
+
+    ed.updateBracketHighlight();
+    CHECK(!ed.bracketPair_.has_value());
+
+    // Forzamos jump hacia close para ejercitar el scan forward incremental.
+    ed.nextBracketJump_ = Editor::BracketJumpTarget::Close;
+
+    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(insert('m'));
+    CHECK_EQ(ed.active().cursor.line, 101);
+    CHECK(ed.active().viewport.top <= 101 &&
+          101 < ed.active().viewport.top + ed.active().viewport.height);
+
+    // El toggle quedó en Open; el segundo salto vuelve al open.
+    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(insert('m'));
+    CHECK_EQ(ed.active().cursor.line, 0);
 }

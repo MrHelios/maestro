@@ -427,23 +427,44 @@ TEST(perf_bracket_match) {
         }
         Document doc; doc.restore(lines);
         Position pos{0,0};
-        // cold - iters reducidos para 25k (767ms/op x50 = 38s)
+        // cold - jump lazy (findMatchingBracketFrom sobre SyntaxCache frío)
         {
-            int iters = n==1000?50 : n==10000?10 : 5;
-            char label[64]; std::snprintf(label,sizeof(label),"bracket cold %5d",n);
+            int iters = n==1000 ? 20 : n==10000 ? 5 : 3;
+            char label[64];
+            std::snprintf(label, sizeof(label), "bracket jump lazy cold %5d", n);
+
             auto t0 = std::chrono::steady_clock::now();
             alloc_stats::resetAll();
             {
                 alloc_stats::Scoped s(alloc_stats::kOther);
-                for (int i=0;i<iters;++i){
-                    auto p = findMatchingBracket(doc, pos, SyntaxLanguage::Cpp);
+                for (int i = 0; i < iters; ++i) {
+                    SyntaxCache cache;
+                    cache.setLanguage(SyntaxLanguage::Cpp);
+
+                    BracketSpanSource src;
+                    src.ensure = [&cache, &doc](int line) {
+                        if (line >= 0) cache.ensureValid(doc, line + 1);
+                    };
+                    src.spans = [&cache](int line) -> const std::vector<SyntaxSpan>& {
+                        return cache.spansFor(line);
+                    };
+
+                    auto p = findMatchingBracketFrom(doc, pos, SyntaxLanguage::Cpp, src);
                     perf_time::g_sink += p ? 1 : 0;
                 }
             }
             auto t1 = std::chrono::steady_clock::now();
-            double us = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count()/iters/1000.0;
+
+            double us = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / iters / 1000.0;
             auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
-            std::printf("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n", label, iters, us, st.allocs/(unsigned long long)iters, st.bytesAllocated/(unsigned long long)iters);
+            std::printf(
+                "%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n",
+                label,
+                iters,
+                us,
+                st.allocs / (unsigned long long)iters,
+                st.bytesAllocated / (unsigned long long)iters
+            );
         }
         // cached via SyntaxCache - usa allSpans() por referencia (camino real Editor)
         {
@@ -993,4 +1014,105 @@ TEST(perf_editor_large_cpp) {
         std::printf("%-48s %6d cycles %8.1f us/cycle  %6llu allocs/cycle %8llu bytes/cycle\n", label, cycles, us, st.allocs/(unsigned long long)cycles, st.bytesAllocated/(unsigned long long)cycles);
     }
     CHECK(perf_time::g_sink>0);
+}
+
+// A. Bounded matcher puro (cache caliente, solo scanning)
+TEST(perf_bracket_matcher_bounded) {
+    std::printf("\n== perf_bracket_matcher_bounded (scanning puro, cache caliente) ==\n");
+    const int sizes[] = {1000, 10000, 25000};
+    const int vh = 24;
+
+    for (int n : sizes) {
+        auto lines = makeCppLines(n);
+        if (n > 0) {
+            lines[0] = "{ // open";
+            lines[n - 1] = "} // close";
+        }
+        Document doc;
+        doc.restore(lines);
+
+        SyntaxCache cache;
+        cache.setLanguage(SyntaxLanguage::Cpp);
+        cache.ensureValid(doc, n); // Cache completamente caliente
+
+        BracketSpanSource src;
+        src.ensure = [](int) {};
+        src.spans = [&cache](int line) -> const std::vector<SyntaxSpan>& {
+            static const std::vector<SyntaxSpan> empty;
+            if (line < 0 || line >= (int)cache.size()) return empty;
+            return cache.spansFor(line);
+        };
+
+        Position pos{0, 0};
+        int iters = n==1000 ? 2000 : n==10000 ? 1000 : 500;
+        char label[64];
+        std::snprintf(label, sizeof(label), "matcher bounded %5d", n);
+
+        auto t0 = std::chrono::steady_clock::now();
+        alloc_stats::resetAll();
+        {
+            alloc_stats::Scoped s(alloc_stats::kOther);
+            for (int i = 0; i < iters; ++i) {
+                auto p = findMatchingBracketBounded(doc, pos, SyntaxLanguage::Cpp, src, 0, vh);
+                perf_time::g_sink += p ? 1 : 0;
+            }
+        }
+        auto t1 = std::chrono::steady_clock::now();
+        double us = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / iters / 1000.0;
+        auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
+        std::printf("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n",
+            label, iters, us, st.allocs / (unsigned long long)iters, st.bytesAllocated / (unsigned long long)iters);
+    }
+    CHECK(perf_time::g_sink > 0);
+}
+
+// B. Editor highlight path real (SyntaxCache + makeBracketSpanSource + top fijo)
+TEST(perf_editor_highlight_path) {
+    std::printf("\n== perf_editor_highlight_path (path real Editor, top fijo en N/2) ==\n");
+    const int sizes[] = {1000, 10000, 25000};
+
+    for (int n : sizes) {
+        auto lines = makeCppLines(n);
+        if (n > 0) {
+            lines[0] = "{ // open";
+            lines[n - 1] = "} // close";
+        }
+        
+        Editor ed;
+        ed.active().document.restore(lines);
+        ed.active().viewport.height = 24;
+        ed.active().viewport.width = 80;
+        
+        // Fijar top en el medio para demostrar que el costo no depende de N
+        int fixedTop = n / 2;
+        ed.active().viewport.top = fixedTop;
+        ed.active().cursor.line = fixedTop + 10;
+        ed.active().cursor.col = 0;
+
+        // Calentar cache del buffer como lo haría el Renderer
+        ed.active().syntaxCache.setLanguage(SyntaxLanguage::Cpp);
+        ed.active().syntaxCache.ensureValid(ed.active().document, n);
+
+        int iters = n==1000 ? 1000 : n==10000 ? 500 : 200;
+        char label[64];
+        std::snprintf(label, sizeof(label), "editor highlight %5d (top=%d)", n, fixedTop);
+
+        auto t0 = std::chrono::steady_clock::now();
+        alloc_stats::resetAll();
+        {
+            alloc_stats::Scoped s(alloc_stats::kOther);
+            for (int i = 0; i < iters; ++i) {
+                // Invalidar fast path para forzar el cálculo real
+                ed.lastBracketCursor_ = {-1, -1}; 
+                ed.updateBracketHighlight();
+                perf_time::g_sink += ed.bracketPair_ ? 1 : 0;
+            }
+        }
+        auto t1 = std::chrono::steady_clock::now();
+        double us = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count() / iters / 1000.0;
+        auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
+        std::printf("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n",
+            label, iters, us, st.allocs / (unsigned long long)iters, st.bytesAllocated / (unsigned long long)iters);
+    }
+    CHECK(perf_time::g_sink > 0);
 }

@@ -38,6 +38,10 @@ constexpr int kIndentLen = 4;
 inline int shiftColumn(int col, int delta) {
     return delta > 0 ? col + delta : std::max(0, col + delta);
 }
+inline bool bracketPairCoversCursor(const BracketPair& p, Position cur) {
+    // cubre desde el open inclusive hasta el close inclusive
+    return !(cur < p.open) && !(p.close < cur);
+}
 inline Edit makeIndentEditForLine(int line, int delta, const std::string& before) {
     if (delta > 0) return {EditType::Insert, {line, 0}, {line, delta}, std::string(static_cast<size_t>(delta), ' ')};
     return {EditType::Delete, {line, 0}, {line, -delta}, before.substr(0, static_cast<size_t>(-delta))};
@@ -421,29 +425,51 @@ void Editor::registerCommands() {
         toggleTheme();
     });
     commands_.registerCommand("bracket.jump", [this] {
-        if (!bracketPair_) {
+        Buffer& b = active();
+        Position cur{b.cursor.line, b.cursor.col};
+    
+        SyntaxLanguage lang = languageFromFilename(b.filename);
+        if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
+    
+        std::optional<Position> target;
+    
+        // 1. ¿pair cache válido cubre el cursor?
+        if (bracketPair_ && bracketPairCoversCursor(*bracketPair_, cur)) {
+            target = (nextBracketJump_ == BracketJumpTarget::Open)
+                ? bracketPair_->open
+                : bracketPair_->close;
+        } else {
+            // 2. No hay pair válido. Buscar SOLO el extremo necesario.
+            auto src = makeBracketSpanSource(b, lang);
+            if (nextBracketJump_ == BracketJumpTarget::Open) {
+                target = findMatchingOpenBackward(b.document, cur, lang, src, 0);
+            } else {
+                target = findMatchingCloseForward(b.document, cur, lang, src, b.document.lineCount());
+            }
+        }
+    
+        if (!target) {
+            bracketPair_.reset();
+            nextBracketJump_ = BracketJumpTarget::Open;
             setActionMessage("Sin bracket.", MessageKind::Warning);
             state_ = priorState_;
             return;
         }
-        Position target;
-        if (nextBracketJump_ == BracketJumpTarget::Open) {
-            target = bracketPair_->open;
-        } else {
-            target = bracketPair_->close;
-        }
-        Buffer& b = active();
-        b.cursor.line = target.line;
-        b.cursor.col = target.col;
+    
+        b.cursor.line = target->line;
+        b.cursor.col = target->col;
         b.cursor.clampToLine(b.document);
+    
         centerViewportOnCursor();
         clearSelection();
-        // invert toggle
+    
         nextBracketJump_ = (nextBracketJump_ == BracketJumpTarget::Open)
-                               ? BracketJumpTarget::Close
-                               : BracketJumpTarget::Open;
+            ? BracketJumpTarget::Close
+            : BracketJumpTarget::Open;
+    
         bracketJumpPendingPreserve_ = true;
         refreshBracketAfterJump();
+    
         state_ = priorState_;
         setActionMessage("Bracket.", MessageKind::Info);
     });
@@ -921,27 +947,49 @@ void Editor::renderFrame() {
         {
             SyntaxLanguage lang = languageFromFilename(b.filename);
             if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
+
             // Para brackets y render se usa el mismo cache del Buffer
             if (b.syntaxCache.language() != lang) b.syntaxCache.setLanguage(lang);
+
             renderer_.setExternalSyntaxCache(&b.syntaxCache);
         }
-        // Bracket highlight: viewport-independent, preserve toggle if just jumped
-        // Siempre visible (incluso dentro del rango), excepto en modo Seleccion donde se oculta pero el comando sigue activo
+
+        // IMPORTANTE: scroll antes que bracket highlight.
+        // Si no, tras un page/jump el cursor puede quedar fuera del rango de scan.
+        if (suppressScrollToCursor_) {
+            suppressScrollToCursor_ = false;
+        } else {
+            b.viewport.scrollToCursor(
+                b.cursor,
+                b.document,
+                textWidthFor(b.viewport, b.document.lineCount())
+            );
+        }
+
+        // Bracket highlight: viewport-acotado.
         if (bracketJumpPendingPreserve_) {
             refreshBracketAfterJump();
             bracketJumpPendingPreserve_ = false;
         } else {
             updateBracketHighlight();
         }
-        std::optional<BracketPair> toRender = (state_ == State::Seleccion) ? std::nullopt : bracketPair_;
-        if (suppressScrollToCursor_) {
-            suppressScrollToCursor_ = false;
-        } else {
-            b.viewport.scrollToCursor(b.cursor, b.document, textWidthFor(b.viewport, b.document.lineCount()));
-        }
-        renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
-                                   b.filename, b.modified, statusMessage_,
-                                   state_, b.selection, searchHighlight_, toRender);
+
+        std::optional<BracketPair> toRender =
+            (state_ == State::Seleccion) ? std::nullopt : bracketPair_;
+
+        renderer_.renderScreenDiff(
+            b.document,
+            b.cursor,
+            b.viewport,
+            b.filename,
+            b.modified,
+            statusMessage_,
+            state_,
+            b.selection,
+            searchHighlight_,
+            toRender
+        );
+
         renderer_.setExternalSyntaxCache(nullptr);
     }
 }
@@ -2088,98 +2136,145 @@ void Editor::handleIrAFilaEvent(const Event& event) {
     }
 }
 
+BracketSpanSource Editor::makeBracketSpanSource(Buffer& buf, SyntaxLanguage lang) {
+    auto& cache = buf.syntaxCache;
+    if (cache.language() != lang) cache.setLanguage(lang);
+    const Document* doc = &buf.document;
+    BracketSpanSource src;
+    src.ensure = [&cache, doc](int line) {
+        if (line >= 0) cache.ensureValid(*doc, line + 1);
+    };
+    src.spans = [&cache](int line) -> const std::vector<SyntaxSpan>& {
+        return cache.spansFor(line);
+    };
+    return src;
+}
+
+// En Editor.cpp, reemplaza makeBracketSpanSource por:
+BracketSpanSource Editor::makeViewportSpanSource(Buffer& buf, SyntaxLanguage lang) {
+    // Highlighter efímero: parsea solo lo que se le pide, sin estado acumulado.
+    // NO usa SyntaxCache. Costo: O(viewport) garantizado, sin importar N.
+    struct ViewportHighlightState {
+        SyntaxHighlighter hl;
+        std::vector<std::vector<SyntaxSpan>> cache;
+        int baseLine = -1;
+    };
+    auto state = std::make_shared<ViewportHighlightState>();
+    state->hl.setLanguage(lang);
+
+    BracketSpanSource src;
+    src.ensure = [state](int line) {
+        // No-op: el parsing se hace lazy en spans()
+        (void)line;
+    };
+    src.spans = [state, &buf, lang](int line) -> const std::vector<SyntaxSpan>& {
+        static const std::vector<SyntaxSpan> empty;
+        if (line < 0 || line >= buf.document.lineCount()) return empty;
+
+        // Cache local por línea para evitar re-parsear la misma línea
+        // en múltiples llamadas dentro del mismo frame
+        int idx = line;
+        if ((int)state->cache.size() <= idx) {
+            state->cache.resize(idx + 1);
+        }
+        if (!state->cache[idx].empty()) {
+            return state->cache[idx];
+        }
+
+        // Parsear esta línea con estado default (sin heredar de líneas anteriores)
+        SyntaxState in{};
+        SyntaxState out;
+        state->hl.highlight(buf.document.lineAt(line), in, out, state->cache[idx]);
+        return state->cache[idx];
+    };
+    return src;
+}
+
 void Editor::updateBracketHighlight() {
     Buffer& b = active();
     Position cur{b.cursor.line, b.cursor.col};
-    // Fast path: nada cambió -> evitar scan completo + allocations de sintaxis
-    if (cur == lastBracketCursor_ && b.document.version() == lastBracketVersion_ && b.document.instanceId() == lastBracketInstanceId_) {
+
+    const int top = std::max(0, b.viewport.top);
+    const int height = std::max(0, b.viewport.height);
+    const int bottom = std::min(b.document.lineCount(), top + height);
+
+    if (cur == lastBracketCursor_ &&
+        b.document.version() == lastBracketVersion_ &&
+        b.document.instanceId() == lastBracketInstanceId_ &&
+        top == lastBracketViewportTop_ &&
+        bottom == lastBracketViewportBottom_) {
         return;
     }
+
     SyntaxLanguage lang = languageFromFilename(b.filename);
     if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
-    const auto& spans = getBracketSpansForBuffer(b, lang);
-    auto p = findMatchingBracket(b.document, cur, lang, spans);
+
+    // YA NO llama a b.syntaxCache.ensureValid()
+    // Usa highlighter efímero viewport-local
+    auto src = makeViewportSpanSource(b, lang);
+    auto p = findMatchingBracketBounded(b.document, cur, lang, src, top, bottom);
+
     if (!p) {
         bracketPair_.reset();
         nextBracketJump_ = BracketJumpTarget::Open;
-        lastBracketCursor_ = cur;
-        lastBracketVersion_ = b.document.version();
-        lastBracketInstanceId_ = b.document.instanceId();
-        return;
-    }
-    bool samePair = bracketPair_ && *bracketPair_ == *p;
-    bool cursorMoved = (lastBracketCursor_.line != cur.line || lastBracketCursor_.col != cur.col);
-    if (!bracketPair_ || !samePair) {
-        bracketPair_ = p;
-        nextBracketJump_ = BracketJumpTarget::Open;
     } else {
-        // same pair
-        if (cursorMoved) nextBracketJump_ = BracketJumpTarget::Open;
-        bracketPair_ = p;
+        bool samePair = bracketPair_ && *bracketPair_ == *p;
+        bool cursorMoved = (lastBracketCursor_.line != cur.line ||
+                            lastBracketCursor_.col != cur.col);
+        if (!bracketPair_ || !samePair) {
+            bracketPair_ = p;
+            nextBracketJump_ = BracketJumpTarget::Open;
+        } else if (cursorMoved) {
+            nextBracketJump_ = BracketJumpTarget::Open;
+            bracketPair_ = p;
+        } else {
+            bracketPair_ = p;
+        }
     }
+
     lastBracketCursor_ = cur;
     lastBracketVersion_ = b.document.version();
     lastBracketInstanceId_ = b.document.instanceId();
+    lastBracketViewportTop_ = top;
+    lastBracketViewportBottom_ = bottom;
 }
 
 void Editor::refreshBracketAfterJump() {
     Buffer& b = active();
     Position cur{b.cursor.line, b.cursor.col};
-    if (cur == lastBracketCursor_ && b.document.version() == lastBracketVersion_ && b.document.instanceId() == lastBracketInstanceId_) {
+
+    const int top = std::max(0, b.viewport.top);
+    const int height = std::max(0, b.viewport.height);
+    const int bottom = std::min(b.document.lineCount(), top + height);
+
+    // Fast path O(1): incluye top y bottom para detectar resizes
+    if (cur == lastBracketCursor_ &&
+        b.document.version() == lastBracketVersion_ &&
+        b.document.instanceId() == lastBracketInstanceId_ &&
+        top == lastBracketViewportTop_ &&
+        bottom == lastBracketViewportBottom_) {
         return;
     }
+
     SyntaxLanguage lang = languageFromFilename(b.filename);
     if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
-    const auto& spans = getBracketSpansForBuffer(b, lang);
-    auto p = findMatchingBracket(b.document, cur, lang, spans);
+
+    // Highlighter efímero viewport-local: NO usa SyntaxCache
+    auto src = makeViewportSpanSource(b, lang);
+    auto p = findMatchingBracketBounded(b.document, cur, lang, src, top, bottom);
+
     if (!p) {
         bracketPair_.reset();
-        nextBracketJump_ = BracketJumpTarget::Open;
-        lastBracketCursor_ = cur;
-        lastBracketVersion_ = b.document.version();
-        lastBracketInstanceId_ = b.document.instanceId();
-        return;
+        // nextBracketJump_ se conserva después de jump
+    } else {
+        bracketPair_ = p;
     }
-    bracketPair_ = p;
+
     lastBracketCursor_ = cur;
     lastBracketVersion_ = b.document.version();
     lastBracketInstanceId_ = b.document.instanceId();
-    // keep nextBracketJump_ as toggled (do not reset)
+    lastBracketViewportTop_ = top;
+    lastBracketViewportBottom_ = bottom;
 }
 
-const std::vector<std::vector<SyntaxSpan>>& Editor::getBracketSpans(const Document& doc, SyntaxLanguage lang) {
-    // Legacy API para tests que crean Document sin Buffer: mantiene cache local incremental via bracketSpansCache_
-    // Para el path normal (Editor), se usa getBracketSpansForBuffer que delega al SyntaxCache del Buffer.
-    if (bracketSpansCache_.empty() || bracketSpansVersion_ != doc.version() || bracketSpansInstanceId_ != doc.instanceId() || bracketSpansLang_ != lang || (int)bracketSpansCache_.size() != doc.lineCount()) {
-        bracketSpansCache_.clear();
-        bracketSpansCache_.resize(doc.lineCount());
-        if (lang != SyntaxLanguage::None && doc.lineCount() > 0) {
-            SyntaxHighlighter hl;
-            hl.setLanguage(lang);
-            SyntaxState state;
-            state.inBlockComment = false;
-            state.inRawString = false;
-            state.rawDelimLen = 0;
-            for (int l = 0; l < doc.lineCount(); ++l) {
-                std::vector<SyntaxSpan> spans;
-                SyntaxState nxt;
-                hl.highlight(doc.lineAt(l), state, nxt, spans);
-                bracketSpansCache_[l] = std::move(spans);
-                state = nxt;
-            }
-        }
-        bracketSpansVersion_ = doc.version();
-        bracketSpansInstanceId_ = doc.instanceId();
-        bracketSpansLang_ = lang;
-    }
-    return bracketSpansCache_;
-}
 
-const std::vector<std::vector<SyntaxSpan>>& Editor::getBracketSpansForBuffer(Buffer& buf, SyntaxLanguage lang) {
-    // Path incremental: usa el SyntaxCache del Buffer compartido con Renderer
-    auto& cache = buf.syntaxCache;
-    if (cache.language() != lang) cache.setLanguage(lang);
-    // ensureValid incremental hasta lineCount con convergencia
-    cache.ensureValid(buf.document, buf.document.lineCount());
-    return cache.allSpans();
-}

@@ -1,3 +1,5 @@
+#include "syntax/SyntaxCache.h"
+#include <functional>
 #include "test_framework.h"
 #include "core/Document.h"
 #include "core/BracketMatcher.h"
@@ -156,4 +158,182 @@ TEST(bracket_matcher_cache_document_reuse) {
 
     auto p2 = findMatchingBracket(*slot, {5, 1}, SyntaxLanguage::Cpp);
     CHECK(!p2.has_value());
+}
+namespace {
+
+BracketSpanSource makeWarmCacheSource(SyntaxCache& cache) {
+    BracketSpanSource src;
+    src.ensure = [](int) {};
+    src.spans = [&cache](int line) -> const std::vector<SyntaxSpan>& {
+        static const std::vector<SyntaxSpan> empty;
+        if (line < 0 || line >= (int)cache.size()) return empty;
+        return cache.spansFor(line);
+    };
+    return src;
+}
+
+} // namespace
+
+// ---------------------------------------------------------------------------
+// findMatchingBracketBounded
+// ---------------------------------------------------------------------------
+
+TEST(bracket_matcher_bounded_open_inside_close_outside) {
+    Document doc;
+    doc.restore({"{", "x", "x", "x", "}"});
+
+    SyntaxCache cache;
+    cache.setLanguage(SyntaxLanguage::Cpp);
+    cache.ensureValid(doc, doc.lineCount());
+
+    auto src = makeWarmCacheSource(cache);
+
+    auto p = findMatchingBracketBounded(doc, {0, 0}, SyntaxLanguage::Cpp, src, 0, 3);
+    CHECK(!p.has_value());
+
+    auto full = findMatchingBracketBounded(doc, {0, 0}, SyntaxLanguage::Cpp, src, 0, doc.lineCount());
+    CHECK(full.has_value());
+    CHECK_EQ(full->open.line, 0);
+    CHECK_EQ(full->close.line, 4);
+}
+
+TEST(bracket_matcher_bounded_close_inside_open_outside) {
+    Document doc;
+    doc.restore({"{", "x", "x", "x", "}"});
+
+    SyntaxCache cache;
+    cache.setLanguage(SyntaxLanguage::Cpp);
+    cache.ensureValid(doc, doc.lineCount());
+
+    auto src = makeWarmCacheSource(cache);
+
+    auto p = findMatchingBracketBounded(doc, {4, 0}, SyntaxLanguage::Cpp, src, 2, 5);
+    CHECK(!p.has_value());
+
+    auto full = findMatchingBracketBounded(doc, {4, 0}, SyntaxLanguage::Cpp, src, 0, 5);
+    CHECK(full.has_value());
+    CHECK_EQ(full->open.line, 0);
+    CHECK_EQ(full->close.line, 4);
+}
+
+TEST(bracket_matcher_bounded_enclosing_visible) {
+    Document doc;
+    doc.restore({"{", "  x", "}"});
+
+    SyntaxCache cache;
+    cache.setLanguage(SyntaxLanguage::Cpp);
+    cache.ensureValid(doc, doc.lineCount());
+
+    auto src = makeWarmCacheSource(cache);
+
+    auto p = findMatchingBracketBounded(doc, {1, 2}, SyntaxLanguage::Cpp, src, 0, 3);
+    CHECK(p.has_value());
+    CHECK_EQ(p->open.line, 0);
+    CHECK_EQ(p->close.line, 2);
+
+    // Si el open queda fuera del rango, no debe reportar envolvente.
+    auto p2 = findMatchingBracketBounded(doc, {1, 2}, SyntaxLanguage::Cpp, src, 1, 3);
+    CHECK(!p2.has_value());
+}
+
+// ---------------------------------------------------------------------------
+// findMatchingBracketFrom
+// ---------------------------------------------------------------------------
+
+TEST(bracket_matcher_from_open_forward) {
+    Document doc;
+    doc.restore({"{", "x", "x", "x", "}"});
+
+    SyntaxCache cache;
+    cache.setLanguage(SyntaxLanguage::Cpp);
+    cache.ensureValid(doc, doc.lineCount());
+
+    auto src = makeWarmCacheSource(cache);
+
+    auto p = findMatchingBracketFrom(doc, {0, 0}, SyntaxLanguage::Cpp, src);
+    CHECK(p.has_value());
+    CHECK_EQ(p->open.line, 0);
+    CHECK_EQ(p->close.line, 4);
+}
+
+TEST(bracket_matcher_from_close_backward) {
+    Document doc;
+    doc.restore({"{", "x", "x", "x", "}"});
+
+    SyntaxCache cache;
+    cache.setLanguage(SyntaxLanguage::Cpp);
+    cache.ensureValid(doc, doc.lineCount());
+
+    auto src = makeWarmCacheSource(cache);
+
+    auto p = findMatchingBracketFrom(doc, {4, 0}, SyntaxLanguage::Cpp, src);
+    CHECK(p.has_value());
+    CHECK_EQ(p->open.line, 0);
+    CHECK_EQ(p->close.line, 4);
+}
+
+TEST(bracket_matcher_from_enclosing_backward) {
+    Document doc;
+    doc.restore({"{", "  x", "  y", "}"});
+
+    SyntaxCache cache;
+    cache.setLanguage(SyntaxLanguage::Cpp);
+    cache.ensureValid(doc, doc.lineCount());
+
+    auto src = makeWarmCacheSource(cache);
+
+    auto p = findMatchingBracketFrom(doc, {2, 1}, SyntaxLanguage::Cpp, src);
+    CHECK(p.has_value());
+    CHECK_EQ(p->open.line, 0);
+    CHECK_EQ(p->close.line, 3);
+}
+
+TEST(bracket_matcher_from_no_bracket) {
+    Document doc;
+    doc.restore({"abc", "def"});
+
+    SyntaxCache cache;
+    cache.setLanguage(SyntaxLanguage::Cpp);
+    cache.ensureValid(doc, doc.lineCount());
+
+    auto src = makeWarmCacheSource(cache);
+
+    auto p = findMatchingBracketFrom(doc, {0, 1}, SyntaxLanguage::Cpp, src);
+    CHECK(!p.has_value());
+}
+
+// ---------------------------------------------------------------------------
+// Equivalencia backward/forward en contornos malformados acordados
+// ---------------------------------------------------------------------------
+
+TEST(bracket_matcher_from_backward_forward_equivalence_contours) {
+    auto checkCase = [](std::vector<std::string> lines, Position pos) {
+        Document doc;
+        doc.restore(lines);
+
+        SyntaxCache cache;
+        cache.setLanguage(SyntaxLanguage::Cpp);
+        cache.ensureValid(doc, doc.lineCount());
+
+        auto src = makeWarmCacheSource(cache);
+
+        auto legacy = findMatchingBracket(doc, pos, SyntaxLanguage::Cpp);
+        auto incremental = findMatchingBracketFrom(doc, pos, SyntaxLanguage::Cpp, src);
+
+        CHECK(legacy.has_value() == incremental.has_value());
+        if (legacy.has_value() && incremental.has_value()) {
+            CHECK(*legacy == *incremental);
+        }
+    };
+
+    // Envolvente bien formado con close posterior.
+    checkCase({"} { x }"}, {0, 4});
+
+    // Envolvente anidado bien formado.
+    checkCase({"({ { } x })"}, {0, 7});
+
+    // Mismatch directo en bracket abierto/cerrado.
+    checkCase({"{[}]"}, {0, 0});
+    checkCase({"{[}]"}, {0, 2});
+    checkCase({"([)]"}, {0, 0});
 }
