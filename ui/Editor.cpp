@@ -439,21 +439,23 @@ void Editor::registerCommands() {
                 ? bracketPair_->open
                 : bracketPair_->close;
         } else {
-            // 2. No hay pair válido. Buscar SOLO el extremo necesario.
+            // 2. No hay pair válido (o no cubre el cursor, típico en viewport-only).
+            // Calcular el par completo bajo demanda usando búsqueda incremental.
+            // Esto es O(distancia) pero solo se paga al comando explícito Ctrl+K m.
             auto src = makeBracketSpanSource(b, lang);
-            if (nextBracketJump_ == BracketJumpTarget::Open) {
-                target = findMatchingOpenBackward(b.document, cur, lang, src, 0);
-            } else {
-                target = findMatchingCloseForward(b.document, cur, lang, src, b.document.lineCount());
+            auto pair = findMatchingBracketFrom(b.document, cur, lang, src);
+            
+            if (!pair) {
+                bracketPair_.reset();
+                nextBracketJump_ = BracketJumpTarget::Open;
+                setActionMessage("Sin bracket.", MessageKind::Warning);
+                state_ = priorState_;
+                return;
             }
-        }
-    
-        if (!target) {
-            bracketPair_.reset();
-            nextBracketJump_ = BracketJumpTarget::Open;
-            setActionMessage("Sin bracket.", MessageKind::Warning);
-            state_ = priorState_;
-            return;
+            
+            target = (nextBracketJump_ == BracketJumpTarget::Open)
+                ? pair->open
+                : pair->close;
         }
     
         b.cursor.line = target->line;

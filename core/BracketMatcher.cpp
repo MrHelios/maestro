@@ -9,11 +9,6 @@
 
 namespace {
 
-enum class EnclosingStrategy {
-    ForwardFull,           // comportamiento legacy: parsea/scanea prefijo desde línea 0
-    BackwardFromCursor     // comportamiento nuevo: envolvente hacia atrás desde el cursor
-};
-
 bool isOpen(char c) { return c == '(' || c == '[' || c == '{'; }
 bool isClose(char c) { return c == ')' || c == ']' || c == '}'; }
 bool isBracket(char c) { return isOpen(c) || isClose(c); }
@@ -56,7 +51,6 @@ const std::vector<SyntaxSpan>& lineSpans(const BracketSpanSource& src, int line)
 }
 
 // Fuente temporal para overloads sin cache externo.
-// Parsea incrementalmente hacia adelante a medida que se piden líneas.
 struct TemporarySyntaxSource {
     const Document* doc_ = nullptr;
     SyntaxLanguage lang_ = SyntaxLanguage::None;
@@ -203,8 +197,6 @@ std::optional<BracketPair> scanBackwardClose(
     return std::nullopt;
 }
 
-// Envolvente nuevo: hacia atrás desde el cursor.
-// Costo: path cursor -> abriente, no prefijo completo.
 std::optional<BracketPair> findEnclosingBackwardThenClose(
     const Document& doc,
     Position pos,
@@ -293,8 +285,6 @@ std::optional<BracketPair> findEnclosingBackwardThenClose(
     return std::nullopt;
 }
 
-// Envolvente legacy: forward desde línea 0.
-// Se mantiene para que los overloads antiguos/tests sigan iguales.
 std::optional<BracketPair> findEnclosingForwardFull(
     const Document& doc,
     Position pos,
@@ -370,6 +360,11 @@ std::optional<BracketPair> findEnclosingForwardFull(
 
     return std::nullopt;
 }
+
+enum class EnclosingStrategy {
+    ForwardFull,
+    BackwardFromCursor
+};
 
 std::optional<BracketPair> findMatchingBracketGeneric(
     const Document& doc,
@@ -493,7 +488,6 @@ std::optional<Position> findMatchingOpenBackward(
     const std::string& line = doc.lineAt(pos.line);
     int col = std::clamp(pos.col, 0, (int)line.size());
 
-    // ¿Estamos sobre un bracket de cierre?
     char bracket = 0;
     Position bracketPos = pos;
     bool hasBracket = false;
@@ -513,7 +507,6 @@ std::optional<Position> findMatchingOpenBackward(
         return pair ? std::optional<Position>(pair->open) : std::nullopt;
     }
 
-    // No estamos sobre bracket: buscar envolvente hacia atrás (closes pendientes).
     std::vector<char> pendingCloses;
     for (int l = pos.line; l >= first; --l) {
         ensureLine(src, l);
@@ -532,7 +525,7 @@ std::optional<Position> findMatchingOpenBackward(
                 if (matchingClose(ch) == pendingCloses.back()) {
                     pendingCloses.pop_back();
                 } else {
-                    return std::nullopt; // mismatch
+                    return std::nullopt;
                 }
             }
         }
@@ -557,7 +550,6 @@ std::optional<Position> findMatchingCloseForward(
     const std::string& line = doc.lineAt(pos.line);
     int col = std::clamp(pos.col, 0, (int)line.size());
 
-    // ¿Estamos sobre un bracket de apertura?
     char bracket = 0;
     Position bracketPos = pos;
     bool hasBracket = false;
@@ -577,16 +569,66 @@ std::optional<Position> findMatchingCloseForward(
         return pair ? std::optional<Position>(pair->close) : std::nullopt;
     }
 
-    // No estamos sobre bracket: buscar cierre del envolvente.
-    // Para encontrar el cierre correcto hacia adelante, necesitamos saber QUÉ estamos cerrando.
-    // Eso requiere encontrar primero el open del envolvente hacia atrás.
     auto openPos = findMatchingOpenBackward(doc, pos, lang, src, 0);
     if (!openPos) return std::nullopt;
 
-    // Ahora buscamos el cierre de ese open específico hacia adelante.
     ensureLine(src, openPos->line);
     const std::string& openLine = doc.lineAt(openPos->line);
     char openChar = openLine[openPos->col];
     auto pair = scanForwardOpen(doc, *openPos, openChar, src, last);
     return pair ? std::optional<Position>(pair->close) : std::nullopt;
+}
+
+std::optional<BracketPair> findMatchingBracket(
+    const Document& doc,
+    Position pos,
+    SyntaxLanguage lang,
+    const std::vector<std::vector<SyntaxSpan>>& spansPerLine
+) {
+    (void)lang;
+
+    BracketSpanSource src;
+    src.ensure = [](int) {};
+    src.spans = [&spansPerLine](int line) -> const std::vector<SyntaxSpan>& {
+        static const std::vector<SyntaxSpan> empty;
+        if (line < 0 || line >= (int)spansPerLine.size()) return empty;
+        return spansPerLine[line];
+    };
+
+    return findMatchingBracketGeneric(
+        doc,
+        pos,
+        src,
+        0,
+        doc.lineCount(),
+        EnclosingStrategy::ForwardFull
+    );
+}
+
+std::optional<BracketPair> findMatchingBracket(
+    const Document& doc,
+    Position pos,
+    SyntaxLanguage lang
+) {
+    TemporarySyntaxSource tmp(doc, lang);
+    BracketSpanSource src = tmp.source();
+
+    return findMatchingBracketGeneric(
+        doc,
+        pos,
+        src,
+        0,
+        doc.lineCount(),
+        EnclosingStrategy::ForwardFull
+    );
+}
+
+std::optional<BracketPair> findMatchingBracket(
+    const Document& doc,
+    Position pos,
+    const std::string& filename
+) {
+    SyntaxLanguage lang = languageFromFilename(filename);
+    if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
+    return findMatchingBracket(doc, pos, lang);
 }
