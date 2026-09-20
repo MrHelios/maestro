@@ -246,7 +246,7 @@ private:
     int lastBracketViewportTop_ = -1;
     int lastBracketViewportBottom_ = -1;
     BracketSpanSource makeBracketSpanSource(Buffer& buf, SyntaxLanguage lang);
-    BracketSpanSource makeViewportSpanSource(Buffer& buf, SyntaxLanguage lang);
+    BracketSpanSource makeViewportSpanSource(Buffer& buf, SyntaxLanguage lang, int firstLine, int lastLine);
     void updateBracketHighlight();
     void refreshBracketAfterJump();
 

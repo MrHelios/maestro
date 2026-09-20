@@ -2152,43 +2152,41 @@ BracketSpanSource Editor::makeBracketSpanSource(Buffer& buf, SyntaxLanguage lang
     return src;
 }
 
-// En Editor.cpp, reemplaza makeBracketSpanSource por:
-BracketSpanSource Editor::makeViewportSpanSource(Buffer& buf, SyntaxLanguage lang) {
-    // Highlighter efímero: parsea solo lo que se le pide, sin estado acumulado.
-    // NO usa SyntaxCache. Costo: O(viewport) garantizado, sin importar N.
+// En Editor.cpp
+BracketSpanSource Editor::makeViewportSpanSource(Buffer& buf, SyntaxLanguage lang, int firstLine, int lastLine) {
     struct ViewportHighlightState {
         SyntaxHighlighter hl;
         std::vector<std::vector<SyntaxSpan>> cache;
-        int baseLine = -1;
+        int firstLine;
     };
+
     auto state = std::make_shared<ViewportHighlightState>();
     state->hl.setLanguage(lang);
+    state->firstLine = firstLine;
+    state->cache.resize(std::max(0, lastLine - firstLine + 1));
 
     BracketSpanSource src;
-    src.ensure = [state](int line) {
-        // No-op: el parsing se hace lazy en spans()
-        (void)line;
-    };
-    src.spans = [state, &buf, lang](int line) -> const std::vector<SyntaxSpan>& {
+
+    src.ensure = [](int) {};
+
+    src.spans = [state, &buf](int line) -> const std::vector<SyntaxSpan>& {
         static const std::vector<SyntaxSpan> empty;
+
         if (line < 0 || line >= buf.document.lineCount()) return empty;
 
-        // Cache local por línea para evitar re-parsear la misma línea
-        // en múltiples llamadas dentro del mismo frame
-        int idx = line;
-        if ((int)state->cache.size() <= idx) {
-            state->cache.resize(idx + 1);
-        }
+        int idx = line - state->firstLine;
+        if (idx < 0 || idx >= (int)state->cache.size()) return empty;
+
         if (!state->cache[idx].empty()) {
             return state->cache[idx];
         }
 
-        // Parsear esta línea con estado default (sin heredar de líneas anteriores)
         SyntaxState in{};
         SyntaxState out;
         state->hl.highlight(buf.document.lineAt(line), in, out, state->cache[idx]);
         return state->cache[idx];
     };
+
     return src;
 }
 
@@ -2211,10 +2209,9 @@ void Editor::updateBracketHighlight() {
     SyntaxLanguage lang = languageFromFilename(b.filename);
     if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
 
-    // YA NO llama a b.syntaxCache.ensureValid()
-    // Usa highlighter efímero viewport-local
-    auto src = makeViewportSpanSource(b, lang);
-    auto p = findMatchingBracketBounded(b.document, cur, lang, src, top, bottom);
+    // firstLine/lastLine salen directamente del rango visible
+    auto source = makeViewportSpanSource(b, lang, top, bottom);
+    auto p = findMatchingBracketBounded(b.document, cur, lang, source, top, bottom);
 
     if (!p) {
         bracketPair_.reset();
@@ -2262,7 +2259,7 @@ void Editor::refreshBracketAfterJump() {
     if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
 
     // Highlighter efímero viewport-local: NO usa SyntaxCache
-    auto src = makeViewportSpanSource(b, lang);
+    auto src = makeViewportSpanSource(b, lang, top, bottom);
     auto p = findMatchingBracketBounded(b.document, cur, lang, src, top, bottom);
 
     if (!p) {
