@@ -2152,30 +2152,39 @@ BracketSpanSource Editor::makeBracketSpanSource(Buffer& buf, SyntaxLanguage lang
     return src;
 }
 
+// En Editor.cpp
 BracketSpanSource Editor::makeViewportSpanSource(Buffer& buf, SyntaxLanguage lang, int firstLine, int lastLine) {
-    // Viewport-only sobre SyntaxCache persistente:
-    // - Reusa estado sintáctico correcto (before_[N+1]/dirtyFrom_/parsedUpTo_)
-    // - Solo expone spans en [firstLine, lastLine) — fuera retorna empty
-    // - ensureValid converge desde dirtyFrom_, parsea solo lo necesario
-    //   para llegar al viewport (viewport + prefix hasta convergencia)
-    auto& cache = buf.syntaxCache;
-    if (cache.language() != lang) cache.setLanguage(lang);
-    const Document* doc = &buf.document;
+    struct ViewportHighlightState {
+        SyntaxHighlighter hl;
+        std::vector<std::vector<SyntaxSpan>> cache;
+        int firstLine;
+    };
+
+    auto state = std::make_shared<ViewportHighlightState>();
+    state->hl.setLanguage(lang);
+    state->firstLine = firstLine;
+    state->cache.resize(std::max(0, lastLine - firstLine + 1));
 
     BracketSpanSource src;
 
-    src.ensure = [&cache, doc](int line) {
-        if (line >= 0) cache.ensureValid(*doc, line + 1);
-    };
+    src.ensure = [](int) {};
 
-    src.spans = [&cache, doc, firstLine, lastLine](int line) -> const std::vector<SyntaxSpan>& {
+    src.spans = [state, &buf](int line) -> const std::vector<SyntaxSpan>& {
         static const std::vector<SyntaxSpan> empty;
-        if (line < firstLine || line >= lastLine) return empty;
-        if (line < 0 || line >= doc->lineCount()) return empty;
-        // spans válidos solo tras ensureValid; el matcher llama ensure() antes,
-        // pero si solo se usa spans garantizamos aquí también (fast-path si ya válido)
-        // cache.ensureValid(*doc, line + 1); // opcional: el ensure ya lo hace; evitamos doble costo
-        return cache.spansFor(line);
+
+        if (line < 0 || line >= buf.document.lineCount()) return empty;
+
+        int idx = line - state->firstLine;
+        if (idx < 0 || idx >= (int)state->cache.size()) return empty;
+
+        if (!state->cache[idx].empty()) {
+            return state->cache[idx];
+        }
+
+        SyntaxState in{};
+        SyntaxState out;
+        state->hl.highlight(buf.document.lineAt(line), in, out, state->cache[idx]);
+        return state->cache[idx];
     };
 
     return src;
