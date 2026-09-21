@@ -247,6 +247,11 @@ private:
     int lastBracketViewportBottom_ = -1;
     BracketSpanSource makeBracketSpanSource(Buffer& buf, SyntaxLanguage lang);
     BracketSpanSource makeViewportSpanSource(Buffer& buf, SyntaxLanguage lang, int firstLine, int lastLine);
+    // Caché propio del path de brackets (siempre en Cpp, ver makeBracketSpanSource).
+    // Separado de Buffer::syntaxCache (idioma real del archivo, lo usa el renderer):
+    // compartirlo con políticas de idioma distintas lo invalidaba cada frame
+    // (thrash Cpp<->None en archivos .md/.txt + reparse 0..cursor).
+    SyntaxCache bracketCache_;
     void updateBracketHighlight();
     void refreshBracketAfterJump();
 

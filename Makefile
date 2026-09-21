@@ -22,10 +22,13 @@ SRC := $(wildcard core/*.cpp ui/*.cpp terminal/*.cpp clipboard/*.cpp filesystem/
 # helpers/. test_main.cpp es el runner en la raiz de tests/.
 TEST_DIR := tests
 TEST_INC := -I$(TEST_DIR) -I$(TEST_DIR)/helpers
+# bench_*.cpp son benchmarks standalone con main() propio: no forman parte
+# de la suite TEST() y se excluyen para no duplicar main con test_main.cpp.
+TEST_PERF_SRCS := $(filter-out $(TEST_DIR)/performance/bench_%.cpp, $(wildcard $(TEST_DIR)/performance/*.cpp))
 TEST_SRC_ALL := $(TEST_DIR)/test_main.cpp \
             $(wildcard $(TEST_DIR)/unit/*.cpp) \
             $(wildcard $(TEST_DIR)/interaction/*.cpp) \
-            $(wildcard $(TEST_DIR)/performance/*.cpp) \
+            $(TEST_PERF_SRCS) \
             $(wildcard $(TEST_DIR)/terminal_graphics/*.cpp) \
             $(wildcard $(TEST_DIR)/e2e/*.cpp) \
             $(wildcard $(TEST_DIR)/integration/*.cpp) \
@@ -37,7 +40,7 @@ TEST_SRC := $(TEST_DIR)/test_main.cpp \
             $(wildcard $(TEST_DIR)/integration/*.cpp) \
             $(wildcard $(TEST_DIR)/integration/x11_clipboard/*.cpp)
 TEST_SRC_PERF := $(TEST_DIR)/test_main.cpp \
-            $(wildcard $(TEST_DIR)/performance/*.cpp)
+            $(TEST_PERF_SRCS)
 TEST_SRC_TERM := $(TEST_DIR)/test_main.cpp \
             $(wildcard $(TEST_DIR)/terminal_graphics/*.cpp)
 TEST_BIN := build/edit_tests

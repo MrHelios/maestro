@@ -37,19 +37,7 @@ int main(){
  std::cout<<"visAvg avg "<< (std::accumulate(visAvg.begin(), visAvg.end(), 0ull, [](auto a, auto&s){return a+s.size();})/40) << "\n";
  std::cout<<"huge "<<huge.size()<<" cols "<<utf8::columnOf(huge,huge.size())<<"\n\n";
 
- auto makeWork = [](std::vector<std::string>& vis, bool useFull, bool useChk)->double{
-   volatile size_t sink=0;
-   auto t0=std::chrono::high_resolution_clock::now();
-   for(auto &line: vis){
-     if(useFull){ rowlayout::RowLayoutFull rl(line); for(int i=0;i<8;++i){int b=(line.size()*i)/8; b=utf8::alignStart(line,b); sink+=rl.columnAt(b);} sink+=rl.range(0,80).size(); sink+=rl.expandVisible(0,80).size(); }
-     else if(useChk){ rowlayout::RowLayoutCheckpoint rl(line); for(int i=0;i<8;++i){int b=(line.size()*i)/8; b=utf8::alignStart(line,b); sink+=rl.columnAt(b);} sink+=rl.range(0,80).size(); sink+=rl.expandVisible(0,80).size(); }
-     else { for(int i=0;i<8;++i){int b=(line.size()*i)/8; b=utf8::alignStart(line,b); sink+=utf8::columnOf(line,b);} sink+=utf8::range(line,0,80).size(); sink+=utf8::expandTabs(utf8::range(line,0,80)).size(); }
-   }
-   auto t1=std::chrono::high_resolution_clock::now();
-   return std::chrono::duration<double,std::micro>(t1-t0).count();
- };
-
- // per frame micro bench (single iteration)
+  // per frame micro bench (single iteration)
  std::cout<<"--- Per-frame (40 lines) micro bench (single frame) ---\n";
  for(auto &caseName: std::vector<std::string>{"visLong","visAvg"}){
    auto &vis = (caseName=="visLong"?visLong:visAvg);

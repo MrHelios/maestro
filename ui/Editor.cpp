@@ -947,10 +947,12 @@ void Editor::renderFrame() {
     } else {
         // Sincroniza lenguaje del cache con el buffer activo antes de bracket/render
         {
+            // Idioma real del archivo (None => sin highlight): este caché es
+            // del renderer. Los brackets usan bracketCache_ propio (siempre
+            // Cpp); forzar Cpp acá reintroduciría el thrash de idioma con
+            // Renderer::updateSyntaxLanguage (invalidateAll por frame).
             SyntaxLanguage lang = languageFromFilename(b.filename);
-            if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
 
-            // Para brackets y render se usa el mismo cache del Buffer
             if (b.syntaxCache.language() != lang) b.syntaxCache.setLanguage(lang);
 
             renderer_.setExternalSyntaxCache(&b.syntaxCache);
@@ -2139,7 +2141,10 @@ void Editor::handleIrAFilaEvent(const Event& event) {
 }
 
 BracketSpanSource Editor::makeBracketSpanSource(Buffer& buf, SyntaxLanguage lang) {
-    auto& cache = buf.syntaxCache;
+    // El path de brackets usa caché propio (siempre Cpp, incluso si el archivo
+    // es None): comparte documento pero no idioma con Buffer::syntaxCache.
+    // syncDocument() invalida solo ante cambio de documento/buffer.
+    auto& cache = bracketCache_;
     if (cache.language() != lang) cache.setLanguage(lang);
     const Document* doc = &buf.document;
     BracketSpanSource src;
@@ -2152,42 +2157,14 @@ BracketSpanSource Editor::makeBracketSpanSource(Buffer& buf, SyntaxLanguage lang
     return src;
 }
 
-// En Editor.cpp
+// Fuente viewport-only sobre SyntaxCache: reutiliza los spans con estado
+// sintáctico correcto (before_[line]) en vez de resaltar cada línea desde
+// SyntaxState{}. El acotado al viewport lo impone findMatchingBracketBounded
+// vía firstLine/lastLineExclusive, no la fuente.
 BracketSpanSource Editor::makeViewportSpanSource(Buffer& buf, SyntaxLanguage lang, int firstLine, int lastLine) {
-    struct ViewportHighlightState {
-        SyntaxHighlighter hl;
-        std::vector<std::vector<SyntaxSpan>> cache;
-        int firstLine;
-    };
-
-    auto state = std::make_shared<ViewportHighlightState>();
-    state->hl.setLanguage(lang);
-    state->firstLine = firstLine;
-    state->cache.resize(std::max(0, lastLine - firstLine + 1));
-
-    BracketSpanSource src;
-
-    src.ensure = [](int) {};
-
-    src.spans = [state, &buf](int line) -> const std::vector<SyntaxSpan>& {
-        static const std::vector<SyntaxSpan> empty;
-
-        if (line < 0 || line >= buf.document.lineCount()) return empty;
-
-        int idx = line - state->firstLine;
-        if (idx < 0 || idx >= (int)state->cache.size()) return empty;
-
-        if (!state->cache[idx].empty()) {
-            return state->cache[idx];
-        }
-
-        SyntaxState in{};
-        SyntaxState out;
-        state->hl.highlight(buf.document.lineAt(line), in, out, state->cache[idx]);
-        return state->cache[idx];
-    };
-
-    return src;
+    (void)firstLine;
+    (void)lastLine;
+    return makeBracketSpanSource(buf, lang);
 }
 
 void Editor::updateBracketHighlight() {
@@ -2258,7 +2235,7 @@ void Editor::refreshBracketAfterJump() {
     SyntaxLanguage lang = languageFromFilename(b.filename);
     if (lang == SyntaxLanguage::None) lang = SyntaxLanguage::Cpp;
 
-    // Highlighter efímero viewport-local: NO usa SyntaxCache
+    // Fuente viewport-only sobre SyntaxCache (estado entre líneas correcto).
     auto src = makeViewportSpanSource(b, lang, top, bottom);
     auto p = findMatchingBracketBounded(b.document, cur, lang, src, top, bottom);
 

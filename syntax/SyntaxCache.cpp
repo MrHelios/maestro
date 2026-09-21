@@ -13,12 +13,14 @@ void SyntaxCache::invalidateAll() {
     before_.clear();
     spans_.clear();
     dirtyFrom_ = 0;
+    dirtyMax_ = -1;
     parsedUpTo_ = 0;
 }
 
 void SyntaxCache::markDirty(int fromLine) {
     if (fromLine < 0) fromLine = 0;
     dirtyFrom_ = std::min(dirtyFrom_, fromLine);
+    dirtyMax_ = std::max(dirtyMax_, fromLine);
 }
 
 void SyntaxCache::onInsertLines(int at, int count) {
@@ -34,6 +36,9 @@ void SyntaxCache::onInsertLines(int at, int count) {
     
     // Las líneas insertadas no están parseadas
     parsedUpTo_ = std::min(parsedUpTo_, at);
+    // Desplazar el extremo derecho con las líneas y cubrir las nuevas.
+    if (dirtyMax_ >= at) dirtyMax_ += count;
+    dirtyMax_ = std::max(dirtyMax_, at + count - 1);
     markDirty(at);
 }
 
@@ -55,6 +60,10 @@ void SyntaxCache::onRemoveLines(int at, int count) {
     
     // Conservador: las líneas posteriores pueden haber cambiado
     parsedUpTo_ = std::min(parsedUpTo_, at);
+    // Desplazar el extremo derecho: lo que estaba después corre, lo que
+    // caía dentro del rango borrado colapsa a `at` (línea con nuevo texto).
+    if (dirtyMax_ >= at + count) dirtyMax_ -= count;
+    else if (dirtyMax_ >= at) dirtyMax_ = at;
     markDirty(at);
 }
 
@@ -171,26 +180,32 @@ void SyntaxCache::ensureValid(const Document& doc, int upTo) {
     SyntaxState state = before_[start];
     int parsedCount = 0;
     int hlCount = 0;
-    
+    bool converged = false;
+
     for (int l = start; l < upTo; ++l) {
         SyntaxState oldOut = before_[l + 1];
         SyntaxState out;
-        
+
         highlighter_.highlight(doc.lineAt(l), state, out, buf);
         hlCount++;
         parsedCount++;
         spans_[l] = buf;
         before_[l + 1] = out;
-        
+
         // Actualizar parsedUpTo_
         if (l + 1 > parsedUpTo_) {
             parsedUpTo_ = l + 1;
         }
 
-        // Convergencia real: estado sin cambios Y sufijo ya parseado
-        if (out == oldOut && parsedUpTo_ > l) {
+        // Convergencia real: estado sin cambios Y sufijo ya parseado, pero
+        // solo si ya se reprocesó la última línea editada. Sin el gate
+        // pastEdits, un break temprano saltea una segunda región dirty y
+        // la cola declararía limpio en falso (stale permanente).
+        bool pastEdits = (l >= dirtyMax_);
+        if (out == oldOut && pastEdits && parsedUpTo_ > l) {
             if (upTo <= parsedUpTo_) {
                 // Todo el rango pedido es válido
+                converged = true;
                 break;
             }
             // Saltar líneas ya parseadas con estado invariante
@@ -198,13 +213,18 @@ void SyntaxCache::ensureValid(const Document& doc, int upTo) {
             state = before_[parsedUpTo_];
             continue;
         }
-        
+
         state = out;
     }
-    // Si hemos parseado hasta upTo y no hay dirty pendiente, marcar como limpio
-    if (parsedUpTo_ >= upTo && dirtyFrom_ < upTo) {
-        dirtyFrom_ = (parsedUpTo_ >= (int)spans_.size() ? INT_MAX : parsedUpTo_);
-        if (dirtyFrom_ >= (int)spans_.size()) dirtyFrom_ = INT_MAX;
+    // Solo declarar limpio si se convergió o si se cubrió todo lo sucio:
+    // upTo > dirtyMax_ implica que cada línea editada fue reprocesada.
+    // En un ensure parcial (upTo <= dirtyMax_) before_[upTo] quedó recién
+    // escrito y es válido: se retoma desde ahí y dirtyMax_ se conserva.
+    if (converged || upTo > dirtyMax_) {
+        dirtyFrom_ = INT_MAX;
+        dirtyMax_ = -1;
+    } else if (dirtyFrom_ < upTo) {
+        dirtyFrom_ = upTo;
     }
     doRecord(requestedClamped, parsedCount, hlCount);
 }

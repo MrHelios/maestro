@@ -8,6 +8,10 @@
 
 // Cache incremental para highlight sintáctico.
 // Mantiene before[N+1] (estado antes de cada línea) y spans[N].
+// El rango sucio es [dirtyFrom_, dirtyMax_]: before_[dirtyFrom_] es válido
+// y desde ahí todo es sospechoso hasta cubrir dirtyMax_. La convergencia
+// solo cuenta pasado dirtyMax_; sin ese extremo derecho, un break temprano
+// puede saltear una segunda región dirty y declarar limpio en falso.
 // Invalida solo desde dirtyFromLine y reparsea hasta convergencia
 // (nuevo stateOut == cacheado stateOut) preservando suffix.
 class SyntaxCache {
@@ -49,6 +53,7 @@ public:
 
     // Para tests/debug
     int dirtyFrom() const { return dirtyFrom_; }
+    int dirtyMax() const { return dirtyMax_; }
     int parsedUpTo() const { return parsedUpTo_; }
     size_t size() const { return spans_.size(); }
 
@@ -60,6 +65,7 @@ private:
     std::vector<std::vector<SyntaxSpan>> spans_; // size N
 
     int dirtyFrom_ = INT_MAX;
+    int dirtyMax_ = -1; // última línea editada (inclusive); -1 == limpio
 
     const Document* docPtr_ = nullptr;
     uint64_t docInstanceId_ = 0;
