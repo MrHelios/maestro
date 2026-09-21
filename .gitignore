@@ -27,3 +27,4 @@ edit_tests
 # Artefactos de CTest (se crean si alguien corre `ctest` por error)
 build/
 Testing/
+tests/temp/
