@@ -1,5 +1,6 @@
 #include "syntax/SyntaxCache.h"
 #include <algorithm>
+#include "core/Instrument.h"
 
 void SyntaxCache::setLanguage(SyntaxLanguage lang) {
     if (lang == language_) return;
@@ -103,10 +104,20 @@ void SyntaxCache::ensureSize(const Document& doc) {
 }
 
 void SyntaxCache::ensureValid(const Document& doc, int upTo) {
+    bool doInstr = instrument::enabled;
+    uint64_t t0 = doInstr ? instrument::nowNanos() : 0;
+    auto doRecord = [&](int requestedClamped, int parsedLines, int hlCalls){
+        if (!doInstr) return;
+        uint64_t ns = instrument::nowNanos() - t0;
+        instrument::recordSyntaxEnsureValid(requestedClamped, parsedLines, ns);
+        for (int i=0;i<hlCalls;++i) instrument::recordHighlighterCall();
+    };
     if (language_ == SyntaxLanguage::None) {
         ensureSize(doc);
         dirtyFrom_ = INT_MAX;
         parsedUpTo_ = doc.lineCount();
+        int req = std::clamp(upTo, 0, doc.lineCount());
+        doRecord(req, 0, 0);
         return;
     }
     
@@ -118,6 +129,8 @@ void SyntaxCache::ensureValid(const Document& doc, int upTo) {
         spans_.clear();
         dirtyFrom_ = INT_MAX;
         parsedUpTo_ = 0;
+        int req = 0;
+        doRecord(req, 0, 0);
         return;
     }
     
@@ -125,9 +138,15 @@ void SyntaxCache::ensureValid(const Document& doc, int upTo) {
     
     if (upTo < 0) upTo = 0;
     if (upTo > n) upTo = n;
+    int requestedClamped = upTo;
     
     // Fast path: ya está válido hasta upTo
     if (dirtyFrom_ == INT_MAX && parsedUpTo_ >= upTo) {
+        if (doInstr && upTo < 100) {
+            // debug
+            // std::cerr << "ensureValid fast upTo="<<upTo<<" parsedUpTo="<<parsedUpTo_<<" dirty="<<dirtyFrom_<<"\n";
+        }
+        doRecord(requestedClamped, 0, 0);
         return;
     }
     
@@ -143,18 +162,23 @@ void SyntaxCache::ensureValid(const Document& doc, int upTo) {
     if (start >= upTo) {
         if (dirtyFrom_ < upTo) dirtyFrom_ = upTo;
         if (dirtyFrom_ >= n) dirtyFrom_ = INT_MAX;
+        doRecord(requestedClamped, 0, 0);
         return;
     }
     
         // Parsear desde start hasta upTo (o hasta convergencia en cache caliente)
     std::vector<SyntaxSpan> buf;
     SyntaxState state = before_[start];
+    int parsedCount = 0;
+    int hlCount = 0;
     
     for (int l = start; l < upTo; ++l) {
         SyntaxState oldOut = before_[l + 1];
         SyntaxState out;
         
         highlighter_.highlight(doc.lineAt(l), state, out, buf);
+        hlCount++;
+        parsedCount++;
         spans_[l] = buf;
         before_[l + 1] = out;
         
@@ -177,6 +201,12 @@ void SyntaxCache::ensureValid(const Document& doc, int upTo) {
         
         state = out;
     }
+    // Si hemos parseado hasta upTo y no hay dirty pendiente, marcar como limpio
+    if (parsedUpTo_ >= upTo && dirtyFrom_ < upTo) {
+        dirtyFrom_ = (parsedUpTo_ >= (int)spans_.size() ? INT_MAX : parsedUpTo_);
+        if (dirtyFrom_ >= (int)spans_.size()) dirtyFrom_ = INT_MAX;
+    }
+    doRecord(requestedClamped, parsedCount, hlCount);
 }
 
 const SyntaxState& SyntaxCache::stateBefore(int line) const {

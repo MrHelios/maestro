@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <algorithm>
 
+#include "core/Instrument.h"
 #include "core/utf8.h"
 #include "ui/RenderUtil.h"
 #include "syntax/SyntaxLanguage.h"
@@ -107,15 +108,24 @@ int gutterWidth(int totalLines) {
 // (mismo comportamiento que antes para las filas no-activas).
 void renderFilledRow(std::string& out, std::string_view text, int width,
                      const std::string& bgStyle, const std::string& reset) {
+    instrument::ScopedTimer _t(instrument::enabled ? &instrument::current.renderFilledRow_nanos : nullptr);
+    if (instrument::enabled) instrument::onRenderFilledRow();
     if (bgStyle.empty()) {
+        instrument::setTag(instrument::Utf8Tag::RangeFilled);
         std::string_view visible = utf8::range(text, 0, width);
+        instrument::clearTag();
         out.append(visible.data(), visible.size());
         return;
     }
+    instrument::setTag(instrument::Utf8Tag::TruncateFilled);
     std::string truncated = utf8::truncate(text, width);
+    instrument::clearTag();
     out += bgStyle;
     out += truncated;
-    for (int c = colCount(truncated); c < width; ++c) out += ' ';
+    instrument::setTag(instrument::Utf8Tag::ColumnOfFilled);
+    int cc = colCount(truncated);
+    instrument::clearTag();
+    for (int c = cc; c < width; ++c) out += ' ';
     out += reset;
 }
 
@@ -260,6 +270,13 @@ std::string Renderer::buildScreen(const Document& doc,
                                    const std::optional<Selection>& selection,
                                    const std::optional<Selection>& searchHighlight,
                                    const std::optional<BracketPair>& bracketPair) {
+    if (instrument::enabled) {
+        // Reset por frame para que report() muestre solo este frame.
+        // El caller puede hacer snapshotAndReset() si quiere acumular.
+        instrument::resetFrame();
+        instrument::onBuildScreen();
+    }
+    instrument::ScopedTimer _t_buildScreen(&instrument::current.buildScreen_nanos);
     updateSyntaxLanguage(filename);
     std::string out;
     beginFrame(out);
@@ -294,6 +311,8 @@ std::string Renderer::buildEditorBody(const Document& doc,
                                        const std::optional<Selection>& selection,
                                        const std::optional<Selection>& searchHighlight,
                                        const std::optional<BracketPair>& bracketPair) const {
+    instrument::ScopedTimer _t(&instrument::current.buildEditorBody_nanos);
+    if (instrument::enabled) instrument::onBuildEditorBody();
     updateSyntaxLanguage(filename);
     std::string out;
     std::optional<Normalized> sel = selection.has_value() ? normalize(*selection)
@@ -416,7 +435,7 @@ void Renderer::renderEditorRow(std::string& out,
         return;
     }
     auto& cache = activeCache();
-    const_cast<SyntaxCache&>(cache).ensureValid(doc, docLine + 1);
+    if (!cache.isValidThrough(docLine + 1)) const_cast<SyntaxCache&>(cache).ensureValid(doc, docLine + 1);
     const auto& spans = cache.spansFor(docLine);
     renderEditorRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, docLine, gutterW, textWidth, spans);
 }
@@ -433,6 +452,8 @@ void Renderer::renderEditorRow(std::string& out,
                              int gutterW,
                              int textWidth,
                              const std::vector<SyntaxSpan>& spans) const {
+    instrument::ScopedTimer _t(&instrument::current.renderEditorRow_nanos);
+    if (instrument::enabled) instrument::onRenderEditorRow();
     if (docLine >= doc.lineCount()) {
         out += renderGutterBlank(gutterW);
         if (textWidth > 0) {
@@ -509,15 +530,21 @@ void Renderer::renderEditorRow(std::string& out,
 
     int absoluteVisStart = viewport.left;
     int absoluteVisEnd = absoluteVisStart + textWidth;
+    instrument::setTag(instrument::Utf8Tag::RangeVisibleRaw);
     std::string_view visibleRaw = utf8::range(line, absoluteVisStart, absoluteVisEnd);
+    instrument::clearTag();
+    instrument::setTag(instrument::Utf8Tag::ExpandTabs);
     std::string visible = utf8::expandTabs(visibleRaw);
+    instrument::clearTag();
 
     std::pair<int,int> visibleSel[2];
     int visibleSelCount = 0;
     for (int i = 0; i < mergedCount; ++i) {
         auto p = merged[i];
+        instrument::setTag(instrument::Utf8Tag::ColumnOfSelection);
         int absoluteSc = utf8::columnOf(line, p.first);
         int absoluteEc = utf8::columnOf(line, p.second);
+        instrument::clearTag();
         if (absoluteEc <= absoluteVisStart || absoluteSc >= absoluteVisEnd) continue;
         int visibleSc = std::max(absoluteSc, absoluteVisStart) - absoluteVisStart;
         int visibleEc = std::min(absoluteEc, absoluteVisEnd) - absoluteVisStart;
@@ -528,8 +555,10 @@ void Renderer::renderEditorRow(std::string& out,
     int visibleBracketCount = 0;
     for (int i=0;i<bracketCount;++i){
         auto p = bracketIntervals[i];
+        instrument::setTag(instrument::Utf8Tag::ColumnOfBracket);
         int absoluteSc = utf8::columnOf(line, p.first);
         int absoluteEc = utf8::columnOf(line, p.second);
+        instrument::clearTag();
         if (absoluteEc <= absoluteVisStart || absoluteSc >= absoluteVisEnd) continue;
         int visibleSc = std::max(absoluteSc, absoluteVisStart) - absoluteVisStart;
         int visibleEc = std::min(absoluteEc, absoluteVisEnd) - absoluteVisStart;
@@ -540,8 +569,10 @@ void Renderer::renderEditorRow(std::string& out,
     std::vector<SynVis> synVis;
     synVis.reserve(spans.size());
     for (auto& sp : spans) {
+        instrument::setTag(instrument::Utf8Tag::ColumnOfSyntax);
         int aSc = utf8::columnOf(line, static_cast<int>(sp.begin));
         int aEc = utf8::columnOf(line, static_cast<int>(sp.end));
+        instrument::clearTag();
         if (aEc <= absoluteVisStart || aSc >= absoluteVisEnd) continue;
         int vs = std::max(aSc, absoluteVisStart) - absoluteVisStart;
         int ve = std::min(aEc, absoluteVisEnd) - absoluteVisStart;
@@ -580,22 +611,30 @@ void Renderer::renderEditorRow(std::string& out,
         for(int k=0;k<visibleSelCount;++k) if(segS>=visibleSel[k].first && segS<visibleSel[k].second){ inSel=true; break; }
         bool inBracket=false;
         if (!inSel) for(int k=0;k<visibleBracketCount;++k) if(segS>=visibleBracket[k].first && segS<visibleBracket[k].second){ inBracket=true; break; }
+        instrument::setTag(instrument::Utf8Tag::RangeSegments);
         std::string_view seg = utf8::range(visible, segS, segE);
+        instrument::clearTag();
+        instrument::setTag(instrument::Utf8Tag::ColumnOfFilled);
         bool beyondContent = seg.empty() && segS >= colCount(visible);
+        instrument::clearTag();
         if (beyondContent) continue;
         if(inSel){
             if(!seg.empty()){
                 out += theme_.selection;
                 out += seg;
                 out += theme_.reset;
+                instrument::setTag(instrument::Utf8Tag::ColumnOfFilled);
                 used += colCount(seg);
+                instrument::clearTag();
             }
         } else if(inBracket){
             if(!seg.empty()){
                 out += theme_.bracketMatch;
                 out += seg;
                 out += theme_.reset;
+                instrument::setTag(instrument::Utf8Tag::ColumnOfFilled);
                 used += colCount(seg);
+                instrument::clearTag();
             }
         } else {
             SyntaxToken tok=SyntaxToken::Keyword; bool hasSyn=false;
@@ -613,7 +652,9 @@ void Renderer::renderEditorRow(std::string& out,
                     out += seg;
                     if(!st.empty()) out += theme_.reset;
                 }
+                instrument::setTag(instrument::Utf8Tag::ColumnOfFilled);
                 used += colCount(seg);
+                instrument::clearTag();
             } else {
                 if(isCurrentLine){
                     out += theme_.currentLine;
@@ -622,11 +663,15 @@ void Renderer::renderEditorRow(std::string& out,
                 } else {
                     out += seg;
                 }
+                instrument::setTag(instrument::Utf8Tag::ColumnOfFilled);
                 used += colCount(seg);
+                instrument::clearTag();
             }
         }
     }
+    instrument::setTag(instrument::Utf8Tag::ColumnOfFilled);
     int visW = colCount(visible);
+    instrument::clearTag();
     if (used < visW) used = visW;
     if(isCurrentLine && used < textWidth){
         out += theme_.currentLine;
@@ -645,13 +690,15 @@ void Renderer::renderEditorContent(std::string& out,
                              const std::optional<Normalized>& bracketClose,
                              const Rect& area,
                              int gutterW) const {
+    instrument::ScopedTimer _t(&instrument::current.renderEditorContent_nanos);
+    if (instrument::enabled) instrument::onRenderEditorContent();
     int textWidth = std::max(0, area.width - gutterW);
-    // Asegurar cache hasta el final del viewport para que spans estén listos sin re-highlight por línea
+    // Evitar ensureValid cuando ya está válido (isValidThrough mantiene invariante)
     {
         auto& cache = activeCache();
         int need = viewport.top + area.height;
         if (need > doc.lineCount()) need = doc.lineCount();
-        if (need > 0) const_cast<SyntaxCache&>(cache).ensureValid(doc, need);
+        if (need > 0 && !cache.isValidThrough(need)) const_cast<SyntaxCache&>(cache).ensureValid(doc, need);
     }
     for (int row = 0; row < area.height; ++row) {
         int docLine = viewport.top + row;

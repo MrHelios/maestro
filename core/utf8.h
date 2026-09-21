@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <algorithm>
+#include "core/Instrument.h"
 
 // Utilitarios UTF-8 puros (sin dependencias del renderer): el renderer
 // los usa y los tests los ejercitan en su propio archivo.
@@ -156,9 +157,17 @@ inline constexpr int TAB_WIDTH = 4;
 inline constexpr int kTabWidth = TAB_WIDTH;
 
 inline int columnOf(std::string_view line, int byteCol) {
+    bool doInstr = instrument::enabled;
+    uint64_t t0 = doInstr ? instrument::nowNanos() : 0;
     int n = static_cast<int>(line.size());
-    int limit = byteCol < n ? byteCol : n;
-    if (limit <= 0) return 0;
+    int limit = byteCol < n ? byteCol : n; // input_bytes/scan_limit, aprox. O(n)
+    if (limit <= 0) {
+        if (doInstr) {
+            uint64_t ns = instrument::nowNanos() - t0;
+            instrument::recordColumnOf(0, ns);
+        }
+        return 0;
+    }
     int col = 0;
     int i = 0;
     while (i < limit) {
@@ -178,6 +187,12 @@ inline int columnOf(std::string_view line, int byteCol) {
             col += cellWidth(line, i, n);
         }
         i += cellLen(line, i, n);
+    }
+    // Registra limit como input_bytes/scan_limit, no bytes iterados literales
+    // (cellLen 1-4 y fast-path 8B hacen que iterados < limit en ASCII)
+    if (doInstr) {
+        uint64_t ns = instrument::nowNanos() - t0;
+        instrument::recordColumnOf(static_cast<uint64_t>(limit), ns);
     }
     return col;
 }
@@ -203,6 +218,8 @@ inline int byteForColumn(std::string_view line, int targetCol) {
 // celda por la mitad (lo que generaria bytes invalidos y corromperia el
 // resto del render).
 inline std::string truncate(std::string_view line, int maxCols) {
+    bool doInstr = instrument::enabled;
+    uint64_t t0 = doInstr ? instrument::nowNanos() : 0;
     int col = 0;
     size_t i = 0;
     int n = static_cast<int>(line.size());
@@ -214,6 +231,11 @@ inline std::string truncate(std::string_view line, int maxCols) {
         col += w;
         i += cellLen(line, static_cast<int>(i), n);
     }
+    // i = bytes escaneados hasta maxCols (no input_bytes total)
+    if (doInstr) {
+        uint64_t ns = instrument::nowNanos() - t0;
+        instrument::recordTruncate(static_cast<uint64_t>(i), ns);
+    }
     return std::string(line.substr(0, i));
 }
 
@@ -221,6 +243,8 @@ inline std::string truncate(std::string_view line, int maxCols) {
 // [fromCol, toCol). No corta celdas por la mitad. Si el rango llega al
 // final de la linea devuelve hasta el ultimo byte.
 inline std::string expandTabs(std::string_view line) {
+    bool doInstr = instrument::enabled;
+    uint64_t t0 = doInstr ? instrument::nowNanos() : 0;
     std::string out;
     out.reserve(line.size() + 8);
     int col = 0;
@@ -239,11 +263,23 @@ inline std::string expandTabs(std::string_view line) {
             i += len;
         }
     }
+    if (doInstr) {
+        uint64_t ns = instrument::nowNanos() - t0;
+        instrument::recordExpandTabs(static_cast<uint64_t>(line.size()), ns);
+    }
     return out;
 }
 
 inline std::string_view range(std::string_view line, int fromCol, int toCol) {
-    if (toCol <= fromCol) return "";
+    bool doInstr = instrument::enabled;
+    uint64_t t0 = doInstr ? instrument::nowNanos() : 0;
+    if (toCol <= fromCol) {
+        if (doInstr) {
+            uint64_t ns = instrument::nowNanos() - t0;
+            instrument::recordRange(0, ns);
+        }
+        return "";
+    }
     int n = static_cast<int>(line.size());
     int col = 0;
     size_t startByte = line.size();
@@ -257,6 +293,11 @@ inline std::string_view range(std::string_view line, int fromCol, int toCol) {
         col += w;
         i += cellLen(line, i, n);
         if (col >= toCol && endByte == line.size()) { endByte = i; break; }
+    }
+    // i = bytes escaneados hasta toCol (mas preciso que limit)
+    if (doInstr) {
+        uint64_t ns = instrument::nowNanos() - t0;
+        instrument::recordRange(static_cast<uint64_t>(i), ns);
     }
     if (startByte == line.size()) return "";
     if (endByte == line.size() && col < toCol) endByte = line.size();

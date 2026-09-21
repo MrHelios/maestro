@@ -39,6 +39,14 @@ public:
     const std::vector<SyntaxState>& allBefore() const { return before_; }
     SyntaxState stateAt(int line, const Document& doc); // garantiza y devuelve
 
+    // Evita llamar ensureValid cuando ya está válido
+    bool isValidThrough(int line) const {
+        if (language_ == SyntaxLanguage::None) return true;
+        if (line < 0) return true;
+        if (line > (int)spans_.size()) line = (int)spans_.size();
+        return parsedUpTo_ >= line && dirtyFrom_ >= line;
+    }
+
     // Para tests/debug
     int dirtyFrom() const { return dirtyFrom_; }
     int parsedUpTo() const { return parsedUpTo_; }
