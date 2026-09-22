@@ -84,4 +84,46 @@ constexpr PerfLimits kRenderViewport{
     "render viewport", 164, 180, 0, ULLONG_MAX, "+9.8% allocs",
     "detectar regresiones sin acoplarse al layout exacto de STL"};
 
+// Baseline highlight steady: tras warmup de bracketCache_ + N/2 fijo,
+// 0 allocs/op medido en 1k/10k/25k (steady O(viewport)), tiempo ~constante.
+// Contratos (dos, no uno):
+//   1) Absoluto: allocs/op <= 2, bytes/op <= 512 (PerfLimits arriba).
+//   2) Escalabilidad: allocs(10k) <= allocs(1k)+2 y allocs(25k) <= allocs(1k)+2.
+// Si falla, es bug real (matcher escapa del viewport o reparse sin convergencia).
+constexpr PerfLimits kBracketHighlightSteady{
+    "bracket highlight steady", 0, 2, 0, 512, "warmup excluido; +2 allocs margen",
+    "steady debe ser O(viewport): warmup deja bracketCache valido hasta top"};
+
+// columnOf cache hit: O(1). Baseline hit ~0.08-0.17us vs
+// full 1.5ms-176ms. Gate conservador: uncached/cached >= 50x para evitar
+// fragilidad; fallar indica que el cache no evita el rescan 0..byteCol.
+// Medido: 1 alloc / 64 B total por bloque (amortizado 0/op con 1000 iters,
+// 64/op con iters=1 en 100xLeft). Margen +1 alloc / 128 B para overhead fijo.
+constexpr double kColumnOfCacheMinSpeedup = 50.0;
+constexpr PerfLimits kColumnOfCacheHit{
+    "columnOf cache hit", 0, 1, 0, 128, "+1 alloc / 128 B overhead fijo",
+    "visualColumn cacheado no debe rescanear O(N); 1 alloc inicial es overhead fijo"};
+
+// Document load (restore vector<string>): 1 alloc/línea, ~120 B/línea.
+// Gate N-lineal con overhead fijo: allocs <= 1.10*N + 10, bytes <= 135*N + 1024.
+// Más robusto que umbral absoluto por N; separa de restore 3k (2 allocs/línea).
+inline void checkDocumentLoadBudget(int n, const alloc_stats::Stats& st,
+                                    long long iters,
+                                    const char* file, int line) {
+    const unsigned long long div = iters > 0 ? (unsigned long long)iters : 1;
+    const unsigned long long a = st.allocs / div;
+    const unsigned long long b = st.bytesAllocated / div;
+    const unsigned long long maxA = (unsigned long long)(1.10 * n + 10 + 0.5);
+    const unsigned long long maxB = (unsigned long long)(135ULL * (unsigned long long)n + 1024);
+    ::testfw::report(a <= maxA,
+        std::string("document load allocs/N ") + std::to_string(a) +
+            " <= 1.10*" + std::to_string(n) + "+10=" + std::to_string(maxA) +
+            " (" + std::to_string(a) + "/" + std::to_string(n) + ")",
+        file, line);
+    ::testfw::report(b <= maxB,
+        std::string("document load bytes/N ") + std::to_string(b) +
+            " <= 135*" + std::to_string(n) + "+1024=" + std::to_string(maxB),
+        file, line);
+}
+
 } // namespace perf_limits

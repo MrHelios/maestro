@@ -68,6 +68,7 @@ TEST(bench_perf_document_load_checked) {
         double us = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count()/iters/1000.0;
         auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
         perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n", label, iters, us, st.allocs/ (unsigned long long)iters, st.bytesAllocated/(unsigned long long)iters);
+        perf_limits::checkDocumentLoadBudget(n, st, iters, __FILE__, __LINE__);
     }
     CHECK(perf_time::g_sink>0);
 }
@@ -1089,22 +1090,26 @@ TEST(bench_perf_bracket_matcher_bounded_checked) {
 }
 
 // B. Editor highlight path real (SyntaxCache + makeBracketSpanSource + top fijo)
+// Mide costo steady O(viewport): warmup excluye el cold-parse de N/2.
 TEST(bench_perf_editor_highlight_path_checked) {
     perf_arch::reportVerbose("\n== perf_editor_highlight_path (path real Editor, top fijo en N/2) ==\n");
     const int sizes[] = {1000, 10000, 25000};
+    double usByN[3] = {};
+    unsigned long long allocsByN[3] = {};
 
-    for (int n : sizes) {
+    for (int idx = 0; idx < 3; ++idx) {
+        int n = sizes[idx];
         auto lines = makeCppLines(n);
         if (n > 0) {
             lines[0] = "{ // open";
             lines[n - 1] = "} // close";
         }
-        
+
         Editor ed;
         ed.active().document.restore(lines);
         ed.active().viewport.height = 24;
         ed.active().viewport.width = 80;
-        
+
         // Fijar top en el medio para demostrar que el costo no depende de N
         int fixedTop = n / 2;
         ed.active().viewport.top = fixedTop;
@@ -1115,21 +1120,27 @@ TEST(bench_perf_editor_highlight_path_checked) {
         ed.active().syntaxCache.setLanguage(SyntaxLanguage::Cpp);
         ed.active().syntaxCache.ensureValid(ed.active().document, n);
 
+        // Warmup bracketCache_ (el usado por updateBracketHighlight), no el
+        // del renderer: sin esto la primera iter paga ensureValid(0..top).
+        ed.lastBracketCursor_ = {-1, -1};
+        ed.updateBracketHighlight();
+        // Descartar allocs del warmup para medir solo steady.
+        // El gate es sobre steady 0 allocs; el cold queda fuera de la medición.
+
         int iters = n==1000 ? 1000 : n==10000 ? 500 : 200;
         char label[64];
         std::snprintf(label, sizeof(label), "editor highlight %5d (top=%d)", n, fixedTop);
 
-        std::optional<BracketPair> firstPair;  // para el check de determinismo
+        std::optional<BracketPair> firstPair;
         auto t0 = std::chrono::steady_clock::now();
         alloc_stats::resetAll();
         {
             alloc_stats::Scoped s(alloc_stats::kOther);
             for (int i = 0; i < iters; ++i) {
-                // Invalidar fast path para forzar el cálculo real
-                ed.lastBracketCursor_ = {-1, -1}; 
+                ed.lastBracketCursor_ = {-1, -1};
                 ed.updateBracketHighlight();
                 if (i == 0) firstPair = ed.bracketPair_;
-                else CHECK(ed.bracketPair_ == firstPair);  // determinismo en cada iter
+                else CHECK(ed.bracketPair_ == firstPair);
             }
         }
         auto t1 = std::chrono::steady_clock::now();
@@ -1137,9 +1148,23 @@ TEST(bench_perf_editor_highlight_path_checked) {
         auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
         perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n",
             label, iters, us, st.allocs / (unsigned long long)iters, st.bytesAllocated / (unsigned long long)iters);
+        usByN[idx] = us;
+        allocsByN[idx] = st.allocs / (unsigned long long)iters;
+        perf_limits::checkAllocBudget(perf_limits::kBracketHighlightSteady, st, iters, __FILE__, __LINE__);
     }
-    // Nota: sin CHECK(g_sink>0) a propósito. El cursor no está sobre un
-    // bracket, así que "no encontrado" es estable y el determinismo del
-    // loop ya impide DCE. Sin gate de recursos acá: este path asigna
-    // (baseline 0/10/62 allocs en 1k/10k/25k) y aún no tiene contrato.
+    // Gate de escalabilidad: top fijo => costo ~constante.
+    // Si falla, marcar como bug (no ajustar baseline): matcher fuera de viewport
+    // o reparse sin convergencia.
+    if (usByN[0] > 0.0) {
+        double r10 = usByN[1] / usByN[0];
+        double r25 = usByN[2] / usByN[0];
+        perf_arch::reportVerbose("  highlight steady ratio 10k/1k %.2fx (gate <=3.0)  25k/1k %.2fx (gate <=4.0)\n", r10, r25);
+        CHECK(r10 <= 3.0);
+        CHECK(r25 <= 4.0);
+    }
+    if (allocsByN[0] <= 2) {
+        // steady debe quedar plano en allocs
+        CHECK(allocsByN[2] <= allocsByN[0] + 2);
+        CHECK(allocsByN[1] <= allocsByN[0] + 2);
+    }
 }

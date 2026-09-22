@@ -126,25 +126,41 @@ TEST(bench_perf_utf8_columnOf_cache_vs_full_checked) {
         int b = startByte;
         for(int k=0;k<100 && b>0;++k){ int prev = utf8::cellStartBefore(line, b); if(prev==b) break; steps.push_back(prev); b=prev; }
         if(steps.empty()) return;
-        bench_us((std::string(tag)+" full 100xLeft").c_str(), 500, [&]{
+        double tFull100 = bench_us((std::string(tag)+" full 100xLeft").c_str(), 500, [&]{
             long c=0; for(int v: steps) c += utf8::columnOf(line, v);
             g_sink += c;
         });
-        bench_us((std::string(tag)+" cached 100xLeft").c_str(), 5000, [&]{
+        double tCached100 = bench_us((std::string(tag)+" cached 100xLeft").c_str(), 5000, [&]{
             Cursor cur; cur.col = startByte; cur.visualColumn(line);
             long c=0; for(int v: steps) { cur.col = v; c += cur.visualColumn(line); }
             g_sink += c;
         });
-        bench_us((std::string(tag)+" full 1x col").c_str(), 5000, [&]{ g_sink += utf8::columnOf(line, startByte); });
+        double tFull1 = bench_us((std::string(tag)+" full 1x col").c_str(), 5000, [&]{ g_sink += utf8::columnOf(line, startByte); });
         Cursor cur2; cur2.col = startByte; cur2.visualColumn(line);
-        bench_us((std::string(tag)+" cached hit 1x col").c_str(), 50000, [&]{ g_sink += cur2.visualColumn(line); });
-        // Gate de recursos: el hit de cache no debe asignar. Sin Scoped a
-        // propósito (fuera de scope atribuye a kOther) para no meter
-        // overhead de push/pop en la medición de tiempo de arriba.
+        double tHit1 = bench_us((std::string(tag)+" cached hit 1x col").c_str(), 50000, [&]{ g_sink += cur2.visualColumn(line); });
+        // Gates duros: hit no debe asignar (O(1) por diseño) + ratio
+        // uncached/cached >= 50x (conservador; baseline 36-100x+).
         alloc_stats::resetAll();
         for (int i = 0; i < 1000; ++i) g_sink += cur2.visualColumn(line);
-        perf_limits::checkAllocBudget(perf_limits::kCursorCacheHit,
+        perf_limits::checkAllocBudget(perf_limits::kColumnOfCacheHit,
             alloc_stats::statsFor(alloc_stats::kOther), 1000, __FILE__, __LINE__);
+        // 100xLeft también debe ser 0 allocs (mismo cache)
+        {
+            alloc_stats::resetAll();
+            Cursor cur; cur.col = startByte; cur.visualColumn(line);
+            for (int v : steps) { cur.col = v; g_sink += cur.visualColumn(line); }
+            perf_limits::checkAllocBudget(perf_limits::kColumnOfCacheHit,
+                alloc_stats::statsFor(alloc_stats::kOther), 1, __FILE__, __LINE__);
+        }
+        if (tHit1 > 0.0 && tCached100 > 0.0) {
+            double r1 = tFull1 / tHit1;
+            double r100 = tFull100 / tCached100;
+            perf_arch::reportVerbose("  cache ratio %s: 1x %.1fx (gate >=%.0fx)  100xLeft %.1fx (gate >=%.0fx)\n",
+                tag, r1, perf_limits::kColumnOfCacheMinSpeedup, r100, perf_limits::kColumnOfCacheMinSpeedup);
+            // Solo el hit 1x es hard gate (>=50x); 100xLeft es informational
+            // porque ASCII roza el limite (36x baseline) y es propenso a ruido.
+            CHECK(r1 >= perf_limits::kColumnOfCacheMinSpeedup);
+        }
     };
     runCase("ascii10k", ascii10k, 5000);
     runCase("utf8_10k", utf8_10k, 5000);
