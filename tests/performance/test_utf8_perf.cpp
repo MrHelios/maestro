@@ -15,6 +15,8 @@
 #include <vector>
 #include "test_framework.h"
 #include "helpers/perf_arch.h"
+#include "helpers/perf_limits.h"
+#include "helpers/alloc_stats.h"
 #include "helpers/perf_time_utils.h"
 #include "core/Cursor.h"
 #include "core/utf8.h"
@@ -136,6 +138,13 @@ TEST(bench_perf_utf8_columnOf_cache_vs_full_checked) {
         bench_us((std::string(tag)+" full 1x col").c_str(), 5000, [&]{ g_sink += utf8::columnOf(line, startByte); });
         Cursor cur2; cur2.col = startByte; cur2.visualColumn(line);
         bench_us((std::string(tag)+" cached hit 1x col").c_str(), 50000, [&]{ g_sink += cur2.visualColumn(line); });
+        // Gate de recursos: el hit de cache no debe asignar. Sin Scoped a
+        // propósito (fuera de scope atribuye a kOther) para no meter
+        // overhead de push/pop en la medición de tiempo de arriba.
+        alloc_stats::resetAll();
+        for (int i = 0; i < 1000; ++i) g_sink += cur2.visualColumn(line);
+        perf_limits::checkAllocBudget(perf_limits::kCursorCacheHit,
+            alloc_stats::statsFor(alloc_stats::kOther), 1000, __FILE__, __LINE__);
     };
     runCase("ascii10k", ascii10k, 5000);
     runCase("utf8_10k", utf8_10k, 5000);

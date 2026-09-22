@@ -6,6 +6,7 @@
 
 #include "test_framework.h"
 #include "helpers/perf_arch.h"
+#include "helpers/perf_limits.h"
 #include "helpers/perf_helpers.h"
 #include "helpers/perf_time_utils.h"
 #include "helpers/alloc_stats.h"
@@ -121,6 +122,7 @@ TEST(bench_perf_syntax_warm_checked) {
         double us = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count()/iters/1000.0;
         auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
         perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n", label, iters, us, st.allocs/(unsigned long long)iters, st.bytesAllocated/(unsigned long long)iters);
+        perf_limits::checkAllocBudget(perf_limits::kSyntaxWarm, st, iters, __FILE__, __LINE__);
     }
     CHECK(perf_time::g_sink>0);
 }
@@ -175,6 +177,8 @@ TEST(bench_perf_syntax_incremental_mid_checked) {
         }
         double us = (double)total_ns/iters/1000.0;
         perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6lld allocs/op  %8lld bytes/op\n", label, iters, us, total_allocs/iters, total_bytes/iters);
+        alloc_stats::Stats incStats{(unsigned long long)total_allocs, 0, (unsigned long long)total_bytes, 0};
+        perf_limits::checkAllocBudget(perf_limits::kSyntaxIncremental, incStats, iters, __FILE__, __LINE__);
     }
     CHECK(perf_time::g_sink>0);
 }
@@ -223,6 +227,8 @@ TEST(bench_perf_syntax_incremental_near_end_checked) {
         }
         double us = (double)total_ns/iters/1000.0;
         perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6lld allocs/op  %8lld bytes/op\n", label, iters, us, total_allocs/iters, total_bytes/iters);
+        alloc_stats::Stats incStats{(unsigned long long)total_allocs, 0, (unsigned long long)total_bytes, 0};
+        perf_limits::checkAllocBudget(perf_limits::kSyntaxIncremental, incStats, iters, __FILE__, __LINE__);
     }
     CHECK(perf_time::g_sink>0);
 }
@@ -271,6 +277,8 @@ TEST(bench_perf_syntax_incremental_repeat_checked) {
         }
         double us = (double)total_ns/iters/1000.0;
         perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6lld allocs/op  %8lld bytes/op\n", label, iters, us, total_allocs/iters, total_bytes/iters);
+        alloc_stats::Stats incStats{(unsigned long long)total_allocs, 0, (unsigned long long)total_bytes, 0};
+        perf_limits::checkAllocBudget(perf_limits::kSyntaxIncremental, incStats, iters, __FILE__, __LINE__);
     }
     CHECK(perf_time::g_sink>0);
 }
@@ -312,6 +320,7 @@ TEST(bench_perf_render_static_checked) {
         double us = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count()/iters/1000.0;
         auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
         perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n", label, iters, us, st.allocs/(unsigned long long)iters, st.bytesAllocated/(unsigned long long)iters);
+        perf_limits::checkAllocBudget(perf_limits::kRenderViewport, st, iters, __FILE__, __LINE__);
     }
     CHECK(perf_time::g_sink>0);
 }
@@ -347,6 +356,7 @@ TEST(bench_perf_render_cursor_positions_checked) {
             double us = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count()/iters/1000.0;
             auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
             perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n", label, iters, us, st.allocs/(unsigned long long)iters, st.bytesAllocated/(unsigned long long)iters);
+            perf_limits::checkAllocBudget(perf_limits::kRenderViewport, st, iters, __FILE__, __LINE__);
         }
     }
     CHECK(perf_time::g_sink>0);
@@ -379,6 +389,7 @@ TEST(bench_perf_render_syntax_cpp_checked) {
             double us = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count()/iters/1000.0;
             auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
             perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n", label, iters, us, st.allocs/(unsigned long long)iters, st.bytesAllocated/(unsigned long long)iters);
+            perf_limits::checkAllocBudget(perf_limits::kRenderViewport, st, iters, __FILE__, __LINE__);
         }
         // Without syntax
         {
@@ -401,6 +412,7 @@ TEST(bench_perf_render_syntax_cpp_checked) {
             double us = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count()/iters/1000.0;
             auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
             perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n", label, iters, us, st.allocs/(unsigned long long)iters, st.bytesAllocated/(unsigned long long)iters);
+            perf_limits::checkAllocBudget(perf_limits::kRenderViewport, st, iters, __FILE__, __LINE__);
         }
     }
     CHECK(perf_time::g_sink>0);
@@ -487,6 +499,7 @@ TEST(bench_perf_bracket_match_checked) {
             double us = (double)std::chrono::duration_cast<std::chrono::nanoseconds>(t1-t0).count()/iters/1000.0;
             auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
             perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n", label, iters, us, st.allocs/(unsigned long long)iters, st.bytesAllocated/(unsigned long long)iters);
+            perf_limits::checkAllocBudget(perf_limits::kBracketCached, st, iters, __FILE__, __LINE__);
         }
         // after edit: B. bracket después de convergencia (edit->markDirty->ensureValid->spans actualizados->bracket)
         {
@@ -532,6 +545,8 @@ TEST(bench_perf_bracket_match_checked) {
             }
             double us = (double)total_ns/iters/1000.0;
             perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6lld allocs/op  %8lld bytes/op\n", label, iters, us, total_allocs/iters, total_bytes/iters);
+            alloc_stats::Stats brStats{(unsigned long long)total_allocs, 0, (unsigned long long)total_bytes, 0};
+            perf_limits::checkAllocBudget(perf_limits::kBracketCached, brStats, iters, __FILE__, __LINE__);
         }
     }
     CHECK(perf_time::g_sink>0);
@@ -1053,9 +1068,12 @@ TEST(bench_perf_bracket_matcher_bounded_checked) {
         alloc_stats::resetAll();
         {
             alloc_stats::Scoped s(alloc_stats::kOther);
+            std::optional<BracketPair> first;
+            bool haveFirst = false;
             for (int i = 0; i < iters; ++i) {
                 auto p = findMatchingBracketBounded(doc, pos, SyntaxLanguage::Cpp, src, 0, vh);
-                perf_time::g_sink += p ? 1 : 0;
+                if (!haveFirst) { first = p; haveFirst = true; }
+                else CHECK(p == first);  // determinismo: mismo resultado en cada iter
             }
         }
         auto t1 = std::chrono::steady_clock::now();
@@ -1063,8 +1081,11 @@ TEST(bench_perf_bracket_matcher_bounded_checked) {
         auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
         perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n",
             label, iters, us, st.allocs / (unsigned long long)iters, st.bytesAllocated / (unsigned long long)iters);
+        perf_limits::checkAllocBudget(perf_limits::kBracketBounded, st, iters, __FILE__, __LINE__);
     }
-    CHECK(perf_time::g_sink > 0);
+    // Nota: sin CHECK(g_sink>0) a propósito. El bracket queda fuera del
+    // viewport (0..vh) así que "no encontrado" es el resultado esperado y
+    // el determinismo del loop ya impide DCE.
 }
 
 // B. Editor highlight path real (SyntaxCache + makeBracketSpanSource + top fijo)
@@ -1098,6 +1119,7 @@ TEST(bench_perf_editor_highlight_path_checked) {
         char label[64];
         std::snprintf(label, sizeof(label), "editor highlight %5d (top=%d)", n, fixedTop);
 
+        std::optional<BracketPair> firstPair;  // para el check de determinismo
         auto t0 = std::chrono::steady_clock::now();
         alloc_stats::resetAll();
         {
@@ -1106,7 +1128,8 @@ TEST(bench_perf_editor_highlight_path_checked) {
                 // Invalidar fast path para forzar el cálculo real
                 ed.lastBracketCursor_ = {-1, -1}; 
                 ed.updateBracketHighlight();
-                perf_time::g_sink += ed.bracketPair_ ? 1 : 0;
+                if (i == 0) firstPair = ed.bracketPair_;
+                else CHECK(ed.bracketPair_ == firstPair);  // determinismo en cada iter
             }
         }
         auto t1 = std::chrono::steady_clock::now();
@@ -1115,5 +1138,8 @@ TEST(bench_perf_editor_highlight_path_checked) {
         perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6llu allocs/op  %8llu bytes/op\n",
             label, iters, us, st.allocs / (unsigned long long)iters, st.bytesAllocated / (unsigned long long)iters);
     }
-    CHECK(perf_time::g_sink > 0);
+    // Nota: sin CHECK(g_sink>0) a propósito. El cursor no está sobre un
+    // bracket, así que "no encontrado" es estable y el determinismo del
+    // loop ya impide DCE. Sin gate de recursos acá: este path asigna
+    // (baseline 0/10/62 allocs en 1k/10k/25k) y aún no tiene contrato.
 }
