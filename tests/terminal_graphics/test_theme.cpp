@@ -71,6 +71,7 @@ std::string fileFrameWithSelection(const Theme& theme, int width = 200) {
 // esquema anterior.
 TEST(theme_default_matches_legacy_colors) {
     const Theme t = defaultTheme();
+    CHECK_EQ(t.background, std::string(kDarkBackground));
     CHECK_EQ(t.currentLine, std::string(kCurrentLineStyle));
     CHECK_EQ(t.selection, std::string(kSelectionStyle));
     CHECK_EQ(t.statusBar, std::string(kStatusBarStyle));
@@ -81,7 +82,7 @@ TEST(theme_default_matches_legacy_colors) {
     CHECK_EQ(t.success, std::string(kMessageSuccess));
     CHECK_EQ(t.warning, std::string(kMessageWarning));
     CHECK_EQ(t.error, std::string(kMessageError));
-    CHECK_EQ(t.reset, std::string(kMessageReset));
+    CHECK_EQ(t.reset, std::string(kDarkReset));
 }
 
 // ---------------------------------------------------------------------------

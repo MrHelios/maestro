@@ -257,7 +257,7 @@ TEST(integration_same_resize_behavior_across_screens) {
 // misma de epilogo.
 // ---------------------------------------------------------------------------
 TEST(integration_frame_lifecycle_shared) {
-    const std::string prelude = "\x1b[?25l\x1b[2J\x1b[H";
+    const std::string prelude = "\x1b[?25l\x1b[48;2;18;19;20m\x1b[2J\x1b[H";
     const std::string epilogue = "\x1b[?25h";
     for (const std::string& frame :
          {frameEditor(5, 80), frameBuffer(5, 80), frameFile(5, 80)}) {

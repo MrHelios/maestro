@@ -96,6 +96,31 @@ struct Theme {
 //                       (buffers/abrir), amarillo (guardar).
 //   - success         : verde;  warning : amarillo;  error : rojo.
 // ---------------------------------------------------------------------------
+// Constantes (paleta dark) — actualizadas
+inline constexpr const char* kCurrentLineStyle    = "\x1b[48;5;237m";
+inline constexpr const char* kListSelectedStyle   = "\x1b[48;5;237m";
+inline constexpr const char* kSelectionStyle      = "\x1b[48;5;60m";
+inline constexpr const char* kLineNumberStyle     = "\x1b[38;5;242m";
+inline constexpr const char* kGutterCurrentStyle  = "\x1b[1m\x1b[38;5;81;48;5;237m";
+inline constexpr const char* kMarkerStyle         = "\x1b[38;5;65m";
+
+// NUEVO: fondo general del editor (match con la imagen)
+inline constexpr const char* kEditorBackground    = "\x1b[48;2;18;19;20m";   // #121314
+inline constexpr const char* kDarkBackground      = "\x1b[48;2;18;19;20m";   // #121314 alias
+inline constexpr const char* kDarkReset           = "\x1b[0m\x1b[48;2;18;19;20m"; // reset + restaura fondo #121314
+
+// NUEVO: fondo del status bar / barra inferior (match con la imagen)
+inline constexpr const char* kStatusBarBackground = "\x1b[48;2;25;26;27m";   // #191A1B
+
+// NUEVO: gris del texto de UI (filename, modo, path, etc.)
+inline constexpr const char* kUiGrayText          = "\x1b[38;2;140;140;140m"; // #8C8C8C
+
+inline constexpr const char* kStatusBarStyle      = "\x1b[38;2;140;140;140m\x1b[48;2;25;26;27m";
+inline constexpr const char* kStatusBarName       = "\x1b[38;2;140;140;140m"; // antes blanco
+inline constexpr const char* kStatusBarPath       = "\x1b[38;2;140;140;140m"; // antes negro
+inline constexpr const char* kStatusBarCommand    = "\x1b[1m\x1b[38;5;178m";  // sin cambios (dorado, resalta el modo comando)
+inline constexpr const char* kStatusBarModified   = "\x1b[1;38;5;221m";      // sin cambios (amarillo claro, resalta modificado)
+/*
 inline constexpr const char* kCurrentLineStyle    = "\x1b[48;5;237m";             // gris muy sutil
 inline constexpr const char* kListSelectedStyle   = "\x1b[48;5;237m";             // gris muy sutil (activo)
 inline constexpr const char* kSelectionStyle      = "\x1b[48;5;60m";              // azul grisáceo
@@ -107,11 +132,14 @@ inline constexpr const char* kStatusBarName       = "\x1b[37m";                 
 inline constexpr const char* kStatusBarPath       = "\x1b[30m";                  // negro
 inline constexpr const char* kStatusBarCommand    = "\x1b[1m\x1b[38;5;178m";     // bold + dorado
 inline constexpr const char* kStatusBarModified   = "\x1b[1;38;5;221m";          // bold + amarillo claro
+*/
+
 inline constexpr const char* kPromptStyle         = "\x1b[1m";                   // negrita
 inline constexpr const char* kMessageSuccess      = "\x1b[38;5;250m";            // mismo color para todos los mensajes
 inline constexpr const char* kMessageWarning      = "\x1b[38;5;250m";
 inline constexpr const char* kMessageError        = "\x1b[38;5;250m";
 inline constexpr const char* kMessageReset        = "\x1b[0m";
+
 
 // Accents por estado activo - dark: todos igual a navegacion
 inline constexpr const char* kAccentNavegacion   = "\x1b[1m\x1b[38;5;81m";       // azul clarito
@@ -130,6 +158,7 @@ inline constexpr const char* kSyntaxCharacter    = "\x1b[38;5;114m";
 inline constexpr const char* kSyntaxNumber       = "\x1b[38;5;214m";
 inline constexpr const char* kSyntaxComment      = "\x1b[38;5;242m";
 inline constexpr const char* kBracketMatch       = "\x1b[48;5;221m\x1b[38;5;235m";
+
 
 inline constexpr const char* kLightBackground        = "\x1b[48;5;255m";
 inline constexpr const char* kLightForeground        = "\x1b[38;5;235m";
@@ -168,7 +197,7 @@ inline constexpr const char* kLightBracketMatch       = "\x1b[48;5;221m\x1b[38;5
 
 inline Theme darkTheme() {
     Theme t;
-    t.background     = "";
+    t.background     = kDarkBackground;
     t.foreground     = "";
     t.lineNumber     = kLineNumberStyle;
     t.gutterCurrent  = kGutterCurrentStyle;
@@ -186,7 +215,7 @@ inline Theme darkTheme() {
     t.success        = kMessageSuccess;
     t.warning        = kMessageWarning;
     t.error          = kMessageError;
-    t.reset          = kMessageReset;
+    t.reset          = kDarkReset;
     t.accentNavegacion  = kAccentNavegacion;
     t.accentInteraccion = kAccentInteraccion;
     t.accentSeleccion   = kAccentSeleccion;

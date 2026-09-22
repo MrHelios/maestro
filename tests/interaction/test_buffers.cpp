@@ -1111,9 +1111,9 @@ TEST(renderer_buffer_list_marks_selected) {
     // El reset no debe estar pegado inmediatamente al texto: tiene que
     // haber padding (espacios) entre medio, prueba de que el fondo cubre
     // el resto de la fila.
-    CHECK(out.compare(textEnd, 4, "\x1b[0m") != 0);
+    CHECK(out.compare(textEnd, r.theme().reset.size(), r.theme().reset) != 0);
 
-    size_t resetPos = out.find("\x1b[0m", textEnd);
+    size_t resetPos = out.find(r.theme().reset, textEnd);
     CHECK(resetPos != std::string::npos);
     CHECK(resetPos > textEnd); // hay espacios de relleno entre medio
 
@@ -1136,8 +1136,8 @@ TEST(renderer_buffer_list_first_selected) {
     CHECK(stylePos != std::string::npos);
     size_t textEnd = stylePos + styledText.size();
     // Mismo criterio: reset no pegado, hay padding antes.
-    CHECK(out.compare(textEnd, 4, "\x1b[0m") != 0);
-    size_t resetPos = out.find("\x1b[0m", textEnd);
+    CHECK(out.compare(textEnd, r.theme().reset.size(), r.theme().reset) != 0);
+    size_t resetPos = out.find(r.theme().reset, textEnd);
     CHECK(resetPos != std::string::npos && resetPos > textEnd);
 
     CHECK(!contains(out, std::string(kListSelectedStyle) + "  b.txt"));
@@ -1151,7 +1151,7 @@ TEST(renderer_buffer_list_only_unified_bar) {
     std::string out = r.buildBufferListScreen({"a.txt", "b.txt"}, 1, 80, 10);
     // Filas vacias con el marcador del editor, alineado con las entradas
     // (misma indentacion de 2 espacios) y sin el texto "BUFFERS".
-    CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~\x1b[0m\r\n"));
+    CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~" + std::string(r.theme().reset) + "\r\n"));
     CHECK(!contains(out, "~ BUFFERS"));
     // Ya no hay barra en video inverso MULTIBUFFER: la barra es la del
     // StatusBar comun (fondo gris 60%) con Buffers/SELECCIONAR y el

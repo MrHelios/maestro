@@ -1448,8 +1448,8 @@ TEST(renderer_file_list_layout) {
     size_t stylePos = out.find(styledText);
     CHECK(stylePos != std::string::npos);
     size_t textEnd = stylePos + styledText.size();
-    CHECK(out.compare(textEnd, 4, "\x1b[0m") != 0);
-    size_t resetPos = out.find("\x1b[0m", textEnd);
+    CHECK(out.compare(textEnd, r.theme().reset.size(), r.theme().reset) != 0);
+    size_t resetPos = out.find(r.theme().reset, textEnd);
     CHECK(resetPos != std::string::npos);
     CHECK(resetPos > textEnd);
     std::string between = out.substr(textEnd, resetPos - textEnd);
@@ -1462,7 +1462,7 @@ TEST(renderer_file_list_layout) {
     // Fila de mensajes con la ayuda.
     CHECK(contains(out, "Enter abrir/entrar"));
     // Filas vacias bajo la lista con el marcador del editor, alineado.
-    CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~\x1b[0m\r\n"));
+    CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~" + r.theme().reset + "\r\n"));
 }
 
 TEST(renderer_file_list_scroll_hides_off_window) {
@@ -1476,8 +1476,8 @@ TEST(renderer_file_list_scroll_hides_off_window) {
     CHECK(stylePos != std::string::npos);
     size_t textEnd = stylePos + styledText.size();
     // Mismo criterio: reset no pegado, hay padding antes.
-    CHECK(out.compare(textEnd, 4, "\x1b[0m") != 0);
-    size_t resetPos = out.find("\x1b[0m", textEnd);
+    CHECK(out.compare(textEnd, r.theme().reset.size(), r.theme().reset) != 0);
+    size_t resetPos = out.find(r.theme().reset, textEnd);
     CHECK(resetPos != std::string::npos && resetPos > textEnd);
     CHECK(!contains(out, "  a.txt"));
     CHECK(!contains(out, "  .."));
