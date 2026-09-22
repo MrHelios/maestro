@@ -15,7 +15,7 @@ static std::vector<std::string> makeBlock(size_t lines, size_t width = 80) {
     return b;
 }
 
-TEST(perf_insertBlock_matrix) {
+TEST(bench_perf_insertBlock_matrix) {
     struct Case {
         const char* name;
         size_t lineSize;
@@ -67,7 +67,7 @@ TEST(perf_insertBlock_matrix) {
     alloc_stats::report("perf_insertBlock_matrix aggregate");
 }
 
-TEST(perf_insertBlock_breakdown) {
+TEST(bench_perf_insertBlock_breakdown) {
     auto bench = [](const char* label, size_t lineSize, const std::vector<std::string>& block, size_t col, int iters) {
         std::string target = makeLine(lineSize);
 
@@ -172,7 +172,7 @@ TEST(perf_insertBlock_breakdown) {
     bench("block_1k 100B x1k", 100, makeBlock(1000), 50, 50);
 }
 
-TEST(perf_insertBlock_shift_inplace) {
+TEST(bench_perf_insertBlock_shift_inplace) {
     auto bench = [&](int docLines, int insertLine, size_t blockLines, int iters) {
         auto block = makeBlock(blockLines, 80);
         // Setup fuera de la medición.
@@ -228,7 +228,7 @@ TEST(perf_insertBlock_shift_inplace) {
     bench(300, 150, 300, 500);
 }
 
-TEST(perf_insertBlock_old_vs_new_vector) {
+TEST(bench_perf_insertBlock_old_vs_new_vector) {
     auto bench = [](int docLines, int line, size_t blockLines, int iters) {
         auto block = makeBlock(blockLines);
         std::vector<std::string> base;
@@ -286,7 +286,7 @@ TEST(perf_insertBlock_old_vs_new_vector) {
     bench(300, 150, 300, 300);
 }
 
-TEST(perf_insertBlock_single_vs_multi_alloc_detail) {
+TEST(bench_perf_insertBlock_single_vs_multi_alloc_detail) {
     auto block1 = makeBlock(1);
     auto block10 = makeBlock(10);
 

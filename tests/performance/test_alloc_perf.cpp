@@ -48,7 +48,7 @@ void press(Editor& ed, EventType type) { ed.handleEvent(moveEvent(type)); }
 // ---------------------------------------------------------------------------
 // 1. La pregunta original: que allocation ocurre al tipear 1000 caracteres?
 // ---------------------------------------------------------------------------
-TEST(alloc_fase_teclado_1000_caracteres) {
+TEST(bench_alloc_fase_teclado_1000_caracteres_checked) {
     Editor ed;
     ed.active().document.restore(makeLines(300, 80));
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
@@ -71,7 +71,7 @@ TEST(alloc_fase_teclado_1000_caracteres) {
 //    HistoryCommit incluye todo; DocInsert/EditPushBack son subconjuntos;
 //    la diferencia es beginHistoryEntry/commitHistoryEntry/cursor.
 // ---------------------------------------------------------------------------
-TEST(alloc_desglose_insert_char) {
+TEST(bench_alloc_desglose_insert_char_checked) {
     Buffer b;
     b.document.restore(makeLines(300, 80));
     b.cursor.line = 10;
@@ -105,7 +105,7 @@ TEST(alloc_desglose_insert_char) {
 //    usuario reporta CPU alta. Oscilar en el borde fuerza scrollToCursor
 //    en cada render posterior, pero este scope mide SOLO el movimiento.
 // ---------------------------------------------------------------------------
-TEST(alloc_scroll_bordes_viewport) {
+TEST(bench_alloc_scroll_bordes_viewport_checked) {
     Editor ed;
     ed.active().document.restore(makeLines(300, 80));
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
@@ -142,7 +142,7 @@ TEST(alloc_scroll_bordes_viewport) {
 // 4. El otro sospechoso de CPU: renderFrame completo tras CADA tecla/movimiento.
 //    Se mide buildScreen (la parte pura) en ambos bordes del viewport.
 // ---------------------------------------------------------------------------
-TEST(alloc_render_frame_bordes) {
+TEST(bench_alloc_render_frame_bordes_checked) {
     Editor ed;
     ed.active().document.restore(makeLines(300, 80));
     ed.state_ = State::Navegacion;
@@ -187,7 +187,7 @@ TEST(alloc_render_frame_bordes) {
 // 5. Borrado: 500 Backspace hacia atras y 500 Delete hacia adelante en linea
 //    larga 4k (ejercita camino UTF-8/bytes, cursor se desplaza).
 // ---------------------------------------------------------------------------
-TEST(alloc_delete_backspace_1000) {
+TEST(bench_alloc_delete_backspace_1000_checked) {
     Editor ed;
     ed.active().document.restore(makeLines(300, 4000));
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
@@ -208,7 +208,7 @@ TEST(alloc_delete_backspace_1000) {
 // ---------------------------------------------------------------------------
 // 6. Undo/Redo: recorre historial (costo de reproducir edits).
 // ---------------------------------------------------------------------------
-TEST(alloc_undo_redo_500) {
+TEST(bench_alloc_undo_redo_500_checked) {
     Editor ed;
     ed.active().document.restore(makeLines(300, 80));
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
@@ -229,7 +229,7 @@ TEST(alloc_undo_redo_500) {
 // ---------------------------------------------------------------------------
 // 7. Insercion multibyte: tildes y emoji (camino UTF-8, caso caro).
 // ---------------------------------------------------------------------------
-TEST(alloc_insert_multibyte_1000) {
+TEST(bench_alloc_insert_multibyte_1000_checked) {
     Editor ed;
     ed.active().document.restore(makeLines(300, 80));
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
@@ -247,7 +247,7 @@ TEST(alloc_insert_multibyte_1000) {
     CHECK_EQ(ed.active().document.lineLength(10), 3080);
 }
 
-TEST(alloc_paste_insertText_10k) {
+TEST(bench_alloc_paste_insertText_10k_checked) {
     Buffer b;
     b.document.restore(makeLines(300, 80));
     b.cursor.line = 10;
@@ -261,7 +261,7 @@ TEST(alloc_paste_insertText_10k) {
     CHECK_EQ(b.document.lineLength(10), 10080);
 }
 
-TEST(alloc_paste_100x100_history) {
+TEST(bench_alloc_paste_100x100_history_checked) {
     // Simula paste fragmentado en 100 operaciones incluyendo costo de History.
     Editor ed;
     ed.active().document.restore(makeLines(300, 80));
@@ -287,7 +287,7 @@ TEST(alloc_paste_100x100_history) {
 // ---------------------------------------------------------------------------
 // 9. Movimiento horizontal: MoveLeft/MoveRight donde columnOf entra en juego.
 // ---------------------------------------------------------------------------
-TEST(alloc_movimiento_horizontal_2000) {
+TEST(bench_alloc_movimiento_horizontal_2000_checked) {
     Editor ed;
     ed.active().document.restore(makeLines(10, 4000));
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
@@ -308,7 +308,7 @@ TEST(alloc_movimiento_horizontal_2000) {
 // ---------------------------------------------------------------------------
 // 10. Saltos grandes: PageUp/PageDown, Home/End, GoTo linea.
 // ---------------------------------------------------------------------------
-TEST(alloc_saltos_grandes) {
+TEST(bench_alloc_saltos_grandes_checked) {
     Editor ed;
     ed.active().document.restore(makeLines(3000, 80));
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
@@ -341,7 +341,7 @@ TEST(alloc_saltos_grandes) {
 // ---------------------------------------------------------------------------
 // 11. Costo de handleEvent para navegacion horizontal.
 // ---------------------------------------------------------------------------
-TEST(alloc_handleEvent_moveLeft_1000) {
+TEST(bench_alloc_handleEvent_moveLeft_1000_checked) {
     Editor ed;
     ed.active().document.restore(makeLines(300, 80));
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
@@ -356,7 +356,7 @@ TEST(alloc_handleEvent_moveLeft_1000) {
     CHECK_EQ(ed.active().cursor.col, 0);
 }
 
-TEST(alloc_document_directo) {
+TEST(bench_alloc_document_directo_checked) {
     Buffer b;
     b.document.restore(makeLines(300, 80));
     b.cursor.line = 10; b.cursor.col = 10;
@@ -372,7 +372,7 @@ TEST(alloc_document_directo) {
 // ---------------------------------------------------------------------------
 // 12. Carga inicial y resize: restore + buildScreen tras cambio de viewport.
 // ---------------------------------------------------------------------------
-TEST(alloc_carga_y_resize) {
+TEST(bench_alloc_carga_y_resize_checked) {
     alloc_stats::resetAll();
     {
         alloc_stats::Scoped scope(alloc_stats::kOther);
@@ -401,7 +401,7 @@ TEST(alloc_carga_y_resize) {
 // ---------------------------------------------------------------------------
 // 13. Multi-buffer: crear y cambiar de buffer activo.
 // ---------------------------------------------------------------------------
-TEST(alloc_multibuffer) {
+TEST(bench_alloc_multibuffer_checked) {
     Editor ed;
     alloc_stats::resetAll();
     {
@@ -441,7 +441,7 @@ TEST(alloc_multibuffer) {
 // ---------------------------------------------------------------------------
 // 14. Sesion realista mixta: tipear, mover, borrar, undo/redo, scroll.
 // ---------------------------------------------------------------------------
-TEST(alloc_sesion_realista_mixta) {
+TEST(bench_alloc_sesion_realista_mixta_checked) {
     Editor ed;
     ed.active().document.restore(makeLines(300, 80));
     ed.active().originalSnapshot_ = ed.active().document.snapshot();

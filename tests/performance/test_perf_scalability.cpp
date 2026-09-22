@@ -48,7 +48,7 @@ inline std::vector<std::string> makeCppLines(int n) {
 // ---------------------------------------------------------------------------
 // 2. Test de carga del documento
 // ---------------------------------------------------------------------------
-TEST(perf_document_load) {
+TEST(bench_perf_document_load_checked) {
     std::printf("\n== perf_document_load (0 / 1k / 10k / 25k) 80 cols Cpp ==\n");
     const int sizes[] = {0, 1000, 10000, 25000};
     for (int n : sizes) {
@@ -73,7 +73,7 @@ TEST(perf_document_load) {
 // ---------------------------------------------------------------------------
 // 3. SyntaxCache
 // ---------------------------------------------------------------------------
-TEST(perf_syntax_cold) {
+TEST(bench_perf_syntax_cold_checked) {
     std::printf("\n== perf_syntax_cold (cold ensureValid hasta final) ==\n");
     const int sizes[] = {0, 1000, 10000, 25000};
     for (int n : sizes) {
@@ -100,7 +100,7 @@ TEST(perf_syntax_cold) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_syntax_warm) {
+TEST(bench_perf_syntax_warm_checked) {
     std::printf("\n== perf_syntax_warm (segunda ensureValid cache convergida) ==\n");
     const int sizes[] = {0, 1000, 10000, 25000};
     for (int n : sizes) {
@@ -124,7 +124,7 @@ TEST(perf_syntax_warm) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_syntax_incremental_mid) {
+TEST(bench_perf_syntax_incremental_mid_checked) {
     std::printf("\n== perf_syntax_incremental_mid (edit medio) - solo ensureValid ==\n");
     const int sizes[] = {1000, 10000, 25000};
     for (int n : sizes) {
@@ -178,7 +178,7 @@ TEST(perf_syntax_incremental_mid) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_syntax_incremental_near_end) {
+TEST(bench_perf_syntax_incremental_near_end_checked) {
     std::printf("\n== perf_syntax_incremental_near_end (edit cerca final) - solo ensureValid ==\n");
     struct Case{int n; int line;};
     Case cases[] = {{1000,900},{10000,9000},{25000,24000}};
@@ -226,7 +226,7 @@ TEST(perf_syntax_incremental_near_end) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_syntax_incremental_repeat) {
+TEST(bench_perf_syntax_incremental_repeat_checked) {
     std::printf("\n== perf_syntax_incremental_repeat (100 edits locales) - solo ensureValid ==\n");
     const int sizes[] = {10000, 25000};
     for (int n : sizes) {
@@ -277,7 +277,7 @@ TEST(perf_syntax_incremental_repeat) {
 // ---------------------------------------------------------------------------
 // 4. Renderer / buildScreen
 // ---------------------------------------------------------------------------
-TEST(perf_render_static) {
+TEST(bench_perf_render_static_checked) {
     std::printf("\n== perf_render_static (viewport 24x80, cache convergida) ==\n");
     const int sizes[] = {0, 1000, 10000, 25000};
     for (int n : sizes) {
@@ -315,7 +315,7 @@ TEST(perf_render_static) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_render_cursor_positions) {
+TEST(bench_perf_render_cursor_positions_checked) {
     std::printf("\n== perf_render_cursor_top/middle/end (10k/25k) ==\n");
     const int sizes[] = {10000, 25000};
     for (int n : sizes) {
@@ -351,7 +351,7 @@ TEST(perf_render_cursor_positions) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_render_syntax_cpp) {
+TEST(bench_perf_render_syntax_cpp_checked) {
     std::printf("\n== perf_render_syntax_cpp vs None (0/1k/10k/25k) ==\n");
     const int sizes[] = {0, 1000, 10000, 25000};
     for (int n : sizes) {
@@ -408,7 +408,7 @@ TEST(perf_render_syntax_cpp) {
 // ---------------------------------------------------------------------------
 // 6. Bracket matching
 // ---------------------------------------------------------------------------
-TEST(perf_bracket_match) {
+TEST(bench_perf_bracket_match_checked) {
     std::printf("\n== perf_bracket_match (cold/cached/after_edit) ==\n");
     const int sizes[] = {1000, 10000, 25000};
     for (int n : sizes) {
@@ -539,7 +539,7 @@ TEST(perf_bracket_match) {
 // ---------------------------------------------------------------------------
 // 7. Interacción real
 // ---------------------------------------------------------------------------
-TEST(perf_typing_render_cycle) {
+TEST(bench_perf_typing_render_cycle_checked) {
     std::printf("\n== perf_typing_render_cycle (insert+render+backspace+render)/2 1k/10k/25k ==\n");
     const int sizes[] = {1000, 10000, 25000};
     for (int n : sizes) {
@@ -577,7 +577,7 @@ TEST(perf_typing_render_cycle) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_backspace_render_cycle) {
+TEST(bench_perf_backspace_render_cycle_checked) {
     std::printf("\n== perf_backspace_render_cycle (backspace+render+insert+render)/2 1k/10k/25k ==\n");
     const int sizes[] = {1000, 10000, 25000};
     for (int n : sizes) {
@@ -614,7 +614,7 @@ TEST(perf_backspace_render_cycle) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_handleEvent_insertChar) {
+TEST(bench_perf_handleEvent_insertChar_checked) {
     std::printf("\n== perf_handleEvent_insertChar (solo handleEvent, sin render) 1k/10k/25k ==\n");
     const int sizes[] = {1000, 10000, 25000};
     for (int n : sizes) {
@@ -649,7 +649,7 @@ TEST(perf_handleEvent_insertChar) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_handleEvent_backspace) {
+TEST(bench_perf_handleEvent_backspace_checked) {
     std::printf("\n== perf_handleEvent_backspace (solo handleEvent) 1k/10k/25k ==\n");
     const int sizes[] = {1000, 10000, 25000};
     for (int n : sizes) {
@@ -687,7 +687,7 @@ TEST(perf_handleEvent_backspace) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_move_left_right) {
+TEST(bench_perf_move_left_right_checked) {
     std::printf("\n== perf_move_left/right (1k/10k/25k) línea larga ==\n");
     const int sizes[] = {1000, 10000, 25000};
     for (int n : sizes) {
@@ -722,7 +722,7 @@ TEST(perf_move_left_right) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_page_up_down_render_cycle) {
+TEST(bench_perf_page_up_down_render_cycle_checked) {
     std::printf("\n== perf_page_up_down_render_cycle (PageUp+render+PageDown+render)/2 (10k/25k) ==\n");
     const int sizes[] = {10000, 25000};
     for (int n : sizes) {
@@ -761,7 +761,7 @@ TEST(perf_page_up_down_render_cycle) {
 // ---------------------------------------------------------------------------
 // 8. Scroll
 // ---------------------------------------------------------------------------
-TEST(perf_scroll) {
+TEST(bench_perf_scroll_checked) {
     std::printf("\n== perf_scroll (10k/25k) line-by-line ==\n");
     const int sizes[] = {10000, 25000};
     for (int n : sizes) {
@@ -795,7 +795,7 @@ TEST(perf_scroll) {
 // ---------------------------------------------------------------------------
 // 9. Edición estructural
 // ---------------------------------------------------------------------------
-TEST(perf_insert_line) {
+TEST(bench_perf_insert_line_checked) {
     std::printf("\n== perf_insert_line (solo InsertNewline, 1k/10k/25k) principio/mitad/final ==\n");
     const int sizes[] = {1000, 10000, 25000};
     for (int n : sizes) {
@@ -833,7 +833,7 @@ TEST(perf_insert_line) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_insert_line_render_cycle) {
+TEST(bench_perf_insert_line_render_cycle_checked) {
     std::printf("\n== perf_insert_line_render_cycle (InsertNewline+render, 1k/10k/25k) ==\n");
     const int sizes[] = {1000, 10000, 25000};
     for (int n : sizes) {
@@ -873,7 +873,7 @@ TEST(perf_insert_line_render_cycle) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_undo) {
+TEST(bench_perf_undo_checked) {
     std::printf("\n== perf_undo (solo undo, 1k/10k/25k) ==\n");
     const int sizes[] = {1000, 10000, 25000};
     for (int n : sizes) {
@@ -913,7 +913,7 @@ TEST(perf_undo) {
     CHECK(perf_time::g_sink>0);
 }
 
-TEST(perf_delete_line) {
+TEST(bench_perf_delete_line_checked) {
     std::printf("\n== perf_delete_line (deleteRange+render solo, 1k/10k/25k) ==\n");
     const int sizes[] = {1000, 10000, 25000};
     for (int n : sizes) {
@@ -954,7 +954,7 @@ TEST(perf_delete_line) {
 // ---------------------------------------------------------------------------
 // 10. Caso combinado
 // ---------------------------------------------------------------------------
-TEST(perf_editor_large_cpp) {
+TEST(bench_perf_editor_large_cpp_checked) {
     std::printf("\n== perf_editor_large_cpp (10k/25k escenario integrado) ==\n");
     const int sizes[] = {10000, 25000};
     for (int n : sizes) {
@@ -1017,7 +1017,7 @@ TEST(perf_editor_large_cpp) {
 }
 
 // A. Bounded matcher puro (cache caliente, solo scanning)
-TEST(perf_bracket_matcher_bounded) {
+TEST(bench_perf_bracket_matcher_bounded_checked) {
     std::printf("\n== perf_bracket_matcher_bounded (scanning puro, cache caliente) ==\n");
     const int sizes[] = {1000, 10000, 25000};
     const int vh = 24;
@@ -1067,7 +1067,7 @@ TEST(perf_bracket_matcher_bounded) {
 }
 
 // B. Editor highlight path real (SyntaxCache + makeBracketSpanSource + top fijo)
-TEST(perf_editor_highlight_path) {
+TEST(bench_perf_editor_highlight_path_checked) {
     std::printf("\n== perf_editor_highlight_path (path real Editor, top fijo en N/2) ==\n");
     const int sizes[] = {1000, 10000, 25000};
 

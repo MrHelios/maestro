@@ -66,7 +66,7 @@ struct RenderFixture {
 // ---------------------------------------------------------------------------
 // 1. Escala con el TAMANO DEL DOCUMENTO o solo con el viewport?
 // ---------------------------------------------------------------------------
-TEST(perf_render_escalado_con_documento) {
+TEST(bench_perf_render_escalado_con_documento_checked) {
     std::printf("\n== perf: buildScreen vs tamanio del documento ==\n");
     const int frames[] = {2000, 1000, 200};
     const int sizes[] = {300, 3000, 30000};
@@ -82,7 +82,7 @@ TEST(perf_render_escalado_con_documento) {
 // ---------------------------------------------------------------------------
 // 2. Desglose: cuanto tarda cada fase dentro de buildScreen?
 // ---------------------------------------------------------------------------
-TEST(perf_render_desglose_fases) {
+TEST(bench_perf_render_desglose_fases_checked) {
     RenderFixture fx(300);
     Renderer& r = fx.ed.renderer_;
     const Buffer& b = fx.ed.active();
@@ -149,7 +149,7 @@ TEST(perf_render_desglose_fases) {
 // ---------------------------------------------------------------------------
 // 3. El ciclo que le importa al usuario: tecla -> estado -> frame completo.
 // ---------------------------------------------------------------------------
-TEST(perf_ciclo_tecla_mas_frame) {
+TEST(bench_perf_ciclo_tecla_mas_frame_checked) {
     std::printf("\n== perf: ciclo tecleo real (handleEvent + buildScreen) ==\n");
     RenderFixture fx(300);
     fx.ed.state_ = State::Interaccion;
@@ -180,7 +180,7 @@ TEST(perf_ciclo_tecla_mas_frame) {
 //    Compara el frame completo actual contra lo que costaria un render
 //    diferencial (solo las filas que realmente cambiaron).
 // ---------------------------------------------------------------------------
-TEST(perf_bytes_por_evento_hacia_terminal) {
+TEST(bench_perf_bytes_por_evento_hacia_terminal_checked) {
     std::printf("\n== perf: bytes por evento hacia la terminal ==\n");
     RenderFixture fx(300);
     fx.ed.state_ = State::Interaccion;
@@ -244,7 +244,7 @@ TEST(perf_bytes_por_evento_hacia_terminal) {
 // ---------------------------------------------------------------------------
 // 5. Ciclo con diff integrado: handleEvent + buildDiffFrame (vs buildScreen).
 // ---------------------------------------------------------------------------
-TEST(perf_ciclo_diff_integrado) {
+TEST(bench_perf_ciclo_diff_integrado_checked) {
     std::printf("\n== perf: ciclo handleEvent + buildDiffFrame (diff integrado) ==\n");
     RenderFixture fx(300);
     fx.ed.state_ = State::Interaccion;
@@ -268,7 +268,7 @@ TEST(perf_ciclo_diff_integrado) {
 // ---------------------------------------------------------------------------
 // 6. Movimiento horizontal y saltos grandes (columnOf + scrollToCursor).
 // ---------------------------------------------------------------------------
-TEST(perf_movimiento_horizontal_y_saltos) {
+TEST(bench_perf_movimiento_horizontal_y_saltos_checked) {
     std::printf("\n== perf: movimiento horizontal y saltos grandes ==\n");
     RenderFixture fx(10);
     fx.ed.state_ = State::Navegacion;
@@ -296,7 +296,7 @@ TEST(perf_movimiento_horizontal_y_saltos) {
 // ---------------------------------------------------------------------------
 // 7. Paste / multibyte y carga inicial.
 // ---------------------------------------------------------------------------
-TEST(perf_paste_multibyte_y_carga) {
+TEST(bench_perf_paste_multibyte_y_carga_checked) {
     std::printf("\n== perf: paste multibyte y carga inicial ==\n");
     std::string big(10000, 'x');
     perf_time::bench_ns("Document::restore 3000x80", 20, [&]{

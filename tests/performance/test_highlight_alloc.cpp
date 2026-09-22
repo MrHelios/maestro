@@ -82,7 +82,7 @@ static void benchFrameReuse(const char* label, SyntaxLanguage lang, const std::v
     CHECK(st.allocs/double(total) < 0.01);
 }
 
-TEST(highlight_alloc_benchmark) {
+TEST(bench_highlight_alloc_benchmark_checked) {
     std::printf("\n== highlight: return (1 alloc/línea) vs reuse (clear+reuse buffer) ==\n");
     const int N=10000;
     benchOneReturn("vacia", SyntaxLanguage::Cpp, "", N);

@@ -35,7 +35,7 @@ std::string makeMixed(int cols) {
 }
 }
 
-TEST(perf_utf8_columnOf) {
+TEST(bench_perf_utf8_columnOf_checked) {
     std::printf("\n== perf: utf8::columnOf (v3 micro-opt) ==\n");
     std::string ascii10k(10000, 'a');
     std::string utf8_10k = makeMixed(4000);
@@ -50,7 +50,7 @@ TEST(perf_utf8_columnOf) {
     bench_us("columnOf 100KB mid 50kB", 5000, [&]{ g_sink += utf8::columnOf(utf8_100k, 50000); });
     CHECK(g_sink > 0);
 }
-TEST(perf_utf8_columnOf_breakdown) {
+TEST(bench_perf_utf8_columnOf_breakdown_checked) {
     std::printf("\n== perf: utf8::columnOf breakdown ASCII%% vs UTF-8 / offset ==\n");
     std::string ascii10k(10000, 'a');
     std::string ascii100k(100000, 'a');
@@ -81,7 +81,7 @@ TEST(perf_utf8_columnOf_breakdown) {
     benchOffsets("utf8_100k", utf8_100k);
     CHECK(g_sink > 0);
 }
-TEST(perf_utf8_truncate) {
+TEST(bench_perf_utf8_truncate_checked) {
     std::printf("\n== perf: utf8::truncate ==\n");
     std::string ascii(4000, 'a');
     std::string mixed = makeMixed(1000);
@@ -93,7 +93,7 @@ TEST(perf_utf8_truncate) {
     CHECK(g_sink > 0);
 }
 
-TEST(perf_utf8_range) {
+TEST(bench_perf_utf8_range_checked) {
     std::printf("\n== perf: utf8::range ==\n");
     std::string mixed = makeMixed(1000);
     std::string longMixed = makeMixed(10000);
@@ -103,7 +103,7 @@ TEST(perf_utf8_range) {
     CHECK(g_sink > 0);
 }
 
-TEST(perf_utf8_isCellStart) {
+TEST(bench_perf_utf8_isCellStart_checked) {
     std::printf("\n== perf: utf8::isCellStart scan ==\n");
     std::string mixed = makeMixed(1000);
     bench_us("isCellStart scan 1k cols (~2.5kB)", 50000, [&]{
@@ -112,7 +112,7 @@ TEST(perf_utf8_isCellStart) {
     });
     CHECK(g_sink > 0);
 }
-TEST(perf_utf8_columnOf_cache_vs_full) {
+TEST(bench_perf_utf8_columnOf_cache_vs_full_checked) {
     std::printf("\n== perf: columnOf cache incremental vs full scan (Left repetido) ==\n");
     std::string ascii10k(10000, 'a');
     std::string utf8_10k = makeMixed(4000);
