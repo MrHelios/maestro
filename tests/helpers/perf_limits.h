@@ -104,6 +104,68 @@ constexpr PerfLimits kColumnOfCacheHit{
     "columnOf cache hit", 0, 1, 0, 128, "+1 alloc / 128 B overhead fijo",
     "visualColumn cacheado no debe rescanear O(N); 1 alloc inicial es overhead fijo"};
 
+// columnOf cold/uncached con tabs+wide: scan puro O(N), no debe asignar.
+// Separado de kColumnOfCacheHit: si falla el hit sabemos que es la cache,
+// si falla este sabemos que es el algoritmo Unicode/tabs.
+constexpr PerfLimits kColumnOfCold{
+    "columnOf cold", 0, 0, 0, 0, "exacto",
+    "columnOf hace scan sin asignar por diseno"};
+
+// RowLayout query steady: objeto ya construido, columnAt/range/expandVisible
+// no deben asignar (Full: tablas; Checkpoint: scan acotado K). La
+// construccion se mide aparte (kRowLayoutBuild) para no mezclar costos.
+constexpr PerfLimits kRowLayoutFrame{
+    "rowlayout frame", 0, 0, 0, 0, "exacto",
+    "query steady no debe asignar; build va en kRowLayoutBuild"};
+
+// RowLayout build (construccion por linea, 40-lineas frame): Checkpoint
+// ~2-4 allocs/linea por growth (Full ~3: byteToCol+colToByte+cells).
+// Gate por linea construida, generoso (+5 margen STL) para no acoplarse
+// al layout exacto de la STL. No confundir con el caso huge 540KB, que
+// es solo memoria informativa (memoryBytes, sin gate de allocs).
+constexpr PerfLimits kRowLayoutBuild{
+    "rowlayout build", 3, 8, 0, ULLONG_MAX, "+5 allocs margen STL",
+    "build acotado por linea; huge 540KB va aparte como memoria informativa"};
+
+// Search steady: collectMatches repetido con mismo query/doc converge en
+// allocations independientes de N (el vector resultado es ~constante si el
+// query es raro). Cold es solo informativo (recorre N lineas).
+constexpr PerfLimits kSearchSteady{
+    "search steady", 0, 2, 0, 512, "+2 allocs / 512 B margen vector",
+    "steady no debe crecer con N; cold es O(N) informativo"};
+
+// Clipboard paste: costo proporcional al contenido pegado, no al documento.
+// Se mide solo insertText/insertBlock; deleteRange va en test aparte para
+// no esconder regresiones de deleteRange/UTF-8.
+constexpr PerfLimits kClipboardPaste{
+    "clipboard paste", 0, 4, 0, ULLONG_MAX, "4 allocs overhead split/insert",
+    "paste escala con pegado, no con N del documento"};
+
+// Render diff: buildDiffFrame steady tras primar cache debe ser O(viewport).
+constexpr PerfLimits kRenderDiff{
+    "render diff", 164, 200, 0, ULLONG_MAX, "+22% sobre viewport",
+    "diff no debe escalar con N; margen holgado sobre kRenderViewport"};
+
+// File save real (saveToFile 25k):
+// saveToFile no debe introducir allocations proporcionales al documento.
+// El costo temporal/bytes escritos escala con el contenido.
+// Sin gate de bytes a proposito: quedaria acoplado al tamano exacto de linea.
+constexpr PerfLimits kFileSave{
+    "file save", 0, 16, 0, ULLONG_MAX, "16 allocs overhead ofstream",
+    "sin allocs proporcionales al documento; tiempo/bytes escalan con contenido"};
+// Syntax worst-case (/* sin cerrar, raw string multiline): tras edicion,
+// solo ensureValid+bracket-viewport medido. Debe ser ~constante con N si
+// ViewportSpanSource es viewport-only. Absoluto generoso + escalabilidad.
+constexpr PerfLimits kSyntaxWorstCase{
+    "syntax worstcase", 3, 6, 184, 1024, "+100% sobre incremental",
+    "worst-case no debe reintroducir O(N) por tecla"};
+
+// Terminal/Keymap decode: lookup control/sequence no debe asignar en steady
+// (el std::string de la secuencia se construye fuera del Scoped medido).
+constexpr PerfLimits kTerminalDecode{
+    "terminal decode", 0, 0, 0, 0, "exacto",
+    "decode es lookup puro sin allocs repetitivas"};
+
 // Document load (restore vector<string>): 1 alloc/línea, ~120 B/línea.
 // Gate N-lineal con overhead fijo: allocs <= 1.10*N + 10, bytes <= 135*N + 1024.
 // Más robusto que umbral absoluto por N; separa de restore 3k (2 allocs/línea).
@@ -123,6 +185,27 @@ inline void checkDocumentLoadBudget(int n, const alloc_stats::Stats& st,
     ::testfw::report(b <= maxB,
         std::string("document load bytes/N ") + std::to_string(b) +
             " <= 135*" + std::to_string(n) + "+1024=" + std::to_string(maxB),
+        file, line);
+}
+
+// File load real (loadFromFile 10MB, lineas anchas 400B): como restore pero
+// con lineas mas grandes + 2 buffers de 256KB. Cota propia: allocs igual
+// que restore, bytes 600*N+1MB (cubre 400B/linea + chunks).
+inline void checkFileLoadBudget(int n, const alloc_stats::Stats& st,
+                                long long iters,
+                                const char* file, int line) {
+    const unsigned long long div = iters > 0 ? (unsigned long long)iters : 1;
+    const unsigned long long a = st.allocs / div;
+    const unsigned long long b = st.bytesAllocated / div;
+    const unsigned long long maxA = (unsigned long long)(1.10 * n + 10 + 0.5);
+    const unsigned long long maxB = 600ULL * (unsigned long long)n + 1024ULL * 1024ULL;
+    ::testfw::report(a <= maxA,
+        std::string("file load allocs/N ") + std::to_string(a) +
+            " <= 1.10*" + std::to_string(n) + "+10=" + std::to_string(maxA),
+        file, line);
+    ::testfw::report(b <= maxB,
+        std::string("file load bytes/N ") + std::to_string(b) +
+            " <= 600*" + std::to_string(n) + "+1MB=" + std::to_string(maxB),
         file, line);
 }
 
