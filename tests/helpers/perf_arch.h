@@ -7,7 +7,7 @@
 //   report_*        → imprimir sólo verbose (sin medición propia)
 //   statsFor()      → obtener métricas (alias de alloc_stats::statsFor)
 //   checkBudget()   → CHECK de presupuesto (wrapper de CHECK)
-//   reportVerbose() → tabla sólo verbose (gated por PERF_VERBOSE=1)
+//   reportVerbose() → tabla sólo verbose (gated por MAESTRO_PERF_VERBOSE=1)
 //
 // Este header NO modifica ningún test existente: solo declara la
 // convención para futuros tests y provee los helpers que hoy faltan.
@@ -22,14 +22,12 @@
 
 #include "test_framework.h"
 #include "helpers/alloc_stats.h"
+#include "helpers/perf_verbose.h"
 
 namespace perf_arch {
 
-// Verbose explícito: solo imprime si PERF_VERBOSE=1.
-inline bool verbose() {
-    const char* e = std::getenv("PERF_VERBOSE");
-    return e && (e[0] == '1' || std::strcmp(e, "true") == 0);
-}
+// Verbose explícito: solo con MAESTRO_PERF_VERBOSE=1.
+inline bool verbose() { return perf_verbose::enabled(); }
 
 // printf gated: usar en report_* y en futuras tablas.
 inline void reportVerbose(const char* fmt, ...) {

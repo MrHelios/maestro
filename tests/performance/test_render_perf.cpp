@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "helpers/perf_arch.h"
 #include "helpers/perf_time_utils.h"
 #include "helpers/test_render_utils.h"
 #include "helpers/perf_helpers.h"
@@ -67,7 +68,7 @@ struct RenderFixture {
 // 1. Escala con el TAMANO DEL DOCUMENTO o solo con el viewport?
 // ---------------------------------------------------------------------------
 TEST(bench_perf_render_escalado_con_documento_checked) {
-    std::printf("\n== perf: buildScreen vs tamanio del documento ==\n");
+    perf_arch::reportVerbose("\n== perf: buildScreen vs tamanio del documento ==\n");
     const int frames[] = {2000, 1000, 200};
     const int sizes[] = {300, 3000, 30000};
     for (int i = 0; i < 3; ++i) {
@@ -109,7 +110,7 @@ TEST(bench_perf_render_desglose_fases_checked) {
         return d;
     };
 
-    std::printf("\n== perf: desglose de buildScreen (300x80, viewport 24x80) ==\n");
+    perf_arch::reportVerbose("\n== perf: desglose de buildScreen (300x80, viewport 24x80) ==\n");
     const double total = perf_time::bench_ns("buildScreen TOTAL", 2000, [&fx] {
         perf_time::g_sink += fx.frame().size();
     });
@@ -150,7 +151,7 @@ TEST(bench_perf_render_desglose_fases_checked) {
 // 3. El ciclo que le importa al usuario: tecla -> estado -> frame completo.
 // ---------------------------------------------------------------------------
 TEST(bench_perf_ciclo_tecla_mas_frame_checked) {
-    std::printf("\n== perf: ciclo tecleo real (handleEvent + buildScreen) ==\n");
+    perf_arch::reportVerbose("\n== perf: ciclo tecleo real (handleEvent + buildScreen) ==\n");
     RenderFixture fx(300);
     fx.ed.state_ = State::Interaccion;
 
@@ -170,7 +171,7 @@ TEST(bench_perf_ciclo_tecla_mas_frame_checked) {
                    .count() /
                1000.0 / keys;
     }();
-    std::printf("%-46s %8.1f us por tecla (%d teclas)\n",
+    perf_arch::reportVerbose("%-46s %8.1f us por tecla (%d teclas)\n",
                 "handleEvent+buildScreen", us, keys);
     CHECK_EQ(keys, 2000);
 }
@@ -181,7 +182,7 @@ TEST(bench_perf_ciclo_tecla_mas_frame_checked) {
 //    diferencial (solo las filas que realmente cambiaron).
 // ---------------------------------------------------------------------------
 TEST(bench_perf_bytes_por_evento_hacia_terminal_checked) {
-    std::printf("\n== perf: bytes por evento hacia la terminal ==\n");
+    perf_arch::reportVerbose("\n== perf: bytes por evento hacia la terminal ==\n");
     RenderFixture fx(300);
     fx.ed.state_ = State::Interaccion;
 
@@ -232,11 +233,11 @@ TEST(bench_perf_bytes_por_evento_hacia_terminal_checked) {
         return rows;
     };
 
-    std::printf("%-46s %6zu bytes/frame\n", "frame completo (camino viejo)",
+    perf_arch::reportVerbose("%-46s %6zu bytes/frame\n", "frame completo (camino viejo)",
                 base.size());
-    std::printf("%-46s %6zu bytes (diff)\n",
+    perf_arch::reportVerbose("%-46s %6zu bytes (diff)\n",
                 "tecla 'a': ANTES vs AHORA", deltaTecla);
-    std::printf("%-46s %6d filas / %6zu -> %zu bytes\n",
+    perf_arch::reportVerbose("%-46s %6d filas / %6zu -> %zu bytes\n",
                 "scroll 1 linea: filas / antes -> ahora",
                 changedRows(base, trasScroll), trasScroll.size(), deltaScroll);
     CHECK(!base.empty());
@@ -245,7 +246,7 @@ TEST(bench_perf_bytes_por_evento_hacia_terminal_checked) {
 // 5. Ciclo con diff integrado: handleEvent + buildDiffFrame (vs buildScreen).
 // ---------------------------------------------------------------------------
 TEST(bench_perf_ciclo_diff_integrado_checked) {
-    std::printf("\n== perf: ciclo handleEvent + buildDiffFrame (diff integrado) ==\n");
+    perf_arch::reportVerbose("\n== perf: ciclo handleEvent + buildDiffFrame (diff integrado) ==\n");
     RenderFixture fx(300);
     fx.ed.state_ = State::Interaccion;
     // primar cache con un frame completo
@@ -269,7 +270,7 @@ TEST(bench_perf_ciclo_diff_integrado_checked) {
 // 6. Movimiento horizontal y saltos grandes (columnOf + scrollToCursor).
 // ---------------------------------------------------------------------------
 TEST(bench_perf_movimiento_horizontal_y_saltos_checked) {
-    std::printf("\n== perf: movimiento horizontal y saltos grandes ==\n");
+    perf_arch::reportVerbose("\n== perf: movimiento horizontal y saltos grandes ==\n");
     RenderFixture fx(10);
     fx.ed.state_ = State::Navegacion;
     fx.ed.active().document.restore(perf_helpers::makeLines(10, 4000));
@@ -297,7 +298,7 @@ TEST(bench_perf_movimiento_horizontal_y_saltos_checked) {
 // 7. Paste / multibyte y carga inicial.
 // ---------------------------------------------------------------------------
 TEST(bench_perf_paste_multibyte_y_carga_checked) {
-    std::printf("\n== perf: paste multibyte y carga inicial ==\n");
+    perf_arch::reportVerbose("\n== perf: paste multibyte y carga inicial ==\n");
     std::string big(10000, 'x');
     perf_time::bench_ns("Document::restore 3000x80", 20, [&]{
         Document d; d.restore(perf_helpers::makeLines(3000, 80));

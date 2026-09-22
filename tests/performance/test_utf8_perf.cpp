@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 #include "test_framework.h"
+#include "helpers/perf_arch.h"
 #include "helpers/perf_time_utils.h"
 #include "core/Cursor.h"
 #include "core/utf8.h"
@@ -36,7 +37,7 @@ std::string makeMixed(int cols) {
 }
 
 TEST(bench_perf_utf8_columnOf_checked) {
-    std::printf("\n== perf: utf8::columnOf (v3 micro-opt) ==\n");
+    perf_arch::reportVerbose("\n== perf: utf8::columnOf (v3 micro-opt) ==\n");
     std::string ascii10k(10000, 'a');
     std::string utf8_10k = makeMixed(4000);
     std::string utf8_100k = makeMixed(40000);
@@ -51,7 +52,7 @@ TEST(bench_perf_utf8_columnOf_checked) {
     CHECK(g_sink > 0);
 }
 TEST(bench_perf_utf8_columnOf_breakdown_checked) {
-    std::printf("\n== perf: utf8::columnOf breakdown ASCII%% vs UTF-8 / offset ==\n");
+    perf_arch::reportVerbose("\n== perf: utf8::columnOf breakdown ASCII%% vs UTF-8 / offset ==\n");
     std::string ascii10k(10000, 'a');
     std::string ascii100k(100000, 'a');
     std::string utf8_10k = makeMixed(4000);
@@ -71,18 +72,18 @@ TEST(bench_perf_utf8_columnOf_breakdown_checked) {
         bench_us((std::string(tag)+" col size/2").c_str(), 5000, [&]{ g_sink += utf8::columnOf(s, (int)s.size()/2); });
         bench_us((std::string(tag)+" col size").c_str(), 2000, [&]{ g_sink += utf8::columnOf(s, (int)s.size()); });
     };
-    std::printf(" -- offsets ascii10k --\n");
+    perf_arch::reportVerbose(" -- offsets ascii10k --\n");
     benchOffsets("ascii10k", ascii10k);
-    std::printf(" -- offsets utf8_10k --\n");
+    perf_arch::reportVerbose(" -- offsets utf8_10k --\n");
     benchOffsets("utf8_10k", utf8_10k);
-    std::printf(" -- offsets ascii100k --\n");
+    perf_arch::reportVerbose(" -- offsets ascii100k --\n");
     benchOffsets("ascii100k", ascii100k);
-    std::printf(" -- offsets utf8_100k --\n");
+    perf_arch::reportVerbose(" -- offsets utf8_100k --\n");
     benchOffsets("utf8_100k", utf8_100k);
     CHECK(g_sink > 0);
 }
 TEST(bench_perf_utf8_truncate_checked) {
-    std::printf("\n== perf: utf8::truncate ==\n");
+    perf_arch::reportVerbose("\n== perf: utf8::truncate ==\n");
     std::string ascii(4000, 'a');
     std::string mixed = makeMixed(1000);
     std::string longMixed = makeMixed(10000);
@@ -94,7 +95,7 @@ TEST(bench_perf_utf8_truncate_checked) {
 }
 
 TEST(bench_perf_utf8_range_checked) {
-    std::printf("\n== perf: utf8::range ==\n");
+    perf_arch::reportVerbose("\n== perf: utf8::range ==\n");
     std::string mixed = makeMixed(1000);
     std::string longMixed = makeMixed(10000);
     bench_us("range mixed 1k [10,90)", 20000, [&]{ g_sink += utf8::range(mixed, 10, 90).size(); });
@@ -104,7 +105,7 @@ TEST(bench_perf_utf8_range_checked) {
 }
 
 TEST(bench_perf_utf8_isCellStart_checked) {
-    std::printf("\n== perf: utf8::isCellStart scan ==\n");
+    perf_arch::reportVerbose("\n== perf: utf8::isCellStart scan ==\n");
     std::string mixed = makeMixed(1000);
     bench_us("isCellStart scan 1k cols (~2.5kB)", 50000, [&]{
         size_t c=0; for(int i=0;i<(int)mixed.size();++i) c+= utf8::isCellStart(mixed,i);
@@ -113,7 +114,7 @@ TEST(bench_perf_utf8_isCellStart_checked) {
     CHECK(g_sink > 0);
 }
 TEST(bench_perf_utf8_columnOf_cache_vs_full_checked) {
-    std::printf("\n== perf: columnOf cache incremental vs full scan (Left repetido) ==\n");
+    perf_arch::reportVerbose("\n== perf: columnOf cache incremental vs full scan (Left repetido) ==\n");
     std::string ascii10k(10000, 'a');
     std::string utf8_10k = makeMixed(4000);
     auto runCase = [&](const char* tag, const std::string& line, int startByte){
@@ -139,6 +140,6 @@ TEST(bench_perf_utf8_columnOf_cache_vs_full_checked) {
     runCase("ascii10k", ascii10k, 5000);
     runCase("utf8_10k", utf8_10k, 5000);
     runCase("utf8_10k end", utf8_10k, (int)utf8_10k.size());
-    std::printf(" -- idea viable: Left retrocede 1 celda via cellStartBefore O(1) max 3 bytes, Right via cellLen O(1); cache evita rescan 0..byteCol --\n");
+    perf_arch::reportVerbose(" -- idea viable: Left retrocede 1 celda via cellStartBefore O(1) max 3 bytes, Right via cellLen O(1); cache evita rescan 0..byteCol --\n");
     CHECK(g_sink > 0);
 }

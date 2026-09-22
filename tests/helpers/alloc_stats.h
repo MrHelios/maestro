@@ -25,7 +25,10 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <new>
+
+#include "perf_verbose.h"
 
 #if defined(__GLIBC__)
 #include <malloc.h>
@@ -151,6 +154,7 @@ inline void resetAll() {
 }
 
 inline void report(const char* title) {
+    if (!perf_verbose::enabled()) return;
     std::printf("\n== allocs: %s ==\n", title);
     std::printf("%-16s %10s %10s %16s %16s\n",
                 "scope", "allocs", "frees", "+bytes", "-bytes");

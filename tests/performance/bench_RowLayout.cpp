@@ -1,5 +1,6 @@
 #include "core/RowLayout.h"
 #include "core/utf8.h"
+#include "tests/helpers/perf_verbose.h"
 #include <fstream>
 #include <vector>
 #include <string>
@@ -7,7 +8,12 @@
 #include <numeric>
 #include <iostream>
 #include <chrono>
+
+// Standalone: silencio por defecto, tablas solo con MAESTRO_PERF_VERBOSE=1.
+struct PerfNullBuf : std::streambuf { int overflow(int c) override { return c; } };
 int main(){
+  PerfNullBuf perfNull;
+  std::ostream perfLog(perf_verbose::enabled() ? std::cout.rdbuf() : &perfNull);
  auto load = [](){
    std::ifstream f("tests/temp/TextEditor.md", std::ios::binary);
    std::string c((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -31,14 +37,14 @@ int main(){
    return std::chrono::duration<double,std::milli>(t1-t0).count();
  };
 
- std::cout<<"=== TextEditor.md stats ===\n";
- std::cout<<"lines "<<lines.size()<<" total "<<std::accumulate(lines.begin(), lines.end(), 0ull, [](auto a, auto&s){return a+s.size();})<<" maxLine "<<longest[0].size()<<"\n";
- std::cout<<"visLong avg "<< (std::accumulate(visLong.begin(), visLong.end(), 0ull, [](auto a, auto&s){return a+s.size();})/40) << " max "<<visLong[0].size()<<"\n";
- std::cout<<"visAvg avg "<< (std::accumulate(visAvg.begin(), visAvg.end(), 0ull, [](auto a, auto&s){return a+s.size();})/40) << "\n";
- std::cout<<"huge "<<huge.size()<<" cols "<<utf8::columnOf(huge,huge.size())<<"\n\n";
+ perfLog<<"=== TextEditor.md stats ===\n";
+ perfLog<<"lines "<<lines.size()<<" total "<<std::accumulate(lines.begin(), lines.end(), 0ull, [](auto a, auto&s){return a+s.size();})<<" maxLine "<<longest[0].size()<<"\n";
+ perfLog<<"visLong avg "<< (std::accumulate(visLong.begin(), visLong.end(), 0ull, [](auto a, auto&s){return a+s.size();})/40) << " max "<<visLong[0].size()<<"\n";
+ perfLog<<"visAvg avg "<< (std::accumulate(visAvg.begin(), visAvg.end(), 0ull, [](auto a, auto&s){return a+s.size();})/40) << "\n";
+ perfLog<<"huge "<<huge.size()<<" cols "<<utf8::columnOf(huge,huge.size())<<"\n\n";
 
   // per frame micro bench (single iteration)
- std::cout<<"--- Per-frame (40 lines) micro bench (single frame) ---\n";
+ perfLog<<"--- Per-frame (40 lines) micro bench (single frame) ---\n";
  for(auto &caseName: std::vector<std::string>{"visLong","visAvg"}){
    auto &vis = (caseName=="visLong"?visLong:visAvg);
    auto fnBase = [&]()->size_t{ size_t s=0; for(auto &l:vis){ for(int i=0;i<8;++i){int b=(l.size()*i)/8; b=utf8::alignStart(l,b); s+=utf8::columnOf(l,b);} s+=utf8::range(l,0,80).size(); s+=utf8::expandTabs(utf8::range(l,0,80)).size();} return s;};
@@ -47,23 +53,23 @@ int main(){
    double tB=bench([&](){return fnBase();},200);
    double tF=bench([&](){return fnFull();},200);
    double tC=bench([&](){return fnChk();},200);
-   std::cout<<caseName<<" baseline "<<tB/200<<" ms/frame\n";
-   std::cout<<caseName<<" Full     "<<tF/200<<" ms/frame x"<<tB/tF<<"\n";
-   std::cout<<caseName<<" Chk      "<<tC/200<<" ms/frame x"<<tB/tC<<"\n";
+   perfLog<<caseName<<" baseline "<<tB/200<<" ms/frame\n";
+   perfLog<<caseName<<" Full     "<<tF/200<<" ms/frame x"<<tB/tF<<"\n";
+   perfLog<<caseName<<" Chk      "<<tC/200<<" ms/frame x"<<tB/tC<<"\n";
  }
 
- std::cout<<"\n--- Huge 540KB single line, 40 col + 15 range per frame ---\n";
+ perfLog<<"\n--- Huge 540KB single line, 40 col + 15 range per frame ---\n";
  auto fnBaseH = [&]()->size_t{ size_t s=0; for(int i=0;i<20;++i){int b=(i*27000)%huge.size(); b=utf8::alignStart(huge,b); s+=utf8::columnOf(huge,b);} for(int k=0;k<5;++k){s+=utf8::range(huge,0,80).size(); s+=utf8::range(huge,1000,1080).size();} return s;};
  auto fnFullH = [&]()->size_t{ rowlayout::RowLayoutFull rl(huge); size_t s=0; for(int i=0;i<20;++i){int b=(i*27000)%huge.size(); b=utf8::alignStart(huge,b); s+=rl.columnAt(b);} for(int k=0;k<5;++k){s+=rl.range(0,80).size(); s+=rl.range(1000,1080).size();} return s;};
  auto fnChkH = [&]()->size_t{ rowlayout::RowLayoutCheckpoint rl(huge); size_t s=0; for(int i=0;i<20;++i){int b=(i*27000)%huge.size(); b=utf8::alignStart(huge,b); s+=rl.columnAt(b);} for(int k=0;k<5;++k){s+=rl.range(0,80).size(); s+=rl.range(1000,1080).size();} return s;};
  double tbH=bench(fnBaseH,20);
  double tfH=bench(fnFullH,20);
  double tcH=bench(fnChkH,20);
- std::cout<<"baseline "<<tbH/20<<" ms/frame\n";
- std::cout<<"Full     "<<tfH/20<<" ms/frame x"<<tbH/tfH<<"\n";
- std::cout<<"Chk      "<<tcH/20<<" ms/frame x"<<tbH/tcH<<"\n";
- std::cout<<"Full mem "<<rowlayout::RowLayoutFull(huge).memoryBytes()/1024.0<<" KB\n";
- std::cout<<"Chk mem  "<<rowlayout::RowLayoutCheckpoint(huge).memoryBytes()/1024.0<<" KB chk="<<rowlayout::RowLayoutCheckpoint(huge).checkpointCount()<<"\n";
+ perfLog<<"baseline "<<tbH/20<<" ms/frame\n";
+ perfLog<<"Full     "<<tfH/20<<" ms/frame x"<<tbH/tfH<<"\n";
+ perfLog<<"Chk      "<<tcH/20<<" ms/frame x"<<tbH/tcH<<"\n";
+ perfLog<<"Full mem "<<rowlayout::RowLayoutFull(huge).memoryBytes()/1024.0<<" KB\n";
+ perfLog<<"Chk mem  "<<rowlayout::RowLayoutCheckpoint(huge).memoryBytes()/1024.0<<" KB chk="<<rowlayout::RowLayoutCheckpoint(huge).checkpointCount()<<"\n";
 
  return 0;
 }

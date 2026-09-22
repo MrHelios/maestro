@@ -3,6 +3,8 @@
 #include <cstdio>
 #include <functional>
 
+#include "perf_verbose.h"
+
 namespace perf_time {
 
 inline size_t g_sink = 0;
@@ -15,7 +17,7 @@ double bench_us(const char* label, int iters, F&& fn) {
     auto e = std::chrono::steady_clock::now();
     double ns = static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(e - s).count());
     double us = ns / iters / 1000.0;
-    std::printf("%-48s %8.2f us/op  (%d iters)\n", label, us, iters);
+    if (perf_verbose::enabled()) std::printf("%-48s %8.2f us/op  (%d iters)\n", label, us, iters);
     return us;
 }
 
@@ -28,7 +30,7 @@ double bench_ns(const char* label, int iters, F&& fn) {
     double ns = static_cast<double>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(e - s).count());
     double per = ns / iters;
-    std::printf("%-46s %8.1f us/frame  (%d frames)\n", label, per / 1000.0, iters);
+    if (perf_verbose::enabled()) std::printf("%-46s %8.1f us/frame  (%d frames)\n", label, per / 1000.0, iters);
     return per;
 }
 
@@ -42,8 +44,9 @@ double bench_with_total(const char* label, int iters, double total_ns, F&& fn) {
         std::chrono::duration_cast<std::chrono::nanoseconds>(e - s).count());
     double us = ns / iters / 1000.0;
     double total_us = total_ns / 1000.0;
-    std::printf("%-46s %8.1f us  (%4.1f%% del total)\n", label, us,
-                total_us > 0 ? 100.0 * us / total_us : 0.0);
+    if (perf_verbose::enabled())
+        std::printf("%-46s %8.1f us  (%4.1f%% del total)\n", label, us,
+                    total_us > 0 ? 100.0 * us / total_us : 0.0);
     return us;
 }
 

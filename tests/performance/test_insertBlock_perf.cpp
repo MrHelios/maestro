@@ -4,6 +4,7 @@
 #include <cstdio>
 
 #include "test_framework.h"
+#include "helpers/perf_arch.h"
 #include "core/Document.h"
 #include "alloc_stats.h"
 
@@ -31,8 +32,8 @@ TEST(bench_perf_insertBlock_matrix) {
         {"large      100KB x 1k",     100000, 1000,  20},
     };
 
-    std::printf("\n== perf_insertBlock_matrix: time + allocs por col (0/mid/end) ==\n");
-    std::printf("%-22s %8s %6s %12s %12s %10s %12s\n",
+    perf_arch::reportVerbose("\n== perf_insertBlock_matrix: time + allocs por col (0/mid/end) ==\n");
+    perf_arch::reportVerbose("%-22s %8s %6s %12s %12s %10s %12s\n",
                 "case", "col", "iters", "ns/op", "allocs/op", "bytes/op", "total allocs");
 
     for (auto& tc : cases) {
@@ -58,12 +59,12 @@ TEST(bench_perf_insertBlock_matrix) {
             auto s = alloc_stats::statsFor(alloc_stats::kDocInsert);
             long long allocsPerOp = s.allocs / (unsigned long long)tc.iters;
             long long bytesPerOp = s.bytesAllocated / (unsigned long long)tc.iters;
-            std::printf("%-22s %8s %6d %12lld %12lld %10lld %12llu\n",
+            perf_arch::reportVerbose("%-22s %8s %6d %12lld %12lld %10lld %12llu\n",
                         tc.name, colNames[ci], tc.iters, nsPerOp, allocsPerOp, bytesPerOp, s.allocs);
             alloc_stats::resetAll();
         }
     }
-    std::printf("\n-- Mide ciclo completo construccion/restauracion + insertBlock (allocs en misma region) --\n");
+    perf_arch::reportVerbose("\n-- Mide ciclo completo construccion/restauracion + insertBlock (allocs en misma region) --\n");
     alloc_stats::report("perf_insertBlock_matrix aggregate");
 }
 
@@ -158,14 +159,14 @@ TEST(bench_perf_insertBlock_breakdown) {
             auto sC = alloc_stats::statsFor(alloc_stats::kDocInsert);
             long long allocC = sC.allocs / iters;
 
-            std::printf("%-22s col=%-3s docLines=%3d iters=%4d | A %6lld ns %3lld alloc | B(inplace) %6lld ns %3lld alloc/pair->%3lld/op | C(full+restore) %6lld ns %3lld alloc\n",
+            perf_arch::reportVerbose("%-22s col=%-3s docLines=%3d iters=%4d | A %6lld ns %3lld alloc | B(inplace) %6lld ns %3lld alloc/pair->%3lld/op | C(full+restore) %6lld ns %3lld alloc\n",
                         label, (col==0?"0":col==lineSize/2?"mid":"end"), docLines, iters, nsA, allocA, nsBpair, allocBpair, allocB, nsC, allocC);
             alloc_stats::resetAll();
         }
     };
 
-    std::printf("\n== perf_insertBlock_breakdown: A puro, B in-place sin copia, C incluye restore ==\n");
-    std::printf("B mide erase+insert+revert in-place (cap reservada), A+B no es comparable directo a C (C incluye restore)\n");
+    perf_arch::reportVerbose("\n== perf_insertBlock_breakdown: A puro, B in-place sin copia, C incluye restore ==\n");
+    perf_arch::reportVerbose("B mide erase+insert+revert in-place (cap reservada), A+B no es comparable directo a C (C incluye restore)\n");
     bench("block_10 100B x10 ", 100, makeBlock(10), 100, 500);
     bench("mixed 4KB x10 mid", 4000, makeBlock(10), 2000, 500);
     bench("mixed 4KB x10 end", 4000, makeBlock(10), 4000, 500);
@@ -202,13 +203,13 @@ TEST(bench_perf_insertBlock_shift_inplace) {
         auto st = alloc_stats::statsFor(alloc_stats::kDocInsert);
         long long allocsPair = st.allocs / static_cast<unsigned long long>(iters);
         long long bytesPair = st.bytesAllocated / static_cast<unsigned long long>(iters);
-        std::printf("inplace doc=%4d line=%4d Npost=%4d block=%3zu iters=%4d => cycle %7lld ns %3lld alloc %8lld bytes\n",
+        perf_arch::reportVerbose("inplace doc=%4d line=%4d Npost=%4d block=%3zu iters=%4d => cycle %7lld ns %3lld alloc %8lld bytes\n",
                     docLines, insertLine, Npost, blockLines, iters, nsPair, allocsPair, bytesPair);
         alloc_stats::resetAll();
         if ((int)lines.size() != docLines) std::printf("  ERROR size %zu != %d\n", lines.size(), docLines);
     };
-    std::printf("\n== perf_insertBlock_shift_inplace ==\n");
-    std::printf("(mide desplazamiento del vector y coste de copiar/mover strings, con capacidad suficiente; no representa realloc de lines_)\n");
+    perf_arch::reportVerbose("\n== perf_insertBlock_shift_inplace ==\n");
+    perf_arch::reportVerbose("(mide desplazamiento del vector y coste de copiar/mover strings, con capacidad suficiente; no representa realloc de lines_)\n");
     // doc fijo 1000, block 1 línea
     bench(1000, 0, 1, 4000);
     bench(1000, 500, 1, 4000);
@@ -222,7 +223,7 @@ TEST(bench_perf_insertBlock_shift_inplace) {
     bench(300, 150, 10, 2000);
     bench(300, 290, 10, 2000);
     bench(1000, 500, 10, 1000);
-    std::printf("--- block sweep doc300 line150 ---\n");
+    perf_arch::reportVerbose("--- block sweep doc300 line150 ---\n");
     bench(300, 150, 1, 2000);
     bench(300, 150, 10, 2000);
     bench(300, 150, 300, 500);
@@ -274,10 +275,10 @@ TEST(bench_perf_insertBlock_old_vs_new_vector) {
         auto t3 = std::chrono::steady_clock::now();
         long long newNs = std::chrono::duration_cast<std::chrono::nanoseconds>(t3 - t2).count() / iters;
         auto newStats = alloc_stats::statsFor(alloc_stats::kDocInsert);
-        std::printf("doc=%4d line=%4d block=%4zu iters=%5d | OLD %8lld ns %4llu alloc | NEW %8lld ns %4llu alloc\n",
+        perf_arch::reportVerbose("doc=%4d line=%4d block=%4zu iters=%5d | OLD %8lld ns %4llu alloc | NEW %8lld ns %4llu alloc\n",
                     docLines, line, blockLines, iters, oldNs, oldStats.allocs / (unsigned long long)iters, newNs, newStats.allocs / (unsigned long long)iters);
     };
-    std::printf("\n== perf_insertBlock_old_vs_new_vector: OLD erase+insert vs NEW insert+assign ==\n");
+    perf_arch::reportVerbose("\n== perf_insertBlock_old_vs_new_vector: OLD erase+insert vs NEW insert+assign ==\n");
     bench(10, 0, 1, 5000);
     bench(10, 0, 10, 3000);
     bench(100, 50, 10, 3000);
