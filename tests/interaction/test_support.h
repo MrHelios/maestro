@@ -12,6 +12,8 @@
 #include "ui/Editor.h"
 #undef private
 #include "core/utf8.h"
+#include "helpers/test_render_utils.h"
+
 using testfw::TempFile;
 inline Event insert(char c){ Event e; e.type=EventType::InsertChar; e.text=std::string(1,c); return e; }
 inline Event ev(EventType t){ Event e; e.type=t; return e; }

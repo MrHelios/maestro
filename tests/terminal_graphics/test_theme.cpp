@@ -9,6 +9,7 @@
 #include <string>
 
 #include "test_framework.h"
+#include "helpers/test_render_utils.h"
 
 #include "core/Theme.h"
 #include "core/Document.h"
