@@ -1173,11 +1173,45 @@ void Editor::handleInteraccionEvent(const Event& event) {
         case EventType::InsertNewline: {
             HistoryEntry e = b.beginHistoryEntry();
             Position at{b.cursor.line, b.cursor.col};
+            // Indentación lógica de la línea original: prefijo
+            // [ ' ' | '\t' ]* verbatim, sin normalizar.
+            std::string orig = b.document.lineAt(at.line);
+            size_t indentLen = 0;
+            while (indentLen < orig.size() &&
+                   (orig[indentLen] == ' ' || orig[indentLen] == '\t'))
+                ++indentLen;
+            std::string indent = orig.substr(0, indentLen);
             b.document.splitLine(at.line, at.col);
             e.edits.push_back({EditType::SplitLine, at,
                                {at.line + 1, 0}, ""});
-            b.cursor.line++;
-            b.cursor.col = 0;
+            if (!indent.empty()) {
+                // Nueva línea = I + ltrim(sufijo): evita duplicar cuando
+                // el corte cae dentro del propio indent o en solo-blancos.
+                const int newLine = at.line + 1;
+                std::string suffix = b.document.lineAt(newLine);
+                size_t k = 0;
+                while (k < suffix.size() &&
+                       (suffix[k] == ' ' || suffix[k] == '\t'))
+                    ++k;
+                if (k > 0) {
+                    std::string removed = suffix.substr(0, k);
+                    b.document.deleteRange(newLine, 0, newLine,
+                                           static_cast<int>(k));
+                    e.edits.push_back({EditType::Delete,
+                                       {newLine, 0},
+                                       {newLine, static_cast<int>(k)},
+                                       removed});
+                }
+                Position end =
+                    b.document.insertText(newLine, 0, indent);
+                e.edits.push_back({EditType::Insert,
+                                   {newLine, 0}, end, indent});
+                b.cursor.line = newLine;
+                b.cursor.col = static_cast<int>(indent.size());
+            } else {
+                b.cursor.line++;
+                b.cursor.col = 0;
+            }
             updateModified(b);
             b.commitHistoryEntry(std::move(e));
             break;
@@ -1204,14 +1238,47 @@ void Editor::handleInteraccionEvent(const Event& event) {
                     updateModified(b);
                 } else {
                     int line = b.cursor.line, col = b.cursor.col;
-                    std::string removed =
-                        b.document.cellTextBefore(line, col);
-                    int deleted = b.document.deleteCharBefore(line, col);
-                    if (deleted > 0) {
-                        e.edits.push_back({EditType::Delete, {line, col - deleted},
-                                           {line, col}, removed});
-                        b.cursor.col -= deleted;
-                        updateModified(b);
+                    // Smart-backspace: si [0, col) es todo indentación
+                    // lógica, borra 1 nivel (1x '\t' o hasta kIndentLen
+                    // espacios) en vez de 1 solo char.
+                    const std::string cur = b.document.lineAt(line);
+                    bool allBlank = col > 0 && col <= static_cast<int>(cur.size());
+                    for (int i = 0; allBlank && i < col; ++i) {
+                        if (cur[static_cast<size_t>(i)] != ' ' &&
+                            cur[static_cast<size_t>(i)] != '\t')
+                            allBlank = false;
+                    }
+                    if (allBlank) {
+                        int n = 0;
+                        if (cur[static_cast<size_t>(col - 1)] == '\t') {
+                            n = 1;
+                        } else {
+                            while (n < kIndentLen && n < col &&
+                                   cur[static_cast<size_t>(col - 1 - n)] == ' ')
+                                ++n;
+                        }
+                        if (n > 0) {
+                            std::string removed =
+                                cur.substr(static_cast<size_t>(col - n),
+                                           static_cast<size_t>(n));
+                            if (b.document.deleteRange(line, col - n, line, col)) {
+                                e.edits.push_back({EditType::Delete,
+                                                   {line, col - n},
+                                                   {line, col}, removed});
+                                b.cursor.col -= n;
+                                updateModified(b);
+                            }
+                        }
+                    } else {
+                        std::string removed =
+                            b.document.cellTextBefore(line, col);
+                        int deleted = b.document.deleteCharBefore(line, col);
+                        if (deleted > 0) {
+                            e.edits.push_back({EditType::Delete, {line, col - deleted},
+                                               {line, col}, removed});
+                            b.cursor.col -= deleted;
+                            updateModified(b);
+                        }
                     }
                 }
             } else {
