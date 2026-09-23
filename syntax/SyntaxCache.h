@@ -14,6 +14,10 @@
 // puede saltear una segunda región dirty y declarar limpio en falso.
 // Invalida solo desde dirtyFromLine y reparsea hasta convergencia
 // (nuevo stateOut == cacheado stateOut) preservando suffix.
+// Contrato de ensure parcial: ensureValid(doc, upTo < n) sin convergencia
+// en el borde deja el cache dirty desde upTo (aunque upTo > dirtyMax_),
+// porque el sufijo más allá del borde es sospechoso. Solo un ensure
+// completo (upTo >= n) o una convergencia real declara limpio.
 class SyntaxCache {
 public:
     void setLanguage(SyntaxLanguage lang);

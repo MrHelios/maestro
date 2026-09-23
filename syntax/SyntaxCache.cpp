@@ -216,15 +216,22 @@ void SyntaxCache::ensureValid(const Document& doc, int upTo) {
 
         state = out;
     }
-    // Solo declarar limpio si se convergió o si se cubrió todo lo sucio:
-    // upTo > dirtyMax_ implica que cada línea editada fue reprocesada.
-    // En un ensure parcial (upTo <= dirtyMax_) before_[upTo] quedó recién
-    // escrito y es válido: se retoma desde ahí y dirtyMax_ se conserva.
-    if (converged || upTo > dirtyMax_) {
+    // Contrato de validez parcial:
+    // - ensure completo (upTo >= n) o convergencia real => limpio.
+    // - ensure parcial (upTo < n) sin convergencia => sigue dirty desde
+    //   upTo, aunque upTo > dirtyMax_. El estado en el borde cambió
+    //   (si no, habría convergido), así que el sufijo cacheado más allá
+    //   de upTo es sospechoso y no se puede declarar limpio: un futuro
+    //   scroll lo creería válido (stale permanente).
+    //   before_[upTo] quedó recién escrito y es válido: se retoma desde
+    //   ahí y dirtyMax_ se conserva (extendido a upTo para mantener
+    //   dirtyFrom_ <= dirtyMax_).
+    if (converged || upTo >= n) {
         dirtyFrom_ = INT_MAX;
         dirtyMax_ = -1;
-    } else if (dirtyFrom_ < upTo) {
-        dirtyFrom_ = upTo;
+    } else {
+        if (dirtyFrom_ < upTo) dirtyFrom_ = upTo;
+        if (dirtyMax_ < upTo) dirtyMax_ = upTo;
     }
     doRecord(requestedClamped, parsedCount, hlCount);
 }

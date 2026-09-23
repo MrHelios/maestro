@@ -853,6 +853,29 @@ std::string Renderer::buildCursorMoveFrame(const Document& doc, const Cursor& cu
         patchContentRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, lastCursorLine_, gutterW, textWidth, contentH);
         patchContentRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose, cursor.line, gutterW, textWidth, contentH);
     }
+    // La edición pudo propagar estado multilínea (/*, raw string) más allá
+    // de la fila del cursor: el patch de una sola fila deja el viewport con
+    // spans stale. Si el viewport sigue sin validez, completarlo (acotado
+    // por viewport, nunca n) y recalcular/comparar todas las filas del
+    // viewport, emitiendo al terminal solamente las que cambiaron
+    // (patchContentRow compara contra rowCache_). Caso neutro/edit de una
+    // línea: ya está válido y se conserva el O(1) sin entrar al loop. El
+    // tail más allá del viewport queda dirty (contrato SyntaxCache) y se
+    // sana al scrollear.
+    {
+        auto& cache = activeCache();
+        int need = viewport.top + contentH;
+        if (need > doc.lineCount()) need = doc.lineCount();
+        if (need > 0 && !cache.isValidThrough(need)) {
+            cache.ensureValid(doc, need);
+            for (int r = 0; r < contentH; ++r) {
+                int dl = viewport.top + r;
+                patchContentRow(out, doc, cursor, viewport, sel, searchSel,
+                                bracketOpen, bracketClose, dl, gutterW,
+                                textWidth, contentH);
+            }
+        }
+    }
     patchStatusBar(out, doc, cursor, filename, modified, message, state, layout, contentH);
 
     if (state != State::Busqueda) {
