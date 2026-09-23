@@ -7,10 +7,10 @@
 #include "test_framework.h"
 
 #define private public
-#include "ui/Editor.h"
+#include "app/Editor.h"
 #include "filesystem/InotifyFileWatcher.h"
 #undef private
-#include "clipboard/FakeClipboard.h"
+#include "helpers/FakeClipboard.h"
 
 using testfw::TempFile;
 

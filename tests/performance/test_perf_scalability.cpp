@@ -13,16 +13,16 @@
 #include "helpers/test_render_utils.h"
 
 #define private public
-#include "ui/Editor.h"
+#include "app/Editor.h"
 #undef private
 
-#include "core/Document.h"
-#include "core/Cursor.h"
-#include "core/Viewport.h"
-#include "ui/Renderer.h"
+#include "document/Document.h"
+#include "document/Cursor.h"
+#include "layout/Viewport.h"
+#include "rendering/Renderer.h"
 #include "syntax/SyntaxCache.h"
 #include "syntax/SyntaxLanguage.h"
-#include "core/BracketMatcher.h"
+#include "layout/BracketMatcher.h"
 
 namespace {
 using perf_helpers::makeLines;

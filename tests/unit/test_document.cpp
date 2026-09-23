@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "core/Document.h"
+#include "document/Document.h"
 #include "test_framework.h"
 
 using Lines = std::vector<std::string>;

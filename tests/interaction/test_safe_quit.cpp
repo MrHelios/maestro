@@ -1,5 +1,5 @@
 #include "test_support.h"
-#include "clipboard/FakeClipboard.h"
+#include "helpers/FakeClipboard.h"
 TEST(safe_quit_single_saved_exits) {
     Editor ed(std::make_unique<FakeClipboard>());
     CHECK(!ed.active().modified);

@@ -1,5 +1,5 @@
-#include "core/RowLayout.h"
-#include "core/utf8.h"
+#include "layout/RowLayout.h"
+#include "base/utf8.h"
 #include "tests/helpers/perf_verbose.h"
 #include <fstream>
 #include <vector>

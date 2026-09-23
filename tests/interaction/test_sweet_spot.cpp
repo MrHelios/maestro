@@ -1,7 +1,7 @@
 #include "test_support.h"
 #include <chrono>
 #include <thread>
-#include "clipboard/FakeClipboard.h"
+#include "helpers/FakeClipboard.h"
 #include "filesystem/NullFileWatcher.h"
 #define private public
 #include "filesystem/InotifyFileWatcher.h"

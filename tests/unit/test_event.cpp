@@ -1,4 +1,4 @@
-#include "terminal/Event.h"
+#include "platform/Event.h"
 #include "test_framework.h"
 
 TEST(event_default_state) {

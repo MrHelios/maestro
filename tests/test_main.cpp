@@ -1,5 +1,5 @@
 #include "test_framework.h"
-#include "ui/Renderer.h"
+#include "rendering/Renderer.h"
 
 int main(int argc, char** argv) {
     std::string filter;

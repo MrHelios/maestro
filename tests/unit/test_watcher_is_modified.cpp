@@ -1,4 +1,4 @@
-#include "core/Buffer.h"
+#include "document/Buffer.h"
 #include "test_framework.h"
 
 static Buffer makeBuffer(const std::vector<std::string>& lines) {

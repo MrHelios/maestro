@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 #define private public
-#include "ui/Editor.h"
+#include "app/Editor.h"
 #undef private
 #include "filesystem/FileSystem.h"
 

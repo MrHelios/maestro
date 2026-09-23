@@ -2,8 +2,8 @@
 #include <string>
 
 #include "test_framework.h"
-#include "core/Cursor.h"
-#include "core/utf8.h"
+#include "document/Cursor.h"
+#include "base/utf8.h"
 
 #define U_E "\xc3\xa9"
 #define U_DASH "\xe2\x80\x94"

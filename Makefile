@@ -3,9 +3,9 @@ CXX := g++
 # Flags por defecto de compilacion. -Wpedantic agrega chequeos del
 # estandar; se dejan en "modo aviso" (sin -Werror) para no cortar el build
 # ante un aviso de un GCC/Clang nuevo en CI.
-# -I. : los includes de capa son rutas relativas ("core/Document.h",
-# "ui/Editor.h", "terminal/Event.h"), asi que se compila desde la raiz.
-CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -I. -MMD -MP -pthread
+# -Isrc : los includes son rutas relativas a src/ ("document/Document.h",
+# "app/Editor.h", "platform/tty/Terminal.h"), asi que se compila desde la raiz.
+CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -Isrc -MMD -MP -pthread
 
 # El binario final se llama "maestro" y vive en build/: el punto de
 # entrada del proyecto para el usuario es el script wrapper ./maestro en
@@ -13,12 +13,14 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -I. -MMD -MP -pthread
 # `make test` / `make test-sanitize` / `make clean`. Compilar el binario
 # DENTRO de build/ evita que colisione en el filesystem con ese script.
 BIN := build/maestro
-# Program sources por capa (modelo / ui / terminal / clipboard / filesystem).
-SRC := $(wildcard core/*.cpp ui/*.cpp terminal/*.cpp clipboard/*.cpp filesystem/*.cpp syntax/*.cpp)
+# Program sources por capa (app / document / layout / syntax / rendering /
+# platform / filesystem / diagnostics, todas bajo src/).
+SRC := $(wildcard src/app/*.cpp src/document/*.cpp src/layout/*.cpp src/syntax/*.cpp src/rendering/*.cpp src/platform/tty/*.cpp src/platform/clipboard/*.cpp src/filesystem/*.cpp src/diagnostics/*.cpp)
 
 # --- Tests ---
-# Los tests se agrupan por nivel: unit/ (core puro), interaction/ (usan
-# ui/) y e2e/ (flujo completo); los helpers (test_framework.h) viven en
+# Los tests se agrupan por nivel: unit/ (document/layout puros),
+# interaction/ (usan app/), rendering/ (Renderer/StatusBar/Theme) y e2e/
+# (flujo completo); los helpers (test_framework.h, FakeClipboard.h) viven en
 # helpers/. test_main.cpp es el runner en la raiz de tests/.
 TEST_DIR := tests
 TEST_INC := -I$(TEST_DIR) -I$(TEST_DIR)/helpers
@@ -29,7 +31,7 @@ TEST_SRC_ALL := $(TEST_DIR)/test_main.cpp \
             $(wildcard $(TEST_DIR)/unit/*.cpp) \
             $(wildcard $(TEST_DIR)/interaction/*.cpp) \
             $(TEST_PERF_SRCS) \
-            $(wildcard $(TEST_DIR)/terminal_graphics/*.cpp) \
+            $(wildcard $(TEST_DIR)/rendering/*.cpp) \
             $(wildcard $(TEST_DIR)/e2e/*.cpp) \
             $(wildcard $(TEST_DIR)/integration/*.cpp) \
             $(wildcard $(TEST_DIR)/integration/x11_clipboard/*.cpp)
@@ -42,7 +44,7 @@ TEST_SRC := $(TEST_DIR)/test_main.cpp \
 TEST_SRC_PERF := $(TEST_DIR)/test_main.cpp \
             $(TEST_PERF_SRCS)
 TEST_SRC_TERM := $(TEST_DIR)/test_main.cpp \
-            $(wildcard $(TEST_DIR)/terminal_graphics/*.cpp)
+            $(wildcard $(TEST_DIR)/rendering/*.cpp)
 TEST_BIN := build/edit_tests
 TEST_BIN_ALL := build/edit_tests_all
 TEST_BIN_PERF := build/edit_tests_performance
@@ -55,8 +57,8 @@ TEST_BIN_TERM := build/edit_tests_terminal
 # cada configuración escribe sus .o/.d en su propio directorio.
 #
 # Los objetos son PLANOS en build/ (basename): los nombres de .cpp son
-# unicos entre capas (Document.cpp solo en core/, Editor.cpp solo en ui/,
-# Terminal.cpp solo en terminal/), asi que no hay colisiones.
+# unicos entre capas (Document.cpp solo en document/, Editor.cpp solo en
+# app/, Terminal.cpp solo en platform/tty/), asi que no hay colisiones.
 #
 # Uso:
 #   make            build normal: build/maestro
@@ -101,22 +103,31 @@ SANFLAGS := -fsanitize=address,undefined -fno-omit-frame-pointer -g
 # debe invalidar los objetos. Si fueran prerequisito normal, el
 # directorio se actualiza al escribir cada .o y quedaria mas nuevo que los
 # objetos anteriores, provocando un rebuild perpetuo en cada `make`.
-build/%.o: core/%.cpp | build
+build/%.o: src/app/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-build/%.o: ui/%.cpp | build
+build/%.o: src/document/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-build/%.o: clipboard/%.cpp | build
+build/%.o: src/layout/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-build/%.o: terminal/%.cpp | build
+build/%.o: src/syntax/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-build/%.o: filesystem/%.cpp | build
+build/%.o: src/rendering/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-build/%.o: syntax/%.cpp | build
+build/%.o: src/platform/tty/%.cpp | build
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+build/%.o: src/platform/clipboard/%.cpp | build
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+build/%.o: src/filesystem/%.cpp | build
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+build/%.o: src/diagnostics/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 build/%.o: tests/%.cpp | build
@@ -134,7 +145,7 @@ build/%.o: tests/e2e/%.cpp | build
 build/%.o: tests/performance/%.cpp | build
 	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
 
-build/%.o: tests/terminal_graphics/%.cpp | build
+build/%.o: tests/rendering/%.cpp | build
 	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
 
 build/%.o: tests/integration/%.cpp | build
@@ -143,22 +154,31 @@ build/%.o: tests/integration/%.cpp | build
 build/%.o: tests/integration/x11_clipboard/%.cpp | build
 	$(CXX) $(CXXFLAGS) $(TEST_INC) -c $< -o $@
 
-build-san/%.o: core/%.cpp | build-san
+build-san/%.o: src/app/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
-build-san/%.o: ui/%.cpp | build-san
+build-san/%.o: src/document/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
-build-san/%.o: clipboard/%.cpp | build-san
+build-san/%.o: src/layout/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
-build-san/%.o: terminal/%.cpp | build-san
+build-san/%.o: src/syntax/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
-build-san/%.o: filesystem/%.cpp | build-san
+build-san/%.o: src/rendering/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
-build-san/%.o: syntax/%.cpp | build-san
+build-san/%.o: src/platform/tty/%.cpp | build-san
+	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
+
+build-san/%.o: src/platform/clipboard/%.cpp | build-san
+	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
+
+build-san/%.o: src/filesystem/%.cpp | build-san
+	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
+
+build-san/%.o: src/diagnostics/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
 build-san/%.o: tests/%.cpp | build-san
@@ -176,7 +196,7 @@ build-san/%.o: tests/e2e/%.cpp | build-san
 build-san/%.o: tests/performance/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
 
-build-san/%.o: tests/terminal_graphics/%.cpp | build-san
+build-san/%.o: tests/rendering/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) $(TEST_INC) -c $< -o $@
 
 build-san/%.o: tests/integration/%.cpp | build-san

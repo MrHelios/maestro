@@ -32,10 +32,10 @@
 #include "helpers/perf_helpers.h"
 
 #define private public
-#include "ui/Editor.h"
+#include "app/Editor.h"
 #undef private
 
-#include "core/utf8.h"
+#include "base/utf8.h"
 
 namespace {
 

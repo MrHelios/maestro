@@ -2,11 +2,11 @@
 #include <string>
 
 #include "test_framework.h"
-#include "clipboard/FakeClipboard.h"
-#include "clipboard/SystemClipboard.h"
-#include "clipboard/X11Clipboard.h"
+#include "helpers/FakeClipboard.h"
+#include "platform/clipboard/SystemClipboard.h"
+#include "platform/clipboard/X11Clipboard.h"
 #define private public
-#include "ui/Editor.h"
+#include "app/Editor.h"
 #undef private
 
 static Event insertChar(const std::string& s) {

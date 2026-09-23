@@ -1,7 +1,7 @@
 #include <pty.h>
 #include <unistd.h>
 #include <string>
-#include "terminal/Terminal.h"
+#include "platform/tty/Terminal.h"
 #include "test_framework.h"
 
 static std::string captureMouseWrites() {

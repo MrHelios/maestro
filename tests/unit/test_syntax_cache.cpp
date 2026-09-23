@@ -1,6 +1,6 @@
 #include "test_framework.h"
-#include "core/Document.h"
-#include "core/Instrument.h"
+#include "document/Document.h"
+#include "diagnostics/Instrument.h"
 #include "syntax/SyntaxCache.h"
 #include "syntax/SyntaxLanguage.h"
 #include "syntax/SyntaxToken.h"

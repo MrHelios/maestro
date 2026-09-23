@@ -1,6 +1,6 @@
-#include "core/Cursor.h"
-#include "core/Document.h"
-#include "core/utf8.h"
+#include "document/Cursor.h"
+#include "document/Document.h"
+#include "base/utf8.h"
 #include "test_framework.h"
 #include <string>
 #include <vector>

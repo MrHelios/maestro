@@ -5,7 +5,7 @@
 
 #include "test_framework.h"
 #include "helpers/perf_arch.h"
-#include "core/Document.h"
+#include "document/Document.h"
 #include "alloc_stats.h"
 
 static std::string makeLine(size_t n) { return std::string(n, 'x'); }

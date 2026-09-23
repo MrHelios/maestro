@@ -1,7 +1,7 @@
 #include "test_framework.h"
-#include "ui/Editor.h"
-#include "terminal/Event.h"
-#include "core/Document.h"
+#include "app/Editor.h"
+#include "platform/Event.h"
+#include "document/Document.h"
 #include <string>
 
 static Event makeCharEvent(const std::string& text) {

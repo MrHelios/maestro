@@ -1,9 +1,9 @@
-#include "core/Viewport.h"
-#include "core/Document.h"
-#include "core/Cursor.h"
-#include "core/Layout.h"
-#include "core/utf8.h"
-#include "ui/Renderer.h"
+#include "layout/Viewport.h"
+#include "document/Document.h"
+#include "document/Cursor.h"
+#include "layout/Layout.h"
+#include "base/utf8.h"
+#include "rendering/Renderer.h"
 #include "test_framework.h"
 #include <string>
 #include <vector>
@@ -488,7 +488,7 @@ TEST(viewport_resize_keeps_cursor_visible) {
     CHECK(ac < vp2.left + twLarge);
 }
 #define private public
-#include "ui/Editor.h"
+#include "app/Editor.h"
 #undef private
 namespace {
 static void pressE(Editor& ed, EventType t){ Event e; e.type=t; ed.handleEvent(e); }

@@ -25,7 +25,7 @@
 #include "alloc_stats.h"
 
 #define private public
-#include "ui/Editor.h"
+#include "app/Editor.h"
 #undef private
 
 namespace {

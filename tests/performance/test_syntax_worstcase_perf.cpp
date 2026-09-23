@@ -20,8 +20,8 @@
 #include "helpers/perf_time_utils.h"
 #include "helpers/alloc_stats.h"
 
-#include "core/Document.h"
-#include "core/BracketMatcher.h"
+#include "document/Document.h"
+#include "layout/BracketMatcher.h"
 #include "syntax/SyntaxCache.h"
 #include "syntax/SyntaxLanguage.h"
 

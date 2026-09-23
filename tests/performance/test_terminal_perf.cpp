@@ -15,7 +15,7 @@
 #include "helpers/perf_time_utils.h"
 #include "helpers/alloc_stats.h"
 
-#include "terminal/Keymap.h"
+#include "platform/tty/Keymap.h"
 
 TEST(bench_perf_terminal_decode_checked) {
     perf_arch::reportVerbose("\n== perf_terminal_decode (Keymap lookup, 0 allocs) ==\n");

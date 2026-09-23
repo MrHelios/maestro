@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
-#include "terminal/Event.h"
+#include "platform/Event.h"
 
 namespace perf_helpers {
 

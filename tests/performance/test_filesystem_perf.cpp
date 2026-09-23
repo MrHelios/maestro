@@ -17,7 +17,7 @@
 #include "helpers/perf_time_utils.h"
 #include "helpers/alloc_stats.h"
 
-#include "core/Document.h"
+#include "document/Document.h"
 
 namespace {
 

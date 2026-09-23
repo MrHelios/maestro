@@ -1,6 +1,6 @@
 #include "test_framework.h"
 #define private public
-#include "clipboard/X11Clipboard.h"
+#include "platform/clipboard/X11Clipboard.h"
 #undef private
 #include <X11/Xlib.h>
 #include <X11/Xproto.h>

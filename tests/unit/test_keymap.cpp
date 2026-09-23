@@ -1,4 +1,4 @@
-#include "terminal/Keymap.h"
+#include "platform/tty/Keymap.h"
 #include "test_framework.h"
 
 // ---------------------------------------------------------------------------

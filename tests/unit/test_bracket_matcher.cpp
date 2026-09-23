@@ -1,8 +1,8 @@
 #include "syntax/SyntaxCache.h"
 #include <functional>
 #include "test_framework.h"
-#include "core/Document.h"
-#include "core/BracketMatcher.h"
+#include "document/Document.h"
+#include "layout/BracketMatcher.h"
 #include "syntax/SyntaxLanguage.h"
 
 TEST(bracket_matcher_single) {

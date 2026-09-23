@@ -17,10 +17,10 @@
 #include "helpers/alloc_stats.h"
 
 #define private public
-#include "ui/Editor.h"
+#include "app/Editor.h"
 #undef private
 
-#include "core/Document.h"
+#include "document/Document.h"
 
 namespace {
 

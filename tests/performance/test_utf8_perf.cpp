@@ -18,8 +18,8 @@
 #include "helpers/perf_limits.h"
 #include "helpers/alloc_stats.h"
 #include "helpers/perf_time_utils.h"
-#include "core/Cursor.h"
-#include "core/utf8.h"
+#include "document/Cursor.h"
+#include "base/utf8.h"
 
 namespace {
 using perf_time::g_sink;
