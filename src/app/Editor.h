@@ -273,6 +273,11 @@ private:
     void clearSelection();
 
     void handleEvent(const Event& event);
+    // Click izquierdo en el viewport: mueve el cursor a la posicion
+    // clickeada. Solo en Navegacion/Interaccion/Seleccion (en Seleccion
+    // limpia TODO el estado de seleccion y vuelve a Navegacion); los
+    // modales lo ignoran. No toca suppressScrollToCursor_.
+    void handleMousePress(const Event& event);
     void save();
     // Dibuja el frame actual segun state_ (pantalla normal, selector de
     // buffers o explorador de archivos). Se comparte entre el flujo normal

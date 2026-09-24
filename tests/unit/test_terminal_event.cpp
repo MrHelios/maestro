@@ -344,9 +344,12 @@ TEST(parse_mouse_sgr_direct_release_ignored) {
 }
 
 TEST(parse_mouse_sgr_direct_click_ignored) {
+    // Fase 1 mouse: left press genera MousePress (ya no None).
     Event e;
     Terminal::parseMouseSgr("[<0;10;5M", e);
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MousePress));
+    CHECK_EQ(e.mouseCol, 10);
+    CHECK_EQ(e.mouseRow, 5);
 }
 
 TEST(parse_mouse_sgr_direct_unknown) {

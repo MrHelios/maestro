@@ -325,13 +325,14 @@ static std::string simpleEscapeForm(const std::string& contents) {
 
 bool Terminal::parseMouseSgr(std::string_view seq, Event& e) {
     // SGR mouse: "[<Cb;Cx;CyM" sin ESC inicial. Validacion minima:
-    // requiere dos ';' y final 'M' (press); 'm' (release) no genera scroll
-    // — la rueda solo envia press, un 'm' con Cb 64/65 seria un release
-    // espurio y se ignora como None. Cx/Cy se ignoran (solo importa scroll).
-    //  - Cb base 64=wheel up, 65=wheel down; se enmascaran bits Shift(4),
+    // requiere dos ';' y final 'M' (press) o 'm' (release). Todo release
+    // se ignora como None (la rueda solo envia press; un 'm' con Cb 64/65
+    // seria un release espurio).
+    //  - code 64=wheel up, 65=wheel down; se preservan bits Shift(4),
     //    Alt(8), Ctrl(16) => 68(64+Shift) sigue siendo ScrollUp, etc.
-    //  - Cualquier Cb distinto de 64/65 (clicks 0, drag, otros) => None
-    //    silencioso (no es error, solo no nos interesa).
+    //  - code 0 (+ mods) = left button press => MousePress con Cx/Cy.
+    //  - Cualquier otro code (1/2 medio/derecho, 32+ drag, motion, ...) =>
+    //    None silencioso (no es error, solo no nos interesa en fase 1).
     size_t p1 = seq.find(';', 2);
     size_t p2 = (p1 == std::string_view::npos) ? std::string_view::npos
                                                 : seq.find(';', p1 + 1);
@@ -344,21 +345,33 @@ bool Terminal::parseMouseSgr(std::string_view seq, Event& e) {
     }
 
     int cb = 0;
+    int cx = 0;
+    int cy = 0;
     try {
         cb = std::stoi(std::string(seq.substr(2, p1 - 2)));
+        cx = std::stoi(std::string(seq.substr(p1 + 1, p2 - p1 - 1)));
+        cy = std::stoi(std::string(seq.substr(p2 + 1, seq.size() - p2 - 2)));
     } catch (const std::exception&) {
         e.type = EventType::None;
         return true;
     }
 
-    int baseButton = cb & ~0x1C;
+    const int modifiers = cb & 0x1C;
+    (void)modifiers; // preservado: 68 sigue siendo left-click con Shift, etc.
+    const int code = cb & ~0x1C;
 
     if (finalCh != 'M') {
         e.type = EventType::None;
         return true;
     }
-    if (baseButton == 64) { e.type = EventType::ScrollUp; return true; }
-    if (baseButton == 65) { e.type = EventType::ScrollDown; return true; }
+    if (code == 64) { e.type = EventType::ScrollUp; return true; }
+    if (code == 65) { e.type = EventType::ScrollDown; return true; }
+    if (code == 0) {
+        e.type = EventType::MousePress;
+        e.mouseCol = cx;
+        e.mouseRow = cy;
+        return true;
+    }
 
     e.type = EventType::None;
     return true;

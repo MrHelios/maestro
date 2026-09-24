@@ -52,6 +52,11 @@ enum class EventType {
     // Busqueda se ignora (no rompe el modo).
     ScrollUp,
     ScrollDown,
+    // Click izquierdo (press SGR `...M`). Fase 1: solo existe el press del
+    // boton izquierdo; release (`...m`), medio/derecho, drag y motion se
+    // traducen a None. Las coordenadas van en mouseRow/mouseCol (1-based
+    // de terminal), nunca en `text`.
+    MousePress,
 };
 
 struct Event {
@@ -61,6 +66,10 @@ struct Event {
     // multibyte (2-4 bytes, p.ej. "á", "ñ", "—", "😀"). Asi el Editor
     // recibee el caracter completo, no byte por byte.
     std::string text;
+    // Coordenadas 1-based de terminal, solo validas si type == MousePress.
+    // (columna, fila) tal como las emite SGR (Cx, Cy).
+    int mouseCol = 0;
+    int mouseRow = 0;
     // Nota: desde v0.3 no hay campo "shift". La seleccion no depende del
     // modificador Shift (que cada terminal emite de forma distinta); la
     // entrada a seleccion se hace con la letra 's' en modo Navegacion.

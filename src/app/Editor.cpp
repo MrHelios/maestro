@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "base/utf8.h"
+#include "layout/ScreenToCursor.h"
 #include "syntax/SyntaxHighlighter.h"
 #include "platform/clipboard/NullClipboard.h"
 #include "platform/clipboard/X11Clipboard.h"
@@ -998,7 +999,34 @@ void Editor::renderFrame() {
     }
 }
 
+void Editor::handleMousePress(const Event& event) {
+    if (state_ != State::Navegacion && state_ != State::Interaccion &&
+        state_ != State::Seleccion) {
+        return;
+    }
+    Buffer& b = active();
+    // Misma reconstruccion que Renderer::calculateLayout: viewport.height
+    // es altura de CONTENIDO, computeLayout espera filas totales.
+    const Layout layout =
+        computeLayout(b.viewport.height + kStatusBarRows, b.viewport.width);
+    auto pos = screenToCursor(event.mouseRow, event.mouseCol, layout,
+                              b.viewport, b.document);
+    if (!pos.has_value()) return;
+    if (state_ == State::Seleccion) {
+        clearSelection();
+        b.selectAllActive = false;
+        state_ = State::Navegacion;
+    }
+    b.cursor.line = pos->line;
+    b.cursor.col = pos->col;
+    b.cursor.clampToLine(b.document);
+}
+
 void Editor::handleEvent(const Event& event) {
+    if (event.type == EventType::MousePress) {
+        handleMousePress(event);
+        return;
+    }
     // v0.6.4: el explorador es modal y se despacha ANTES del prefijo: un
     // Ctrl+K dentro no abre un nuevo prefijo sino que cancela el explorador.
     if (state_ == State::FileBrowser) {
