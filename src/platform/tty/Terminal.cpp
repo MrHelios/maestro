@@ -61,7 +61,7 @@ void fatalSignalHandler(int sig) {
     // mouse tracking y alt-screen son modos independientes de raw y deben
     // limpiarse aunque el crash ocurra tras enableMouseTracking().
     if (g_mouseActive) {
-        write(STDOUT_FILENO, "\x1b[?1006l\x1b[?1000l", sizeof("\x1b[?1006l\x1b[?1000l") - 1);
+        write(STDOUT_FILENO, "\x1b[?1006l\x1b[?1002l\x1b[?1000l", sizeof("\x1b[?1006l\x1b[?1002l\x1b[?1000l") - 1);
     }
     if (g_altActive) {
         write(STDOUT_FILENO, "\x1b[?1049l", sizeof("\x1b[?1049l") - 1);
@@ -208,14 +208,14 @@ void Terminal::enableMouseTracking() {
     // El flag se publica despues del write(); existe una ventana minima
     // en la que el signal handler aun no conoce este estado.
     if (mouseTrackingEnabled_) return;
-    write(STDOUT_FILENO, "\x1b[?1000h\x1b[?1006h", sizeof("\x1b[?1000h\x1b[?1006h") - 1);
+    write(STDOUT_FILENO, "\x1b[?1000h\x1b[?1002h\x1b[?1006h", sizeof("\x1b[?1000h\x1b[?1002h\x1b[?1006h") - 1);
     mouseTrackingEnabled_ = true;
     g_mouseActive = 1;
 }
 
 void Terminal::disableMouseTracking() {
     if (!mouseTrackingEnabled_) return;
-    write(STDOUT_FILENO, "\x1b[?1006l\x1b[?1000l", sizeof("\x1b[?1006l\x1b[?1000l") - 1);
+    write(STDOUT_FILENO, "\x1b[?1006l\x1b[?1002l\x1b[?1000l", sizeof("\x1b[?1006l\x1b[?1002l\x1b[?1000l") - 1);
     mouseTrackingEnabled_ = false;
     g_mouseActive = 0;
 }
@@ -325,14 +325,14 @@ static std::string simpleEscapeForm(const std::string& contents) {
 
 bool Terminal::parseMouseSgr(std::string_view seq, Event& e) {
     // SGR mouse: "[<Cb;Cx;CyM" sin ESC inicial. Validacion minima:
-    // requiere dos ';' y final 'M' (press) o 'm' (release). Todo release
-    // se ignora como None (la rueda solo envia press; un 'm' con Cb 64/65
-    // seria un release espurio).
+    // requiere dos ';' y final 'M' (press/drag/rueda) o 'm' (release).
     //  - code 64=wheel up, 65=wheel down; se preservan bits Shift(4),
     //    Alt(8), Ctrl(16) => 68(64+Shift) sigue siendo ScrollUp, etc.
-    //  - code 0 (+ mods) = left button press => MousePress con Cx/Cy.
-    //  - Cualquier otro code (1/2 medio/derecho, 32+ drag, motion, ...) =>
-    //    None silencioso (no es error, solo no nos interesa en fase 1).
+    //  - code 0 (+ mods) + 'M' = left button press => MousePress.
+    //  - code 32 (+ mods) + 'M' = left drag (?1002h) => MouseDrag.
+    //  - code 3 (+ mods) + 'm' = left release => MouseRelease.
+    //  - Cualquier otro code (1/2 medio/derecho, 35 motion sin boton,
+    //    rueda con 'm', ...) => None silencioso.
     size_t p1 = seq.find(';', 2);
     size_t p2 = (p1 == std::string_view::npos) ? std::string_view::npos
                                                 : seq.find(';', p1 + 1);
@@ -360,7 +360,13 @@ bool Terminal::parseMouseSgr(std::string_view seq, Event& e) {
     (void)modifiers; // preservado: 68 sigue siendo left-click con Shift, etc.
     const int code = cb & ~0x1C;
 
-    if (finalCh != 'M') {
+    if (finalCh == 'm') {
+        if (code == 3) {
+            e.type = EventType::MouseRelease;
+            e.mouseCol = cx;
+            e.mouseRow = cy;
+            return true;
+        }
         e.type = EventType::None;
         return true;
     }
@@ -368,6 +374,12 @@ bool Terminal::parseMouseSgr(std::string_view seq, Event& e) {
     if (code == 65) { e.type = EventType::ScrollDown; return true; }
     if (code == 0) {
         e.type = EventType::MousePress;
+        e.mouseCol = cx;
+        e.mouseRow = cy;
+        return true;
+    }
+    if (code == 32) {
+        e.type = EventType::MouseDrag;
         e.mouseCol = cx;
         e.mouseRow = cy;
         return true;

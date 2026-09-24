@@ -57,6 +57,15 @@ enum class EventType {
     // traducen a None. Las coordenadas van en mouseRow/mouseCol (1-based
     // de terminal), nunca en `text`.
     MousePress,
+    // Arrastre con boton izquierdo (SGR Cb=32 + 'M', con ?1002h). Solo se
+    // emite mientras un press previo lo armo (mouseGestureActive_); el Editor
+    // lo usa para iniciar/extender la seleccion (1 linea / 1 celda por
+    // evento, con autoscroll en bordes). Coordenadas igual que MousePress.
+    MouseDrag,
+    // Release del boton izquierdo (SGR Cb=3 + 'm'). Cierra el gesto:
+    // sin drag previo aplica la conducta de click simple; con drag previo
+    // permanece en Seleccion. No cambia el modo por si solo.
+    MouseRelease,
 };
 
 struct Event {

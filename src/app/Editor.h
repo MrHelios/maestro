@@ -273,11 +273,25 @@ private:
     void clearSelection();
 
     void handleEvent(const Event& event);
-    // Click izquierdo en el viewport: mueve el cursor a la posicion
-    // clickeada. Solo en Navegacion/Interaccion/Seleccion (en Seleccion
-    // limpia TODO el estado de seleccion y vuelve a Navegacion); los
-    // modales lo ignoran. No toca suppressScrollToCursor_.
+    // Click izquierdo en el viewport: arma el gesto de seleccion
+    // (mueve el cursor y guarda dragAnchor_) SIN cambiar el modo ni tocar
+    // la seleccion. La decision click-vs-drag se difiere a release/drag.
     void handleMousePress(const Event& event);
+    // Arrastre con boton presionado: solo valido si un press previo lo
+    // armo (mouseGestureActive_). El primer drag efectivo entra a Seleccion
+    // (o descarta el rango previo si ya estaba) con anchor=dragAnchor_;
+    // los siguientes extienden selection.position. Incluye autoscroll
+    // de 1 linea / 1 celda por evento en bordes.
+    void handleMouseDrag(const Event& event);
+    // Cierre del gesto: sin drag previo aplica la conducta de click
+    // simple (en Seleccion limpia y vuelve a Navegacion); con drag previo
+    // permanece en Seleccion. Siempre desarma el gesto.
+    void handleMouseRelease(const Event& event);
+    // Resuelve la posicion de un MouseDrag: dentro del viewport usa
+    // screenToCursor(); fuera calcula scroll ±1 + posicion de borde
+    // (siempre via byteForColumn + alignStart + clamp). Devuelve nullopt
+    // solo si no hay posicion resoluble.
+    std::optional<Position> resolveMouseDragPosition(int mouseRow, int mouseCol);
     void save();
     // Dibuja el frame actual segun state_ (pantalla normal, selector de
     // buffers o explorador de archivos). Se comparte entre el flujo normal
@@ -321,6 +335,15 @@ private:
     // scrollToCursor en el siguiente frame.
     void applyScroll(int delta);
     bool suppressScrollToCursor_ = false;
+
+    // ---- Gesto de seleccion por mouse (press armado vs drag iniciado) ----
+    // press arma (mueve cursor + guarda anchor) sin cambiar modo/seleccion;
+    // el primer drag efectivo inicia/reinicia la seleccion; release sin
+    // drag aplica el click simple y release con drag permanece en Seleccion.
+    bool mouseGestureActive_ = false;
+    bool mouseDragStarted_ = false;
+    std::optional<Position> dragAnchor_;
+    State pressState_ = State::Navegacion;
 
     // Indenta / desindenta el rango seleccionado actual (todas las lineas
     // que toca). `indent` true tabula hacia adentro ('}'), `indent` false

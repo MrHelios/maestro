@@ -64,6 +64,39 @@ inline void updateModified(Buffer& b) {
     b.recalcModified();
 }
 
+// Posicion visible clampada al borde para el drag del mouse (autoscroll y
+// filas `~`). Funcion PURA: no muta el viewport, solo lo lee.
+//
+// Es la unica copia de la logica "relCol -> byte col" fuera de
+// screenToCursor(): gutter -> inicio de fila, si no visTarget = left +
+// (col - gutterW) via byteForColumn + alignStart + clamp a EOL. Tanto el
+// camino tilde como el post-scroll pasan por aca, asi gutter/tabs/emoji
+// /EOL no pueden divergir entre ambos.
+//
+// Requiere doc.lineCount() > 0, h > 0 y totalW > 0 (los callers lo
+// garantizan). La linea se clampdea a [0, count): en filas `~` eso da
+// EOF sin codigo especial.
+inline Position dragEdgePosition(int relRow, int relCol, const Viewport& vp,
+                                 const Document& doc, int h, int totalW) {
+    const int count = doc.lineCount();
+    const int gutterW = gutterWidth(count, totalW);
+    const int clampedRow = std::min(std::max(relRow, 0), h - 1);
+    const int clampedCol = std::min(std::max(relCol, 0), totalW - 1);
+    int line = vp.top + clampedRow;
+    if (line < 0) line = 0;
+    if (line >= count) line = count - 1;
+    const std::string& lineStr = doc.lineAt(line);
+    if (clampedCol < gutterW) return Position{line, 0};
+    int visTarget = vp.left + (clampedCol - gutterW);
+    if (visTarget < 0) visTarget = 0;
+    int byteCol = utf8::byteForColumn(lineStr, visTarget);
+    byteCol = utf8::alignStart(lineStr, byteCol);
+    if (byteCol < 0) byteCol = 0;
+    if (byteCol > static_cast<int>(lineStr.size()))
+        byteCol = static_cast<int>(lineStr.size());
+    return Position{line, byteCol};
+}
+
 } // namespace
 
 namespace {
@@ -1008,20 +1041,173 @@ void Editor::handleMousePress(const Event& event) {
         computeLayout(b.viewport.height + kStatusBarRows, b.viewport.width);
     auto pos = screenToCursor(event.mouseRow, event.mouseCol, layout,
                               b.viewport, b.document);
+    if (!pos.has_value()) {
+        mouseGestureActive_ = false;
+        mouseDragStarted_ = false;
+        dragAnchor_.reset();
+        return;
+    }
+    // Press ARMADO: mueve el cursor y guarda el anchor, SIN cambiar el
+    // modo ni tocar la seleccion. La decision click-vs-drag se difiere a
+    // handleMouseRelease (click) / handleMouseDrag (seleccion).
+    b.cursor.line = pos->line;
+    b.cursor.col = pos->col;
+    b.cursor.clampToLine(b.document);
+    dragAnchor_ = *pos;
+    pressState_ = state_;
+    mouseGestureActive_ = true;
+    mouseDragStarted_ = false;
+}
+
+std::optional<Position> Editor::resolveMouseDragPosition(int mouseRow,
+                                                         int mouseCol) {
+    Buffer& b = active();
+    const Layout layout =
+        computeLayout(b.viewport.height + kStatusBarRows, b.viewport.width);
+    const int h = layout.content.height;
+    const int totalW = layout.content.width;
+    if (h <= 0 || totalW <= 0) return std::nullopt;
+    const int count = b.document.lineCount();
+    if (count <= 0) return std::nullopt;
+
+    const int relRow = mouseRow - 1 - layout.content.row;
+    const int relCol = mouseCol - 1 - layout.content.col;
+    const int gutterW = gutterWidth(count, totalW);
+    const int textW = totalW - gutterW;
+    const int maxTop = (count - h) > 0 ? (count - h) : 0;
+
+    // Fila `~` dentro del content (mas alla del EOF pero sin salir del
+    // viewport): sin scroll, se extiende hasta EOF via el clamp de linea
+    // del helper (top + relRow >= count -> count - 1).
+    const bool insideRows = relRow >= 0 && relRow < h;
+    if (insideRows && b.viewport.top + relRow >= count) {
+        return dragEdgePosition(relRow, relCol, b.viewport, b.document, h,
+                                totalW);
+    }
+
+    // Autoscroll por bordes (1 linea / 1 celda por evento). Los bordes
+    // son INCLUSIVOS (primera/ultima celda visible) porque la terminal no
+    // puede reportar coordenadas fuera de la ventana (no hay relRow<0 ni
+    // relCol>=totalW reales con content en (0,0)); el mouse "pegado" al
+    // borde es la intencion de scroll.
+    bool scrolled = false;
+    if (relRow <= 0 && b.viewport.top > 0) {
+        b.viewport.top--;
+        scrolled = true;
+    } else if (relRow >= h - 1 && b.viewport.top < maxTop) {
+        b.viewport.top++;
+        scrolled = true;
+    }
+    if (relCol <= gutterW && b.viewport.left > 0) {
+        b.viewport.left--;
+        if (b.viewport.left < 0) b.viewport.left = 0;
+        scrolled = true;
+    } else if (relCol >= totalW - 1 && textW > 0) {
+        // Guard contra deriva infinita en lineas cortas: solo scroll a la
+        // derecha si la linea borde tiene contenido oculto mas alla del
+        // viewport (ancho visual > left + textW).
+        int probeLine = b.viewport.top +
+                        std::min(std::max(relRow, 0), h - 1);
+        if (probeLine < 0) probeLine = 0;
+        if (probeLine >= count) probeLine = count - 1;
+        const std::string& ls = b.document.lineAt(probeLine);
+        const int visWidth = utf8::columnOf(ls, static_cast<int>(ls.size()));
+        if (visWidth > b.viewport.left + textW) {
+            b.viewport.left++;
+            scrolled = true;
+        }
+    }
+
+    if (!scrolled) {
+        // Sin scroll: mapeo normal (puede ser nullopt en statusbar, que
+        // aqui ya se trato como borde inferior si habia scroll posible;
+        // si no habia scroll posible se ignora el evento).
+        return screenToCursor(mouseRow, mouseCol, layout, b.viewport,
+                              b.document);
+    }
+
+    // Tras scrollear, la posicion es el borde visible (mismo helper que
+    // el camino tilde: una sola copia de la logica de columnas).
+    return dragEdgePosition(relRow, relCol, b.viewport, b.document, h,
+                            totalW);
+}
+
+void Editor::handleMouseDrag(const Event& event) {
+    if (state_ != State::Navegacion && state_ != State::Interaccion &&
+        state_ != State::Seleccion) {
+        return;
+    }
+    if (!mouseGestureActive_) return;
+    if (!dragAnchor_.has_value()) return;
+    Buffer& b = active();
+    auto pos = resolveMouseDragPosition(event.mouseRow, event.mouseCol);
     if (!pos.has_value()) return;
-    if (state_ == State::Seleccion) {
-        clearSelection();
-        b.selectAllActive = false;
-        state_ = State::Navegacion;
+    if (!mouseDragStarted_) {
+        // Primer drag efectivo: entra a Seleccion o reinicia el rango.
+        if (pressState_ != State::Seleccion) {
+            state_ = State::Seleccion;
+            b.selectAllActive = false;
+        } else {
+            b.selection.reset();
+            b.selectAllActive = false;
+        }
+        b.selection = Selection{dragAnchor_.value(), pos.value()};
+        b.cursor.line = pos->line;
+        b.cursor.col = pos->col;
+        b.cursor.clampToLine(b.document);
+        // La posicion ya viene normalizada por byteForColumn+alignStart;
+        // se re-sincroniza por seguridad tras el clamp.
+        b.selection->position = {b.cursor.line, b.cursor.col};
+        mouseDragStarted_ = true;
+        return;
     }
     b.cursor.line = pos->line;
     b.cursor.col = pos->col;
     b.cursor.clampToLine(b.document);
+    if (b.selection.has_value()) {
+        b.selection->position = {b.cursor.line, b.cursor.col};
+    } else {
+        b.selection = Selection{dragAnchor_.value(),
+                                {b.cursor.line, b.cursor.col}};
+    }
+}
+
+void Editor::handleMouseRelease(const Event& event) {
+    (void)event;
+    if (!mouseGestureActive_) return;
+    if (state_ != State::Navegacion && state_ != State::Interaccion &&
+        state_ != State::Seleccion) {
+        mouseGestureActive_ = false;
+        mouseDragStarted_ = false;
+        return;
+    }
+    if (!mouseDragStarted_) {
+        // Click simple: conducta historica diferida al release. El cursor
+        // ya quedo en la pos del press; en Seleccion se cancela a
+        // Navegacion, fuera de ella no hay cambio de modo.
+        if (pressState_ == State::Seleccion) {
+            Buffer& b = active();
+            clearSelection();
+            b.selectAllActive = false;
+            state_ = State::Navegacion;
+        }
+    }
+    // Con drag previo se permanece en Seleccion sin mas cambios.
+    mouseGestureActive_ = false;
+    mouseDragStarted_ = false;
 }
 
 void Editor::handleEvent(const Event& event) {
     if (event.type == EventType::MousePress) {
         handleMousePress(event);
+        return;
+    }
+    if (event.type == EventType::MouseDrag) {
+        handleMouseDrag(event);
+        return;
+    }
+    if (event.type == EventType::MouseRelease) {
+        handleMouseRelease(event);
         return;
     }
     // v0.6.4: el explorador es modal y se despacha ANTES del prefijo: un
