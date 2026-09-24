@@ -299,13 +299,16 @@ TEST(mouse_editor_seleccion_cancels_and_moves) {
     ed.processEventForTesting(insertCh('s')); // entra a Seleccion
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
-    // Press solo arma: todavia no cancela ni cambia de modo.
+    // Press en Seleccion: cancela el highlight EN EL PRESS (sin esperar
+    // al release) y mueve el cursor a la posicion clickeada.
     ed.processEventForTesting(mousePress(5, 2));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Seleccion));
+             static_cast<int>(State::Navegacion));
     CHECK_EQ(b.cursor.line, 1);
     CHECK_EQ(b.cursor.col, 1);
-    // Release sin drag: conducta historica de click (cancela a Navegacion).
+    CHECK(!b.selection.has_value());
+    CHECK(!b.selectAllActive);
+    // Release sin drag: no-op, sigue en Navegacion sin rango.
     ed.processEventForTesting(mouseRelease(5, 2));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Navegacion));
@@ -356,6 +359,36 @@ TEST(mouse_press_arms_without_mode_change) {
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Navegacion));
     CHECK(!b.selection.has_value());
+    CHECK(!ed.hasSelection());
+}
+
+TEST(mouse_click_after_mouse_drag_clears_on_other_text) {
+    // Seleccion por drag y luego click en OTRA parte del codigo (distinta
+    // linea/col del anchor): debe limpiar y mover el cursor al click.
+    Editor ed;
+    Buffer& b = ed.getActiveBufferForTesting();
+    b.document.restore({"hello world", "second line", "third line"});
+    b.viewport.height = 10;
+    b.viewport.width = 40;
+    b.viewport.top = 0;
+    b.viewport.left = 0;
+    b.cursor.line = 0;
+    b.cursor.col = 0;
+    ed.processEventForTesting(mousePress(4, 1)); // anchor (0,0)
+    ed.processEventForTesting(mouseDrag(8, 2));  // (1,4)
+    ed.processEventForTesting(mouseRelease(8, 2));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Seleccion));
+    CHECK(ed.hasSelection());
+    // Click en otra parte: linea 2, visual 5 -> (2,5).
+    ed.processEventForTesting(mousePress(9, 3));
+    ed.processEventForTesting(mouseRelease(9, 3));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Navegacion));
+    CHECK(!b.selection.has_value());
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(b.cursor.line, 2);
+    CHECK_EQ(b.cursor.col, 5);
 }
 
 TEST(mouse_click_navegacion_preserves_historic_behavior) {
@@ -437,10 +470,14 @@ TEST(mouse_drag_resets_existing_selection) {
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK(b.selection.has_value());
-    // Nuevo gesto: el rango anterior se resetea con el nuevo anchor.
+    // Nuevo gesto: el press cancela el rango anterior de inmediato (el
+    // highlight se borra al clickear, sin esperar al drag/release).
     ed.processEventForTesting(mousePress(4, 3)); // fila 2
-    // Todavia conserva el rango viejo hasta el primer drag.
-    CHECK(b.selection.has_value());
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Navegacion));
+    CHECK(!b.selection.has_value());
+    CHECK_EQ(b.cursor.line, 2);
+    CHECK_EQ(b.cursor.col, 0);
     ed.processEventForTesting(mouseDrag(5, 3));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
@@ -657,4 +694,114 @@ TEST(mouse_drag_multiple_anchor_fixed_position_follows) {
     CHECK_EQ(b.selection->position.line, 0);
     CHECK_EQ(b.selection->position.col, 1);
     CHECK(ed.hasSelection());
+}
+
+// --- Repro bug: seleccion con mouse + click posterior debe borrar ---
+
+TEST(mouse_click_after_mouse_drag_clears_on_text) {
+    // Caso base: seleccion por drag y luego click en otro texto valido.
+    Editor ed;
+    Buffer& b = ed.getActiveBufferForTesting();
+    b.document.restore({"hello", "world"});
+    b.viewport.height = 10;
+    b.viewport.width = 20;
+    b.viewport.top = 0;
+    b.viewport.left = 0;
+    b.cursor.line = 0;
+    b.cursor.col = 0;
+    ed.processEventForTesting(mousePress(4, 1)); // (0,0)
+    ed.processEventForTesting(mouseDrag(6, 2));  // (1,2)
+    ed.processEventForTesting(mouseRelease(6, 2));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Seleccion));
+    CHECK(ed.hasSelection());
+    // Click en otro texto valido: debe limpiar y volver a Navegacion.
+    ed.processEventForTesting(mousePress(4, 1));
+    ed.processEventForTesting(mouseRelease(4, 1));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Navegacion));
+    CHECK(!b.selection.has_value());
+    CHECK(!ed.hasSelection());
+}
+
+TEST(mouse_click_after_mouse_drag_on_tilde_clears) {
+    // Click en fila `~` (viewport pero mas alla del EOF) tambien debe limpiar.
+    Editor ed;
+    Buffer& b = ed.getActiveBufferForTesting();
+    b.document.restore({"a", "b"});
+    b.viewport.height = 10;
+    b.viewport.width = 20;
+    b.viewport.top = 0;
+    b.viewport.left = 0;
+    b.cursor.line = 0;
+    b.cursor.col = 0;
+    ed.processEventForTesting(mousePress(4, 1)); // (0,0)
+    ed.processEventForTesting(mouseDrag(5, 1));  // (0,1)
+    ed.processEventForTesting(mouseRelease(5, 1));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Seleccion));
+    CHECK(ed.hasSelection());
+    // Fila visible 4 = docLine 4 >= lineCount (2): fila `~`.
+    ed.processEventForTesting(mousePress(10, 5));
+    ed.processEventForTesting(mouseRelease(10, 5));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Navegacion));
+    CHECK(!b.selection.has_value());
+    CHECK(!ed.hasSelection());
+}
+
+TEST(mouse_click_after_mouse_drag_on_statusbar_clears) {
+    // Click en la statusbar tambien debe limpiar la seleccion vigente.
+    Editor ed;
+    Buffer& b = ed.getActiveBufferForTesting();
+    b.document.restore({"hello", "world"});
+    b.viewport.height = 10;
+    b.viewport.width = 20;
+    b.viewport.top = 0;
+    b.viewport.left = 0;
+    b.cursor.line = 0;
+    b.cursor.col = 0;
+    ed.processEventForTesting(mousePress(4, 1)); // (0,0)
+    ed.processEventForTesting(mouseDrag(6, 2));  // (1,2)
+    ed.processEventForTesting(mouseRelease(6, 2));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Seleccion));
+    CHECK(ed.hasSelection());
+    // Contenido = filas 1..10 (1-based); 11 es la primera de statusbar.
+    ed.processEventForTesting(mousePress(10, 11));
+    ed.processEventForTesting(mouseRelease(10, 11));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Navegacion));
+    CHECK(!b.selection.has_value());
+    CHECK(!ed.hasSelection());
+}
+
+TEST(mouse_press_after_mouse_drag_clears_highlight_immediately) {
+    // Escenario del reporte: abrir archivo con contenido, seleccionar
+    // arrastrando, soltar, y luego hacer click en otra parte del codigo
+    // para ir a otra posicion. El highlight debe borrarse EN EL PRESS,
+    // sin esperar al release.
+    Editor ed;
+    Buffer& b = ed.getActiveBufferForTesting();
+    b.document.restore({"hello world", "second line", "third line"});
+    b.viewport.height = 10;
+    b.viewport.width = 40;
+    b.viewport.top = 0;
+    b.viewport.left = 0;
+    b.cursor.line = 0;
+    b.cursor.col = 0;
+    ed.processEventForTesting(mousePress(4, 1)); // anchor (0,0)
+    ed.processEventForTesting(mouseDrag(8, 2));  // (1,4)
+    ed.processEventForTesting(mouseRelease(8, 2));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Seleccion));
+    CHECK(ed.hasSelection());
+    // Click en otra posicion: solo el press, todavia sin release.
+    ed.processEventForTesting(mousePress(9, 3)); // (2,5)
+    CHECK_EQ(b.cursor.line, 2);
+    CHECK_EQ(b.cursor.col, 5);
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Navegacion));
+    CHECK(!b.selection.has_value());
+    CHECK(!ed.hasSelection());
 }

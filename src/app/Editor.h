@@ -273,9 +273,11 @@ private:
     void clearSelection();
 
     void handleEvent(const Event& event);
-    // Click izquierdo en el viewport: arma el gesto de seleccion
-    // (mueve el cursor y guarda dragAnchor_) SIN cambiar el modo ni tocar
-    // la seleccion. La decision click-vs-drag se difiere a release/drag.
+    // Click izquierdo en el viewport: si venia de Seleccion cancela el
+    // highlight EN EL PRESS (valido o en ~/statusbar) y vuelve a
+    // Navegacion; luego arma el gesto (mueve el cursor y guarda
+    // dragAnchor_) sin crear rango. El drag posterior crea la nueva
+    // seleccion, el release sin drag es no-op.
     void handleMousePress(const Event& event);
     // Arrastre con boton presionado: solo valido si un press previo lo
     // armo (mouseGestureActive_). El primer drag efectivo entra a Seleccion
@@ -283,9 +285,10 @@ private:
     // los siguientes extienden selection.position. Incluye autoscroll
     // de 1 linea / 1 celda por evento en bordes.
     void handleMouseDrag(const Event& event);
-    // Cierre del gesto: sin drag previo aplica la conducta de click
-    // simple (en Seleccion limpia y vuelve a Navegacion); con drag previo
-    // permanece en Seleccion. Siempre desarma el gesto.
+    // Cierre del gesto: sin drag previo es no-op (el press ya cancelo la
+    // seleccion si venia de Seleccion); con drag previo permanece en
+    // Seleccion. Siempre desarma el gesto. Se conserva la rama historica
+    // pressState_==Seleccion por robustez.
     void handleMouseRelease(const Event& event);
     // Resuelve la posicion de un MouseDrag: dentro del viewport usa
     // screenToCursor(); fuera calcula scroll ±1 + posicion de borde
@@ -336,10 +339,11 @@ private:
     void applyScroll(int delta);
     bool suppressScrollToCursor_ = false;
 
-    // ---- Gesto de seleccion por mouse (press armado vs drag iniciado) ----
-    // press arma (mueve cursor + guarda anchor) sin cambiar modo/seleccion;
-    // el primer drag efectivo inicia/reinicia la seleccion; release sin
-    // drag aplica el click simple y release con drag permanece en Seleccion.
+    // ---- Gesto de seleccion por mouse (press cancela vs drag crea) ----
+    // press en Seleccion limpia el highlight de inmediato (valido o en
+    // ~/statusbar) y vuelve a Navegacion; luego arma (mueve cursor +
+    // guarda anchor). El primer drag efectivo crea la nueva seleccion;
+    // release sin drag es no-op y con drag permanece en Seleccion.
     bool mouseGestureActive_ = false;
     bool mouseDragStarted_ = false;
     std::optional<Position> dragAnchor_;

@@ -1042,14 +1042,28 @@ void Editor::handleMousePress(const Event& event) {
     auto pos = screenToCursor(event.mouseRow, event.mouseCol, layout,
                               b.viewport, b.document);
     if (!pos.has_value()) {
+        if (state_ == State::Seleccion) {
+            clearSelection();
+            b.selectAllActive = false;
+            state_ = State::Navegacion;
+        }
         mouseGestureActive_ = false;
         mouseDragStarted_ = false;
         dragAnchor_.reset();
         return;
     }
-    // Press ARMADO: mueve el cursor y guarda el anchor, SIN cambiar el
-    // modo ni tocar la seleccion. La decision click-vs-drag se difiere a
-    // handleMouseRelease (click) / handleMouseDrag (seleccion).
+    // Press VALIDO: si venia de Seleccion, el click para ir a otra
+    // posicion cancela el highlight EN EL PRESS (sin esperar al release).
+    // Luego se arma el gesto normal: el drag posterior crea la nueva
+    // seleccion desde dragAnchor_, el release sin drag es no-op.
+    if (state_ == State::Seleccion) {
+        clearSelection();
+        b.selectAllActive = false;
+        state_ = State::Navegacion;
+    }
+    // Press ARMADO: mueve el cursor y guarda el anchor, SIN crear rango.
+    // La decision click-vs-drag sigue en release (no-op) / drag (nueva
+    // seleccion).
     b.cursor.line = pos->line;
     b.cursor.col = pos->col;
     b.cursor.clampToLine(b.document);
