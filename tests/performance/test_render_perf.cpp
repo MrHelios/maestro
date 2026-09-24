@@ -36,6 +36,7 @@
 #undef private
 
 #include "base/utf8.h"
+#include "layout/Gutter.h"
 
 namespace {
 
@@ -91,7 +92,7 @@ TEST(bench_perf_render_desglose_fases_checked) {
     const Cursor& cur = b.cursor;
     const Viewport& vp = b.viewport;
 
-    const int gutterW = std::min(testutil::gutterWidth(300), vp.width);
+    const int gutterW = gutterWidth(300, vp.width);
     const Layout layout = computeLayout(vp.height + kStatusBarRows, vp.width);
 
     // Espejo de editorBarData (Renderer.cpp, internal linkage): los campos

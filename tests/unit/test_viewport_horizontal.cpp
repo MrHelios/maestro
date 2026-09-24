@@ -1,6 +1,7 @@
 #include "layout/Viewport.h"
 #include "document/Document.h"
 #include "document/Cursor.h"
+#include "layout/Gutter.h"
 #include "layout/Layout.h"
 #include "base/utf8.h"
 #include "rendering/Renderer.h"
@@ -9,11 +10,6 @@
 #include <vector>
 
 namespace {
-int gutterWFor(int totalLines) {
-    int digits = 1;
-    for (int n = totalLines; n >= 10; n /= 10) ++digits;
-    return std::max(3, digits + 1);
-}
 std::string frameWithViewport(const std::vector<std::string>& lines, int cursorLine, int cursorCol, Viewport vp) {
     Document doc; doc.restore(lines);
     Cursor cur; cur.line = cursorLine; cur.col = cursorCol;
@@ -34,7 +30,7 @@ int cursorVisibleCol(const std::string& frame, const Viewport& vp, const std::ve
     int terminalCol = cursorTerminalCol(frame, vp, cursorLine);
     if (terminalCol < 0) return -1;
     Document tmp; tmp.restore(lines);
-    int gutterW = std::min(gutterWFor((int)lines.size()), vp.width);
+    int gutterW = gutterWidth((int)lines.size(), vp.width);
     Layout layout = computeLayout(vp.height, vp.width);
     return terminalCol - gutterW - layout.content.col;
 }
@@ -54,7 +50,7 @@ std::string rowText(const std::string& frame, int lineCount){
     size_t nl=plain.find("\r\n");
     if(nl==std::string::npos) nl=plain.size();
     std::string row=plain.substr(0,nl);
-    int gw=gutterWFor(lineCount);
+    int gw=gutterWidth(lineCount, (int)row.size());
     row.erase(0,std::min(gw,(int)row.size()));
     return row;
 }
@@ -280,7 +276,7 @@ TEST(viewport_utf8_visual_columns) {
         int visCol = cursorVisibleCol(frm, vp2, lines, 0);
         CHECK_EQ(visCol, absCol - vp2.left + 1);
         int terminalCol = cursorTerminalCol(frm, vp2, 0);
-        int gutterW = std::min(gutterWFor((int)lines.size()), vp2.width);
+        int gutterW = gutterWidth((int)lines.size(), vp2.width);
         Layout layout = computeLayout(vp2.height, vp2.width);
         CHECK_EQ(terminalCol, gutterW + (absCol - vp2.left) + 1 + layout.content.col);
         std::string row = rowText(frm,1);
@@ -299,7 +295,7 @@ TEST(viewport_utf8_visual_columns) {
         CHECK_EQ(vc, absCol - vp2.left + 1);
         CHECK(vc>=1); CHECK(vc<=textWidth);
         int terminalCol = cursorTerminalCol(f, vp2, 0);
-        int gutterW = std::min(gutterWFor((int)lines.size()), vp2.width);
+        int gutterW = gutterWidth((int)lines.size(), vp2.width);
         Layout layout = computeLayout(vp2.height, vp2.width);
         CHECK_EQ(terminalCol, gutterW + (absCol - vp2.left) + 1 + layout.content.col);
     }
@@ -322,7 +318,7 @@ TEST(viewport_short_line_resets) {
         std::string frm = frameWithViewport(lines,1,0,vp2);
         CHECK(cursorVisibleCol(frm, vp2, lines, 1)==1);
         int terminalCol = cursorTerminalCol(frm, vp2, 1);
-        int gutterW = std::min(gutterWFor((int)lines.size()), vp2.width);
+        int gutterW = gutterWidth((int)lines.size(), vp2.width);
         Layout layout = computeLayout(vp2.height, vp2.width);
         CHECK_EQ(terminalCol, gutterW + 1 + layout.content.col);
     }
@@ -357,7 +353,7 @@ TEST(viewport_switch_lines) {
         std::string frm = frameWithViewport(lines,2,0,vp3);
         CHECK_EQ(cursorVisibleCol(frm, vp3, lines, 2),1);
         int terminalCol = cursorTerminalCol(frm, vp3, 2);
-        int gutterW = std::min(gutterWFor((int)lines.size()), vp3.width);
+        int gutterW = gutterWidth((int)lines.size(), vp3.width);
         Layout layout = computeLayout(vp3.height, vp3.width);
         CHECK_EQ(terminalCol, gutterW + 1 + layout.content.col);
         CHECK(colWidth(rowText(frm,3)) <= 10);
@@ -387,7 +383,7 @@ TEST(viewport_textWidth_zero_or_negative) {
     vp2.height = 1;
     vp2.top = 0;
     vp2.left = 3;
-    int gutterW = std::min(gutterWFor((int)doc2.lineCount()), vp2.width);
+    int gutterW = gutterWidth((int)doc2.lineCount(), vp2.width);
     int textWidth = vp2.width - gutterW;
     CHECK(textWidth <= 0);
     Cursor cur2; cur2.line=0; cur2.col=1;
@@ -396,7 +392,7 @@ TEST(viewport_textWidth_zero_or_negative) {
     std::vector<std::string> lines = {"abcdefghij"};
     Viewport vp3; vp3.width=2; vp3.height=1; vp3.top=0; vp3.left=0;
     std::string frm = frameWithViewport(lines, 0, 2, vp3);
-    int gw = std::min(gutterWFor((int)lines.size()), vp3.width);
+    int gw = gutterWidth((int)lines.size(), vp3.width);
     CHECK_EQ(gw, 2);
     CHECK(colWidth(rowText(frm, 1)) <= 0);
     cur2.col = 2;
@@ -409,7 +405,7 @@ TEST(viewport_resize_keeps_cursor_visible) {
     Document doc; doc.restore({longLine});
     Viewport vp;
     vp.top = 0; vp.left = 40; vp.height = 10; vp.width = 80;
-    int gutterW = std::min(gutterWFor((int)doc.lineCount()), vp.width);
+    int gutterW = gutterWidth((int)doc.lineCount(), vp.width);
     int textWidth80 = vp.width - gutterW;
     CHECK(textWidth80 > 40);
     Cursor cur; cur.line=0; cur.col=45;
@@ -419,7 +415,7 @@ TEST(viewport_resize_keeps_cursor_visible) {
     CHECK(absCol < vp.left + textWidth80);
     CHECK(vp.left == 40);
     vp.width = 20;
-    int gutterW2 = std::min(gutterWFor((int)doc.lineCount()), vp.width);
+    int gutterW2 = gutterWidth((int)doc.lineCount(), vp.width);
     int textWidth20 = vp.width - gutterW2;
     CHECK(textWidth20 < textWidth80);
     CHECK(textWidth20 > 0);
@@ -434,7 +430,7 @@ TEST(viewport_resize_keeps_cursor_visible) {
     CHECK(absCol >= vp.left);
     CHECK(absCol < vp.left + textWidth80);
     vp.width = 20;
-    textWidth20 = vp.width - std::min(gutterWFor((int)doc.lineCount()), vp.width);
+    textWidth20 = vp.width - gutterWidth((int)doc.lineCount(), vp.width);
     vp.scrollToCursor(cur, absCol, textWidth20);
     CHECK(vp.left >= 0);
     CHECK(absCol >= vp.left);
@@ -446,18 +442,18 @@ TEST(viewport_resize_keeps_cursor_visible) {
         int visCol = cursorVisibleCol(frm, vp, lines, 0);
         CHECK_EQ(visCol, absCol - vp.left + 1);
         int terminalCol = cursorTerminalCol(frm, vp, 0);
-        int gw = std::min(gutterWFor((int)lines.size()), vp.width);
+        int gw = gutterWidth((int)lines.size(), vp.width);
         Layout layout = computeLayout(vp.height, vp.width);
         CHECK_EQ(terminalCol, gw + (absCol - vp.left) + 1 + layout.content.col);
     }
     vp.width = 80;
-    int textWidth80b = vp.width - std::min(gutterWFor((int)doc.lineCount()), vp.width);
+    int textWidth80b = vp.width - gutterWidth((int)doc.lineCount(), vp.width);
     vp.scrollToCursor(cur, absCol, textWidth80b);
     CHECK(vp.left >= 0);
     CHECK(absCol >= vp.left);
     CHECK(absCol < vp.left + textWidth80b);
     vp.width = 10;
-    int gutterW3 = std::min(gutterWFor((int)doc.lineCount()), vp.width);
+    int gutterW3 = gutterWidth((int)doc.lineCount(), vp.width);
     int textWidth10 = vp.width - gutterW3;
     if(textWidth10 <= 0){
         vp.scrollToCursor(cur, absCol, textWidth10);
@@ -471,18 +467,18 @@ TEST(viewport_resize_keeps_cursor_visible) {
     Viewport vp2; vp2.top=0; vp2.left=0; vp2.height=10; vp2.width=80;
     cur.col = 0;
     Document doc2; doc2.restore({std::string(200,'y')});
-    for(int i=0;i<80;i++){ cur.moveRight(doc2); vp2.scrollToCursor(cur, doc2, vp2.width - std::min(gutterWFor(1), vp2.width)); }
+    for(int i=0;i<80;i++){ cur.moveRight(doc2); vp2.scrollToCursor(cur, doc2, vp2.width - gutterWidth(1, vp2.width)); }
     int leftBefore = vp2.left;
     CHECK(leftBefore > 0);
     vp2.width = 30;
-    int twSmall = vp2.width - std::min(gutterWFor(1), vp2.width);
+    int twSmall = vp2.width - gutterWidth(1, vp2.width);
     int ac = utf8::columnOf(doc2.lineAt(0), cur.col);
     vp2.scrollToCursor(cur, ac, twSmall);
     CHECK(ac >= vp2.left);
     CHECK(ac < vp2.left + twSmall);
     CHECK(vp2.left >= 0);
     vp2.width = 100;
-    int twLarge = vp2.width - std::min(gutterWFor(1), vp2.width);
+    int twLarge = vp2.width - gutterWidth(1, vp2.width);
     vp2.scrollToCursor(cur, ac, twLarge);
     CHECK(ac >= vp2.left);
     CHECK(ac < vp2.left + twLarge);

@@ -6,6 +6,7 @@
 #include "base/utf8.h"
 #include "document/Document.h"
 #include "document/Position.h"
+#include "layout/Gutter.h"
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
 
@@ -22,11 +23,8 @@
 //   - Click en gutter (relCol < gutterW) => inicio de la fila (col 0).
 //   - Click en texto o mas alla de EOL => utf8::byteForColumn + alignStart
 //     (mas alla de EOL clampa naturalmente a EOL).
-inline int screenToCursorGutterWidth(int totalLines, int viewportWidth) {
-    int digits = 1;
-    for (int n = totalLines; n >= 10; n /= 10) ++digits;
-    return std::min(std::max(3, digits + 1), viewportWidth);
-}
+//
+// El ancho del gutter es layout/Gutter.h (unica fuente de verdad).
 
 inline std::optional<Position> screenToCursor(int mouseRow, int mouseCol,
                                               const Layout& layout,
@@ -42,7 +40,7 @@ inline std::optional<Position> screenToCursor(int mouseRow, int mouseCol,
     const int docLine = viewport.top + relRow;
     if (docLine < 0 || docLine >= count) return std::nullopt;
 
-    const int gutterW = screenToCursorGutterWidth(count, viewport.width);
+    const int gutterW = gutterWidth(count, viewport.width);
     if (relCol < gutterW) return Position{docLine, 0};
 
     const int visTarget = viewport.left + (relCol - gutterW);

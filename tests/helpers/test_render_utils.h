@@ -88,12 +88,6 @@ inline std::vector<std::string> visibleRows(const std::string& frame) {
     return out;
 }
 
-inline int gutterWidth(int totalLines) {
-    int digits = 1;
-    for (int n = totalLines; n >= 10; n /= 10) ++digits;
-    return std::max(3, digits + 1);
-}
-
 // Valida estructura basica UTF-8 para tests: detecta truncamientos y
 // bytes de continuacion invalidos. No pretende validar todos los casos
 // Unicode (overlong/surrogates/>U+10FFFF) - suficiente para comprobar

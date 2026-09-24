@@ -11,6 +11,7 @@
 #include "app/Editor.h"
 #include "rendering/Theme.h"
 #include "base/utf8.h"
+#include "layout/Gutter.h"
 
 // Secuencias ANSI usadas por el renderer.
 #define ANSI_INV "\x1b[48;5;60m"   // seleccion azul grisáceo (kSelectionStyle)
@@ -21,14 +22,12 @@ namespace {
 using testutil::stripAnsi;
 using testutil::colWidth;
 using testutil::contains;
-using testutil::gutterWidth;
 using testutil::validUtf8;
 
 } // namespace
 
 namespace {
 
-using testutil::gutterWidth;
 
 // Monta un frame con el contenido dado y devuelve la secuencia ANSI.
 // `sel` opcional; si es std::nullopt, sin seleccion.
@@ -91,7 +90,9 @@ int cursorVisibleCol(const std::string& frame) {
     if (end == std::string::npos) return -1;
 
     int terminalCol = std::stoi(frame.substr(pos + 4, end - pos - 4));
-    return terminalCol - gutterWidth(1);
+    // Los frames medidos aqui usan viewport.width = 200 (frame(),
+    // curFrame(), selCurFrame()): ese es el ancho real que corresponde.
+    return terminalCol - gutterWidth(1, 200);
 }
 
 } // namespace
@@ -269,7 +270,7 @@ std::string rowText(const std::string& frame, int lineCount) {
     size_t nl = plain.find("\r\n");
     if (nl == std::string::npos) nl = plain.size();
     std::string row = plain.substr(0, nl);
-    int gw = testutil::gutterWidth(lineCount);
+    int gw = gutterWidth(lineCount, static_cast<int>(row.size()));
     row.erase(0, std::min(gw, static_cast<int>(row.size())));
     return row;
 }
@@ -280,8 +281,15 @@ std::string rowText(const std::string& frame, int lineCount) {
 // solo el TEXTO visible, sin ANSI y sin el gutter.
 std::string textRow(const std::string& line, int cols) {
     Document doc; doc.restore({line, ""});
-    int gw = testutil::gutterWidth(2);
-    Viewport vp; vp.top = 0; vp.height = 1; vp.width = gw + cols;
+    // Viewport con exactamente `cols` columnas de texto: el ancho total
+    // es `cols` + gutter renderizado, pero el gutter se resuelve contra
+    // el propio ancho final (punto fijo w = cols + gutter(w)). Iterar
+    // hasta estabilizar evita asumir ninguna cota del gutter; converge
+    // porque el gutter esta acotado por la formula cruda y el ancho
+    // crece de a >= 1 mientras el texto sea menor que `cols`.
+    Viewport vp; vp.top = 0; vp.height = 1; vp.width = cols;
+    while (vp.width - gutterWidth(2, vp.width) != cols)
+        vp.width = cols + gutterWidth(2, vp.width);
     Cursor cur; cur.line = 1; cur.col = 0;
     Renderer r;
     std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
@@ -1248,7 +1256,7 @@ TEST(gutter_shows_correct_numbers_when_scrolled) {
     Renderer r;
     std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
     
-    // Para 100 líneas, gutterWidth(100) devuelve 4.
+    // Para 100 líneas, gutterWidth(100, 20) devuelve 4.
     // El formato es: número alineado a la derecha en (ancho-1) + 1 espacio.
     // Para ancho 4 y línea 50: "%3d " -> " 50 "
     

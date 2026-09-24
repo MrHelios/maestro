@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "base/utf8.h"
+#include "layout/Gutter.h"
 #include "layout/ScreenToCursor.h"
 #include "syntax/SyntaxHighlighter.h"
 #include "platform/clipboard/NullClipboard.h"
@@ -51,14 +52,10 @@ inline Edit makeIndentEditForLine(int line, int delta, const std::string& before
 
 namespace {
 
-inline int gutterWidthFor(int totalLines) {
-    int digits = 1;
-    for (int n = totalLines; n >= 10; n /= 10) ++digits;
-    return std::max(3, digits + 1);
-}
-
+// textWidthFor sigue local a proposito: es una derivacion usada por el
+// Editor, no politica compartida. El gutter viene de layout/Gutter.h.
 inline int textWidthFor(const Viewport& vp, int totalLines) {
-    int gutterW = std::min(gutterWidthFor(totalLines), vp.width);
+    int gutterW = gutterWidth(totalLines, vp.width);
     int w = vp.width - gutterW;
     return w < 0 ? 0 : w;
 }

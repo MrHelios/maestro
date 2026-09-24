@@ -34,6 +34,7 @@
 
 #include "document/Document.h"
 #include "document/Cursor.h"
+#include "layout/Gutter.h"
 #include "layout/Layout.h"
 #include "base/utf8.h"
 #include "layout/Viewport.h"
@@ -44,7 +45,6 @@ namespace {
 
 using testutil::stripAnsi;
 using testutil::colWidth;
-using testutil::gutterWidth;
 using testutil::validUtf8;
 using testutil::visibleRows;
 
@@ -240,7 +240,7 @@ TEST(regression_utf8_content) {
         std::string f = frameEditor(lines, 6, width);
         checkFrameWithinBounds(f, 6, width);
         const auto rows = visibleRows(f);
-        int gw = std::min(gutterWidth((int)lines.size()), width);
+        int gw = gutterWidth((int)lines.size(), width);
         int tw = std::max(0, width - gw);
         for (size_t i = 0; i < lines.size() && (int)i < 6; ++i) {
             std::string row = rows[i];
@@ -309,7 +309,7 @@ TEST(regression_gutter_clamped_at_narrow_width) {
         std::string f = frameEditor(doc, 6, width);
         checkFrameWithinBounds(f, 6, width);
         const auto rows = visibleRows(f);
-        int gw = std::min(gutterWidth((int)doc.size()), width);
+        int gw = gutterWidth((int)doc.size(), width);
         for (int row = 0; row < 6; ++row) {
             CHECK(colWidth(rows[row]) <= width);
             std::string numStr = std::to_string(row + 1);
@@ -341,7 +341,7 @@ TEST(regression_gutter_clamped_at_narrow_width) {
             std::string f = frameAt(top);
             checkFrameWithinBounds(f, 6, width);
             const auto rows = visibleRows(f);
-            int gw = std::min(gutterWidth((int)doc1000.size()), width);
+            int gw = gutterWidth((int)doc1000.size(), width);
             for (int row = 0; row < 6; ++row) {
                 int docLine = top + row + 1;
                 std::string numStr = std::to_string(docLine);

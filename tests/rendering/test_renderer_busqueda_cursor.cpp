@@ -1,6 +1,7 @@
 #include "document/Document.h"
 #include "document/Cursor.h"
 #include "layout/Viewport.h"
+#include "layout/Gutter.h"
 #include "layout/Layout.h"
 #include "base/utf8.h"
 #include "rendering/Renderer.h"
@@ -21,10 +22,8 @@ namespace Ansi {
 
 namespace {
 
-using testutil::gutterWidth;
-
 std::string cursorMoveSeq(const Document& doc, const Cursor& cur, const Viewport& vp) {
-    int gutterW = std::min(gutterWidth(doc.lineCount()), vp.width);
+    int gutterW = gutterWidth(doc.lineCount(), vp.width);
     Layout layout = computeLayout(vp.height, vp.width);
 
     int absCol = utf8::columnOf(doc.lineAt(cur.line), cur.col);

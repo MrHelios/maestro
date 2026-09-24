@@ -8,6 +8,7 @@
 
 #include "diagnostics/Instrument.h"
 #include "base/utf8.h"
+#include "layout/Gutter.h"
 #include "rendering/RenderUtil.h"
 #include "syntax/SyntaxLanguage.h"
 
@@ -91,15 +92,7 @@ StatusBarData editorBarData(const std::string& filename, bool modified,
 // Renderer ya no dibuja la barra comun, solo calcula su Layout y arma el
 // StatusBarData.
 
-// Ancho del gutter de numeros de linea (estilo vim): `d(n)+1` columnas,
-// con `n` = cantidad de digitos del numero mas largo del documento, y un
-// minimo de 3 (para que no este saltando de ancho con archivos chicos).
-// La columna extra es el separador antes del texto.
-int gutterWidth(int totalLines) {
-    int digits = 1;
-    for (int n = totalLines; n >= 10; n /= 10) ++digits;
-    return std::max(3, digits + 1); // +1 = separador antes del texto
-}
+// Ancho del gutter: ver layout/Gutter.h (unica fuente de verdad).
 
 // Escribe una fila de texto de ancho fijo `width`, truncando si excede y
 // rellenando con espacios si sobra, para que el fondo (si se pasa uno)
@@ -297,7 +290,7 @@ Renderer::EditorGeometry Renderer::editorGeometry(const Document& doc,
                                                     const Viewport& viewport) const {
     EditorGeometry g;
     g.layout = calculateLayout(viewport.height, viewport.width);
-    g.gutterW = std::min(gutterWidth(doc.lineCount()), viewport.width);
+    g.gutterW = gutterWidth(doc.lineCount(), viewport.width);
     return g;
 }
 
