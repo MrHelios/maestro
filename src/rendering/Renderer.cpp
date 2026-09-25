@@ -343,6 +343,21 @@ void Renderer::editorCursorPos(const Document& doc,
     int absoluteCol = cursor.visualColumn(doc);
     int visibleCol = absoluteCol - viewport.left;
     outCol = g.gutterW + visibleCol + 1 + g.layout.content.col;
+    // Clamp al area de contenido real (nunca altura total del terminal):
+    // tras un scroll de rueda el cursor logico puede quedar fuera del
+    // viewport y el raw caeria en status bar / mensajes. Se conserva la
+    // formula raw (visualColumn + gutter) y solo se limita la salida.
+    // Filas: computeLayout() garantiza content.height >= 1 para cualquier
+    // entrada, asi que rowLo <= rowHi por invariante (sin max artificial).
+    // Columnas: content.width = cols sin garantizar (>=1 solo en el camino
+    // real via getWindowSize/fallback; viewports de test pueden traer 0),
+    // por eso aqui el max(1, ...) evita clamp(lo > hi), que seria UB.
+    const int rowLo = g.layout.content.row + 1;
+    const int rowHi = rowLo + g.layout.content.height - 1;
+    const int colLo = g.layout.content.col + 1;
+    const int colHi = colLo + std::max(1, g.layout.content.width) - 1;
+    outRow = std::clamp(outRow, rowLo, rowHi);
+    outCol = std::clamp(outCol, colLo, colHi);
 }
 
 // Posiciona el cursor real de la terminal en la fila/columna 1-indexadas.
