@@ -7,9 +7,19 @@ Mayoritariamente *vibecode* con supervisión del creador.
 
 ## Estado actual
 
-- **Versión:** `v0.9` (alpha)
+- **Versión:** `v0.10` (alpha)
 - **Estado:** en desarrollo activo
 - **Plataforma:** Linux/Ubuntu X11
+
+## Cambios: v0.10
+
+- auto-scroll en los limites superior o inferior
+- se puede hacer click y scroll con el mouse
+- se puede marcar texto con el mouse
+- mejorado de optimizacion
+- se muestra texto para .cpp , .c y .h coloreado
+- se marcan los [](){} y tambien se puede usar comando para saltar
+- se mejoraron los test de performance, para que el output se simple o verborragico
 
 ## Cambios: v0.9
 
