@@ -887,6 +887,19 @@ void Editor::run() {
             if (waitMs < 0) waitMs = msgMs;
             else waitMs = std::min(waitMs, msgMs);
         }
+        // Autoscroll temporal de seleccion por mouse: solo si hay gesto en
+        // curso con el mouse fuera (no despierta periodicamente en idle
+        // normal). Acota el wait para dar un paso por intervalo.
+        if (mouseAutoscrollActive()) {
+            const auto target =
+                mouseAutoscrollLastStep_ + kMouseAutoscrollInterval;
+            const auto remaining = target - std::chrono::steady_clock::now();
+            const long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                remaining).count();
+            int tickMs = ms <= 0 ? 0 : static_cast<int>(std::min<long>(ms, INT_MAX));
+            if (waitMs < 0) waitMs = tickMs;
+            else waitMs = std::min(waitMs, tickMs);
+        }
         if (clipboard_) clipboard_->processEvents();
         int cfd = clipboard_ ? clipboard_->fd() : -1;
         struct pollfd pfds[3];
@@ -928,6 +941,7 @@ void Editor::run() {
         }
         if (pr == 0) {
             clearExpiredActionMessage();
+            tickMouseAutoscroll(std::chrono::steady_clock::now());
             renderFrame();
             continue;
         }
@@ -1050,6 +1064,7 @@ void Editor::handleMousePress(const Event& event) {
         mouseGestureActive_ = false;
         mouseDragStarted_ = false;
         dragAnchor_.reset();
+        mouseAutoscrollDirection_ = MouseAutoscrollDirection::None;
         return;
     }
     // Press VALIDO: si venia de Seleccion, el click para ir a otra
@@ -1071,6 +1086,7 @@ void Editor::handleMousePress(const Event& event) {
     pressState_ = state_;
     mouseGestureActive_ = true;
     mouseDragStarted_ = false;
+    mouseAutoscrollDirection_ = MouseAutoscrollDirection::None;
 }
 
 std::optional<Position> Editor::resolveMouseDragPosition(int mouseRow,
@@ -1090,6 +1106,39 @@ std::optional<Position> Editor::resolveMouseDragPosition(int mouseRow,
     const int textW = totalW - gutterW;
     const int maxTop = (count - h) > 0 ? (count - h) : 0;
 
+    // Intencion de autoscroll temporal (solo vertical, solo gesto de mouse:
+    // unico llamador con gesto armado, mas el tick que re-ejecuta fuera).
+    // Semantica ASIMETRICA, y hacia arriba deliberadamente distinta de
+    // "estrictamente fuera":
+    // - relRow == 0 ES contenido (primera fila visible), no fuera. Pero el
+    //   fuera real hacia arriba (relRow < 0) no existe: la terminal reporta
+    //   filas 1-based y el contenido arranca en la fila 1, asi que jamas
+    //   llega relRow < 0. DECISION: tratar la primera fila como intencion
+    //   de scroll-up, como sustituto del fuera inalcanzable. Consecuencia
+    //   conocida y aceptada: un drag que termina justo en la primera fila
+    //   scrollea (y arma el tick); con este reporte no hay forma de
+    //   distinguir "seleccionar la primera fila" de "pedir scroll arriba".
+    // - Hacia abajo el fuera real SI llega (statusbar: relRow >= h), asi
+    //   que no hay sustituto: la ultima fila (h-1) es seleccion exacta,
+    //   no intencion de scroll.
+    // El resto del interior apaga de inmediato. Al armar (None -> intencion)
+    // se fija lastStep = ahora: el primer paso lo da el tick tras el
+    // intervalo, sin salto inmediato.
+    {
+        MouseAutoscrollDirection want = MouseAutoscrollDirection::None;
+        if (relRow <= 0)
+            want = MouseAutoscrollDirection::Up;
+        else if (relRow >= h)
+            want = MouseAutoscrollDirection::Down;
+        if (want != MouseAutoscrollDirection::None) {
+            if (mouseAutoscrollDirection_ == MouseAutoscrollDirection::None)
+                mouseAutoscrollLastStep_ = std::chrono::steady_clock::now();
+            mouseAutoscrollRow_ = mouseRow;
+            mouseAutoscrollCol_ = mouseCol;
+        }
+        mouseAutoscrollDirection_ = want;
+    }
+
     // Fila `~` dentro del content (mas alla del EOF pero sin salir del
     // viewport): sin scroll, se extiende hasta EOF via el clamp de linea
     // del helper (top + relRow >= count -> count - 1).
@@ -1099,16 +1148,35 @@ std::optional<Position> Editor::resolveMouseDragPosition(int mouseRow,
                                 totalW);
     }
 
-    // Autoscroll por bordes (1 linea / 1 celda por evento). Los bordes
-    // son INCLUSIVOS (primera/ultima celda visible) porque la terminal no
-    // puede reportar coordenadas fuera de la ventana (no hay relRow<0 ni
-    // relCol>=totalW reales con content en (0,0)); el mouse "pegado" al
-    // borde es la intencion de scroll.
+    // Fuera del contenido en vertical y ya en el limite: scroll imposible,
+    // pero la intencion de seleccionar hacia el borde sigue siendo valida.
+    // Se devuelve la posicion clampada al borde (mismo helper, unica copia
+    // de la logica de columnas) en lugar de caer en screenToCursor()
+    // (nullopt). Solo activo durante seleccion por mouse: esta funcion solo
+    // se llama desde handleMouseDrag con gesto armado (press previo valido).
+    // Por lado, no por top: con archivo menor que el viewport (maxTop==0)
+    // relRow<0 da la primera linea y relRow>=h da la ultima.
+    if (relRow < 0 && b.viewport.top <= 0) {
+        return dragEdgePosition(relRow, relCol, b.viewport, b.document, h,
+                                totalW);
+    }
+    if (relRow >= h && b.viewport.top >= maxTop) {
+        return dragEdgePosition(relRow, relCol, b.viewport, b.document, h,
+                                totalW);
+    }
+
+    // Autoscroll por bordes (1 linea / 1 celda por evento). Asimetrico en
+    // vertical como el armado de arriba: la primera fila (relRow == 0, que
+    // ES contenido) scrollea por la misma DECISION sustituta —el fuera
+    // hacia arriba no es reportable—; la ultima fila es exclusiva (el
+    // fuera real es la statusbar, relRow >= h). Coordenadas fuera del
+    // contenido por abajo (statusbar) scrollean mientras quede contenido
+    // por revelar; al llegar al limite las cubren los retornos de arriba.
     bool scrolled = false;
     if (relRow <= 0 && b.viewport.top > 0) {
         b.viewport.top--;
         scrolled = true;
-    } else if (relRow >= h - 1 && b.viewport.top < maxTop) {
+    } else if (relRow >= h && b.viewport.top < maxTop) {
         b.viewport.top++;
         scrolled = true;
     }
@@ -1146,16 +1214,8 @@ std::optional<Position> Editor::resolveMouseDragPosition(int mouseRow,
                             totalW);
 }
 
-void Editor::handleMouseDrag(const Event& event) {
-    if (state_ != State::Navegacion && state_ != State::Interaccion &&
-        state_ != State::Seleccion) {
-        return;
-    }
-    if (!mouseGestureActive_) return;
-    if (!dragAnchor_.has_value()) return;
+void Editor::applyMouseDragPosition(const Position& pos) {
     Buffer& b = active();
-    auto pos = resolveMouseDragPosition(event.mouseRow, event.mouseCol);
-    if (!pos.has_value()) return;
     if (!mouseDragStarted_) {
         // Primer drag efectivo: entra a Seleccion o reinicia el rango.
         if (pressState_ != State::Seleccion) {
@@ -1165,9 +1225,9 @@ void Editor::handleMouseDrag(const Event& event) {
             b.selection.reset();
             b.selectAllActive = false;
         }
-        b.selection = Selection{dragAnchor_.value(), pos.value()};
-        b.cursor.line = pos->line;
-        b.cursor.col = pos->col;
+        b.selection = Selection{dragAnchor_.value(), pos};
+        b.cursor.line = pos.line;
+        b.cursor.col = pos.col;
         b.cursor.clampToLine(b.document);
         // La posicion ya viene normalizada por byteForColumn+alignStart;
         // se re-sincroniza por seguridad tras el clamp.
@@ -1175,8 +1235,8 @@ void Editor::handleMouseDrag(const Event& event) {
         mouseDragStarted_ = true;
         return;
     }
-    b.cursor.line = pos->line;
-    b.cursor.col = pos->col;
+    b.cursor.line = pos.line;
+    b.cursor.col = pos.col;
     b.cursor.clampToLine(b.document);
     if (b.selection.has_value()) {
         b.selection->position = {b.cursor.line, b.cursor.col};
@@ -1186,6 +1246,54 @@ void Editor::handleMouseDrag(const Event& event) {
     }
 }
 
+bool Editor::mouseAutoscrollActive() const {
+    if (mouseAutoscrollDirection_ == MouseAutoscrollDirection::None)
+        return false;
+    if (!mouseGestureActive_ || !mouseDragStarted_) return false;
+    if (state_ != State::Navegacion && state_ != State::Interaccion &&
+        state_ != State::Seleccion)
+        return false;
+    if (!active().selection.has_value()) return false;
+    return true;
+}
+
+bool Editor::tickMouseAutoscroll(
+    std::chrono::steady_clock::time_point now) {
+    if (!mouseAutoscrollActive()) return false;
+    if (!mouseButtonHeldOracle_()) {
+        // Suelta fuera de la ventana: el release nunca llega como evento y
+        // solo el oraculo fisico lo detecta. Misma salida que un release
+        // entregado (gesto cerrado, sin paso).
+        mouseGestureActive_ = false;
+        mouseDragStarted_ = false;
+        mouseAutoscrollDirection_ = MouseAutoscrollDirection::None;
+        return false;
+    }
+    if (now - mouseAutoscrollLastStep_ < kMouseAutoscrollInterval)
+        return false;
+    // Un paso: re-ejecuta el ultimo drag fuera (resolve scrollea como
+    // maximo 1 linea, o sostiene el borde si ya esta en el limite). Sin
+    // deuda acumulada: lastStep = ahora, no += intervalo.
+    auto pos = resolveMouseDragPosition(mouseAutoscrollRow_,
+                                        mouseAutoscrollCol_);
+    mouseAutoscrollLastStep_ = now;
+    if (!pos.has_value()) return false;
+    applyMouseDragPosition(*pos);
+    return true;
+}
+
+void Editor::handleMouseDrag(const Event& event) {
+    if (state_ != State::Navegacion && state_ != State::Interaccion &&
+        state_ != State::Seleccion) {
+        return;
+    }
+    if (!mouseGestureActive_) return;
+    if (!dragAnchor_.has_value()) return;
+    auto pos = resolveMouseDragPosition(event.mouseRow, event.mouseCol);
+    if (!pos.has_value()) return;
+    applyMouseDragPosition(*pos);
+}
+
 void Editor::handleMouseRelease(const Event& event) {
     (void)event;
     if (!mouseGestureActive_) return;
@@ -1193,6 +1301,7 @@ void Editor::handleMouseRelease(const Event& event) {
         state_ != State::Seleccion) {
         mouseGestureActive_ = false;
         mouseDragStarted_ = false;
+        mouseAutoscrollDirection_ = MouseAutoscrollDirection::None;
         return;
     }
     if (!mouseDragStarted_) {
@@ -1207,8 +1316,11 @@ void Editor::handleMouseRelease(const Event& event) {
         }
     }
     // Con drag previo se permanece en Seleccion sin mas cambios.
+    // Cierre del gesto: el autoscroll temporal se detiene (release fuera
+    // tambien lo apaga).
     mouseGestureActive_ = false;
     mouseDragStarted_ = false;
+    mouseAutoscrollDirection_ = MouseAutoscrollDirection::None;
 }
 
 void Editor::handleEvent(const Event& event) {

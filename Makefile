@@ -15,7 +15,7 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -Isrc -MMD -MP -pthread
 BIN := build/maestro
 # Program sources por capa (app / document / layout / syntax / rendering /
 # platform / filesystem / diagnostics, todas bajo src/).
-SRC := $(wildcard src/app/*.cpp src/document/*.cpp src/layout/*.cpp src/syntax/*.cpp src/rendering/*.cpp src/platform/tty/*.cpp src/platform/clipboard/*.cpp src/filesystem/*.cpp src/diagnostics/*.cpp)
+SRC := $(wildcard src/app/*.cpp src/document/*.cpp src/layout/*.cpp src/syntax/*.cpp src/rendering/*.cpp src/platform/*.cpp src/platform/tty/*.cpp src/platform/clipboard/*.cpp src/filesystem/*.cpp src/diagnostics/*.cpp)
 
 # --- Tests ---
 # Los tests se agrupan por nivel: unit/ (document/layout puros),
@@ -121,6 +121,9 @@ build/%.o: src/rendering/%.cpp | build
 build/%.o: src/platform/tty/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
+build/%.o: src/platform/%.cpp | build
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
 build/%.o: src/platform/clipboard/%.cpp | build
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -170,6 +173,9 @@ build-san/%.o: src/rendering/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
 build-san/%.o: src/platform/tty/%.cpp | build-san
+	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
+
+build-san/%.o: src/platform/%.cpp | build-san
 	$(CXX) $(CXXFLAGS) $(SANFLAGS) -c $< -o $@
 
 build-san/%.o: src/platform/clipboard/%.cpp | build-san

@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -80,6 +81,16 @@ public:
     State getStateForTesting() const { return state_; }
     std::string getGoToLineQueryForTesting() const { return goToLineQuery_; }
     Buffer& getActiveBufferForTesting() { return active(); }
+
+    // Oraculo del boton fisico del mouse: responde si el boton izquierdo
+    // sigue presionado. Existe porque soltar FUERA de la ventana del
+    // terminal no entrega ningun evento (el release se pierde) y el tick no
+    // tiene forma de notarlo solo con eventos. Por defecto siempre dice
+    // "presionado" (tests y entornos sin X11); la app real instala el
+    // sondeo X11 en main. El tick lo consulta y desarma como un release.
+    void setMouseButtonHeldOracle(std::function<bool()> oracle) {
+        mouseButtonHeldOracle_ = std::move(oracle);
+    }
 
 private:
     // ---- Mensajes al usuario (paso 8) ----
@@ -291,10 +302,28 @@ private:
     // pressState_==Seleccion por robustez.
     void handleMouseRelease(const Event& event);
     // Resuelve la posicion de un MouseDrag: dentro del viewport usa
-    // screenToCursor(); fuera calcula scroll ±1 + posicion de borde
-    // (siempre via byteForColumn + alignStart + clamp). Devuelve nullopt
-    // solo si no hay posicion resoluble.
+    // screenToCursor(); fuera calcula scroll ±1 + posicion de borde, y si
+    // ya esta en el limite (scroll imposible) devuelve la posicion
+    // clampada al borde (siempre via byteForColumn + alignStart + clamp).
+    // Devuelve nullopt solo si no hay posicion resoluble. Como efecto
+    // lateral actualiza la intencion de autoscroll temporal (arriba: la
+    // primera fila —contenido— se trata como intencion por decision, ya que
+    // el fuera hacia arriba no es reportable; abajo: solo el fuera real en
+    // statusbar; el resto apaga); solo util durante el gesto de mouse.
     std::optional<Position> resolveMouseDragPosition(int mouseRow, int mouseCol);
+    // Aplica una posicion de drag a cursor+seleccion: primer drag efectivo
+    // entra a Seleccion (o reinicia el rango), los siguientes extienden
+    // selection.position. Cola compartida de handleMouseDrag y del tick.
+    void applyMouseDragPosition(const Position& pos);
+    // true si hay autoscroll temporal activo: direccion armada + gesto de
+    // mouse en curso + seleccion iniciada + estado valido. Chequeo completo
+    // para no dejar estado zombie que despierte el loop.
+    bool mouseAutoscrollActive() const;
+    // Un paso de autoscroll temporal (como maximo 1 linea, sin ponerse al
+    // dia con deuda acumulada): re-ejecuta el ultimo drag fuera y extiende
+    // la seleccion; en el limite sostiene el borde. `now` inyectable para
+    // tests deterministas. Devuelve true si produjo posicion.
+    bool tickMouseAutoscroll(std::chrono::steady_clock::time_point now);
     void save();
     // Dibuja el frame actual segun state_ (pantalla normal, selector de
     // buffers o explorador de archivos). Se comparte entre el flujo normal
@@ -348,6 +377,30 @@ private:
     bool mouseDragStarted_ = false;
     std::optional<Position> dragAnchor_;
     State pressState_ = State::Navegacion;
+
+    // ---- Autoscroll temporal de seleccion por mouse (solo vertical) ----
+    // Intencion, no coordenadas: hacia abajo el mouse sigue fuera del area
+    // de edicion (statusbar); hacia arriba no hay fuera reportable, asi que
+    // por DECISION la primera fila (contenido) cuenta como intencion, con
+    // la consecuencia conocida de que un drag terminado justo ahi scrollea.
+    // El loop despierta por timeout y tickMouseAutoscroll() da un paso por
+    // intervalo, sin necesidad de mover el mouse.
+    enum class MouseAutoscrollDirection { None, Up, Down };
+    MouseAutoscrollDirection mouseAutoscrollDirection_ =
+        MouseAutoscrollDirection::None;
+    // Ultimo drag en zona de scroll (coords 1-based de terminal): fuera
+    // real por abajo (statusbar) o primera fila por sustitucion hacia
+    // arriba (ver DECISION en el bloque de armado). El tick lo re-ejecuta
+    // para dar un paso.
+    int mouseAutoscrollRow_ = 0;
+    int mouseAutoscrollCol_ = 0;
+    // Oraculo del boton fisico (ver setter): por defecto "presionado".
+    std::function<bool()> mouseButtonHeldOracle_ = [] { return true; };
+    // Instante del ultimo paso (o del armado): el primer tick mueve solo
+    // tras el intervalo, sin salto inmediato al salir del viewport.
+    std::chrono::steady_clock::time_point mouseAutoscrollLastStep_{};
+    static constexpr auto kMouseAutoscrollInterval =
+        std::chrono::milliseconds(100);
 
     // Indenta / desindenta el rango seleccionado actual (todas las lineas
     // que toca). `indent` true tabula hacia adentro ('}'), `indent` false

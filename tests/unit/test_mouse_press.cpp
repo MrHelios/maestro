@@ -524,7 +524,10 @@ TEST(mouse_drag_without_press_ignored) {
     CHECK_EQ(b.cursor.col, 0);
 }
 
-TEST(mouse_drag_autoscroll_down) {
+TEST(mouse_drag_last_visible_row_is_exact_no_scroll) {
+    // La ultima fila visible es seleccion exacta, no intencion de scroll
+    // (el fuera real hacia abajo es la statusbar): el drag no mueve el
+    // viewport ni arma el autoscroll temporal.
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
     b.document.restore({"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7"});
@@ -539,8 +542,11 @@ TEST(mouse_drag_autoscroll_down) {
     ed.processEventForTesting(mouseDrag(4, 4)); // ultima fila visible
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
-    CHECK_EQ(b.viewport.top, 1); // scrolleo 1 linea
-    // La fila borde ahora muestra la linea recien revelada (1+3).
+    CHECK_EQ(b.viewport.top, 0); // sin scroll: endpoint exacto
+    CHECK_EQ(b.cursor.line, 3);
+    // Continuidad del gesto: empujar a la statusbar si scrollea.
+    ed.processEventForTesting(mouseDrag(4, 5)); // statusbar (relRow=4)
+    CHECK_EQ(b.viewport.top, 1);
     CHECK_EQ(b.cursor.line, 4);
 }
 
@@ -612,10 +618,12 @@ TEST(mouse_drag_statusbar_scrolls_when_content_below) {
     CHECK(ed.hasSelection());
 }
 
-TEST(mouse_drag_statusbar_at_maxTop_keeps_selection) {
+TEST(mouse_drag_statusbar_at_maxTop_clamps_to_edge) {
     // Gesto sobre la statusbar ya en el ultimo viewport (top == maxTop):
-    // no hay nada que desplazar; el evento se ignora y la seleccion
-    // vigente queda intacta (cursor, rango y viewport sin cambios).
+    // no hay nada que desplazar (scroll imposible), pero la intencion de
+    // seleccionar hacia el borde sigue siendo valida: se clampdea a la
+    // ultima fila visible en lugar de ignorarse (auto-scroll conceptual:
+    // cada drag con el mouse fuera vuelve a producir el borde).
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
     b.document.restore({"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7"});
@@ -630,18 +638,17 @@ TEST(mouse_drag_statusbar_at_maxTop_keeps_selection) {
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.cursor.line, 6);
-    ed.processEventForTesting(mouseDrag(4, 5)); // statusbar, sin scroll
+    ed.processEventForTesting(mouseDrag(4, 5)); // statusbar: clamp al borde
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
-    CHECK_EQ(b.viewport.top, 4); // sin cambios
-    CHECK_EQ(b.cursor.line, 6);  // sin cambios
+    CHECK_EQ(b.viewport.top, 4); // sin scroll: ya en el limite
+    CHECK_EQ(b.cursor.line, 7);  // marca la ultima fila
     CHECK_EQ(b.cursor.col, 0);
     CHECK(b.selection.has_value());
     CHECK_EQ(b.selection->anchor.line, 7);
     CHECK_EQ(b.selection->anchor.col, 0);
-    CHECK_EQ(b.selection->position.line, 6);
+    CHECK_EQ(b.selection->position.line, 7);
     CHECK_EQ(b.selection->position.col, 0);
-    CHECK(ed.hasSelection());
 }
 
 TEST(mouse_drag_multiple_anchor_fixed_position_follows) {
