@@ -4,20 +4,16 @@
 #include <cctype>
 #include <climits>
 #include <filesystem>
-#include <poll.h>
-#include <signal.h>
 #include <cerrno>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include "base/utf8.h"
 #include "layout/Gutter.h"
 #include "layout/ScreenToCursor.h"
 #include "syntax/SyntaxHighlighter.h"
-#include "platform/clipboard/NullClipboard.h"
-#include "platform/clipboard/X11Clipboard.h"
-#include "filesystem/InotifyFileWatcher.h"
-#include "filesystem/NullFileWatcher.h"
+#include "platform/clipboard/ClipboardFactory.h"
+#include "filesystem/FileWatcherFactory.h"
+#include "platform/tty/TtyRunLoop.h"
 
 namespace {
 
@@ -129,15 +125,15 @@ static Buffer::FileIdentity captureIdentity(const std::string& path) {
 
 } // namespace
 
-Editor::Editor() : Editor(std::make_unique<X11Clipboard>()) {}
+Editor::Editor() : Editor(makeSystemClipboard()) {}
 
 Editor::Editor(std::unique_ptr<SystemClipboard> clipboard)
-    : Editor(std::move(clipboard), std::make_unique<InotifyFileWatcher>()) {}
+    : Editor(std::move(clipboard), makeFileWatcher()) {}
 
 Editor::Editor(std::unique_ptr<SystemClipboard> clipboard, std::unique_ptr<FileWatcher> watcher)
     : clipboard_(std::move(clipboard)), watcher_(std::move(watcher)) {
-    if (!clipboard_) clipboard_ = std::make_unique<NullClipboard>();
-    if (!watcher_) watcher_ = std::make_unique<NullFileWatcher>();
+    if (!clipboard_) clipboard_ = makeNullClipboard();
+    if (!watcher_) watcher_ = makeNullFileWatcher();
     setStatusMessage(kHelpEmpty);
     registerCommands();
 }
@@ -563,7 +559,10 @@ bool Editor::loadIntoActiveBuffer(const std::string& path) {
     return result == LoadResult::Success;
 }
 
-void Editor::handleResize() {
+void Editor::handleResize(int rows, int cols) {
+    if (rows <= 0 || cols <= 0) return;
+    currentRows_ = rows;
+    currentCols_ = cols;
     for (int i = 0; i < buffers.count(); ++i) {
         syncViewportSize(buffers.at(i));
         buffers.at(i).cursor.clampToLine(buffers.at(i).document);
@@ -571,14 +570,11 @@ void Editor::handleResize() {
 }
 
 void Editor::syncViewportSize(Buffer& b) {
-    int rows, cols;
-    terminal_.getWindowSize(rows, cols);
-    BufferManager::fitViewport(b, rows, cols);
+    BufferManager::fitViewport(b, currentRows_, currentCols_);
 }
 
 void Editor::createBuffer() {
-    int rows, cols;
-    terminal_.getWindowSize(rows, cols);
+    const int rows = currentRows_, cols = currentCols_;
     // Guardar buffer actual como anterior ANTES de crear el nuevo (el nuevo
     // se vuelve activo automaticamente en BufferManager::createBuffer).
     if (buffers.count() > 0) {
@@ -599,8 +595,7 @@ void Editor::closeActiveBuffer() {
     std::string closedDisplayName = cur.displayName();
 
     std::string oldPath = cur.filename;
-    int rows, cols;
-    terminal_.getWindowSize(rows, cols);
+    const int rows = currentRows_, cols = currentCols_;
     auto cr = buffers.closeActive(rows, cols);
     if (cr != CloseResult::ModifiedBlocked) unwatchFile(oldPath);
     switch (cr) {
@@ -846,134 +841,11 @@ void Editor::openFileInBuffer(const std::string& path) {
 }
 
 void Editor::run() {
-    for (int i = 0; i < buffers.count(); ++i) {
-        syncViewportSize(buffers.at(i));
-    }
-
-    terminal_.enableRawMode();
-    terminal_.enterAlternateScreen();
-    terminal_.enableMouseTracking();
-
-    sigset_t blockMask, origMask;
-    sigemptyset(&blockMask);
-    sigaddset(&blockMask, SIGWINCH);
-    sigprocmask(SIG_BLOCK, &blockMask, &origMask);
-
-    {
-        Buffer& b = active();
-        b.viewport.scrollToCursor(b.cursor, b.document, textWidthFor(b.viewport, b.document.lineCount()));
-        renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
-                                   b.filename, b.modified, statusMessage_,
-                                   state_, b.selection, searchHighlight_);
-    }
-
-    while (running_) {
-        if (terminal_.hasResized()) {
-            handleResize();
-            renderFrame();
-            continue;
-        }
-
-        int waitMs = -1;
-        if (clipboard_ && clipboard_->hasPending()) {
-            waitMs = 20;
-        }
-        if (statusMessage_.expiry) {
-            const auto remaining = *statusMessage_.expiry -
-                                   std::chrono::steady_clock::now();
-            const long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                remaining).count();
-            int msgMs = ms <= 0 ? 0 : static_cast<int>(std::min<long>(ms, INT_MAX));
-            if (waitMs < 0) waitMs = msgMs;
-            else waitMs = std::min(waitMs, msgMs);
-        }
-        // Autoscroll temporal de seleccion por mouse: solo si hay gesto en
-        // curso con el mouse fuera (no despierta periodicamente en idle
-        // normal). Acota el wait para dar un paso por intervalo.
-        if (mouseAutoscrollActive()) {
-            const auto target =
-                mouseAutoscrollLastStep_ + kMouseAutoscrollInterval;
-            const auto remaining = target - std::chrono::steady_clock::now();
-            const long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                remaining).count();
-            int tickMs = ms <= 0 ? 0 : static_cast<int>(std::min<long>(ms, INT_MAX));
-            if (waitMs < 0) waitMs = tickMs;
-            else waitMs = std::min(waitMs, tickMs);
-        }
-        if (clipboard_) clipboard_->processEvents();
-        int cfd = clipboard_ ? clipboard_->fd() : -1;
-        struct pollfd pfds[3];
-        pfds[0].fd = STDIN_FILENO;
-        pfds[0].events = POLLIN;
-        pfds[0].revents = 0;
-        int nfds = 1;
-        int clipboardIdx = -1;
-        if (cfd >= 0) {
-            clipboardIdx = nfds;
-            pfds[nfds].fd = cfd;
-            pfds[nfds].events = POLLIN;
-            pfds[nfds].revents = 0;
-            nfds++;
-        }
-        int watcherIdx = -1;
-        int wfd = watcher_ ? watcher_->fd() : -1;
-        if (wfd >= 0) {
-            watcherIdx = nfds;
-            pfds[nfds].fd = wfd;
-            pfds[nfds].events = POLLIN;
-            pfds[nfds].revents = 0;
-            nfds++;
-        }
-        struct timespec ts;
-        struct timespec* tsp = nullptr;
-        if (waitMs >= 0) {
-            ts.tv_sec = waitMs / 1000;
-            ts.tv_nsec = (waitMs % 1000) * 1000000L;
-            tsp = &ts;
-        }
-        int pr = ppoll(pfds, nfds, tsp, &origMask);
-        if (pr < 0) {
-            if (errno == EINTR && terminal_.hasResized()) {
-                handleResize();
-                renderFrame();
-            }
-            continue;
-        }
-        if (pr == 0) {
-            clearExpiredActionMessage();
-            tickMouseAutoscroll(std::chrono::steady_clock::now());
-            renderFrame();
-            continue;
-        }
-        bool xReady = (clipboardIdx >= 0 && (pfds[clipboardIdx].revents & POLLIN));
-        bool inReady = (pfds[0].revents & POLLIN);
-        bool watcherReady = (watcherIdx >= 0 && (pfds[watcherIdx].revents & POLLIN));
-        if (xReady) clipboard_->processEvents();
-        if (watcherReady && watcher_) {
-            watcher_->pollEvents([this](const FileChangeEvent& ev) {
-                handleFileChange(ev);
-            });
-        }
-        if (inReady) {
-            Event event;
-            if (!terminal_.readEvent(event, 0)) {
-                if (xReady || watcherReady) continue;
-            } else {
-                handleEvent(event);
-                if (!running_) break;
-                clearExpiredActionMessage();
-                renderFrame();
-            }
-        } else if (xReady || watcherReady) {
-            clearExpiredActionMessage();
-        }
-    }
-
-    sigprocmask(SIG_SETMASK, &origMask, nullptr);
-    terminal_.disableMouseTracking();
-    terminal_.leaveAlternateScreen();
-    terminal_.disableRawMode();
-    write(STDOUT_FILENO, "\x1b[0m\x1b[39m\x1b[49m\x1b[?25h\x1b[2J\x1b[H\x1b[0 q", sizeof("\x1b[0m\x1b[39m\x1b[49m\x1b[?25h\x1b[2J\x1b[H\x1b[0 q") - 1);
+    // Frontier (12): el loop TTY vive en TtyRunLoop. Este método solo
+    // delega para preservar la API (main/tests). Ver
+    // platform/tty/TtyRunLoop.h.
+    TtyRunLoop loop(*this);
+    loop.run();
 }
 
 void Editor::renderFrame() {
@@ -1324,6 +1196,10 @@ void Editor::handleMouseRelease(const Event& event) {
 }
 
 void Editor::handleEvent(const Event& event) {
+    if (event.type == EventType::Resize) {
+        handleResize(event.resizeRows, event.resizeCols);
+        return;
+    }
     if (event.type == EventType::MousePress) {
         handleMousePress(event);
         return;

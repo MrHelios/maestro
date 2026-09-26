@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "rendering/Style.h"
+#include "rendering/tty/TtyScroll.h"
 
 void TtyDiff::updateCacheState(const Viewport& viewport, const Cursor& cursor,
                                const Document& doc) {
@@ -227,8 +228,9 @@ std::string TtyDiff::buildScrollFrame(
     const FrameBuilder::EditorGeometry g =
         builder_.editorGeometry(doc, viewport);
     const int contentH = g.layout.content.height;
-    const int absDelta = std::abs(deltaTop);
-    if (contentH <= 0 || absDelta == 0 || absDelta >= contentH) return "";
+    const TtyScrollOp scrollOp = scrollOpFor(contentH, deltaTop);
+    const int absDelta = scrollOp.absDelta;
+    if (!scrollOp.useRegion) return "";
     if (static_cast<int>(rowCache_.size()) != contentH) return "";
 
     const int gutterW = g.gutterW;
@@ -249,13 +251,7 @@ std::string TtyDiff::buildScrollFrame(
 
     std::string out;
     encoder_.hideCursor(out);
-    out += "\x1b[1;";
-    out += std::to_string(contentH);
-    out += "r";
-    out += "\x1b[";
-    out += std::to_string(absDelta);
-    out += (deltaTop > 0) ? "S" : "T";
-    out += "\x1b[r";
+    out += scrollRegionPrefix(contentH, scrollOp);
 
     if (deltaTop > 0) {
         for (int i = 0; i < absDelta; ++i) rowCache_.pop_front();

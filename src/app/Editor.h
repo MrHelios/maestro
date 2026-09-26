@@ -19,7 +19,6 @@
 #include "app/FileBrowser.h"
 #include "app/Message.h"
 #include "rendering/Renderer.h"
-#include "platform/tty/Terminal.h"
 #include "platform/Event.h"
 
 // Editor es el "engine": maneja una coleccion de buffers (v0.6.3), un
@@ -29,7 +28,12 @@
 // mutaciones sobre el buffer activo. No sabe nada de teclas crudas (eso
 // es responsabilidad de Terminal) ni de como se dibuja (eso es
 // responsabilidad de Renderer).
+// Frontier (12): Editor común — no incluye Terminal/Keymap, no conoce
+// pollfd/fd(), no construye X11/Inotify (eso lo hacen las factories y el
+// TtyRunLoop). El tamaño de ventana es estado propio (currentRows_/Cols_)
+// actualizado por cada EventType::Resize con su payload.
 class Editor {
+    friend class TtyRunLoop;
 public:
     Editor();
     explicit Editor(std::unique_ptr<SystemClipboard> clipboard);
@@ -120,14 +124,17 @@ private:
     // v0.6.3: Ctrl+K n -> crea un buffer nuevo SIN NOMBRE y lo activa
     // inmediatamente. El buffer nuevo arranca en Navegacion, vacio.
     void createBuffer();
-    // Dimensiones del viewport de un buffer, tomadas de la terminal en
-    // ese momento. run() las fija al arrancar para los buffers que ya
-    // existen, pero un buffer creado a mitad de sesion (Ctrl+K n) o
-    // reiniciado (Ctrl+K w sobre el ultimo) arranca con el Viewport por
-    // defecto (24x80) y no redibujaria toda la pantalla si la terminal
-    // es mas grande. Este helper le da sus dimensiones reales.
+    // Dimensiones del viewport de un buffer, tomadas del tamaño actual
+    // (currentRows_/Cols_, actualizado por el último Resize). run() las
+    // fija al arrancar para los buffers que ya existen, pero un buffer
+    // creado a mitad de sesion (Ctrl+K n) o reiniciado (Ctrl+K w sobre
+    // el ultimo) arranca con el Viewport por defecto (24x80) y no
+    // redibujaria toda la pantalla si la terminal es mas grande.
+    // Este helper le da sus dimensiones reales.
     void syncViewportSize(Buffer& b);
-    void handleResize();
+    // Resize autónomo: aplica el payload del evento (sin consultar
+    // ningún backend). Payload inválido (filas/cols <= 0) se ignora.
+    void handleResize(int rows, int cols);
     // v0.6.3: Ctrl+K w -> cierra el buffer activo.
     //   - modificado: NO cierra; muestra aviso (hay que guardar o restaurar).
     //   - ultimo buffer: no se elimina; se convierte en vacio sin nombre.
@@ -159,7 +166,19 @@ private:
     void openFileInBuffer(const std::string& path);
 
     Renderer renderer_;
-    Terminal terminal_;
+    // Tamaño actual de la ventana (estado del editor, no del backend).
+    // Default 24x80 (igual que el fallback de Terminal sin TTY).
+    // Lo actualiza cada EventType::Resize via handleResize(rows, cols):
+    // el evento es autónomo (trae su payload) y vale para TTY y GUI
+    // sin instalar ningún provider.
+    int currentRows_ = 24;
+    int currentCols_ = 80;
+    // Lectura del tamaño actual (tests: reemplaza al viejo
+    // `ed.terminal_.getWindowSize`). No consulta ningún backend.
+    void getWindowSize(int& rows, int& cols) const {
+        rows = currentRows_;
+        cols = currentCols_;
+    }
     // Despacho de comandos por nombre. El Editor registra los handlers en
     // el constructor (registerCommands) y los modos resuelven la tecla ->
     // nombre -> handler aqui, en vez de tener cada accion dispersa en

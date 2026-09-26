@@ -1,5 +1,7 @@
 #include "platform/tty/Terminal.h"
 
+#include "platform/tty/TtyMouse.h"
+
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -324,69 +326,10 @@ static std::string simpleEscapeForm(const std::string& contents) {
 }
 
 bool Terminal::parseMouseSgr(std::string_view seq, Event& e) {
-    // SGR mouse: "[<Cb;Cx;CyM" sin ESC inicial. Validacion minima:
-    // requiere dos ';' y final 'M' (press/drag/rueda) o 'm' (release).
-    //  - code 64=wheel up, 65=wheel down; se preservan bits Shift(4),
-    //    Alt(8), Ctrl(16) => 68(64+Shift) sigue siendo ScrollUp, etc.
-    //  - code 0 (+ mods) + 'M' = left button press => MousePress.
-    //  - code 32 (+ mods) + 'M' = left drag (?1002h) => MouseDrag.
-    //  - code 3 (+ mods) + 'm' = left release => MouseRelease.
-    //  - Cualquier otro code (1/2 medio/derecho, 35 motion sin boton,
-    //    rueda con 'm', ...) => None silencioso.
-    size_t p1 = seq.find(';', 2);
-    size_t p2 = (p1 == std::string_view::npos) ? std::string_view::npos
-                                                : seq.find(';', p1 + 1);
-    char finalCh = seq.empty() ? 0 : seq.back();
-
-    if (p1 == std::string_view::npos || p2 == std::string_view::npos ||
-        (finalCh != 'M' && finalCh != 'm')) {
-        e.type = EventType::None;
-        return true;
-    }
-
-    int cb = 0;
-    int cx = 0;
-    int cy = 0;
-    try {
-        cb = std::stoi(std::string(seq.substr(2, p1 - 2)));
-        cx = std::stoi(std::string(seq.substr(p1 + 1, p2 - p1 - 1)));
-        cy = std::stoi(std::string(seq.substr(p2 + 1, seq.size() - p2 - 2)));
-    } catch (const std::exception&) {
-        e.type = EventType::None;
-        return true;
-    }
-
-    const int modifiers = cb & 0x1C;
-    (void)modifiers; // preservado: 68 sigue siendo left-click con Shift, etc.
-    const int code = cb & ~0x1C;
-
-    if (finalCh == 'm') {
-        if (code == 3) {
-            e.type = EventType::MouseRelease;
-            e.mouseCol = cx;
-            e.mouseRow = cy;
-            return true;
-        }
-        e.type = EventType::None;
-        return true;
-    }
-    if (code == 64) { e.type = EventType::ScrollUp; return true; }
-    if (code == 65) { e.type = EventType::ScrollDown; return true; }
-    if (code == 0) {
-        e.type = EventType::MousePress;
-        e.mouseCol = cx;
-        e.mouseRow = cy;
-        return true;
-    }
-    if (code == 32) {
-        e.type = EventType::MouseDrag;
-        e.mouseCol = cx;
-        e.mouseRow = cy;
-        return true;
-    }
-
-    e.type = EventType::None;
-    return true;
+    // Frontier (11): el parseo vive en TtyMouse (produce CellPos);
+    // acá solo se delega para no duplicar la tabla Cb.
+    CellPos pos;
+    return decodeMouseSgr(seq, e, pos);
 }
 
 Event Terminal::readEvent() {

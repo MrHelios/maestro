@@ -271,7 +271,7 @@ TEST(ctrl_k_n_edit_switch_back_preserves_content) {
 TEST(ctrl_k_n_new_buffer_viewport_matches_terminal) {
     Editor ed;
     int rows, cols;
-    ed.terminal_.getWindowSize(rows, cols);
+    ed.getWindowSize(rows, cols);
     int vpHeight = rows > 2 ? rows - 2 : 1;
     int vpWidth = cols;
 
@@ -286,7 +286,7 @@ TEST(ctrl_k_n_new_buffer_viewport_matches_terminal) {
 TEST(ctrl_k_w_last_buffer_reset_keeps_terminal_viewport) {
     Editor ed;
     int rows, cols;
-    ed.terminal_.getWindowSize(rows, cols);
+    ed.getWindowSize(rows, cols);
     int vpHeight = rows > 2 ? rows - 2 : 1;
     int vpWidth = cols;
 

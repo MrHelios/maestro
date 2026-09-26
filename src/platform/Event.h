@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "platform/CellPos.h"
+
 // En vez de razonar en terminos de "teclas", el Engine razona en
 // terminos de EVENTOS. Esto hace que Editor sea completamente
 // reutilizable: podria alimentarse desde un teclado real, desde un
@@ -66,6 +68,11 @@ enum class EventType {
     // sin drag previo aplica la conducta de click simple; con drag previo
     // permanece en Seleccion. No cambia el modo por si solo.
     MouseRelease,
+    // Resize de ventana (SIGWINCH traducido por el loop TTY, o tamaño
+    // enviado por la GUI). Payload AUTÓNOMO en resizeRows/resizeCols:
+    // el Editor lo aplica tal cual (handleResize(rows, cols)) sin
+    // consultar ningún backend ni provider.
+    Resize,
 };
 
 struct Event {
@@ -79,6 +86,12 @@ struct Event {
     // (columna, fila) tal como las emite SGR (Cx, Cy).
     int mouseCol = 0;
     int mouseRow = 0;
+    // Tamaño nuevo, solo válido si type == Resize.
+    int resizeCols = 0;
+    int resizeRows = 0;
+    // Vista común (Frontier 1): misma coordenada que mouseCol/Row.
+    CellPos cellPos() const { return CellPos{mouseCol, mouseRow}; }
+    void setCellPos(CellPos p) { mouseCol = p.col; mouseRow = p.row; }
     // Nota: desde v0.3 no hay campo "shift". La seleccion no depende del
     // modificador Shift (que cada terminal emite de forma distinta); la
     // entrada a seleccion se hace con la letra 's' en modo Navegacion.

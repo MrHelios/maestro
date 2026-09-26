@@ -3,6 +3,7 @@
 #include <string_view>
 
 #include "platform/Event.h"
+#include "platform/IEventSource.h"
 #include "platform/tty/Keymap.h"
 
 // Encapsula todo lo especifico de la terminal (POSIX/Linux/macOS):
@@ -14,10 +15,10 @@
 // caracter UTF-8 multibyte), pero NO decide el significado de cada tecla:
 // eso vive en el Keymap (remapeable), que Terminal consulta para traducir
 // lo leido a un Evento.
-class Terminal {
+class Terminal : public IEventSource {
 public:
     Terminal();
-    ~Terminal();
+    ~Terminal() override;
 
     // Pone la terminal en modo raw: sin buffer de linea, sin eco,
     // teclas especiales (Ctrl+C, Ctrl+Z, etc) entregadas tal cual.
@@ -47,7 +48,7 @@ public:
     // tradujo una tecla; false si el timeout expiro sin entrada. Es el
     // mecanismo que permite al Editor despertar el ciclo para limpiar un
     // mensaje de accion expirado sin que el usuario aprete ninguna tecla.
-    bool readEvent(Event& event, int timeoutMs);
+    bool readEvent(Event& event, int timeoutMs) override;
 
     // Tamano actual de la terminal.
     void getWindowSize(int& rows, int& cols);
@@ -57,7 +58,10 @@ public:
     // Tabla tecla -> Evento que readEvent() consulta. El usuario puede
     // rebindear las teclas en tiempo de ejecucion (keymap().bindSequence(...)
     // / keymap().bindControl(...)) sin tocar la logica del Editor.
+    // Tipo concreto (compat tests); keymapIface() expone la interfaz (10).
     Keymap& keymap() { return keymap_; }
+    IKeymap& keymapIface() { return keymap_; }
+    const IKeymap& keymapIface() const { return keymap_; }
 
     static bool parseMouseSgr(std::string_view seq, Event& e);
 

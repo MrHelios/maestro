@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "rendering/Style.h"
+
 struct Theme {
     int id;
     std::string background;        // fondo del area de texto y relleno de filas "~"
@@ -139,4 +141,52 @@ inline bool operator==(const Theme& a, const Theme& b) {
 
 inline bool operator!=(const Theme& a, const Theme& b) {
     return !(a == b); 
+}
+
+// ---------------------------------------------------------------------------
+// Frontier (7): Theme → Style.
+//
+// El Theme es la tabla ANSI del backend TTY; StyleRole es el vocabulario
+// común del Frame. Este mapeo es la ÚNICA dirección permitida
+// (Theme conoce Style, nunca al revés; Style.h sigue puro sin ANSI).
+// TtyEncoder::ansiFor delega acá.
+// ---------------------------------------------------------------------------
+inline const std::string& themeAnsiFor(const Theme& t, StyleRole role) {
+    static const std::string kEmpty;
+    switch (role) {
+        case StyleRole::Default:     return kEmpty;
+        case StyleRole::Gutter:      return t.lineNumber;
+        case StyleRole::GutterCurrent: return t.gutterCurrent;
+        case StyleRole::GutterBlank: return kEmpty;
+        case StyleRole::Marker:      return t.marker;
+        case StyleRole::CurrentLine: return t.currentLine;
+        case StyleRole::Selection:   return t.selection;
+        case StyleRole::BracketMatch: return t.bracketMatch;
+        case StyleRole::ListSelected: return t.listSelected;
+        case StyleRole::StatusBase:  return t.statusBar;
+        case StyleRole::StatusName:  return t.statusBarName;
+        case StyleRole::StatusPath:  return t.statusBarPath;
+        case StyleRole::StatusModified: return t.statusBarModified;
+        case StyleRole::StatusAccentDefault: return t.statusBarAccent;
+        case StyleRole::AccentNavegacion:  return t.accentNavegacion;
+        case StyleRole::AccentInteraccion: return t.accentInteraccion;
+        case StyleRole::AccentSeleccion:   return t.accentSeleccion;
+        case StyleRole::AccentComando:     return t.accentComando;
+        case StyleRole::AccentBuffers:     return t.accentBuffers;
+        case StyleRole::AccentGuardar:     return t.accentGuardar;
+        case StyleRole::AccentAbrir:       return t.accentAbrir;
+        case StyleRole::MsgInfo:     return t.message;
+        case StyleRole::MsgSuccess:  return t.success;
+        case StyleRole::MsgWarning:  return t.warning;
+        case StyleRole::MsgError:    return t.error;
+        case StyleRole::MsgPrompt:   return t.prompt;
+        case StyleRole::SyntaxKeyword:      return t.syntaxKeyword;
+        case StyleRole::SyntaxType:         return t.syntaxType;
+        case StyleRole::SyntaxPreprocessor: return t.syntaxPreprocessor;
+        case StyleRole::SyntaxString:       return t.syntaxString;
+        case StyleRole::SyntaxCharacter:    return t.syntaxCharacter;
+        case StyleRole::SyntaxNumber:       return t.syntaxNumber;
+        case StyleRole::SyntaxComment:      return t.syntaxComment;
+    }
+    return kEmpty;
 }

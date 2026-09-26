@@ -4,50 +4,8 @@
 
 #include "rendering/StatusBar.h"
 
-namespace {
-
-const std::string kEmpty;
-
-} // namespace
-
 const std::string& TtyEncoder::ansiFor(StyleRole role) const {
-    const Theme& T = theme_;
-    switch (role) {
-        case StyleRole::Default:     return kEmpty;
-        case StyleRole::Gutter:      return T.lineNumber;
-        case StyleRole::GutterCurrent: return T.gutterCurrent;
-        case StyleRole::GutterBlank: return kEmpty;
-        case StyleRole::Marker:      return T.marker;
-        case StyleRole::CurrentLine: return T.currentLine;
-        case StyleRole::Selection:   return T.selection;
-        case StyleRole::BracketMatch: return T.bracketMatch;
-        case StyleRole::ListSelected: return T.listSelected;
-        case StyleRole::StatusBase:  return T.statusBar;
-        case StyleRole::StatusName:  return T.statusBarName;
-        case StyleRole::StatusPath:  return T.statusBarPath;
-        case StyleRole::StatusModified: return T.statusBarModified;
-        case StyleRole::StatusAccentDefault: return T.statusBarAccent;
-        case StyleRole::AccentNavegacion:  return T.accentNavegacion;
-        case StyleRole::AccentInteraccion: return T.accentInteraccion;
-        case StyleRole::AccentSeleccion:   return T.accentSeleccion;
-        case StyleRole::AccentComando:     return T.accentComando;
-        case StyleRole::AccentBuffers:     return T.accentBuffers;
-        case StyleRole::AccentGuardar:     return T.accentGuardar;
-        case StyleRole::AccentAbrir:       return T.accentAbrir;
-        case StyleRole::MsgInfo:     return T.message;
-        case StyleRole::MsgSuccess:  return T.success;
-        case StyleRole::MsgWarning:  return T.warning;
-        case StyleRole::MsgError:    return T.error;
-        case StyleRole::MsgPrompt:   return T.prompt;
-        case StyleRole::SyntaxKeyword:      return T.syntaxKeyword;
-        case StyleRole::SyntaxType:         return T.syntaxType;
-        case StyleRole::SyntaxPreprocessor: return T.syntaxPreprocessor;
-        case StyleRole::SyntaxString:       return T.syntaxString;
-        case StyleRole::SyntaxCharacter:    return T.syntaxCharacter;
-        case StyleRole::SyntaxNumber:       return T.syntaxNumber;
-        case StyleRole::SyntaxComment:      return T.syntaxComment;
-    }
-    return kEmpty;
+    return themeAnsiFor(theme_, role);
 }
 
 namespace {
