@@ -211,7 +211,7 @@ TEST(render_diff_pantalla_identica_al_frame_completo) {
     auto syncBoth = [&](const std::function<void()>& action) {
         action();
         b.viewport.scrollToCursor(b.cursor);
-        bool allowFullClear = !h.r.hasCache_;
+        bool allowFullClear = !h.r.hasCache();
         checkDiffMatchesFull(viaDiff, viaFull,
             h.getDiffOutput(),
             h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, Message(""), State::Navegacion, b.selection),
@@ -304,7 +304,7 @@ TEST(render_diff_linea_se_encoge_no_deja_basura) {
     Buffer& b = h.buf();
     TinyTerm viaDiff(h.kRows), viaFull(h.kRows);
 
-    bool allow1 = !h.r.hasCache_;
+    bool allow1 = !h.r.hasCache();
     for (int i = 0; i < 20; ++i) h.ed.handleEvent(key('a'));
     b.viewport.scrollToCursor(b.cursor);
     std::string delta = h.getDiffOutput();
@@ -368,7 +368,7 @@ TEST(render_diff_vuelta_de_filebrowser_es_completo) {
     DiffHarness h(300);
     h.getDiffOutput();
     h.r.renderFileList({"a.txt", "b.txt"}, 0, 0, "/tmp", Message(""), 80, 24);
-    CHECK(!h.r.hasCache_);
+    CHECK(!h.r.hasCache());
     const std::string trasFileList = h.getDiffOutput();
     CHECK(trasFileList.find("\x1b[2J\x1b[H") != std::string::npos);
 }
@@ -398,16 +398,16 @@ TEST(render_diff_invalidacion_por_modal_y_resize) {
     DiffHarness h(300);
 
     h.getDiffOutput();
-    CHECK(h.r.hasCache_);
+    CHECK(h.r.hasCache());
 
     h.r.renderBufferList({"uno", "dos"}, 0, 80, 24);
-    CHECK(!h.r.hasCache_);
+    CHECK(!h.r.hasCache());
     const std::string trasModal = h.getDiffOutput();
     CHECK(trasModal.find("\x1b[2J\x1b[H") != std::string::npos);
-    CHECK(h.r.hasCache_);
+    CHECK(h.r.hasCache());
 
     h.buf().viewport.height = 30;
     const std::string trasResize = h.getDiffOutput();
     CHECK(trasResize.find("\x1b[2J\x1b[H") != std::string::npos);
-    CHECK_EQ(h.r.lastViewportH_, 30);
+    CHECK_EQ(h.r.lastViewportH(), 30);
 }

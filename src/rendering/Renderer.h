@@ -1,38 +1,45 @@
 #pragma once
 
-#include <deque>
 #include <optional>
 #include <string>
 #include <vector>
-#include "layout/BracketMatcher.h"
-#include "document/Document.h"
-#include "document/Cursor.h"
-#include "layout/Layout.h"
-#include "document/Selection.h"
-#include "rendering/Theme.h"
-#include "layout/Viewport.h"
+
 #include "app/EditorState.h"
 #include "app/Message.h"
+#include "document/Cursor.h"
+#include "document/Document.h"
+#include "document/Selection.h"
+#include "layout/BracketMatcher.h"
+#include "layout/Layout.h"
+#include "layout/Viewport.h"
 #include "rendering/StatusBar.h"
-#include "syntax/SyntaxHighlighter.h"
-#include "syntax/SyntaxLanguage.h"
-#include "syntax/SyntaxSpan.h"
+#include "rendering/Theme.h"
+#include "rendering/frame/FrameBuilder.h"
+#include "rendering/tty/TtyDiff.h"
+#include "rendering/tty/TtyEncoder.h"
 #include "syntax/SyntaxCache.h"
 
+// ---------------------------------------------------------------------------
+// Renderer: SHIM de compatibilidad (Fase B/C-1).
+//
+// La API pública se preserva intacta para no migrar la batería de tests en
+// esta fase. Internamente delega en el pipeline nuevo:
+//
+//   buildScreen*    -> FrameBuilder::buildFrame + TtyEncoder::encodeFrame
+//   buildDiffFrame* -> TtyDiff (dueño de rowCache_/statusCache_/scroll)
+//
+// Las pantallas de listas (buffers/archivos) siguen siendo TTY directo
+// (pendientes de extracción a rendering/tty/). Los métodos privados al pie
+// (beginFrame, renderEditorContent, ...) se conservan solo porque los
+// perf-tests los usan; delegan en FrameBuilder/TtyEncoder.
+// ---------------------------------------------------------------------------
 class Renderer {
 public:
     static void setTestMode(bool v) { s_testMode = v; }
     static bool isTestMode() { return s_testMode; }
-    void setTheme(const Theme& t) {
-        theme_ = t;
-        hasCache_ = false;
-        hasLastStatusData_ = false;
-    }
-    void invalidateCache() {
-        hasCache_ = false;
-        hasLastStatusData_ = false;
-    }
-    const Theme& theme() const { return theme_; }
+    void setTheme(const Theme& t);
+    const Theme& theme() const { return encoder_.theme(); }
+    void invalidateCache() { diff_.invalidateCache(); }
 
     std::string buildScreen(const Document& doc,
                              const Cursor& cursor,
@@ -106,84 +113,22 @@ public:
                          int width,
                          int height);
 
+    void setExternalSyntaxCache(SyntaxCache* c);
+    SyntaxCache* externalSyntaxCache() const {
+        return frameBuilder_.externalSyntaxCache();
+    }
+    SyntaxCache& activeCache() const { return frameBuilder_.activeCache(); }
+
+    // Observabilidad para tests (solo lectura): estado del cache diferencial
+    // (vive en TtyDiff). Reemplaza el acceso directo a los viejos campos
+    // hasCache_/lastViewportH_ del Renderer monolítico.
+    bool hasCache() const { return diff_.hasCache(); }
+    int lastViewportH() const { return diff_.lastViewportH(); }
+
 private:
-    Theme theme_ = defaultTheme();
-    mutable SyntaxHighlighter syntaxHighlighter_;
-    mutable SyntaxCache syntaxCache_;
-    mutable SyntaxCache* externalCache_ = nullptr;
-
-    mutable std::deque<std::string> rowCache_;   // una entrada por fila de contenido: "\x1b[K" + bytes
-    mutable std::string statusCache_;            // status bar cacheado, filas separadas por "\r\n"
-    mutable bool hasCache_ = false;
-    mutable int cachedContentH_ = -1;
-    mutable int lastViewportW_ = -1;
-    mutable int lastViewportH_ = -1;
-    mutable int lastViewportTop_ = 0;
-    mutable int lastViewportLeft_ = 0;
-    mutable int lastCursorLine_ = 0;
-    mutable int lastCursorCol_ = 0;
-    mutable uint64_t lastVersion_ = 0;
-    mutable int lastLineCount_ = 0;
-    mutable StatusBarData lastStatusData_;
-    mutable bool hasLastStatusData_ = false;
-    mutable std::optional<BracketPair> lastBracketPair_;
-    mutable bool hasLastBracketPair_ = false;
-
-    Layout calculateLayout(int contentRows, int width) const;
-
-    void renderEditorContent(std::string& out,
-                              const Document& doc,
-                              const Cursor& cursor,
-                              const Viewport& viewport,
-                              const std::optional<Normalized>& sel,
-                              const Rect& area,
-                              int gutterW) const;
-    void renderEditorContent(std::string& out,
-                              const Document& doc,
-                              const Cursor& cursor,
-                              const Viewport& viewport,
-                              const std::optional<Normalized>& sel,
-                              const std::optional<Normalized>& searchSel,
-                              const std::optional<Normalized>& bracketOpen,
-                              const std::optional<Normalized>& bracketClose,
-                              const Rect& area,
-                              int gutterW) const;
-
-    void renderEditorRow(std::string& out,
-                         const Document& doc,
-                         const Cursor& cursor,
-                         const Viewport& viewport,
-                         const std::optional<Normalized>& sel,
-                         const std::optional<Normalized>& searchSel,
-                         const std::optional<Normalized>& bracketOpen,
-                         const std::optional<Normalized>& bracketClose,
-                         int docLine,
-                         int gutterW,
-                         int textWidth) const;
-    void renderEditorRow(std::string& out,
-                         const Document& doc,
-                         const Cursor& cursor,
-                         const Viewport& viewport,
-                         const std::optional<Normalized>& sel,
-                         const std::optional<Normalized>& searchSel,
-                         const std::optional<Normalized>& bracketOpen,
-                         const std::optional<Normalized>& bracketClose,
-                         int docLine,
-                         int gutterW,
-                         int textWidth,
-                         const std::vector<SyntaxSpan>& spans) const;
-
-    SyntaxState syntaxStateAt(const Document& doc, int targetLine) const;
-    void updateSyntaxLanguage(const std::string& filename) const;
-public:
-    void setExternalSyntaxCache(SyntaxCache* c) { externalCache_ = c; }
-    SyntaxCache* externalSyntaxCache() const { return externalCache_; }
-    SyntaxCache& activeCache() const { return externalCache_ ? *externalCache_ : syntaxCache_; }
-private:
-    const std::string& syntaxStyleFor(SyntaxToken tok) const;
-    static void normalizeBracketPair(const std::optional<BracketPair>& pair,
-                                     std::optional<Normalized>& outOpen,
-                                     std::optional<Normalized>& outClose);
+    mutable FrameBuilder frameBuilder_;
+    mutable TtyEncoder encoder_;
+    mutable TtyDiff diff_;
 
     void renderBufferListContent(std::string& out,
                                    const std::vector<std::string>& names,
@@ -201,82 +146,24 @@ private:
                            const Rect& area,
                            const StatusBarData& data) const;
 
-    struct EditorGeometry {
-        Layout layout;
-        int gutterW = 0;
-    };
-    EditorGeometry editorGeometry(const Document& doc,
-                                   const Viewport& viewport) const;
-
-    std::string buildEditorBody(const Document& doc,
-                                 const Cursor& cursor,
-                                 const Viewport& viewport,
-                                 const std::string& filename,
-                                 bool modified,
-                                 const Message& message,
-                                 State state,
-                                 const std::optional<Selection>& selection,
-                                 const std::optional<Selection>& searchHighlight,
-                                 const std::optional<BracketPair>& bracketPair) const;
-
-    std::string buildScrollFrame(const Document& doc,
-                                 const Cursor& cursor,
-                                 const Viewport& viewport,
-                                 const std::string& filename,
-                                 bool modified,
-                                 const Message& message,
-                                 State state,
-                                 const std::optional<Selection>& selection,
-                                 const std::optional<Selection>& searchHighlight,
-                                 const std::optional<BracketPair>& bracketPair,
-                                 int deltaTop);
-
-    std::string buildCursorMoveFrame(const Document& doc,
-                                     const Cursor& cursor,
-                                     const Viewport& viewport,
-                                     const std::string& filename,
-                                     bool modified,
-                                     const Message& message,
-                                     State state);
-
-    void rebuildCache(const Document& doc, const Cursor& cursor, const Viewport& viewport,
-                      const std::string& filename, bool modified, const Message& message,
-                      State state, const std::optional<Selection>& selection,
-                      const std::optional<Selection>& searchHighlight,
-                      const std::optional<BracketPair>& bracketPair);
-
-    bool patchContentRow(std::string& out, const Document& doc, const Cursor& cursor,
-                         const Viewport& viewport, const std::optional<Normalized>& sel,
-                         const std::optional<Normalized>& searchSel,
-                         const std::optional<Normalized>& bracketOpen,
-                         const std::optional<Normalized>& bracketClose, int docLine,
-                         int gutterW, int textWidth, int contentH);
-
-    void patchStatusBar(std::string& out, const Document& doc, const Cursor& cursor,
-                        const std::string& filename, bool modified, const Message& message,
-                        State state, const Layout& layout, int contentH);
-
-    void editorCursorPos(const Document& doc,
-                           const Cursor& cursor,
-                           const Viewport& viewport,
-                           int& outRow, int& outCol) const;
-    void editorCursorPos(const Document& doc,
-                           const Cursor& cursor,
-                           const Viewport& viewport,
-                           const EditorGeometry& g,
-                           int& outRow, int& outCol) const;
-
-    void moveCursorTo(std::string& out, int row, int col) const;
-
-    void beginFrame(std::string& out) const;
-    void endFrame(std::string& out) const;
-    void hideCursor(std::string& out) const;
-    void showCursor(std::string& out) const;
-    void setCursorStyle(std::string& out, State state) const;
-    void updateCacheState(const Viewport& viewport, const Cursor& cursor,
-                           const Document& doc);
-
-    static void splitRows(const std::string& body, std::vector<std::string_view>* rows);
+    // Compatibilidad con perf-tests (delegan en TtyEncoder/FrameBuilder).
+    void beginFrame(std::string& out) const { encoder_.beginFrame(out); }
+    void endFrame(std::string& out) const { encoder_.endFrame(out); }
+    void hideCursor(std::string& out) const { encoder_.hideCursor(out); }
+    void showCursor(std::string& out) const { encoder_.showCursor(out); }
+    void setCursorStyle(std::string& out, State state) const {
+        encoder_.setCursorStyle(out, state);
+    }
+    void moveCursorTo(std::string& out, int row, int col) const {
+        encoder_.moveCursorTo(out, row, col);
+    }
+    void renderEditorContent(std::string& out,
+                               const Document& doc,
+                               const Cursor& cursor,
+                               const Viewport& viewport,
+                               const std::optional<Normalized>& sel,
+                               const Rect& area,
+                               int gutterW) const;
 
     static inline bool s_testMode = false;
 };

@@ -242,11 +242,9 @@ inline std::string truncate(std::string_view line, int maxCols) {
 // Devuelve los bytes de `line` cuyas COLUMNAS VISUALES caen dentro de
 // [fromCol, toCol). No corta celdas por la mitad. Si el rango llega al
 // final de la linea devuelve hasta el ultimo byte.
-inline std::string expandTabs(std::string_view line) {
-    bool doInstr = instrument::enabled;
-    uint64_t t0 = doInstr ? instrument::nowNanos() : 0;
-    std::string out;
-    out.reserve(line.size() + 8);
+// Agrega a `out` los bytes de `line` con tabs expandidos (misma lógica que
+// expandTabs, pero sin string temporal: el caller amortiza el buffer).
+inline void expandTabsInto(std::string& out, std::string_view line) {
     int col = 0;
     int n = static_cast<int>(line.size());
     int i = 0;
@@ -263,6 +261,14 @@ inline std::string expandTabs(std::string_view line) {
             i += len;
         }
     }
+}
+
+inline std::string expandTabs(std::string_view line) {
+    bool doInstr = instrument::enabled;
+    uint64_t t0 = doInstr ? instrument::nowNanos() : 0;
+    std::string out;
+    out.reserve(line.size() + 8);
+    expandTabsInto(out, line);
     if (doInstr) {
         uint64_t ns = instrument::nowNanos() - t0;
         instrument::recordExpandTabs(static_cast<uint64_t>(line.size()), ns);
