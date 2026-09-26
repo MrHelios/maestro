@@ -5,7 +5,7 @@
 #include <string>
 
 #include "platform/Event.h"
-#include "platform/IKeymap.h"
+#include "platform/tty/ITtyKeymap.h"
 
 // Tabla de datos que traduce las teclas crudas a Eventos de alto nivel,
 // y que se puede reconfigurar en tiempo de ejecucion.
@@ -29,33 +29,33 @@
 //   - sequences_: secuencias de escape, identificadas por su CONTENIDO
 //     (lo que sigue al ESC hasta el caracter final), p.ej. "A" (ESC[A
 //     = flecha arriba), "[B", "[1;2C", "3~", "OH", ...
-// TtyKeymap: implementación TTY de IKeymap (ver tty/TtyKeymap.h).
+// TtyKeymap: implementación TTY de ITtyKeymap (ver tty/ITtyKeymap.h).
 // Se conserva el nombre histórico `Keymap` por compatibilidad
 // (tests, Terminal); el alias canónico vive en TtyKeymap.h.
-class Keymap : public IKeymap {
+class Keymap : public ITtyKeymap {
 public:
     Keymap();
 
     // --- Teclas de control de un byte (Ctrl+..., Enter, Backspace) ---
     // Asocia `byte` de control a un Evento. Reemplaza el anterior.
-    void bindControl(unsigned char byte, EventType type) override;
+    void bindControl(unsigned char byte, InputEventType type) override;
     // Evento asociado al byte, o std::nullopt si no esta enlazado.
-    std::optional<EventType> control(unsigned char byte) const override;
+    std::optional<InputEventType> control(unsigned char byte) const override;
 
     // --- Secuencias de escape ---
     // Asocia el CONTENIDO de una secuencia (sin el ESC inicial) a un
     // Evento. Reemplaza el anterior. Se guarda tal cual se acumula
     // despues del ESC: "[C" para flecha derecha, "[1;2C" con modificador,
     // "3~" para Delete, "OH" para fin...
-    void bindSequence(const std::string& contents, EventType type) override;
+    void bindSequence(const std::string& contents, InputEventType type) override;
     // Evento asociado al contenido, o std::nullopt si no esta enlazado.
-    std::optional<EventType> sequence(const std::string& contents) const override;
+    std::optional<InputEventType> sequence(const std::string& contents) const override;
 
     // Restaura los enlaces por defecto del editor. Util para "volver a
     // cero" (p.ej. tras una sesion que los reconfiguro).
     void resetDefaults() override;
 
 private:
-    std::map<unsigned char, EventType> controlBytes_;
-    std::map<std::string, EventType> sequences_;
+    std::map<unsigned char, InputEventType> controlBytes_;
+    std::map<std::string, InputEventType> sequences_;
 };

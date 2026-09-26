@@ -7,7 +7,7 @@
 #include "platform/IEventSource.h"
 #include "platform/MouseEvent.h"
 #include "platform/ResizeEvent.h"
-#include "platform/IKeymap.h"
+#include "platform/tty/ITtyKeymap.h"
 #include "platform/tty/Keymap.h"
 #include "platform/tty/TtyKeymap.h"
 #include "platform/tty/Terminal.h"
@@ -115,10 +115,10 @@ TEST(frontier_factories_return_interfaces) {
     CHECK(nullW != nullptr);
 }
 
-// 10: Keymap implementa IKeymap (alias TtyKeymap).
+// 10: Keymap implementa ITtyKeymap (alias TtyKeymap, TTY-only).
 TEST(frontier_ikeymap_interface) {
     TtyKeymap km;
-    IKeymap& iface = km;
+    ITtyKeymap& iface = km;
     iface.bindControl(18, EventType::PageDown);
     auto t = iface.control(18);
     CHECK(t.has_value());
@@ -127,7 +127,7 @@ TEST(frontier_ikeymap_interface) {
     auto s = iface.sequence("[9~");
     CHECK(s.has_value());
     Terminal term;
-    IKeymap& ti = term.keymapIface();
+    ITtyKeymap& ti = term.keymapIface();
     CHECK(ti.control(17).has_value());
 }
 

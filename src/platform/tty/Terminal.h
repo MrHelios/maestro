@@ -4,6 +4,7 @@
 
 #include "platform/Event.h"
 #include "platform/IEventSource.h"
+#include "platform/tty/ITtyKeymap.h"
 #include "platform/tty/Keymap.h"
 
 // Encapsula todo lo especifico de la terminal (POSIX/Linux/macOS):
@@ -58,10 +59,10 @@ public:
     // Tabla tecla -> Evento que readEvent() consulta. El usuario puede
     // rebindear las teclas en tiempo de ejecucion (keymap().bindSequence(...)
     // / keymap().bindControl(...)) sin tocar la logica del Editor.
-    // Tipo concreto (compat tests); keymapIface() expone la interfaz (10).
+    // Tipo concreto (compat tests); keymapIface() expone la interfaz TTY (2).
     Keymap& keymap() { return keymap_; }
-    IKeymap& keymapIface() { return keymap_; }
-    const IKeymap& keymapIface() const { return keymap_; }
+    ITtyKeymap& keymapIface() { return keymap_; }
+    const ITtyKeymap& keymapIface() const { return keymap_; }
 
     static bool parseMouseSgr(std::string_view seq, Event& e);
 

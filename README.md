@@ -145,7 +145,8 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 
 ## Documentación
 
-Aun no implementado
+Ver `docs/architecture.md` (reglas InputEvent/CommandMap, neutralidad de
+backend, keymaps por backend).
 
 ## Licencia
 

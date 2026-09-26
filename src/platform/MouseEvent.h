@@ -47,11 +47,7 @@ inline Event makeMouseReleaseEvent(CellPos p) {
     return e;
 }
 
-// InputEvent: envoltorio común mínimo (forma tipada de "algo llegó").
-// Hoy el engine consume Event; esto documenta el paso previo
-// InputEvent -> Event sin imponer variant/visit en el hot path.
-struct InputEvent {
-    enum class Kind { Key, Mouse, Resize, None };
-    Kind kind = Kind::None;
-    Event event; // forma ya traducida (puente temporal hasta el split total)
-};
+// Nota: el envoltorio genérico antes llamado `InputEvent` vivía aquí como
+// puente temporal; el nombre canónico ahora es el vocabulario semántico de
+// platform/InputEvent.h (alias Event en platform/Event.h). Este header solo
+// conserva MouseEvent y las fábricas MouseEvent -> Event.

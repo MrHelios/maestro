@@ -2,9 +2,9 @@
 
 #include "platform/tty/Keymap.h"
 
-// Frontier (10): TtyKeymap — implementación TTY de IKeymap.
+// Frontier (10): TtyKeymap — implementación TTY de ITtyKeymap.
 //
 // `Keymap` se conserva como nombre histórico (tests y Terminal lo usan);
 // este alias es el nombre canónico del paso 10. La interfaz vive en
-// platform/IKeymap.h (común); este header vive en tty (implementación).
+// platform/tty/ITtyKeymap.h (TTY-only); la GUI tendrá la suya propia.
 using TtyKeymap = Keymap;

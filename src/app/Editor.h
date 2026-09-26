@@ -81,6 +81,14 @@ public:
         handleEvent(event);
     }
 
+    // Puerta GUI (regla InputEvent/CommandMap): ejecuta un comando nombrado
+    // SIN sintetizar eventos de teclado ni pasar por el prefijo. Es el único
+    // punto de entrada para botones/acciones GUI; handleEvent queda para el
+    // teclado (keymap -> InputEvent -> handling -> CommandMap).
+    // Nombre desconocido -> no-op robusto (igual que CommandMap::execute).
+    void executeCommand(const std::string& name);
+    bool hasCommand(const std::string& name) const;
+
     // Getters para testing
     State getStateForTesting() const { return state_; }
     std::string getGoToLineQueryForTesting() const { return goToLineQuery_; }
@@ -385,6 +393,13 @@ private:
     // suppressScrollToCursor_ para que renderFrame no lo deshaga via
     // scrollToCursor en el siguiente frame.
     void applyScroll(int delta);
+    // Salto a extremo durante seleccion total (prefijo 'a' activo): replica
+    // la rama de flechas de handleSelectAllEvent (cursor al extremo,
+    // seleccion degenerada sin rango, sale del prefijo 'a'). `toEnd` false
+    // = BOF, true = EOF. Vive aquí para que los comandos cursor.mover.*
+    // sean dueños de la semántica completa por modo (regla InputEvent /
+    // CommandMap: el handling solo resuelve el nombre).
+    void jumpSelectAllEdge(bool toEnd);
     bool suppressScrollToCursor_ = false;
 
     // ---- Gesto de seleccion por mouse (press cancela vs drag crea) ----

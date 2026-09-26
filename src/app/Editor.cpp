@@ -498,10 +498,201 @@ void Editor::registerCommands() {
     
         bracketJumpPendingPreserve_ = true;
         refreshBracketAfterJump();
-    
+
         state_ = priorState_;
         setActionMessage("Bracket.", MessageKind::Info);
     });
+
+    // --- Cobertura completa (decisión 3): intenciones sin parámetros ---
+    // Cada comando representa la INTENCIÓN de aplicación y es dueño de la
+    // semántica completa por modo (regla InputEvent/CommandMap): el handling
+    // (handleNavegacion/Interaccion/SeleccionEvent) solo resuelve
+    // InputEvent -> nombre, sin envolver la acción. Así el camino TTY y el
+    // botón GUI (executeCommand) producen exactamente lo mismo:
+    //   Navegacion/Interaccion -> mover pelado;
+    //   Seleccion (sin 'a')    -> begin + mover + update;
+    //   Seleccion total ('a')  -> salto a extremo (flechas) o no-op;
+    //   modales                -> no-op, como el teclado.
+    // Eventos con payload (InsertChar.text, Mouse.coords, Resize) NO son
+    // comandos (Handler es void()): viajan por handleEvent.
+    commands_.registerCommand("cursor.mover.izquierda", [this] {
+        Buffer& b = active();
+        if (state_ == State::Seleccion && b.selectAllActive) {
+            jumpSelectAllEdge(false);  // BOF, como flecha en seleccion total
+            return;
+        }
+        if (state_ == State::Seleccion) {
+            beginSelection();
+            b.cursor.moveLeft(b.document);
+            updateSelectionPosition();
+            return;
+        }
+        if (state_ == State::Navegacion || state_ == State::Interaccion) {
+            b.cursor.moveLeft(b.document);
+        }
+    });
+    commands_.registerCommand("cursor.mover.derecha", [this] {
+        Buffer& b = active();
+        if (state_ == State::Seleccion && b.selectAllActive) {
+            jumpSelectAllEdge(true);  // EOF, como flecha en seleccion total
+            return;
+        }
+        if (state_ == State::Seleccion) {
+            beginSelection();
+            b.cursor.moveRight(b.document);
+            updateSelectionPosition();
+            return;
+        }
+        if (state_ == State::Navegacion || state_ == State::Interaccion) {
+            b.cursor.moveRight(b.document);
+        }
+    });
+    commands_.registerCommand("cursor.mover.arriba", [this] {
+        Buffer& b = active();
+        if (state_ == State::Seleccion && b.selectAllActive) {
+            jumpSelectAllEdge(false);  // BOF, como flecha en seleccion total
+            return;
+        }
+        if (state_ == State::Seleccion) {
+            beginSelection();
+            b.cursor.moveUp(b.document);
+            updateSelectionPosition();
+            return;
+        }
+        if (state_ == State::Navegacion || state_ == State::Interaccion) {
+            b.cursor.moveUp(b.document);
+        }
+    });
+    commands_.registerCommand("cursor.mover.abajo", [this] {
+        Buffer& b = active();
+        if (state_ == State::Seleccion && b.selectAllActive) {
+            jumpSelectAllEdge(true);  // EOF, como flecha en seleccion total
+            return;
+        }
+        if (state_ == State::Seleccion) {
+            beginSelection();
+            b.cursor.moveDown(b.document);
+            updateSelectionPosition();
+            return;
+        }
+        if (state_ == State::Navegacion || state_ == State::Interaccion) {
+            b.cursor.moveDown(b.document);
+        }
+    });
+    commands_.registerCommand("cursor.mover.inicio", [this] {
+        Buffer& b = active();
+        if (state_ == State::Seleccion && b.selectAllActive) return;  // no-op, como el teclado
+        if (state_ == State::Seleccion) {
+            beginSelection();
+            b.cursor.moveHome();
+            updateSelectionPosition();
+            return;
+        }
+        if (state_ == State::Navegacion || state_ == State::Interaccion) {
+            b.cursor.moveHome();
+        }
+    });
+    commands_.registerCommand("cursor.mover.fin", [this] {
+        Buffer& b = active();
+        if (state_ == State::Seleccion && b.selectAllActive) return;  // no-op, como el teclado
+        if (state_ == State::Seleccion) {
+            beginSelection();
+            b.cursor.moveEnd(b.document);
+            updateSelectionPosition();
+            return;
+        }
+        if (state_ == State::Navegacion || state_ == State::Interaccion) {
+            b.cursor.moveEnd(b.document);
+        }
+    });
+    commands_.registerCommand("cursor.pagina.arriba", [this] {
+        if (state_ == State::Seleccion && active().selectAllActive) return;  // no-op, como el teclado
+        if (state_ == State::Seleccion) {
+            beginSelection();
+            applyPage(-1);
+            updateSelectionPosition();
+            return;
+        }
+        if (state_ == State::Navegacion || state_ == State::Interaccion) {
+            applyPage(-1);
+        }
+    });
+    commands_.registerCommand("cursor.pagina.abajo", [this] {
+        if (state_ == State::Seleccion && active().selectAllActive) return;  // no-op, como el teclado
+        if (state_ == State::Seleccion) {
+            beginSelection();
+            applyPage(+1);
+            updateSelectionPosition();
+            return;
+        }
+        if (state_ == State::Navegacion || state_ == State::Interaccion) {
+            applyPage(+1);
+        }
+    });
+    commands_.registerCommand("vista.scroll.arriba", [this] {
+        if (state_ == State::Seleccion && active().selectAllActive) return;  // no-op, como el teclado
+        if (state_ == State::Navegacion || state_ == State::Interaccion ||
+            state_ == State::Seleccion) {
+            applyScroll(-3);
+        }
+    });
+    commands_.registerCommand("vista.scroll.abajo", [this] {
+        if (state_ == State::Seleccion && active().selectAllActive) return;  // no-op, como el teclado
+        if (state_ == State::Navegacion || state_ == State::Interaccion ||
+            state_ == State::Seleccion) {
+            applyScroll(3);
+        }
+    });
+    commands_.registerCommand("edicion.deshacer", [this] {
+        undo();
+    });
+    commands_.registerCommand("edicion.rehacer", [this] {
+        redo();
+    });
+    // Ctrl+K s / botón GUI "Guardar": con nombre guarda directo (y sale
+    // del prefijo si venía de él); sin nombre abre el prompt SaveAs
+    // (fijando priorState_ si no venía del prefijo, para poder volver).
+    commands_.registerCommand("buffer.guardar", [this] {
+        if (active().filename.empty()) {
+            if (state_ != State::Prefix && state_ != State::SaveAs)
+                priorState_ = state_;
+            startSaveAs();
+            return;
+        }
+        save();
+        if (state_ == State::Prefix) state_ = priorState_;
+    });
+    // Ctrl+K Ctrl+S / botón GUI "Guardar como": siempre abre el prompt.
+    commands_.registerCommand("buffer.guardar.como", [this] {
+        if (state_ != State::Prefix && state_ != State::SaveAs)
+            priorState_ = state_;
+        startSaveAs();
+    });
+    // Ctrl+K q / botón GUI "Salir": bloquea si hay modificados.
+    commands_.registerCommand("app.salir", [this] {
+        bool anyModified = false;
+        for (int i = 0; i < buffers.count(); ++i) {
+            if (buffers.at(i).modified) { anyModified = true; break; }
+        }
+        if (anyModified) {
+            if (state_ == State::Prefix) state_ = priorState_;
+            setActionMessage("Hay archivos sin guardar", MessageKind::Warning);
+        } else {
+            running_ = false;
+        }
+    });
+    // Ctrl+K Ctrl+Q / botón GUI "Salir sin guardar": salida inmediata.
+    commands_.registerCommand("app.salir.forzado", [this] {
+        running_ = false;
+    });
+}
+
+void Editor::executeCommand(const std::string& name) {
+    commands_.execute(name);
+}
+
+bool Editor::hasCommand(const std::string& name) const {
+    return commands_.has(name);
 }
 
 bool Editor::isDirectory(const std::string& path) {
@@ -1250,8 +1441,8 @@ void Editor::handleEvent(const Event& event) {
     // modo. Nota: Ctrl+S (Save) SOLO tiene efecto tras el prefijo (lo
     // consume handlePrefixKey). Sin prefijo llega aqui y cae como no-op
     // en cada modo: Ctrl+S deja de tener significado especial.
-    if (event.type == EventType::Undo) { undo(); return; }
-    if (event.type == EventType::Redo) { redo(); return; }
+    if (event.type == EventType::Undo) { commands_.execute("edicion.deshacer"); return; }
+    if (event.type == EventType::Redo) { commands_.execute("edicion.rehacer"); return; }
     if (event.type == EventType::Prefix) {
         priorState_ = state_;
         state_ = State::Prefix;
@@ -1292,7 +1483,6 @@ void Editor::handleEvent(const Event& event) {
 }
 
 void Editor::handleNavegacionEvent(const Event& event) {
-    Buffer& b = active();
     switch (event.type) {
         case EventType::InsertChar:
             // En navegacion no se escribe: las letras solo pueden ser
@@ -1324,17 +1514,17 @@ void Editor::handleNavegacionEvent(const Event& event) {
             break;
 
         // Movimientos libres, sin iniciar seleccion (a diferencia de
-        // como Select extendia en v0.3-v0.4).
-        case EventType::MoveLeft: b.cursor.moveLeft(b.document); break;
-        case EventType::MoveRight: b.cursor.moveRight(b.document); break;
-        case EventType::MoveUp: b.cursor.moveUp(b.document); break;
-        case EventType::MoveDown: b.cursor.moveDown(b.document); break;
-        case EventType::MoveHome: b.cursor.moveHome(); break;
-        case EventType::MoveEnd: b.cursor.moveEnd(b.document); break;
-        case EventType::PageUp: applyPage(-1); break;
-        case EventType::PageDown: applyPage(+1); break;
-        case EventType::ScrollUp: applyScroll(-3); break;
-        case EventType::ScrollDown: applyScroll(3); break;
+        // como Select extendia en v0.3-v0.4). La acción vive en commands_.
+        case EventType::MoveLeft: commands_.execute("cursor.mover.izquierda"); break;
+        case EventType::MoveRight: commands_.execute("cursor.mover.derecha"); break;
+        case EventType::MoveUp: commands_.execute("cursor.mover.arriba"); break;
+        case EventType::MoveDown: commands_.execute("cursor.mover.abajo"); break;
+        case EventType::MoveHome: commands_.execute("cursor.mover.inicio"); break;
+        case EventType::MoveEnd: commands_.execute("cursor.mover.fin"); break;
+        case EventType::PageUp: commands_.execute("cursor.pagina.arriba"); break;
+        case EventType::PageDown: commands_.execute("cursor.pagina.abajo"); break;
+        case EventType::ScrollUp: commands_.execute("vista.scroll.arriba"); break;
+        case EventType::ScrollDown: commands_.execute("vista.scroll.abajo"); break;
 
         // InsertNewline/Backspace/Delete y Escape: no-op (no hay edicion
         // posible y ya estamos en navegacion, no hay a donde volver).
@@ -1522,16 +1712,16 @@ void Editor::handleInteraccionEvent(const Event& event) {
             setStatusMessage(kHelpEmpty);
             break;
 
-        case EventType::MoveLeft: b.cursor.moveLeft(b.document); break;
-        case EventType::MoveRight: b.cursor.moveRight(b.document); break;
-        case EventType::MoveUp: b.cursor.moveUp(b.document); break;
-        case EventType::MoveDown: b.cursor.moveDown(b.document); break;
-        case EventType::MoveHome: b.cursor.moveHome(); break;
-        case EventType::MoveEnd: b.cursor.moveEnd(b.document); break;
-        case EventType::PageUp: applyPage(-1); break;
-        case EventType::PageDown: applyPage(+1); break;
-        case EventType::ScrollUp: applyScroll(-3); break;
-        case EventType::ScrollDown: applyScroll(3); break;
+        case EventType::MoveLeft: commands_.execute("cursor.mover.izquierda"); break;
+        case EventType::MoveRight: commands_.execute("cursor.mover.derecha"); break;
+        case EventType::MoveUp: commands_.execute("cursor.mover.arriba"); break;
+        case EventType::MoveDown: commands_.execute("cursor.mover.abajo"); break;
+        case EventType::MoveHome: commands_.execute("cursor.mover.inicio"); break;
+        case EventType::MoveEnd: commands_.execute("cursor.mover.fin"); break;
+        case EventType::PageUp: commands_.execute("cursor.pagina.arriba"); break;
+        case EventType::PageDown: commands_.execute("cursor.pagina.abajo"); break;
+        case EventType::ScrollUp: commands_.execute("vista.scroll.arriba"); break;
+        case EventType::ScrollDown: commands_.execute("vista.scroll.abajo"); break;
 
         default:
             break;
@@ -1549,29 +1739,32 @@ void Editor::handleSeleccionEvent(const Event& event) {
     }
 
     switch (event.type) {
-        // Los movimientos extienden la seleccion, igual que hacia v0.3-v0.4.
+        // Movimientos: pura resolución InputEvent -> nombre. La semántica
+        // completa (begin + mover + update, o salto a extremo en seleccion
+        // total) vive en el comando (regla InputEvent/CommandMap), así el
+        // botón GUI produce lo mismo que el teclado. Igual que v0.3-v0.4.
         case EventType::MoveLeft:
-            beginSelection(); b.cursor.moveLeft(b.document); updateSelectionPosition(); break;
+            commands_.execute("cursor.mover.izquierda"); break;
         case EventType::MoveRight:
-            beginSelection(); b.cursor.moveRight(b.document); updateSelectionPosition(); break;
+            commands_.execute("cursor.mover.derecha"); break;
         case EventType::MoveUp:
-            beginSelection(); b.cursor.moveUp(b.document); updateSelectionPosition(); break;
+            commands_.execute("cursor.mover.arriba"); break;
         case EventType::MoveDown:
-            beginSelection(); b.cursor.moveDown(b.document); updateSelectionPosition(); break;
+            commands_.execute("cursor.mover.abajo"); break;
         case EventType::MoveHome:
-            beginSelection(); b.cursor.moveHome(); updateSelectionPosition(); break;
+            commands_.execute("cursor.mover.inicio"); break;
         case EventType::MoveEnd:
-            beginSelection(); b.cursor.moveEnd(b.document); updateSelectionPosition(); break;
+            commands_.execute("cursor.mover.fin"); break;
         // RePag/AvPag extienden la seleccion como una flecha (Up/Down):
-        // el anchor permanece y el cursor salta una pagina.
+        // el anchor permanece y el cursor salta una pagina (en el comando).
         case EventType::PageUp:
-            beginSelection(); applyPage(-1); updateSelectionPosition(); break;
+            commands_.execute("cursor.pagina.arriba"); break;
         case EventType::PageDown:
-            beginSelection(); applyPage(+1); updateSelectionPosition(); break;
+            commands_.execute("cursor.pagina.abajo"); break;
         case EventType::ScrollUp:
-            applyScroll(-3); break;
+            commands_.execute("vista.scroll.arriba"); break;
         case EventType::ScrollDown:
-            applyScroll(3); break;
+            commands_.execute("vista.scroll.abajo"); break;
 
         // 'c' copia el rango al buffer y 'x' lo copia y lo borra; ambos
         // terminan la seleccion y vuelven a navegacion. Si la seleccion
@@ -1713,28 +1906,39 @@ void Editor::handleSelectAllEvent(const Event& event) {
             // Cualquier otra letra: no pasa nada.
             break;
 
-        // Flechas: saltan a los extremos, terminan la seleccion total y
-        // dejan el cursor en el extremo (anchor == cursor, sin seleccion).
+        // Flechas y movimientos: delegan a los comandos cursor.mover.* /
+        // cursor.pagina.* / vista.scroll.*, que son dueños del salto a
+        // extremo en seleccion total (jumpSelectAllEdge) y del no-op donde
+        // el teclado no hace nada (regla InputEvent/CommandMap).
         case EventType::MoveRight:
-        case EventType::MoveDown: {
-            int last = b.document.lineCount() - 1;
-            b.cursor.line = last;
-            b.cursor.col = b.document.lineLength(last);
-            b.selection = Selection{{b.cursor.line, b.cursor.col},
-                                    {b.cursor.line, b.cursor.col}};
-            b.selectAllActive = false;
-            b.selectAllPrevious.reset();
-            setStatusMessage("SELECCION");
+            commands_.execute("cursor.mover.derecha");
             break;
-        }
+        case EventType::MoveDown:
+            commands_.execute("cursor.mover.abajo");
+            break;
         case EventType::MoveLeft:
+            commands_.execute("cursor.mover.izquierda");
+            break;
         case EventType::MoveUp:
-            b.cursor.line = 0;
-            b.cursor.col = 0;
-            b.selection = Selection{{0, 0}, {0, 0}};
-            b.selectAllActive = false;
-            b.selectAllPrevious.reset();
-            setStatusMessage("SELECCION");
+            commands_.execute("cursor.mover.arriba");
+            break;
+        case EventType::MoveHome:
+            commands_.execute("cursor.mover.inicio");
+            break;
+        case EventType::MoveEnd:
+            commands_.execute("cursor.mover.fin");
+            break;
+        case EventType::PageUp:
+            commands_.execute("cursor.pagina.arriba");
+            break;
+        case EventType::PageDown:
+            commands_.execute("cursor.pagina.abajo");
+            break;
+        case EventType::ScrollUp:
+            commands_.execute("vista.scroll.arriba");
+            break;
+        case EventType::ScrollDown:
+            commands_.execute("vista.scroll.abajo");
             break;
 
         // ESC: cancela la seleccion total (y toda seleccion) y vuelve a
@@ -1785,11 +1989,11 @@ std::optional<Selection> Editor::selectAllSelection() const {
 void Editor::handlePrefixKey(const Event& event) {
     switch (event.type) {
         case EventType::Save:
-            startSaveAs();
+            commands_.execute("buffer.guardar.como");
             break;
 
         case EventType::Quit:
-            running_ = false;
+            commands_.execute("app.salir.forzado");
             break;
 
         // v0.6.3: comandos de buffer dentro del prefijo. El mapeo tecla ->
@@ -1812,25 +2016,11 @@ void Editor::handlePrefixKey(const Event& event) {
                 break;
             }
             if (event.text == "s") {           // Ctrl+K s: guardar archivo
-                if (active().filename.empty()) {
-                    startSaveAs();
-                    break;
-                }
-                save();
-                state_ = priorState_;
+                commands_.execute("buffer.guardar");
                 break;
             }
             if (event.text == "q") {           // Ctrl+K q: salida segura
-                bool anyModified = false;
-                for (int i = 0; i < buffers.count(); ++i) {
-                    if (buffers.at(i).modified) { anyModified = true; break; }
-                }
-                if (anyModified) {
-                    state_ = priorState_;
-                    setActionMessage("Hay archivos sin guardar", MessageKind::Warning);
-                } else {
-                    running_ = false;
-                }
+                commands_.execute("app.salir");
                 break;
             }
             if (event.text == "b") {           // Ctrl+K b: buffer anterior
@@ -2192,6 +2382,23 @@ void Editor::applyScroll(int delta) {
     const int oldTop = b.viewport.top;
     b.viewport.top = std::min(std::max(b.viewport.top + delta, 0), maxTop);
     if (b.viewport.top != oldTop) suppressScrollToCursor_ = true;
+}
+
+void Editor::jumpSelectAllEdge(bool toEnd) {
+    Buffer& b = active();
+    if (toEnd) {
+        int last = b.document.lineCount() - 1;
+        b.cursor.line = last;
+        b.cursor.col = b.document.lineLength(last);
+    } else {
+        b.cursor.line = 0;
+        b.cursor.col = 0;
+    }
+    b.selection = Selection{{b.cursor.line, b.cursor.col},
+                            {b.cursor.line, b.cursor.col}};
+    b.selectAllActive = false;
+    b.selectAllPrevious.reset();
+    setStatusMessage("SELECCION");
 }
 
 void Editor::clearSelection() {

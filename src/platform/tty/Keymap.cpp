@@ -15,68 +15,68 @@ void Keymap::resetDefaults() {
     // --- Teclas de control de un byte ---
     // Todas son bytes UNICOS (no secuencias), asi que funcionan igual en
     // cualquier emulador.
-    bindControl(17, EventType::Quit);                // Ctrl+Q -> salir
-    bindControl(19, EventType::Save);                // Ctrl+S -> guardar (solo tras Ctrl+K)
-    bindControl(11, EventType::Prefix);              // Ctrl+K -> prefijo de comando
-    bindControl(21, EventType::Undo);                // Ctrl+U -> deshacer
-    bindControl(25, EventType::Redo);                // Ctrl+Y -> rehacer
-    bindControl(127, EventType::Backspace);          // DEL
-    bindControl(8, EventType::Backspace);            // BS (otra forma de Backspace)
-    bindControl(13, EventType::InsertNewline);       // Enter (\r)
-    bindControl(10, EventType::InsertNewline);       // Enter (\n)
+    bindControl(17, InputEventType::Quit);                // Ctrl+Q -> salir
+    bindControl(19, InputEventType::Save);                // Ctrl+S -> guardar (solo tras Ctrl+K)
+    bindControl(11, InputEventType::Prefix);              // Ctrl+K -> prefijo de comando
+    bindControl(21, InputEventType::Undo);                // Ctrl+U -> deshacer
+    bindControl(25, InputEventType::Redo);                // Ctrl+Y -> rehacer
+    bindControl(127, InputEventType::Backspace);          // DEL
+    bindControl(8, InputEventType::Backspace);            // BS (otra forma de Backspace)
+    bindControl(13, InputEventType::InsertNewline);       // Enter (\r)
+    bindControl(10, InputEventType::InsertNewline);       // Enter (\n)
 
     // --- Secuencias de escape (el contenido que sigue al ESC) ---
     // Flechas y Home/End sin parametros: "ESC [ A" se guarda como "[A"...,
     // y "ESC O H" (teclas de cursor en modo aplicacion) como "OH".
-    bindSequence("A",  EventType::MoveUp);
-    bindSequence("B",  EventType::MoveDown);
-    bindSequence("C",  EventType::MoveRight);
-    bindSequence("D",  EventType::MoveLeft);
-    bindSequence("[A", EventType::MoveUp);
-    bindSequence("[B", EventType::MoveDown);
-    bindSequence("[C", EventType::MoveRight);
-    bindSequence("[D", EventType::MoveLeft);
-    bindSequence("[H", EventType::MoveHome);
-    bindSequence("[F", EventType::MoveEnd);
-    bindSequence("OH", EventType::MoveEnd);   // modo aplicacion: End
-    bindSequence("OF", EventType::MoveHome);  // modo aplicacion: Home
+    bindSequence("A",  InputEventType::MoveUp);
+    bindSequence("B",  InputEventType::MoveDown);
+    bindSequence("C",  InputEventType::MoveRight);
+    bindSequence("D",  InputEventType::MoveLeft);
+    bindSequence("[A", InputEventType::MoveUp);
+    bindSequence("[B", InputEventType::MoveDown);
+    bindSequence("[C", InputEventType::MoveRight);
+    bindSequence("[D", InputEventType::MoveLeft);
+    bindSequence("[H", InputEventType::MoveHome);
+    bindSequence("[F", InputEventType::MoveEnd);
+    bindSequence("OH", InputEventType::MoveEnd);   // modo aplicacion: End
+    bindSequence("OF", InputEventType::MoveHome);  // modo aplicacion: Home
     // Modo aplicacion (SS3): las flechas tambien llegan como "ESC O A"...
     // (p.ej. tras activar smkx en algunos emuladores).
-    bindSequence("OA", EventType::MoveUp);
-    bindSequence("OB", EventType::MoveDown);
-    bindSequence("OC", EventType::MoveRight);
-    bindSequence("OD", EventType::MoveLeft);
+    bindSequence("OA", InputEventType::MoveUp);
+    bindSequence("OB", InputEventType::MoveDown);
+    bindSequence("OC", InputEventType::MoveRight);
+    bindSequence("OD", InputEventType::MoveLeft);
 
     // Secuencias con parametros e "~": Home/End/Delete/RePag/AvPag.
     // Aqui el parametro SI importa: es la propia tecla, no un modificador.
-    bindSequence("[1~", EventType::MoveHome);
-    bindSequence("[7~", EventType::MoveHome);
-    bindSequence("[4~", EventType::MoveEnd);
-    bindSequence("[8~", EventType::MoveEnd);
-    bindSequence("[3~", EventType::Delete);
-    bindSequence("[5~", EventType::PageUp);
-    bindSequence("[6~", EventType::PageDown);
+    bindSequence("[1~", InputEventType::MoveHome);
+    bindSequence("[7~", InputEventType::MoveHome);
+    bindSequence("[4~", InputEventType::MoveEnd);
+    bindSequence("[8~", InputEventType::MoveEnd);
+    bindSequence("[3~", InputEventType::Delete);
+    bindSequence("[5~", InputEventType::PageUp);
+    bindSequence("[6~", InputEventType::PageDown);
 }
 
 Keymap::Keymap() {
     resetDefaults();
 }
 
-void Keymap::bindControl(unsigned char byte, EventType type) {
+void Keymap::bindControl(unsigned char byte, InputEventType type) {
     controlBytes_[byte] = type;
 }
 
-std::optional<EventType> Keymap::control(unsigned char byte) const {
+std::optional<InputEventType> Keymap::control(unsigned char byte) const {
     auto it = controlBytes_.find(byte);
     return it == controlBytes_.end() ? std::nullopt
-                                     : std::optional<EventType>(it->second);
+                                     : std::optional<InputEventType>(it->second);
 }
 
-void Keymap::bindSequence(const std::string& contents, EventType type) {
+void Keymap::bindSequence(const std::string& contents, InputEventType type) {
     sequences_[contents] = type;
 }
 
-std::optional<EventType> Keymap::sequence(const std::string& contents) const {
+std::optional<InputEventType> Keymap::sequence(const std::string& contents) const {
     auto it = sequences_.find(contents);
     if (it != sequences_.end()) return it->second;
     if (contents.size() >= 3) {
