@@ -154,6 +154,9 @@ private:
     void setCursorStyle(std::string& out, State state) const {
         encoder_.setCursorStyle(out, state);
     }
+    void setCursorStyle(std::string& out, FrameCursorShape shape) const {
+        encoder_.setCursorStyle(out, shape);
+    }
     void moveCursorTo(std::string& out, int row, int col) const {
         encoder_.moveCursorTo(out, row, col);
     }

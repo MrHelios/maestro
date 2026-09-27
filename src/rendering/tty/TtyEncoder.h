@@ -49,6 +49,7 @@ public:
     void hideCursor(std::string& out) const;
     void showCursor(std::string& out) const;
     void setCursorStyle(std::string& out, State state) const;
+    void setCursorStyle(std::string& out, FrameCursorShape shape) const;
     void beginFrame(std::string& out) const;
     void endFrame(std::string& out) const;
 

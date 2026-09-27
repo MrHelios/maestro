@@ -7,6 +7,7 @@
 #include "app/EditorState.h"
 #include "base/SmallVec.h"
 #include "layout/Layout.h"
+#include "platform/CellPos.h"
 #include "rendering/StatusBar.h"
 #include "rendering/Style.h"
 
@@ -52,12 +53,42 @@ struct StyledRow {
     bool isCurrentLine = false;
 };
 
-// Cursor lógico ya resuelto a coordenadas de terminal 1-indexadas.
+// Forma visual del cursor para el contrato común TTY/GUI.
+// NOTA: se llama FrameCursorShape (y no CursorShape) porque X11/X.h define
+// `#define CursorShape 0` y cualquier uso del identificador rompe la
+// compilación cuando los headers de X11 ya fueron incluidos (p. ej. via
+// X11Clipboard.h antes que Frame.h).
+enum class FrameCursorShape {
+    Block, // Navegacion/Seleccion/etc: bloque "\x1b[2 q"
+    Bar,   // Interaccion: barra "\x1b[1 q"
+};
+
+inline FrameCursorShape cursorShapeFor(State state) {
+    return state == State::Interaccion ? FrameCursorShape::Bar : FrameCursorShape::Block;
+}
+
+// Cursor visual con contrato explícito (comun TTY/GUI):
+//
+//   visible == true  -> `pos` es la posicion visual real (1-based) y el
+//                       backend debe pintar el cursor ahi con `shape`.
+//   visible == false -> el cursor logico esta fuera del viewport (ej. rueda
+//                       con suppressScrollToCursor_) o el modo lo oculta
+//                       (Busqueda). `pos` NO debe utilizarse para pintar.
+//
+// El GUI no reproduce ningun clamp: solo mira `visible`. El backend TTY
+// tampoco clampa: si no es visible deja el cursor oculto (hideCursor sin
+// show posterior). `state` se conserva para el estilo legacy/TTY.
 struct FrameCursor {
-    int row = 1;
-    int col = 1;
-    bool visible = true;   // Busqueda oculta el cursor real
+    CellPos pos; // 1-based (col=X, row=Y); valido solo si visible==true
+    // Default seguro: oculto, consistente con pos invalida (0,0).
+    // Todo Frame valido lo rellena FrameBuilder::buildFrame.
+    bool visible = false;
+    FrameCursorShape shape = FrameCursorShape::Block;
     State state = State::Navegacion;
+    // Compatibilidad con el camino TTY anterior (row/col 1-based).
+    // Solo validos si visible==true; no usar cuando visible==false.
+    int row() const { return pos.row; }
+    int col() const { return pos.col; }
 };
 
 struct Frame {

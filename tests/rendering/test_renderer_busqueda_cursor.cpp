@@ -248,13 +248,16 @@ TEST(renderer_cursor_fuera_viewport_seguro) {
 
     Renderer r;
 
+    // Contrato visual explicito: cursor fuera del viewport => oculto,
+    // no clampado al borde (vale tambien en Navegacion, no solo Busqueda).
     std::string fNav = r.buildScreen(
         doc, cur, vp, "t", false, "",
         State::Navegacion, std::nullopt, std::nullopt
     );
 
     CHECK(!fNav.empty());
-    CHECK(contains(fNav, Ansi::CURSOR_SHOW));
+    CHECK(!contains(fNav, Ansi::CURSOR_SHOW));
+    CHECK(contains(fNav, Ansi::CURSOR_HIDE));
 
     std::string fBus = r.buildScreen(
         doc, cur, vp, "t", false, "",
@@ -273,7 +276,7 @@ TEST(renderer_cursor_fuera_viewport_seguro) {
     );
 
     CHECK(!d1.empty());
-    CHECK(contains(d1, Ansi::CURSOR_SHOW));
+    CHECK(!contains(d1, Ansi::CURSOR_SHOW));
 
     std::string d2 = rd.buildDiffFrame(
         doc, cur, vp, "t", false, "",

@@ -201,12 +201,15 @@ std::string TtyDiff::buildCursorMoveFrame(
     patchStatusBar(out, doc, cursor, filename, modified, message, state, layout,
                    contentH);
 
+    // Contrato visual: solo posicionar/mostrar si el cursor esta en viewport.
+    // Si esta fuera (rueda con suppressScrollToCursor_) se deja oculto.
     if (state != State::Busqueda) {
-        int curRow = 1, curCol = 1;
-        builder_.editorCursorPos(doc, cursor, viewport, g, curRow, curCol);
-        encoder_.moveCursorTo(out, curRow, curCol);
-        encoder_.setCursorStyle(out, state);
-        encoder_.showCursor(out);
+        int curRow = 0, curCol = 0;
+        if (builder_.editorCursorPos(doc, cursor, viewport, g, curRow, curCol)) {
+            encoder_.moveCursorTo(out, curRow, curCol);
+            encoder_.setCursorStyle(out, state);
+            encoder_.showCursor(out);
+        }
     }
     lastCursorLine_ = cursor.line;
     lastCursorCol_ = cursor.col;
@@ -292,11 +295,12 @@ std::string TtyDiff::buildScrollFrame(
                    g.layout, contentH);
 
     if (state != State::Busqueda) {
-        int curRow = 1, curCol = 1;
-        builder_.editorCursorPos(doc, cursor, viewport, g, curRow, curCol);
-        encoder_.moveCursorTo(out, curRow, curCol);
-        encoder_.setCursorStyle(out, state);
-        encoder_.showCursor(out);
+        int curRow = 0, curCol = 0;
+        if (builder_.editorCursorPos(doc, cursor, viewport, g, curRow, curCol)) {
+            encoder_.moveCursorTo(out, curRow, curCol);
+            encoder_.setCursorStyle(out, state);
+            encoder_.showCursor(out);
+        }
     }
 
     updateCacheState(viewport, cursor, doc);
@@ -333,11 +337,16 @@ std::string TtyDiff::buildDiffFrame(
         }
         out += statusCache_;
         if (state == State::Busqueda) return out;
-        int curRow = 1, curCol = 1;
-        builder_.editorCursorPos(doc, cursor, viewport, curRow, curCol);
-        encoder_.moveCursorTo(out, curRow, curCol);
-        encoder_.setCursorStyle(out, state);
-        encoder_.endFrame(out);
+        {
+            int curRow = 0, curCol = 0;
+            if (builder_.editorCursorPos(doc, cursor, viewport, curRow, curCol)) {
+                encoder_.moveCursorTo(out, curRow, curCol);
+                encoder_.setCursorStyle(out, state);
+                encoder_.endFrame(out);
+            }
+            // Si esta fuera del viewport se deja oculto (sin show): respeta
+            // el contrato visible==false sin clampar al borde.
+        }
         return out;
     }
 
@@ -427,11 +436,14 @@ std::string TtyDiff::buildDiffFrame(
         updateCacheState(viewport, cursor, doc);
         return out;
     }
-    int curRow = 1, curCol = 1;
-    builder_.editorCursorPos(doc, cursor, viewport, curRow, curCol);
-    encoder_.moveCursorTo(out, curRow, curCol);
-    encoder_.setCursorStyle(out, state);
-    encoder_.showCursor(out);
+    {
+        int curRow = 0, curCol = 0;
+        if (builder_.editorCursorPos(doc, cursor, viewport, curRow, curCol)) {
+            encoder_.moveCursorTo(out, curRow, curCol);
+            encoder_.setCursorStyle(out, state);
+            encoder_.showCursor(out);
+        }
+    }
 
     updateCacheState(viewport, cursor, doc);
     return out;

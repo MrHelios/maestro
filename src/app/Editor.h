@@ -391,7 +391,10 @@ private:
     // a logica de movimiento de cursor; cursor permanece quieto (puede
     // quedar off-screen). Clampeado en [0, maxTop]. Activa
     // suppressScrollToCursor_ para que renderFrame no lo deshaga via
-    // scrollToCursor en el siguiente frame.
+    // scrollToCursor en el siguiente frame. Es comportamiento del editor
+    // (viewport desacoplado del cursor), no peculiaridad del terminal:
+    // el Frame resultante lleva cursor.visible==false y ningun backend
+    // debe pintar/clamparlo al borde.
     void applyScroll(int delta);
     // Salto a extremo durante seleccion total (prefijo 'a' activo): replica
     // la rama de flechas de handleSelectAllEvent (cursor al extremo,

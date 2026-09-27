@@ -121,9 +121,12 @@ void TtyEncoder::appendFrame(std::string& out, const Frame& f) const {
         out += "\r\n";
     }
     appendStatus(out, f.layout.statusBar, f.status, f.statusAccent);
+    // Contrato visual: visible==false -> pos invalida, no pintar cursor.
+    // Cubre Busqueda y cursor fuera del viewport (rueda con
+    // suppressScrollToCursor_): se deja oculto (beginFrame hizo hide).
     if (!f.cursor.visible) return;
-    moveCursorTo(out, f.cursor.row, f.cursor.col);
-    setCursorStyle(out, f.cursor.state);
+    moveCursorTo(out, f.cursor.pos.row, f.cursor.pos.col);
+    setCursorStyle(out, f.cursor.shape);
     endFrame(out);
 }
 
@@ -138,7 +141,10 @@ void TtyEncoder::moveCursorTo(std::string& out, int row, int col) const {
 void TtyEncoder::hideCursor(std::string& out) const { out += "\x1b[?25l"; }
 void TtyEncoder::showCursor(std::string& out) const { out += "\x1b[?25h"; }
 void TtyEncoder::setCursorStyle(std::string& out, State state) const {
-    if (state == State::Interaccion) out += "\x1b[1 q";
+    setCursorStyle(out, cursorShapeFor(state));
+}
+void TtyEncoder::setCursorStyle(std::string& out, FrameCursorShape shape) const {
+    if (shape == FrameCursorShape::Bar) out += "\x1b[1 q";
     else out += "\x1b[2 q";
 }
 

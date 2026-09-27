@@ -171,15 +171,15 @@ FrameBuilder::EditorGeometry FrameBuilder::editorGeometry(
     return g;
 }
 
-void FrameBuilder::editorCursorPos(const Document& doc,
+bool FrameBuilder::editorCursorPos(const Document& doc,
                                    const Cursor& cursor,
                                    const Viewport& viewport,
                                    int& outRow, int& outCol) const {
     const EditorGeometry g = editorGeometry(doc, viewport);
-    editorCursorPos(doc, cursor, viewport, g, outRow, outCol);
+    return editorCursorPos(doc, cursor, viewport, g, outRow, outCol);
 }
 
-void FrameBuilder::editorCursorPos(const Document& doc,
+bool FrameBuilder::editorCursorPos(const Document& doc,
                                    const Cursor& cursor,
                                    const Viewport& viewport,
                                    const EditorGeometry& g,
@@ -192,8 +192,11 @@ void FrameBuilder::editorCursorPos(const Document& doc,
     const int rowHi = rowLo + g.layout.content.height - 1;
     const int colLo = g.layout.content.col + 1;
     const int colHi = colLo + std::max(1, g.layout.content.width) - 1;
-    outRow = std::clamp(outRow, rowLo, rowHi);
-    outCol = std::clamp(outCol, colLo, colHi);
+    // Sin clamp silencioso: fuera del viewport => false y el crudo queda
+    // en outRow/outCol para diagnostico, pero el llamador NO debe pintarlo.
+    if (outRow < rowLo || outRow > rowHi || outCol < colLo || outCol > colHi)
+        return false;
+    return true;
 }
 
 StyledRow FrameBuilder::buildContentRow(
@@ -561,7 +564,19 @@ Frame FrameBuilder::buildFrame(    const Document& doc,
     f.status = payload.data;
     f.statusAccent = payload.accent;
     f.cursor.state = state;
-    f.cursor.visible = (state != State::Busqueda);
-    editorCursorPos(doc, cursor, viewport, g, f.cursor.row, f.cursor.col);
+    f.cursor.shape = cursorShapeFor(state);
+    // Contrato visual explicito: visible solo si el modo lo permite Y el
+    // cursor logico esta dentro del viewport. Cuando la rueda mueve el
+    // viewport con suppressScrollToCursor_ (cursor off-screen), visible=false
+    // y pos queda invalida a proposito para que ningun backend la pinte.
+    int curRow = 0, curCol = 0;
+    const bool inViewport =
+        editorCursorPos(doc, cursor, viewport, g, curRow, curCol);
+    const bool visible = state != State::Busqueda && inViewport;
+    f.cursor.visible = visible;
+    if (visible)
+        f.cursor.pos = CellPos(curCol, curRow);
+    else
+        f.cursor.pos = CellPos(0, 0); // invalida: no usar (ver FrameCursor)
     return f;
 }

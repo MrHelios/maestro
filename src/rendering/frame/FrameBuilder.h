@@ -57,12 +57,21 @@ public:
                               int textWidth) const;
 
     EditorGeometry editorGeometry(const Document& doc,
-                                  const Viewport& viewport) const;
-    void editorCursorPos(const Document& doc,
+                                   const Viewport& viewport) const;
+    // Resuelve el cursor logico a coordenadas 1-based de terminal.
+    // Contrato explicito (sin clamp silencioso):
+    //   return true  -> (outRow,outCol) es la posicion visual real.
+    //   return false -> cursor fuera del viewport; (outRow,outCol) lleva el
+    //                   crudo sin clampar y NO debe usarse para pintar.
+    // El llamador (buildFrame / TtyDiff) traduce false a FrameCursor{visible=false}.
+    // Nota: los fast paths de TtyDiff consumen este bool directamente sin
+    // construir un Frame (bypass documentado en TtyDiff.h); buildFrame es el
+    // unico que materializa el FrameCursor comun.
+    bool editorCursorPos(const Document& doc,
                          const Cursor& cursor,
                          const Viewport& viewport,
                          int& outRow, int& outCol) const;
-    void editorCursorPos(const Document& doc,
+    bool editorCursorPos(const Document& doc,
                          const Cursor& cursor,
                          const Viewport& viewport,
                          const EditorGeometry& g,

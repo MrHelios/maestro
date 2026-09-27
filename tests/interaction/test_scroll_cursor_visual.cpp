@@ -24,14 +24,15 @@ inline int cursorScreenRow(const std::string& frame) {
     return row;
 }
 
-// Repro bug visual: scroll de rueda hacia arriba con el cursor en la parte
-// baja del viewport deja al cursor fuera del area de contenido y el Renderer
-// lo dibuja sobre la status bar / seccion de mensajes.
+// Contrato visual explicito: scroll de rueda con el cursor fuera del
+// viewport deja FrameCursor.visible==false y el TTY oculta el cursor
+// (sin posicionarlo). Nunca debe caer en status bar / mensajes.
 //
 // Setup: viewport h=10, top=20 (lineas visibles 20..29), cursor en la ultima
 // fila visible (linea 29). ScrollUp mueve el viewport a top=17 sin mover el
-// cursor (conducta actual). Entonces la fila de pantalla del cursor seria
-// 29-17+1=13, fuera del contenido (1..10): cae en status bar/mensajes.
+// cursor (suppressScrollToCursor_). Entonces la fila cruda seria
+// 29-17+1=13, fuera del contenido (1..10): el contrato exige ocultarlo,
+// no clamparlo al borde ni pintarlo en la barra.
 TEST(scroll_wheel_up_bottom_cursor_stays_in_content) {
     Editor ed;
     std::vector<std::string> lines;
@@ -56,19 +57,26 @@ TEST(scroll_wheel_up_bottom_cursor_stays_in_content) {
     CHECK_EQ(ed.active().viewport.top, 17);
     CHECK_EQ(ed.active().cursor.line, 29);
 
+    // Contrato: cursor fuera del viewport => Frame invisible y TTY oculto.
+    {
+        FrameBuilder fb;
+        Frame f = fb.buildFrame(ed.active().document, ed.active().cursor,
+                                ed.active().viewport, "t", false, "",
+                                ed.state_, std::nullopt);
+        CHECK(!f.cursor.visible);
+    }
     Renderer r;
     std::string screen = r.buildScreen(ed.active().document, ed.active().cursor,
                                        ed.active().viewport, "t", false, "",
                                        ed.state_, std::nullopt);
-    int curRow = cursorScreenRow(screen);
-    // El cursor de terminal debe quedar dentro del area de contenido
-    // (filas 1..viewport.height), nunca en status bar ni mensajes.
-    CHECK(curRow >= 1);
-    CHECK(curRow <= ed.active().viewport.height);
+    // Sin posicionamiento de cursor: oculto, nunca en status bar/mensajes.
+    CHECK_EQ(cursorScreenRow(screen), -1);
+    CHECK(screen.find(" q") == std::string::npos);
+    CHECK(screen.find("\x1b[?25h") == std::string::npos);
 }
 
 // Caso simetrico: cursor en la parte superior + ScrollDown deja al cursor
-// fuera por arriba (raw <= 0) y debe clamparse a la fila 1 del contenido.
+// fuera por arriba (raw <= 0). Contrato: ocultarlo, no clamparlo a la fila 1.
 TEST(scroll_wheel_down_top_cursor_stays_in_content) {
     Editor ed;
     std::vector<std::string> lines;
@@ -92,12 +100,19 @@ TEST(scroll_wheel_down_top_cursor_stays_in_content) {
     CHECK_EQ(ed.active().viewport.top, 23);
     CHECK_EQ(ed.active().cursor.line, 20);
 
+    // Contrato: cursor fuera del viewport => Frame invisible y TTY oculto.
+    {
+        FrameBuilder fb;
+        Frame f = fb.buildFrame(ed.active().document, ed.active().cursor,
+                                ed.active().viewport, "t", false, "",
+                                ed.state_, std::nullopt);
+        CHECK(!f.cursor.visible);
+    }
     Renderer r;
     std::string screen = r.buildScreen(ed.active().document, ed.active().cursor,
                                        ed.active().viewport, "t", false, "",
                                        ed.state_, std::nullopt);
-    int curRow = cursorScreenRow(screen);
-    CHECK(curRow >= 1);
-    CHECK(curRow <= ed.active().viewport.height);
-    CHECK_EQ(curRow, 1);
+    CHECK_EQ(cursorScreenRow(screen), -1);
+    CHECK(screen.find(" q") == std::string::npos);
+    CHECK(screen.find("\x1b[?25h") == std::string::npos);
 }
