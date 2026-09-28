@@ -1,4 +1,4 @@
-#include "rendering/StatusBar.h"
+#include "rendering/tty/StatusBar.h"
 
 #include <sstream>
 #include <algorithm>

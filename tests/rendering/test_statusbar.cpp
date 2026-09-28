@@ -22,7 +22,7 @@
 
 #include "layout/Layout.h"
 #include "app/Message.h"
-#include "rendering/StatusBar.h"
+#include "rendering/tty/StatusBar.h"
 
 namespace {
 

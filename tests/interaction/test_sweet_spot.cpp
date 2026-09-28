@@ -3,11 +3,28 @@
 #include <thread>
 #include "helpers/FakeClipboard.h"
 #include "filesystem/NullFileWatcher.h"
+#include "rendering/tty/TtySink.h"
 #define private public
 #include "filesystem/InotifyFileWatcher.h"
 #undef private
-static Editor makeNullEditor() {
-    return Editor(std::make_unique<FakeClipboard>(), std::make_unique<NullFileWatcher>());
+// Estos tests ejercitan handleFileChange (lógica de recarga), que renderiza
+// de paso. MutedEditor posee un NullSink junto al Editor e inyecta uno en
+// el otro (sink declarado primero: se destruye último). Solo scaffolding
+// de tests, sin globales en src/.
+// Uso: MutedEditor m; Editor& ed = m.ed;
+struct MutedEditor {
+    NullSink sink;
+    Editor ed;
+    MutedEditor()
+        : ed(std::make_unique<FakeClipboard>(), std::make_unique<NullFileWatcher>()) {
+        ed.setSink(sink);
+    }
+};
+// Para los pocos Editors de construcción directa: NullSink de vida del
+// thread (suite single-thread; solo scaffolding de tests).
+static void muteRender(Editor& ed) {
+    thread_local NullSink nullSink;
+    ed.setSink(nullSink);
 }
 static void writeFile(const std::string& p, const std::string& c) {
     std::ofstream f(p, std::ios::binary | std::ios::trunc);
@@ -25,7 +42,7 @@ static bool waitFor(Pred pred, int timeoutMs = 500) {
 
 TEST(external_change_reloads_clean_buffer) {
     TempFile f; f.write("old\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     writeFile(f.path, "new\n");
     ed.handleFileChange({f.path, FileChangeKind::Modified});
@@ -36,7 +53,7 @@ TEST(external_change_reloads_clean_buffer) {
 
 TEST(external_change_preserves_modified_buffer) {
     TempFile f; f.write("A\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     ed.active().document.restore({"A_prime"});
     ed.active().modified = true;
@@ -49,7 +66,7 @@ TEST(external_change_preserves_modified_buffer) {
 
 TEST(external_change_updates_saved_lines) {
     TempFile f; f.write("A\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     auto oldSaved = ed.active().originalSnapshot_;
     writeFile(f.path, "B\n");
@@ -60,7 +77,7 @@ TEST(external_change_updates_saved_lines) {
 
 TEST(external_change_clamps_cursor) {
     TempFile f; f.write("a\nb\nc\nd\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     ed.active().cursor.line = 3;
     ed.active().cursor.col = 0;
@@ -76,7 +93,7 @@ TEST(external_change_clamps_cursor) {
 
 TEST(save_does_not_trigger_external_change) {
     TempFile f; f.write("orig\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     ed.active().document.restore({"mod"});
     ed.active().modified = true;
@@ -91,7 +108,7 @@ TEST(save_does_not_trigger_external_change) {
 
 TEST(multiple_saves_do_not_trigger_external_change) {
     TempFile f; f.write("a\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     for (int i = 0; i < 2; ++i) {
         ed.active().document.restore({std::string("v") + std::to_string(i)});
@@ -106,7 +123,7 @@ TEST(multiple_saves_do_not_trigger_external_change) {
 
 TEST(multiple_external_writes_reload_latest_content) {
     TempFile f; f.write("0\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     writeFile(f.path, "1\n");
     writeFile(f.path, "2\n");
@@ -119,6 +136,7 @@ TEST(multiple_external_writes_reload_latest_content) {
 TEST(deleted_file_is_detected) {
     TempFile f; f.write("keep\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
+    muteRender(ed);
     CHECK(ed.loadIntoActiveBuffer(f.path));
     std::filesystem::remove(f.path);
     bool got = waitFor([&]{
@@ -136,6 +154,7 @@ TEST(deleted_file_is_detected) {
 TEST(deleted_then_recreated_file_is_reloaded) {
     TempFile f; f.write("orig\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
+    muteRender(ed);
     CHECK(ed.loadIntoActiveBuffer(f.path));
     std::filesystem::remove(f.path);
     bool gone = waitFor([&]{
@@ -169,6 +188,7 @@ TEST(deleted_then_recreated_file_is_reloaded) {
 TEST(atomic_file_replacement_is_detected) {
     TempFile f; f.write("v1\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
+    muteRender(ed);
     CHECK(ed.loadIntoActiveBuffer(f.path));
     std::string tmp = f.path + ".tmp";
     {
@@ -191,7 +211,7 @@ TEST(atomic_file_replacement_is_detected) {
 
 TEST(closing_buffer_does_not_process_old_path) {
     TempFile f; f.write("x\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     std::string path = ed.active().filename;
     ed.closeActiveBuffer();
@@ -204,6 +224,7 @@ TEST(closing_buffer_does_not_process_old_path) {
 TEST(closing_buffer_removes_watch_integration) {
     TempFile f; f.write("x\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
+    muteRender(ed);
     CHECK(ed.loadIntoActiveBuffer(f.path));
     std::string path = ed.active().filename;
     ed.closeActiveBuffer();
@@ -224,7 +245,7 @@ TEST(closing_buffer_removes_watch_integration) {
 
 TEST(same_file_two_buffers_share_watch) {
     TempFile f; f.write("shared\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     Buffer second = ed.active();
     second.unnamedName = "";
@@ -241,7 +262,7 @@ TEST(same_file_two_buffers_share_watch) {
 
 TEST(closing_one_shared_buffer_keeps_watch) {
     TempFile f; f.write("shared\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     Buffer second = ed.active();
     second.unnamedName = "";
@@ -261,7 +282,7 @@ TEST(closing_one_shared_buffer_keeps_watch) {
 TEST(different_files_have_independent_watches) {
     TempFile fa, fb;
     fa.write("A1\n"); fb.write("B1\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(fa.path));
     ed.createBuffer();
     CHECK(ed.loadIntoActiveBuffer(fb.path));
@@ -283,7 +304,7 @@ TEST(different_files_have_independent_watches) {
 }
 
 TEST(unnamed_buffer_has_no_watch) {
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.active().filename.empty());
     // handle change for random path must not affect unnamed buffer
     ed.handleFileChange({"/tmp/no_such_file_xyz", FileChangeKind::Modified});
@@ -293,7 +314,7 @@ TEST(unnamed_buffer_has_no_watch) {
 
 TEST(rapid_external_changes) {
     TempFile f; f.write("0\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     for (int i = 1; i <= 10; ++i) writeFile(f.path, std::to_string(i) + "\n");
     ed.handleFileChange({f.path, FileChangeKind::Modified});
@@ -319,6 +340,7 @@ TEST(modify_and_chmod_generates_no_false_warning) {
     CHECK(hasModified);
     w.unwatch(f.path);
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
+    muteRender(ed);
     CHECK(ed.loadIntoActiveBuffer(f.path));
     writeFile(f.path, "d\n");
     std::filesystem::permissions(f.path, std::filesystem::perms::owner_read | std::filesystem::perms::owner_write);
@@ -338,7 +360,7 @@ TEST(modify_and_chmod_generates_no_false_warning) {
 
 TEST(save_then_external_change) {
     TempFile f; f.write("orig\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     ed.active().document.restore({"local"});
     ed.active().modified = true;
@@ -352,7 +374,7 @@ TEST(save_then_external_change) {
 
 TEST(external_change_then_local_edit) {
     TempFile f; f.write("orig\n");
-    Editor ed = makeNullEditor();
+    MutedEditor muted; Editor& ed = muted.ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     writeFile(f.path, "ext\n");
     ed.handleFileChange({f.path, FileChangeKind::Modified});
@@ -369,6 +391,7 @@ TEST(open_close_many_buffers_does_not_leak_watches) {
     InotifyFileWatcher probe;
     CHECK(probe.fd() >= 0);
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
+    muteRender(ed);
     // :e sobre el mismo buffer (sin createBuffer): no debe acumular watches
     // de fa/fb/fc. Tras cerrar, los mapas internos tienen que quedar vacíos.
     ed.loadIntoActiveBuffer(fa.path);

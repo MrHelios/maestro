@@ -210,8 +210,8 @@ StyledRow FrameBuilder::buildContentRow(
     int docLine,
     int gutterW,
     int textWidth) const {
-    instrument::ScopedTimer _t(&instrument::current.renderEditorRow_nanos);
-    if (instrument::enabled) instrument::onRenderEditorRow();
+    instrument::ScopedTimer _t(instrument::renderEditorRowTimer());
+    if (instrument::isEnabled()) instrument::onRenderEditorRow();
     StyledRow row;
     const bool isCurrentLine = (docLine == cursor.line);
     row.isCurrentLine = isCurrentLine && docLine < doc.lineCount();
@@ -519,13 +519,13 @@ Frame FrameBuilder::buildFrame(    const Document& doc,
     const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) const {
-    if (instrument::enabled) {
+    if (instrument::isEnabled()) {
         instrument::resetFrame();
         instrument::onBuildScreen();
     }
-    instrument::ScopedTimer _t_buildScreen(&instrument::current.buildScreen_nanos);
-    instrument::ScopedTimer _t_body(&instrument::current.buildEditorBody_nanos);
-    if (instrument::enabled) instrument::onBuildEditorBody();
+    instrument::ScopedTimer _t_buildScreen(instrument::buildScreenTimer());
+    instrument::ScopedTimer _t_body(instrument::buildEditorBodyTimer());
+    if (instrument::isEnabled()) instrument::onBuildEditorBody();
 
     updateSyntaxLanguage(filename);
 

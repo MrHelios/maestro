@@ -12,6 +12,7 @@
 #include <optional>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <chrono>
 class X11Clipboard : public SystemClipboard {
 public:
@@ -29,29 +30,48 @@ public:
     bool hasPending() const override { return !incrSends_.empty(); }
     bool isAvailable() const { return display_ != nullptr; }
 private:
-    // Xlib mantiene el error handler a nivel global de proceso.
-    // Este contador asume que la creación/destrucción de X11Clipboard
-    // ocurre desde un único thread.
+    // ---- Estado de PROCESO (todo lo global que queda; impuesto por Xlib) --
+    // Xlib mantiene UN error handler por proceso y el callback no recibe
+    // userdata, así que este grupo es inevitablemente estático:
+    //   previousHandler_/refCount_: instalan/restauran el handler una vez
+    //     (adquisición/release contada).
+    //   liveInstances_: registro de instancias vivas para que el handler
+    //     estático pueda consultar el estado funcional (por-instancia).
+    //     No es estado funcional: solo el puente que Xlib nos niega.
+    // Mismo supuesto single-thread que refCount_.
+    static int refCount_;
+    static XErrorHandler previousHandler_;
+    static std::unordered_set<X11Clipboard*> liveInstances_;
+    // Adquisición/release contada del handler de proceso + registro.
+    static void acquireProcessState(X11Clipboard* self);
+    static void releaseProcessState(X11Clipboard* self);
+    static int handleX11Error(Display* display, XErrorEvent* error);
+
+    // ---- Estado FUNCIONAL (por instancia: un clipboard concreto) ----------
     struct RequestorInfo {
         int count = 0;
         std::chrono::steady_clock::time_point last;
     };
-    static int refCount_;
-    static XErrorHandler previousHandler_;
     // Rastrea requestors activos (ventanas), no transferencias individuales.
     // Si una misma ventana hace múltiples solicitudes simultáneas, se cuenta
     // como una sola entrada con contador. No eliminar demasiado pronto: una
     // transferencia INCR mantiene el requestor hasta completar/expirar.
-    // NOTA: existe duplicación de estado con incrSends_ (timeout). Idealmente
-    // activeRequestors_ debería derivarse del estado real de transferencias y
-    // su timeout ser solo protección contra estados abandonados. No blocker ahora.
-    static std::unordered_map<unsigned long, RequestorInfo> activeRequestors_;
-    static int absorbedErrorCount_;
-    static int handleX11Error(Display* display, XErrorEvent* error);
-    static bool isExpectedClipboardError(const XErrorEvent& error);
-    static void registerRequestor(unsigned long win);
-    static void unregisterRequestor(unsigned long win);
-    static void purgeStaleRequestors();
+    // NOTA derivación vs incrSends_ (ambos por-instancia ahora): todo
+    // requestor con un INCR en curso está en activeRequestors_
+    // (keepRegistered=true al servir el chunk inicial; unregister al
+    // completar/expirar en handlePropertyNotify y purgeStaleIncrSends). El
+    // camino no-INCR registra y desregistra dentro del mismo
+    // handleSelectionRequest. Conjunto de ventanas con transferencia viva ⊆
+    // claves de activeRequestors_; la inversa no vale en ventanas síncronas
+    // transitorias. Derivar el filtro desde incrSends_ exigiría acoplar el
+    // handler a transferencias en vez de ventanas; se mantiene el mapa
+    // dedicado con timeout como protección anti-abandono.
+    std::unordered_map<unsigned long, RequestorInfo> activeRequestors_;
+    int absorbedErrorCount_ = 0;
+    bool isExpectedClipboardError(const XErrorEvent& error) const;
+    void registerRequestor(unsigned long win);
+    void unregisterRequestor(unsigned long win);
+    void purgeStaleRequestors();
     void handleSelectionRequest(void* ev);
     std::optional<std::string> readProperty(unsigned long win, unsigned long prop);
     void deleteProperty(unsigned long win, unsigned long prop);

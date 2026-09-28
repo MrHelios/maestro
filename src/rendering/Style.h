@@ -10,8 +10,8 @@
 //   - TtyEncoder  : rol -> secuencia ANSI (lee el Theme como tabla ANSI).
 //   - GuiPainter  : rol -> color/fuente Qt (futuro).
 //
-// Este header es puro: no incluye Theme.h ni emite "\x1b". El Theme sigue
-// siendo la tabla ANSI del backend TTY (ver rendering/tty/TtyEncoder).
+// Este header es puro: no incluye el Theme ni emite secuencias de escape.
+// El Theme sigue siendo la tabla del backend TTY (ver rendering/tty/).
 // ---------------------------------------------------------------------------
 enum class StyleRole {
     Default,            // texto plano sin estilo

@@ -33,12 +33,12 @@ static void isolateClipboard() {
     if (!tmp.isAvailable()) return;
     tmp.copy("");
     for (int i = 0; i < 5; ++i) { tmp.processEvents(); usleep(5000); }
-    for (int i = 0; i < 10 && (!X11Clipboard::activeRequestors_.empty() || !tmp.incrSends_.empty()); ++i) {
+    for (int i = 0; i < 10 && (!tmp.activeRequestors_.empty() || !tmp.incrSends_.empty()); ++i) {
         tmp.processEvents();
         tmp.purgeStaleIncrSends();
         usleep(5000);
     }
-    CHECK(X11Clipboard::activeRequestors_.empty());
+    CHECK(tmp.activeRequestors_.empty());
     CHECK(tmp.incrSends_.empty());
 }
 
@@ -266,8 +266,8 @@ TEST(clipboard_x11_error_handler_absorbs_expected_and_delegates_unexpected) {
     if (!cb.isAvailable()) SKIP("X11 not available - requires X11/Xvfb with DISPLAY");
     g_origCalled.store(false, std::memory_order_relaxed);
     const unsigned long fakeReq = kTestRequestor;
-    X11Clipboard::registerRequestor(fakeReq);
-    int before = X11Clipboard::absorbedErrorCount_;
+    cb.registerRequestor(fakeReq);
+    int before = cb.absorbedErrorCount_;
     XErrorEvent ev{};
     ev.error_code = BadWindow;
     ev.request_code = X_ChangeProperty;
@@ -275,7 +275,7 @@ TEST(clipboard_x11_error_handler_absorbs_expected_and_delegates_unexpected) {
     int ret = X11Clipboard::handleX11Error(nullptr, &ev);
     CHECK(ret == 0);
     CHECK(!g_origCalled.load(std::memory_order_relaxed));
-    CHECK(X11Clipboard::absorbedErrorCount_ > before);
+    CHECK(cb.absorbedErrorCount_ > before);
     g_origCalled.store(false, std::memory_order_relaxed);
     XErrorEvent ev2{};
     ev2.error_code = BadWindow;
@@ -283,7 +283,7 @@ TEST(clipboard_x11_error_handler_absorbs_expected_and_delegates_unexpected) {
     ev2.resourceid = 0x12345678;
     X11Clipboard::handleX11Error(nullptr, &ev2);
     CHECK(g_origCalled.load(std::memory_order_relaxed));
-    X11Clipboard::unregisterRequestor(fakeReq);
+    cb.unregisterRequestor(fakeReq);
     g_origCalled.store(false, std::memory_order_relaxed);
     CHECK(cb.copy("still alive after X error"));
 }
@@ -305,7 +305,6 @@ TEST(clipboard_survives_other_instance_destruction) {
 
 TEST(clipboard_error_not_from_requestor_delegates) {
     CHECK_EQ(X11Clipboard::refCount_, 0);
-    CHECK(X11Clipboard::activeRequestors_.empty());
     XErrorHandlerGuard guard(testOrigHandler);
     auto* cb = new X11Clipboard();
     g_origCalled.store(false, std::memory_order_relaxed);
@@ -325,7 +324,7 @@ TEST(clipboard_error_from_requestor_absorbed) {
     CHECK_EQ(X11Clipboard::refCount_, 0);
     XErrorHandlerGuard guard(testOrigHandler);
     auto* cb = new X11Clipboard();
-    X11Clipboard::registerRequestor(kTestRequestor);
+    cb->registerRequestor(kTestRequestor);
     g_origCalled.store(false, std::memory_order_relaxed);
     XErrorEvent ev{};
     ev.error_code = BadWindow;
@@ -333,7 +332,7 @@ TEST(clipboard_error_from_requestor_absorbed) {
     ev.resourceid = kTestRequestor;
     X11Clipboard::handleX11Error(nullptr, &ev);
     CHECK(!g_origCalled.load(std::memory_order_relaxed));
-    X11Clipboard::unregisterRequestor(kTestRequestor);
+    cb->unregisterRequestor(kTestRequestor);
     delete cb;
 }
 
@@ -356,11 +355,11 @@ TEST(clipboard_requestor_disappears_during_response_does_not_crash) {
     XConvertSelection(d2.get(), clip, utf8, prop, req.get(), CurrentTime);
     XFlush(d2.get());
     XSync(d2.get(), False);
-    for (int i = 0; i < 100 && (X11Clipboard::activeRequestors_.find(req.get()) == X11Clipboard::activeRequestors_.end() || cb.incrSends_.empty()); ++i) {
+    for (int i = 0; i < 100 && (cb.activeRequestors_.find(req.get()) == cb.activeRequestors_.end() || cb.incrSends_.empty()); ++i) {
         cb.processEvents();
         usleep(5000);
     }
-    CHECK(X11Clipboard::activeRequestors_.find(req.get()) != X11Clipboard::activeRequestors_.end());
+    CHECK(cb.activeRequestors_.find(req.get()) != cb.activeRequestors_.end());
     CHECK(!cb.incrSends_.empty());
     Window reqVal = req.get();
     XDestroyWindow(d2.get(), reqVal);
@@ -375,13 +374,13 @@ TEST(clipboard_requestor_disappears_during_response_does_not_crash) {
     pe.state = PropertyDelete;
     pe.time = CurrentTime;
     g_origCalled.store(false, std::memory_order_relaxed);
-    int absorbedBefore = X11Clipboard::absorbedErrorCount_;
+    int absorbedBefore = cb.absorbedErrorCount_;
     cb.handlePropertyNotify(&pe);
     XSync(cb.display_, False);
     CHECK(!g_origCalled.load(std::memory_order_relaxed));
-    CHECK(X11Clipboard::absorbedErrorCount_ > absorbedBefore);
+    CHECK(cb.absorbedErrorCount_ > absorbedBefore);
     // Requestor was destroyed; real code should have cleaned via XGetWindowAttributes check
-    CHECK(X11Clipboard::activeRequestors_.find(reqVal) == X11Clipboard::activeRequestors_.end());
+    CHECK(cb.activeRequestors_.find(reqVal) == cb.activeRequestors_.end());
     bool stillHasIncrForReq = false;
     for (auto &s : cb.incrSends_) if (s.requestor == reqVal) stillHasIncrForReq = true;
     CHECK(!stillHasIncrForReq);
@@ -477,12 +476,12 @@ TEST(clipboard_multiple_requestors_one_disappears_other_continues) {
     XConvertSelection(dB.get(), clipB, utf8B, propB, reqB.get(), CurrentTime);
     XFlush(dA.get()); XFlush(dB.get());
     XSync(dA.get(), False); XSync(dB.get(), False);
-    for (int i = 0; i < 100 && (X11Clipboard::activeRequestors_.find(reqA.get()) == X11Clipboard::activeRequestors_.end() || X11Clipboard::activeRequestors_.find(reqB.get()) == X11Clipboard::activeRequestors_.end() || owner.incrSends_.size() < 2); ++i) {
+    for (int i = 0; i < 100 && (owner.activeRequestors_.find(reqA.get()) == owner.activeRequestors_.end() || owner.activeRequestors_.find(reqB.get()) == owner.activeRequestors_.end() || owner.incrSends_.size() < 2); ++i) {
         owner.processEvents();
         usleep(5000);
     }
-    CHECK(X11Clipboard::activeRequestors_.find(reqA.get()) != X11Clipboard::activeRequestors_.end());
-    CHECK(X11Clipboard::activeRequestors_.find(reqB.get()) != X11Clipboard::activeRequestors_.end());
+    CHECK(owner.activeRequestors_.find(reqA.get()) != owner.activeRequestors_.end());
+    CHECK(owner.activeRequestors_.find(reqB.get()) != owner.activeRequestors_.end());
     CHECK(owner.incrSends_.size() >= 2);
     Window reqAVal = reqA.get();
     XDestroyWindow(dA.get(), reqAVal);
@@ -495,21 +494,21 @@ TEST(clipboard_multiple_requestors_one_disappears_other_continues) {
     peA.atom = propA;
     peA.state = PropertyDelete;
     peA.time = CurrentTime;
-    int absorbedBefore = X11Clipboard::absorbedErrorCount_;
+    int absorbedBefore = owner.absorbedErrorCount_;
     owner.handlePropertyNotify(&peA);
     XSync(owner.display_, False);
     CHECK(!g_origCalled.load(std::memory_order_relaxed));
-    CHECK(X11Clipboard::absorbedErrorCount_ > absorbedBefore);
-    CHECK(X11Clipboard::activeRequestors_.find(reqAVal) == X11Clipboard::activeRequestors_.end());
+    CHECK(owner.absorbedErrorCount_ > absorbedBefore);
+    CHECK(owner.activeRequestors_.find(reqAVal) == owner.activeRequestors_.end());
     bool hasAIncr = false;
     for (auto &s : owner.incrSends_) if (s.requestor == reqAVal) hasAIncr = true;
     CHECK(!hasAIncr);
-    CHECK(X11Clipboard::activeRequestors_.find(reqB.get()) != X11Clipboard::activeRequestors_.end());
+    CHECK(owner.activeRequestors_.find(reqB.get()) != owner.activeRequestors_.end());
     bool hasBIncr = false;
     for (auto &s : owner.incrSends_) if (s.requestor == reqB.get()) hasBIncr = true;
     CHECK(hasBIncr);
     // B must still be able to complete the transfer via real code
-    for (int i = 0; i < 20 && X11Clipboard::activeRequestors_.find(reqB.get()) != X11Clipboard::activeRequestors_.end(); ++i) {
+    for (int i = 0; i < 20 && owner.activeRequestors_.find(reqB.get()) != owner.activeRequestors_.end(); ++i) {
         XPropertyEvent peB{};
         peB.type = PropertyNotify;
         peB.display = owner.display_;
@@ -523,7 +522,7 @@ TEST(clipboard_multiple_requestors_one_disappears_other_continues) {
         usleep(5000);
         owner.processEvents();
     }
-    CHECK(X11Clipboard::activeRequestors_.find(reqB.get()) == X11Clipboard::activeRequestors_.end());
+    CHECK(owner.activeRequestors_.find(reqB.get()) == owner.activeRequestors_.end());
     bool hasBIncrAfter = false;
     for (auto &s : owner.incrSends_) if (s.requestor == reqB.get()) hasBIncrAfter = true;
     CHECK(!hasBIncrAfter);

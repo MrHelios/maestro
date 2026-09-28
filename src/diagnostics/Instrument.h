@@ -91,10 +91,20 @@ struct FrameMetrics {
     std::string reportTimedHierarchical() const;
 };
 
-// Estado global
+// Estado global: vive en diagnostics/ y SOLO diagnostics/ puede tocar
+// `enabled / current / currentTag` directamente. Fuera de diagnostics/ la
+// API es: isEnabled(), on*(), record*(), setTag()/clearTag(), los
+// *Timer() de abajo y ScopedTimer. (Gate: rg "instrument::(enabled|
+// current\.|currentTag)" fuera de diagnostics/ debe dar vacío.)
 extern bool enabled;
 extern thread_local FrameMetrics current;
 extern thread_local Utf8Tag currentTag;
+
+inline uint64_t* renderEditorRowTimer() { return enabled ? &current.renderEditorRow_nanos : nullptr; }
+inline uint64_t* renderFilledRowTimer() { return enabled ? &current.renderFilledRow_nanos : nullptr; }
+inline uint64_t* renderEditorContentTimer() { return enabled ? &current.renderEditorContent_nanos : nullptr; }
+inline uint64_t* buildScreenTimer() { return enabled ? &current.buildScreen_nanos : nullptr; }
+inline uint64_t* buildEditorBodyTimer() { return enabled ? &current.buildEditorBody_nanos : nullptr; }
 
 inline void enable(bool v = true) { enabled = v; }
 inline bool isEnabled() { return enabled; }

@@ -24,7 +24,7 @@
 #include "layout/Viewport.h"
 #include "app/Message.h"
 #include "rendering/Renderer.h"
-#include "rendering/StatusBar.h"
+#include "rendering/tty/StatusBar.h"
 
 namespace {
 

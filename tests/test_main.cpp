@@ -1,6 +1,7 @@
 #include "test_framework.h"
-#include "rendering/Renderer.h"
 
+// Runner: parsea el filtro y ejecuta los tests. Cada test es dueño de sus
+// objetos (incluidos los Sink que necesite); acá no hay estado que preparar.
 int main(int argc, char** argv) {
     std::string filter;
     for (int i = 1; i < argc; ++i) {
@@ -12,6 +13,5 @@ int main(int argc, char** argv) {
             return 0;
         }
     }
-    Renderer::setTestMode(true);
     return testfw::runAll(filter);
 }

@@ -14,15 +14,40 @@
 //
 // Costo: un roundtrip X por consulta; el unico llamador es el tick de
 // autoscroll (como maximo 1 cada 100ms y solo con gesto armado).
-// El Display se abre una sola vez por proceso (static) y no se cierra:
-// vive lo que vive la app, igual que el clipboard X11.
+//
+// OWNERSHIP + LAZY: el Display es un recurso externo con dueño explícito.
+// Se abre en la PRIMERA consulta (como el viejo static lazy), no en el
+// constructor: una ejecución sin gestos de mouse/autoscroll jamás toca X11.
+// Se cierra en el destructor (RAII). No hay caché estática de proceso: el
+// dueño (main) decide el lifetime y lo inyecta al Editor como oracle. Los
+// tests inyectan una lambda y nunca construyen esto.
 //
 // OJO X11: este header NO incluye <X11/...> a proposito (Xlib hace
 // `typedef XID Cursor` y colisiona con document/Cursor.h). Solo declara;
-// la implementacion vive en platform/MouseButton.cpp, que no incluye el
-// engine. Solo la incluye quien la usa (main).
+// la implementacion vive en platform/MouseButton.cpp.
+// Solo la incluye quien la usa (main).
 namespace platform {
 
-bool leftMouseButtonHeld();
+// Fuente del estado físico del botón izquierdo. Posee su Display.
+class X11MouseButtonQuery {
+public:
+    X11MouseButtonQuery() = default;
+    ~X11MouseButtonQuery();
+    X11MouseButtonQuery(const X11MouseButtonQuery&) = delete;
+    X11MouseButtonQuery& operator=(const X11MouseButtonQuery&) = delete;
+    X11MouseButtonQuery(X11MouseButtonQuery&&) = delete;
+    X11MouseButtonQuery& operator=(X11MouseButtonQuery&&) = delete;
+
+    // true = presionado (con fallback "presionado" sin X11, ver arriba).
+    bool held() const;
+
+private:
+    // Apertura perezosa (mutable: held() es const). opened_ registra que el
+    // intento ya ocurrió (exitoso o no) para no reintentar por consulta.
+    void ensureDisplay() const;
+    // Puntero opaco a Display (evita <X11/...> en el header).
+    mutable void* display_ = nullptr;
+    mutable bool opened_ = false;
+};
 
 } // namespace platform

@@ -1,6 +1,7 @@
 #include "platform/tty/Terminal.h"
 
 #include "platform/tty/TtyMouse.h"
+#include "platform/tty/TtySignalState.h"
 
 #include <cstdlib>
 #include <cstdio>
@@ -28,51 +29,57 @@
 // habitual en editores de terminal (el propio proceso es el unico que usa
 // stdin y el riesgo real es despreciable frente a dejar la terminal inutil).
 //
-// El handler es una funcion libre y no puede tocar el objeto Terminal, asi
-// que el estado minimo (el termios original y si el raw mode esta activo) se
-// guarda en globales. Se asume una UNICA Terminal viva a la vez (el Editor
-// tiene una sola).
+// El handler es una funcion libre y no puede capturar `this`. El estado
+// mínimo signal-safe vive en Terminal::signalState_ (miembro, ver
+// TtySignalState.h) y este único puntero lo publica mientras el raw mode
+// está activo. Se asume una UNICA Terminal viva a la vez (el Editor
+// tiene una sola). No agregar más globales: todo lo que el handler
+// necesite va al TtySignalState miembro.
 // ---------------------------------------------------------------------------
 namespace {
 
 const int kFatalSignals[] = { SIGINT, SIGTERM, SIGQUIT, SIGHUP,
                               SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL };
 constexpr int kFatalSignalCount = static_cast<int>(sizeof(kFatalSignals) / sizeof(kFatalSignals[0]));
+static_assert(kFatalSignalCount == TtySignalState::kFatalCount,
+              "TtySignalState::kFatalCount debe cubrir kFatalSignals");
 
-termios* g_origTermios = nullptr;
-volatile sig_atomic_t g_rawActive = 0;
-volatile sig_atomic_t g_mouseActive = 0;
-volatile sig_atomic_t g_altActive = 0;
+// Único hook global: apunta al signalState_ miembro del Terminal vivo.
+// Se publica cuando ALGÚN modo está activo (raw/mouse/alt) y se retira
+// cuando los tres están apagados. Los flags son independientes (el handler
+// debe limpiar mouse/alt aunque el crash ocurra fuera de raw).
+TtySignalState* g_activeSignalState = nullptr;
 
-volatile sig_atomic_t g_resized = 0;
-struct sigaction g_oldWinchAction;
-bool g_winchInstalled = false;
-
-void sigwinchHandler(int) {
-    g_resized = 1;
+// Sincroniza la publicación con los flags del miembro. Solo el Terminal
+// vivo publica; al apagarse el último modo se retira el puntero.
+void publishIfActive(TtySignalState* st) {
+    if (st->rawActive || st->mouseActive || st->altActive) {
+        g_activeSignalState = st;
+    } else if (g_activeSignalState == st) {
+        g_activeSignalState = nullptr;
+    }
 }
 
-struct SavedAction {
-    int sig = 0;
-    struct sigaction old;
-};
-SavedAction g_savedActions[kFatalSignalCount];
+void sigwinchHandler(int) {
+    if (g_activeSignalState) g_activeSignalState->resized = 1;
+}
 
 void fatalSignalHandler(int sig) {
     // Restaurar la terminal antes de morir. Debe espejar el estado activo:
     // mouse tracking y alt-screen son modos independientes de raw y deben
     // limpiarse aunque el crash ocurra tras enableMouseTracking().
-    if (g_mouseActive) {
+    TtySignalState* st = g_activeSignalState;
+    if (st && st->mouseActive) {
         write(STDOUT_FILENO, "\x1b[?1006l\x1b[?1002l\x1b[?1000l", sizeof("\x1b[?1006l\x1b[?1002l\x1b[?1000l") - 1);
     }
-    if (g_altActive) {
+    if (st && st->altActive) {
         write(STDOUT_FILENO, "\x1b[?1049l", sizeof("\x1b[?1049l") - 1);
     }
-    if (g_rawActive) {
+    if (st && st->rawActive) {
         write(STDOUT_FILENO, "\x1b[0 q", sizeof("\x1b[0 q") - 1);
     }
-    if (g_rawActive && g_origTermios) {
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, g_origTermios);
+    if (st && st->rawActive && st->orig) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, st->orig);
     }
     // Volver a la accion por defecto y relanzar la senal, para morir de
     // verdad con el codigo de salida adecuado. La senal actual esta bloqueda
@@ -83,31 +90,31 @@ void fatalSignalHandler(int sig) {
 
 // Captura las senales fatales. Guarda como estaban antes, para restaurarlas
 // luego (no borrar un handler previo del proceso).
-void installFatalSignalHandlers() {
+void installFatalSignalHandlers(TtySignalState* st) {
     struct sigaction sa;
     std::memset(&sa, 0, sizeof(sa));
     sa.sa_handler = fatalSignalHandler;
     sigemptyset(&sa.sa_mask);
     for (int i = 0; i < kFatalSignalCount; ++i) {
-        if (sigaction(kFatalSignals[i], &sa, &g_savedActions[i].old) == 0) {
-            g_savedActions[i].sig = kFatalSignals[i];
+        if (sigaction(kFatalSignals[i], &sa, &st->savedActions[i].old) == 0) {
+            st->savedActions[i].sig = kFatalSignals[i];
         }
     }
 }
 
 // Restaura los handlers previos (llamada al apagar el raw mode).
-void restoreFatalSignalHandlers() {
+void restoreFatalSignalHandlers(TtySignalState* st) {
     for (int i = 0; i < kFatalSignalCount; ++i) {
-        if (g_savedActions[i].sig != 0) {
-            sigaction(g_savedActions[i].sig, &g_savedActions[i].old, nullptr);
-            g_savedActions[i].sig = 0;
+        if (st->savedActions[i].sig != 0) {
+            sigaction(st->savedActions[i].sig, &st->savedActions[i].old, nullptr);
+            st->savedActions[i].sig = 0;
         }
     }
 }
 
 } // namespace
 
-Terminal::Terminal() {
+Terminal::Terminal() : signalState_(std::make_unique<TtySignalState>()) {
     origTermios_ = new termios();
     debugKeys_ = std::getenv("EDIT_DEBUG_KEYS") != nullptr;
 }
@@ -154,18 +161,19 @@ void Terminal::enableRawMode() {
     // sentido cambiar la forma del cursor.
     write(STDOUT_FILENO, "\x1b[2 q", sizeof("\x1b[2 q") - 1);
 
-    // Raw mode activo: instalar el handler de restauracion de senales.
-    // enable/disable deben llamarse en pares estrictos; guard contra
-    // reentrancia: si ya esta en raw, no pisar g_oldWinchAction (perderia
-    // el original del sistema y disable restauraria el propio handler).
-    // Mismo patron que kFatalSignals — ver g_winchInstalled.
-    g_origTermios = orig;
-    g_rawActive = 1;
-    if (!g_winchInstalled) {
-        installFatalSignalHandlers();
+    // Raw mode activo: publicar el signalState_ miembro y luego instalar
+    // los handlers. enable/disable deben llamarse en pares estrictos; guard
+    // contra reentrancia: si ya esta en raw, no pisar oldWinchAction
+    // (perderia el original del sistema y disable restauraria el propio
+    // handler). Mismo patron que kFatalSignals — ver winchInstalled.
+    signalState_->orig = orig;
+    signalState_->rawActive = 1;
+    publishIfActive(signalState_.get());
+    if (!signalState_->winchInstalled) {
+        installFatalSignalHandlers(signalState_.get());
     }
 
-    if (!g_winchInstalled) {
+    if (!signalState_->winchInstalled) {
         struct sigaction sa;
         std::memset(&sa, 0, sizeof(sa));
         sa.sa_handler = sigwinchHandler;
@@ -177,21 +185,21 @@ void Terminal::enableRawMode() {
         // resize quedaria bloqueado hasta la proxima tecla (ventana de carrera
         // con waitMs=-1). Ver Editor::run() ppoll(..., &origMask).
         sa.sa_flags = 0;
-        sigaction(SIGWINCH, &sa, &g_oldWinchAction);
-        g_winchInstalled = true;
+        sigaction(SIGWINCH, &sa, &signalState_->oldWinchAction);
+        signalState_->winchInstalled = true;
     }
 }
 
 void Terminal::disableRawMode() {
     if (!rawModeEnabled_) return;
-    if (g_winchInstalled) {
-        sigaction(SIGWINCH, &g_oldWinchAction, nullptr);
-        g_winchInstalled = false;
+    if (signalState_->winchInstalled) {
+        sigaction(SIGWINCH, &signalState_->oldWinchAction, nullptr);
+        signalState_->winchInstalled = false;
     }
 
     // Apagar los handlers ANTES de restaurar: una senal que caiga sobre una
     // terminal que ya no esta en raw mode no debe intentar restaurarla.
-    restoreFatalSignalHandlers();
+    restoreFatalSignalHandlers(signalState_.get());
 
     // Restaurar la forma por defecto del cursor antes de devolver la
     // terminal al shell (el raw mode la deja en bloque fijo).
@@ -202,8 +210,9 @@ void Terminal::disableRawMode() {
     // considerarnos en raw mode: no hay nada mas que hacer aqui.
     tcsetattr(STDIN_FILENO, TCSAFLUSH, orig);
     rawModeEnabled_ = false;
-    g_rawActive = 0;
-    g_origTermios = nullptr;
+    signalState_->rawActive = 0;
+    signalState_->orig = nullptr;
+    publishIfActive(signalState_.get());
 }
 
 void Terminal::enableMouseTracking() {
@@ -212,14 +221,16 @@ void Terminal::enableMouseTracking() {
     if (mouseTrackingEnabled_) return;
     write(STDOUT_FILENO, "\x1b[?1000h\x1b[?1002h\x1b[?1006h", sizeof("\x1b[?1000h\x1b[?1002h\x1b[?1006h") - 1);
     mouseTrackingEnabled_ = true;
-    g_mouseActive = 1;
+    signalState_->mouseActive = 1;
+    publishIfActive(signalState_.get());
 }
 
 void Terminal::disableMouseTracking() {
     if (!mouseTrackingEnabled_) return;
     write(STDOUT_FILENO, "\x1b[?1006l\x1b[?1002l\x1b[?1000l", sizeof("\x1b[?1006l\x1b[?1002l\x1b[?1000l") - 1);
     mouseTrackingEnabled_ = false;
-    g_mouseActive = 0;
+    signalState_->mouseActive = 0;
+    publishIfActive(signalState_.get());
 }
 
 void Terminal::enterAlternateScreen() {
@@ -228,23 +239,27 @@ void Terminal::enterAlternateScreen() {
     if (altScreenActive_) return;
     write(STDOUT_FILENO, "\x1b[?1049h", sizeof("\x1b[?1049h") - 1);
     altScreenActive_ = true;
-    g_altActive = 1;
+    signalState_->altActive = 1;
+    publishIfActive(signalState_.get());
 }
 
 void Terminal::leaveAlternateScreen() {
     if (!altScreenActive_) return;
     write(STDOUT_FILENO, "\x1b[?1049l", sizeof("\x1b[?1049l") - 1);
     altScreenActive_ = false;
-    g_altActive = 0;
+    signalState_->altActive = 0;
+    publishIfActive(signalState_.get());
 }
 
-bool Terminal::isMouseActiveForTest() { return g_mouseActive != 0; }
-bool Terminal::isAltActiveForTest() { return g_altActive != 0; }
-bool Terminal::isRawActiveForTest() { return g_rawActive != 0; }
+bool Terminal::isMouseActiveForTest() const { return signalState_->mouseActive != 0; }
+// NOTA: leen el miembro propio publicado al handler, no g_activeSignalState.
+// El test interroga al objeto que mutó (ver Terminal.h).
+bool Terminal::isAltActiveForTest() const { return signalState_->altActive != 0; }
+bool Terminal::isRawActiveForTest() const { return signalState_->rawActive != 0; }
 
 bool Terminal::hasResized() {
-    if (g_resized) {
-        g_resized = 0;
+    if (signalState_->resized) {
+        signalState_->resized = 0;
         return true;
     }
     return false;

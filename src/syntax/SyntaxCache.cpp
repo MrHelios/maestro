@@ -113,7 +113,7 @@ void SyntaxCache::ensureSize(const Document& doc) {
 }
 
 void SyntaxCache::ensureValid(const Document& doc, int upTo) {
-    bool doInstr = instrument::enabled;
+    bool doInstr = instrument::isEnabled();
     uint64_t t0 = doInstr ? instrument::nowNanos() : 0;
     auto doRecord = [&](int requestedClamped, int parsedLines, int hlCalls){
         if (!doInstr) return;

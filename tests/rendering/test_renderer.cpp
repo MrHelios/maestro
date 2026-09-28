@@ -9,7 +9,7 @@
 // usamos construimos un Document/Cursor/Viewport de nivel bajo.
 #include "rendering/Renderer.h"
 #include "app/Editor.h"
-#include "rendering/Theme.h"
+#include "rendering/tty/Theme.h"
 #include "base/utf8.h"
 #include "layout/Gutter.h"
 

@@ -157,7 +157,7 @@ inline constexpr int TAB_WIDTH = 4;
 inline constexpr int kTabWidth = TAB_WIDTH;
 
 inline int columnOf(std::string_view line, int byteCol) {
-    bool doInstr = instrument::enabled;
+    bool doInstr = instrument::isEnabled();
     uint64_t t0 = doInstr ? instrument::nowNanos() : 0;
     int n = static_cast<int>(line.size());
     int limit = byteCol < n ? byteCol : n; // input_bytes/scan_limit, aprox. O(n)
@@ -218,7 +218,7 @@ inline int byteForColumn(std::string_view line, int targetCol) {
 // celda por la mitad (lo que generaria bytes invalidos y corromperia el
 // resto del render).
 inline std::string truncate(std::string_view line, int maxCols) {
-    bool doInstr = instrument::enabled;
+    bool doInstr = instrument::isEnabled();
     uint64_t t0 = doInstr ? instrument::nowNanos() : 0;
     int col = 0;
     size_t i = 0;
@@ -264,7 +264,7 @@ inline void expandTabsInto(std::string& out, std::string_view line) {
 }
 
 inline std::string expandTabs(std::string_view line) {
-    bool doInstr = instrument::enabled;
+    bool doInstr = instrument::isEnabled();
     uint64_t t0 = doInstr ? instrument::nowNanos() : 0;
     std::string out;
     out.reserve(line.size() + 8);
@@ -277,7 +277,7 @@ inline std::string expandTabs(std::string_view line) {
 }
 
 inline std::string_view range(std::string_view line, int fromCol, int toCol) {
-    bool doInstr = instrument::enabled;
+    bool doInstr = instrument::isEnabled();
     uint64_t t0 = doInstr ? instrument::nowNanos() : 0;
     if (toCol <= fromCol) {
         if (doInstr) {

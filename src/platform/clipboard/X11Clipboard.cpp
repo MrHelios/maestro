@@ -10,10 +10,27 @@
 
 XErrorHandler X11Clipboard::previousHandler_ = nullptr;
 int X11Clipboard::refCount_ = 0;
-std::unordered_map<unsigned long, X11Clipboard::RequestorInfo> X11Clipboard::activeRequestors_;
-int X11Clipboard::absorbedErrorCount_ = 0;
+std::unordered_set<X11Clipboard*> X11Clipboard::liveInstances_;
 
-bool X11Clipboard::isExpectedClipboardError(const XErrorEvent& error) {
+void X11Clipboard::acquireProcessState(X11Clipboard* self) {
+    if (refCount_ == 0) {
+        previousHandler_ = XSetErrorHandler(handleX11Error);
+    }
+    ++refCount_;
+    liveInstances_.insert(self);
+}
+
+void X11Clipboard::releaseProcessState(X11Clipboard* self) {
+    assert(refCount_ > 0);
+    liveInstances_.erase(self);
+    --refCount_;
+    if (refCount_ == 0) {
+        XSetErrorHandler(previousHandler_);
+        previousHandler_ = nullptr;
+    }
+}
+
+bool X11Clipboard::isExpectedClipboardError(const XErrorEvent& error) const {
     if (activeRequestors_.find(error.resourceid) == activeRequestors_.end()) return false;
     // NOTA: resourceid no siempre es una ventana. Para BadWindow/BadDrawable
     // si es el ID de la ventana; para BadAtom es el atomo que fallo y para
@@ -58,9 +75,13 @@ void X11Clipboard::purgeStaleRequestors() {
 }
 
 int X11Clipboard::handleX11Error(Display* display, XErrorEvent* error) {
-    if (isExpectedClipboardError(*error)) {
-        ++absorbedErrorCount_;
-        return 0;
+    // Sin userdata de Xlib: se consulta el estado funcional de cada
+    // instancia viva (unión == vieja semántica del mapa compartido).
+    for (X11Clipboard* inst : liveInstances_) {
+        if (inst && inst->isExpectedClipboardError(*error)) {
+            ++inst->absorbedErrorCount_;
+            return 0;
+        }
     }
     if (previousHandler_) return previousHandler_(display, error);
     if (display) {
@@ -73,10 +94,7 @@ int X11Clipboard::handleX11Error(Display* display, XErrorEvent* error) {
 }
 
 X11Clipboard::X11Clipboard() {
-    if (refCount_ == 0) {
-        previousHandler_ = XSetErrorHandler(handleX11Error);
-    }
-    ++refCount_;
+    acquireProcessState(this);
 
     display_ = XOpenDisplay(nullptr);
     if (!display_) return;
@@ -111,15 +129,9 @@ X11Clipboard::~X11Clipboard() {
         if (window_) XDestroyWindow(display_, (Window)window_);
         XCloseDisplay(display_);
     }
-    // Xlib mantiene el error handler a nivel global de proceso.
-    // Este contador asume que la creación/destrucción de X11Clipboard
-    // ocurre desde un único thread.
-    assert(refCount_ > 0);
-    --refCount_;
-    if (refCount_ == 0) {
-        XSetErrorHandler(previousHandler_);
-        previousHandler_ = nullptr;
-    }
+    // Xlib mantiene el error handler a nivel global de proceso (ver
+    // acquire/releaseProcessState y el bloque "Estado de PROCESO" en el .h).
+    releaseProcessState(this);
 }
 
 bool X11Clipboard::ownsClipboard() const {

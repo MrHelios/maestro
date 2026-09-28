@@ -8,7 +8,7 @@
 #include "base/SmallVec.h"
 #include "layout/Layout.h"
 #include "platform/CellPos.h"
-#include "rendering/StatusBar.h"
+#include "rendering/StatusBarData.h"
 #include "rendering/Style.h"
 
 // ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include "rendering/StatusBar.h"
+#include "rendering/tty/StatusBar.h"
 
 const std::string& TtyEncoder::ansiFor(StyleRole role) const {
     return themeAnsiFor(theme_, role);
@@ -37,6 +37,8 @@ std::string TtyEncoder::encodeRow(const StyledRow& row) const {
     appendRow(out, row);
     return out;
 }
+
+void TtyEncoder::appendClearLine(std::string& out) const { out += "\x1b[K"; }
 
 void TtyEncoder::appendRow(std::string& out, const StyledRow& row) const {
     const Theme& T = theme_;

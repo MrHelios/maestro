@@ -46,7 +46,7 @@ void TtyRunLoop::run() {
         b.viewport.scrollToCursor(b.cursor, b.document, tw);
         editor_.renderer_.renderScreenDiff(b.document, b.cursor, b.viewport,
                                    b.filename, b.modified, editor_.statusMessage_,
-                                   editor_.state_, b.selection, editor_.searchHighlight_);
+                                   editor_.state_, editor_.sink(), b.selection, editor_.searchHighlight_);
     }
 
     while (editor_.running_) {

@@ -13,7 +13,7 @@
 #include "layout/BracketMatcher.h"
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
-#include "rendering/StatusBar.h"
+#include "rendering/StatusBarData.h"
 #include "rendering/frame/FrameBuilder.h"
 #include "rendering/tty/TtyEncoder.h"
 

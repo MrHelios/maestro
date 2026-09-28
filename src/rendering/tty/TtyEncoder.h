@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "rendering/Theme.h"
+#include "rendering/tty/Theme.h"
 #include "rendering/frame/Frame.h"
 
 // ---------------------------------------------------------------------------
@@ -24,10 +24,14 @@ public:
     // Tabla rol -> secuencia ANSI (vacía = sin estilo).
     const std::string& ansiFor(StyleRole role) const;
 
+    // Borrado de línea para pantallas de listas. Es detalle de codificación
+    // del backend (objeto, sin estado): las pantallas legacy de Renderer lo
+    // usan vía su encoder_ miembro en vez de un literal fuera de tty/.
+    void appendClearLine(std::string& out) const;
+
     // Fila codificada lista para pintar: "\x1b[K" + segmentos.
     // Reproduce byte a byte el viejo renderEditorRow ANSI.
-    std::string encodeRow(const StyledRow& row) const;
-    // Variante sin allocation extra: agrega la fila a `out` (camino
+    std::string encodeRow(const StyledRow& row) const;    // Variante sin allocation extra: agrega la fila a `out` (camino
     // caliente de buildScreen: un solo buffer con una sola reserva).
     void appendRow(std::string& out, const StyledRow& row) const;
 

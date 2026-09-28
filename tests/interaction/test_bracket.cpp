@@ -181,7 +181,7 @@ TEST(bracket_selection_highlight_hidden_but_jump_works) {
     CHECK(ed.bracketPair_.has_value());
     ed.handleEvent(insert('s'));
     CHECK(ed.getStateForTesting() == State::Seleccion);
-    Renderer r; r.setTestMode(true);
+    Renderer r;
     Document doc = ed.active().document;
     Cursor cur = ed.active().cursor;
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=40;
@@ -261,7 +261,7 @@ TEST(bracket_unicode_before) {
     ed.updateBracketHighlight();
     CHECK(ed.bracketPair_.has_value());
     CHECK_EQ(ed.bracketPair_->open.col, 2); // byte column
-    Renderer r; r.setTestMode(true);
+    Renderer r;
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=40;
     Cursor cur = ed.active().cursor;
     std::string out = r.buildScreen(ed.active().document, cur, vp, "t.cpp", false, Message{}, State::Navegacion, std::nullopt, std::nullopt, ed.bracketPair_);
@@ -276,7 +276,7 @@ TEST(bracket_tab_before) {
     CHECK(ed.bracketPair_.has_value());
     CHECK_EQ(ed.bracketPair_->open.line, 0);
     CHECK_EQ(ed.bracketPair_->close.line, 2);
-    Renderer r; r.setTestMode(true);
+    Renderer r;
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=40;
     Cursor cur = ed.active().cursor;
     std::string out = r.buildScreen(ed.active().document, cur, vp, "t.cpp", false, Message{}, State::Navegacion, std::nullopt, std::nullopt, ed.bracketPair_);

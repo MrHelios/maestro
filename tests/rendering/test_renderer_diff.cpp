@@ -19,6 +19,7 @@
 
 #define private public
 #include "app/Editor.h"
+#include "rendering/tty/TtySink.h"
 #undef private
 
 namespace {
@@ -366,8 +367,9 @@ TEST(render_diff_scroll_realista_reescribe_filas_sin_borrado_total) {
 
 TEST(render_diff_vuelta_de_filebrowser_es_completo) {
     DiffHarness h(300);
+    NullSink null;
     h.getDiffOutput();
-    h.r.renderFileList(std::vector<FileListItem>{{"a.txt", false}, {"b.txt", false}}, 0, 0, "/tmp", Message(""), 80, 24);
+    h.r.renderFileList(std::vector<FileListItem>{{"a.txt", false}, {"b.txt", false}}, 0, 0, "/tmp", Message(""), 80, 24, null);
     CHECK(!h.r.hasCache());
     const std::string trasFileList = h.getDiffOutput();
     CHECK(trasFileList.find("\x1b[2J\x1b[H") != std::string::npos);
@@ -396,11 +398,12 @@ TEST(render_diff_mensaje_temporal) {
 
 TEST(render_diff_invalidacion_por_modal_y_resize) {
     DiffHarness h(300);
+    NullSink null;
 
     h.getDiffOutput();
     CHECK(h.r.hasCache());
 
-    h.r.renderBufferList({"uno", "dos"}, 0, 80, 24);
+    h.r.renderBufferList({"uno", "dos"}, 0, 80, 24, null);
     CHECK(!h.r.hasCache());
     const std::string trasModal = h.getDiffOutput();
     CHECK(trasModal.find("\x1b[2J\x1b[H") != std::string::npos);

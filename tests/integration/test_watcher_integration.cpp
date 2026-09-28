@@ -9,10 +9,19 @@
 #define private public
 #include "app/Editor.h"
 #include "filesystem/InotifyFileWatcher.h"
+#include "rendering/tty/TtySink.h"
 #undef private
 #include "helpers/FakeClipboard.h"
 
 using testfw::TempFile;
+
+// Estos tests ejercitan handleFileChange (lógica de recarga), que renderiza
+// de paso. Inyectan un NullSink de vida del thread: la suite es
+// single-thread y es solo scaffolding de tests (ningún global en src/).
+static void muteRender(Editor& ed) {
+    thread_local NullSink nullSink;
+    ed.setSink(nullSink);
+}
 
 static bool writeFile(const std::string& p, const std::string& c) {
     std::ofstream f(p, std::ios::binary | std::ios::trunc);
@@ -41,6 +50,7 @@ static bool pollUntil(InotifyFileWatcher& w, std::vector<FileChangeEvent>& out, 
 
 template <typename Pred>
 static bool pollEditorUntil(Editor& ed, Pred pred) {
+    muteRender(ed);
     auto* w = dynamic_cast<InotifyFileWatcher*>(ed.watcher_.get());
     if (!w) return false;
     for (int i = 0; i < 30; ++i) {
@@ -63,6 +73,7 @@ static void drainWatcher(InotifyFileWatcher& w) {
 }
 
 static void drainEditor(Editor& ed) {
+    muteRender(ed);
     auto* w = dynamic_cast<InotifyFileWatcher*>(ed.watcher_.get());
     if (!w) return;
     for (int i = 0; i < 20; ++i) {
@@ -117,6 +128,7 @@ static void checkWatcherInvariants(const InotifyFileWatcher& w) {
 
 template <typename Pred>
 static bool pollEditorUntilWithModifiedCount(Editor& ed, const std::string& path, size_t& outModified, Pred pred) {
+    muteRender(ed);
     auto* w = dynamic_cast<InotifyFileWatcher*>(ed.watcher_.get());
     if (!w) return false;
     outModified = 0;
@@ -313,6 +325,7 @@ TEST(save_procesa_todos_los_eventos_no_warning) {
 TEST(save_con_modify_y_attrib_no_warning) {
     TempFile f; f.write("orig\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
+    muteRender(ed);
     CHECK(ed.loadIntoActiveBuffer(f.path));
     ed.active().document.restore({"v2"});
     ed.active().modified = true;
@@ -1126,6 +1139,7 @@ TEST(editor_destructor_cleans_all_watches) {
 TEST(editor_handleFileChange_atomic_replace_sequence_clean_reloads_once) {
     TempFile f; f.write("v1\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
+    muteRender(ed);
     CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK(!ed.active().modified);
     auto id1 = ed.active().savedIdentity;
@@ -1157,6 +1171,7 @@ TEST(editor_handleFileChange_atomic_replace_sequence_clean_reloads_once) {
 TEST(editor_handleFileChange_atomic_replace_sequence_dirty_warns_not_reload) {
     TempFile f; f.write("v1\n");
     Editor ed(std::make_unique<FakeClipboard>(), std::make_unique<InotifyFileWatcher>());
+    muteRender(ed);
     CHECK(ed.loadIntoActiveBuffer(f.path));
     ed.active().document.restore({"local"});
     ed.active().modified = true;

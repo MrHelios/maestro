@@ -1,12 +1,24 @@
 #include <cstdio>
 #include "app/Editor.h"
 #include "platform/MouseButton.h"
+#include "rendering/tty/TtySink.h"
 
+// main es el composition root: acá se cablean los backends concretos
+// (TtySink, X11MouseButtonQuery) con el engine (Editor), que solo conoce
+// interfaces puras (Sink, oracle). El futuro GUI construirá los suyos sin
+// tocar src/app/.
 int main(int argc, char* argv[]) {
+    // Dueño explícito del recurso X11 (sin static de proceso). Vive lo que
+    // vive el editor, que lo consulta vía oracle en el tick de autoscroll.
+    platform::X11MouseButtonQuery mouseQuery;
+    // Backend de escritura real. Vive lo que vive el editor.
+    TtySink ttySink;
     Editor editor;
+    editor.setSink(ttySink);
     // Oraculo fisico para el autoscroll: si se suelta fuera de la ventana
     // no llega evento de release; el tick consulta X11 y frena igual.
-    editor.setMouseButtonHeldOracle([] { return platform::leftMouseButtonHeld(); });
+    // Único cableado productivo: no hay fallback global oculto.
+    editor.setMouseButtonHeldOracle([&] { return mouseQuery.held(); });
 
     // Sin argumentos: arranca con el buffer vacío "SinNombre" que ya
     // crea BufferManager en su constructor. Con un path: lo abre (o crea

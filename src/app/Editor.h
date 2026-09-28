@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -20,6 +21,10 @@
 #include "app/Message.h"
 #include "rendering/Renderer.h"
 #include "platform/Event.h"
+
+// Sink de escritura (frontera de I/O del Renderer). Forward declarado para
+// no acoplar este header a rendering/tty/: el dueño real vive en el .cpp.
+class Sink;
 
 // Editor es el "engine": maneja una coleccion de buffers (v0.6.3), un
 // buffer activo, el modo, los mensajes y el portapapeles global. Todo lo
@@ -104,6 +109,18 @@ public:
         mouseButtonHeldOracle_ = std::move(oracle);
     }
 
+    // Sink de escritura para renderFrame. El Editor SOLO conoce la
+    // interfaz pura (Sink*): nunca construye ni incluye el backend TTY.
+    // Lo inyecta el dueño en el composition root (main: TtySink real;
+    // tests: NullSink/TtySink local). Precondición: setSink antes del
+    // primer renderFrame (assert en sink()).
+    void setSink(Sink& s) { sink_ = &s; }
+    void clearSink() { sink_ = nullptr; }
+    Sink& sink() {
+        assert(sink_ != nullptr && "Editor::setSink() antes del primer render");
+        return *sink_;
+    }
+
 private:
     // ---- Mensajes al usuario (paso 8) ----
     // Un unico valor `statusMessage_` (ui::Message) lleva el texto, el tipo
@@ -174,6 +191,11 @@ private:
     void openFileInBuffer(const std::string& path);
 
     Renderer renderer_;
+    // Sink inyectado (no poseído). El Editor no sabe qué backend es:
+    // main inyecta TtySink, los tests su NullSink/TtySink local.
+    // Nulo hasta setSink(); el futuro GUI inyectará el suyo sin que el
+    // engine arrastre un TtySink inútil.
+    Sink* sink_ = nullptr;
     // Tamaño actual de la ventana (estado del editor, no del backend).
     // Default 24x80 (igual que el fallback de Terminal sin TTY).
     // Lo actualiza cada EventType::Resize via handleResize(rows, cols):

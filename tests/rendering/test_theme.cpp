@@ -11,13 +11,13 @@
 #include "test_framework.h"
 #include "helpers/test_render_utils.h"
 
-#include "rendering/Theme.h"
+#include "rendering/tty/Theme.h"
 #include "document/Document.h"
 #include "document/Cursor.h"
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
 #include "rendering/Renderer.h"
-#include "rendering/StatusBar.h"
+#include "rendering/tty/StatusBar.h"
 
 namespace {
 

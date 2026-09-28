@@ -1,5 +1,6 @@
 #include "test_support.h"
 #include "platform/tty/Terminal.h"
+#include "rendering/tty/TtySink.h"
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -86,6 +87,8 @@ TEST(scroll_in_selection_does_not_extend) {
 
 TEST(scroll_does_not_snap_back_on_render) {
     Editor ed;
+    NullSink null;
+    ed.setSink(null);
     std::vector<std::string> lines;
     for (int i = 0; i < 100; ++i) lines.push_back("line " + std::to_string(i));
     ed.active().document.restore(lines);
@@ -289,6 +292,8 @@ TEST(scroll_terminal_event_to_viewport) {
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::ScrollUp));
 
     Editor ed;
+    NullSink nullViewport;
+    ed.setSink(nullViewport);
     std::vector<std::string> lines;
     for (int i = 0; i < 100; ++i) lines.push_back("line " + std::to_string(i));
     ed.active().document.restore(lines);
@@ -315,6 +320,8 @@ TEST(scroll_terminal_event_to_viewport) {
 
 TEST(scroll_renderFrame_diff_visual) {
     Editor ed;
+    NullSink null;
+    ed.setSink(null);
     std::vector<std::string> lines;
     for (int i = 0; i < 100; ++i) lines.push_back("line " + std::to_string(i));
     ed.active().document.restore(lines);
@@ -343,6 +350,9 @@ TEST(scroll_renderFrame_diff_visual) {
 
 TEST(scroll_renderFrame_captures_diff) {
     Editor ed;
+    NullSink null;
+    TtySink real;
+    ed.setSink(null);
     std::vector<std::string> lines;
     for (int i = 0; i < 100; ++i) lines.push_back("line " + std::to_string(i));
     ed.active().document.restore(lines);
@@ -351,16 +361,16 @@ TEST(scroll_renderFrame_captures_diff) {
     ed.active().viewport.top = 10;
     ed.active().cursor.line = 12;
 
-    Renderer::setTestMode(true);
+    ed.setSink(null);
     ed.renderFrame();
     int savedStdout = dup(STDOUT_FILENO);
     int pfd[2];
     pipe(pfd);
     dup2(pfd[1], STDOUT_FILENO);
-    Renderer::setTestMode(false);
+    ed.setSink(real);
     press(ed, EventType::ScrollDown);
     ed.renderFrame();
-    Renderer::setTestMode(true);
+    ed.setSink(null);
     dup2(savedStdout, STDOUT_FILENO);
     close(savedStdout);
     close(pfd[1]);

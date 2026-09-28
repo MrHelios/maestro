@@ -12,8 +12,8 @@
 #include "layout/BracketMatcher.h"
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
-#include "rendering/StatusBar.h"
-#include "rendering/Theme.h"
+#include "rendering/Sink.h"
+#include "rendering/StatusBarData.h"
 #include "rendering/frame/FrameBuilder.h"
 #include "rendering/tty/TtyDiff.h"
 #include "rendering/tty/TtyEncoder.h"
@@ -43,8 +43,15 @@ struct FileListItem {
 // ---------------------------------------------------------------------------
 class Renderer {
 public:
-    static void setTestMode(bool v) { s_testMode = v; }
-    static bool isTestMode() { return s_testMode; }
+    // NOTA de alcance (honesta): acá no hay flag de test-mode ni estado
+    // global, y build* es puro (FrameBuilder -> Frame -> string, sin I/O).
+    // Pero la clase NO es backend-independent: posee TtyEncoder y TtyDiff
+    // como miembros, su setTheme habla el Theme ANSI del backend TTY, y las
+    // pantallas de listas siguen siendo TTY directo. Es el shim de
+    // transición documentado arriba: conoce StyleRole + Frame, construye,
+    // codifica vía el backend TTY que posee y entrega a un Sink inyectado.
+    // La independencia total (Renderer puro + TtyRenderer en tty/) queda
+    // pendiente y exigiría migrar la batería de tests.
     void setTheme(const Theme& t);
     const Theme& theme() const { return encoder_.theme(); }
     void invalidateCache() { diff_.invalidateCache(); }
@@ -67,6 +74,7 @@ public:
                       bool modified,
                       const Message& message,
                       State state,
+                      Sink& sink,
                       const std::optional<Selection>& selection = std::nullopt,
                       const std::optional<Selection>& searchHighlight = std::nullopt,
                       const std::optional<BracketPair>& bracketPair = std::nullopt);
@@ -78,6 +86,7 @@ public:
                           bool modified,
                           const Message& message,
                           State state,
+                          Sink& sink,
                           const std::optional<Selection>& selection = std::nullopt,
                           const std::optional<Selection>& searchHighlight = std::nullopt,
                           const std::optional<BracketPair>& bracketPair = std::nullopt);
@@ -101,7 +110,8 @@ public:
     void renderBufferList(const std::vector<std::string>& names,
                           int selected,
                           int width,
-                          int height);
+                          int height,
+                          Sink& sink);
 
     // Precondición FileBrowser: 0 <= scroll <= items.size(), 0 <= selected < items.size() (si no vacío)
     // y selected en [scroll, scroll+height). El caller (Editor) debe clampear antes de renderizar.
@@ -119,7 +129,8 @@ public:
                          const std::string& path,
                          const Message& message,
                          int width,
-                         int height);
+                         int height,
+                         Sink& sink);
 
     void setExternalSyntaxCache(SyntaxCache* c);
     SyntaxCache* externalSyntaxCache() const {
@@ -173,8 +184,6 @@ private:
                                const Cursor& cursor,
                                const Viewport& viewport,
                                const std::optional<Normalized>& sel,
-                               const Rect& area,
-                               int gutterW) const;
-
-    static inline bool s_testMode = false;
+                                const Rect& area,
+                                int gutterW) const;
 };

@@ -261,28 +261,28 @@ TEST(terminal_raw_alt_mouse_cycle) {
 
 TEST(terminal_signal_flag_mouse) {
     Terminal t;
-    CHECK(!Terminal::isMouseActiveForTest());
+    CHECK(!t.isMouseActiveForTest());
     t.enableMouseTracking();
-    CHECK(Terminal::isMouseActiveForTest());
+    CHECK(t.isMouseActiveForTest());
     t.disableMouseTracking();
-    CHECK(!Terminal::isMouseActiveForTest());
+    CHECK(!t.isMouseActiveForTest());
     t.enableMouseTracking();
-    CHECK(Terminal::isMouseActiveForTest());
+    CHECK(t.isMouseActiveForTest());
     t.disableMouseTracking();
-    CHECK(!Terminal::isMouseActiveForTest());
+    CHECK(!t.isMouseActiveForTest());
 }
 
 TEST(terminal_signal_flag_alt) {
     Terminal t;
-    CHECK(!Terminal::isAltActiveForTest());
+    CHECK(!t.isAltActiveForTest());
     t.enterAlternateScreen();
-    CHECK(Terminal::isAltActiveForTest());
+    CHECK(t.isAltActiveForTest());
     t.leaveAlternateScreen();
-    CHECK(!Terminal::isAltActiveForTest());
+    CHECK(!t.isAltActiveForTest());
     t.enterAlternateScreen();
-    CHECK(Terminal::isAltActiveForTest());
+    CHECK(t.isAltActiveForTest());
     t.leaveAlternateScreen();
-    CHECK(!Terminal::isAltActiveForTest());
+    CHECK(!t.isAltActiveForTest());
 }
 
 TEST(terminal_signal_flag_raw) {
@@ -291,11 +291,11 @@ TEST(terminal_signal_flag_raw) {
     int savedStdin = dup(STDIN_FILENO);
     dup2(ptySlave, STDIN_FILENO);
     Terminal t;
-    CHECK(!Terminal::isRawActiveForTest());
+    CHECK(!t.isRawActiveForTest());
     t.enableRawMode();
-    CHECK(Terminal::isRawActiveForTest());
+    CHECK(t.isRawActiveForTest());
     t.disableRawMode();
-    CHECK(!Terminal::isRawActiveForTest());
+    CHECK(!t.isRawActiveForTest());
     dup2(savedStdin, STDIN_FILENO);
     close(savedStdin);
     close(ptyMaster);

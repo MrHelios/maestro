@@ -15,7 +15,7 @@
 #include "platform/clipboard/ClipboardFactory.h"
 #include "filesystem/FileWatcherFactory.h"
 #include "layout/ScreenToCursor.h"
-#include "rendering/Theme.h"
+#include "rendering/tty/Theme.h"
 #include "rendering/tty/TtyScroll.h"
 #include "app/Editor.h"
 

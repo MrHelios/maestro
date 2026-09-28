@@ -1,9 +1,7 @@
 #include "rendering/Renderer.h"
 
 #include <algorithm>
-#include <cerrno>
 #include <cstdlib>
-#include <unistd.h>
 
 #include "base/utf8.h"
 #include "diagnostics/Instrument.h"
@@ -17,8 +15,8 @@ using namespace chrome;
 
 void renderFilledRow(std::string& out, std::string_view text, int width,
                      const std::string& bgStyle, const std::string& reset) {
-    instrument::ScopedTimer _t(instrument::enabled ? &instrument::current.renderFilledRow_nanos : nullptr);
-    if (instrument::enabled) instrument::onRenderFilledRow();
+    instrument::ScopedTimer _t(instrument::renderFilledRowTimer());
+    if (instrument::isEnabled()) instrument::onRenderFilledRow();
     if (bgStyle.empty()) {
         instrument::setTag(instrument::Utf8Tag::RangeFilled);
         std::string_view visible = utf8::range(text, 0, width);
@@ -87,45 +85,30 @@ std::string Renderer::buildScreen(
     return out;
 }
 
-static bool writeAll(int fd, const std::string& s) {
-    if (Renderer::isTestMode()) return true;
-    const char* p = s.c_str();
-    std::size_t remaining = s.size();
-    while (remaining > 0) {
-        ssize_t n = ::write(fd, p, remaining);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            return false;
-        }
-        if (n == 0) return false;
-        p += static_cast<std::size_t>(n);
-        remaining -= static_cast<std::size_t>(n);
-    }
-    return true;
-}
-
 void Renderer::renderScreen(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
     const std::string& filename, bool modified, const Message& message,
-    State state, const std::optional<Selection>& selection,
+    State state, Sink& sink,
+    const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
     std::string buffer = buildScreen(doc, cursor, viewport, filename, modified,
                                      message, state, selection,
                                      searchHighlight, bracketPair);
-    writeAll(STDOUT_FILENO, buffer);
+    sink.writeStdout(buffer);
 }
 
 void Renderer::renderScreenDiff(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
     const std::string& filename, bool modified, const Message& message,
-    State state, const std::optional<Selection>& selection,
+    State state, Sink& sink,
+    const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
     const std::string out =
         buildDiffFrame(doc, cursor, viewport, filename, modified, message,
                        state, selection, searchHighlight, bracketPair);
-    if (!writeAll(STDOUT_FILENO, out)) diff_.invalidateCache();
+    if (!sink.writeStdout(out)) diff_.invalidateCache();
 }
 
 std::string Renderer::buildDiffFrame(
@@ -143,8 +126,8 @@ void Renderer::renderEditorContent(
     std::string& out, const Document& doc, const Cursor& cursor,
     const Viewport& viewport, const std::optional<Normalized>& sel,
     const Rect& area, int gutterW) const {
-    instrument::ScopedTimer _t(&instrument::current.renderEditorContent_nanos);
-    if (instrument::enabled) instrument::onRenderEditorContent();
+    instrument::ScopedTimer _t(instrument::renderEditorContentTimer());
+    if (instrument::isEnabled()) instrument::onRenderEditorContent();
     int textWidth = std::max(0, area.width - gutterW);
     for (int row = 0; row < area.height; ++row) {
         int docLine = viewport.top + row;
@@ -194,7 +177,7 @@ void Renderer::renderBufferListContent(
     const Theme& T = encoder_.theme();
     int rows = 0;
     for (size_t i = 0; i < names.size() && rows < area.height; ++i, ++rows) {
-        out += "\x1b[K";
+        encoder_.appendClearLine(out);
         std::string line = "  " + names[i];
         bool isSelected = (static_cast<int>(i) == selected);
         renderFilledRow(out, line, area.width,
@@ -202,17 +185,18 @@ void Renderer::renderBufferListContent(
         out += "\r\n";
     }
     for (int r = rows; r < area.height; ++r) {
-        out += "\x1b[K";
+        encoder_.appendClearLine(out);
         renderEmptyMarkerRow(out, T, area.width);
         out += "\r\n";
     }
 }
 
 void Renderer::renderBufferList(const std::vector<std::string>& names,
-                                int selected, int width, int height) {
+                                int selected, int width, int height,
+                                Sink& sink) {
     diff_.invalidateCache();
     std::string buffer = buildBufferListScreen(names, selected, width, height);
-    writeAll(STDOUT_FILENO, buffer);
+    sink.writeStdout(buffer);
 }
 
 std::string Renderer::buildFileListScreen(
@@ -252,7 +236,7 @@ void Renderer::renderFileListContent(
     int rows = 0;
     for (int row = 0; row < area.height; ++row, ++rows) {
         int idx = scroll + row;
-        out += "\x1b[K";
+        encoder_.appendClearLine(out);
         if (idx < static_cast<int>(items.size())) {
             const FileListItem& item = items[static_cast<size_t>(idx)];
             std::string line =
@@ -270,9 +254,10 @@ void Renderer::renderFileListContent(
 
 void Renderer::renderFileList(const std::vector<FileListItem>& items,
                               int selected, int scroll, const std::string& path,
-                              const Message& message, int width, int height) {
+                              const Message& message, int width, int height,
+                              Sink& sink) {
     diff_.invalidateCache();
     std::string buffer =
         buildFileListScreen(items, selected, scroll, path, message, width, height);
-    writeAll(STDOUT_FILENO, buffer);
+    sink.writeStdout(buffer);
 }

@@ -1045,7 +1045,7 @@ void Editor::renderFrame() {
         // Pantalla del selector: se dibuja la lista de buffers con la
         // barra MULTIBUFFER al final, manteniendo el aspecto del editor.
         renderer_.renderBufferList(bufferNames(), bufferSelectorIndex_,
-                                   b.viewport.width, b.viewport.height);
+                                   b.viewport.width, b.viewport.height, sink());
     } else if (state_ == State::FileBrowser) {
         fileBrowser.clampScroll(b.viewport.height);
         // DEUDA (Alcance 1): el vector adaptado se reconstruye por frame
@@ -1060,7 +1060,7 @@ void Editor::renderFrame() {
         renderer_.renderFileList(items,
                                  fileBrowser.index_, fileBrowser.scroll_,
                                  fileBrowser.path_, statusMessage_,
-                                 b.viewport.width, b.viewport.height);
+                                 b.viewport.width, b.viewport.height, sink());
     } else {
         // Sincroniza lenguaje del cache con el buffer activo antes de bracket/render
         {
@@ -1106,6 +1106,7 @@ void Editor::renderFrame() {
             b.modified,
             statusMessage_,
             state_,
+            sink(),
             b.selection,
             searchHighlight_,
             toRender

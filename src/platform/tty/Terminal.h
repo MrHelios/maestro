@@ -1,11 +1,18 @@
 #pragma once
 
+#include <memory>
 #include <string_view>
 
 #include "platform/Event.h"
 #include "platform/IEventSource.h"
 #include "platform/tty/ITtyKeymap.h"
 #include "platform/tty/Keymap.h"
+
+// Estado mínimo compartido con los signal handlers C. Forward declarado
+// para no exponer <termios.h>/<signal.h> a los consumidores de este header
+// (misma opacidad que origTermios_); la definición vive en
+// platform/tty/TtySignalState.h, solo incluida por Terminal.cpp.
+struct TtySignalState;
 
 // Encapsula todo lo especifico de la terminal (POSIX/Linux/macOS):
 // activar/desactivar el modo "raw", leer teclas crudas, y consultar
@@ -66,9 +73,13 @@ public:
 
     static bool parseMouseSgr(std::string_view seq, Event& e);
 
-    static bool isMouseActiveForTest();
-    static bool isAltActiveForTest();
-    static bool isRawActiveForTest();
+    // Observabilidad solo para tests: leen el estado PUBLICADO POR ESTE
+    // objeto (su signalState_ miembro), nunca el puntero global. Incluso
+    // bajo el supuesto de una sola Terminal viva, el test consulta al
+    // objeto que mutó, no a quien el handler ve hoy.
+    bool isMouseActiveForTest() const;
+    bool isAltActiveForTest() const;
+    bool isRawActiveForTest() const;
 
 private:
     bool rawModeEnabled_ = false;
@@ -79,6 +90,13 @@ private:
     // emite la terminal las secuencias, p.ej. Shift+Flecha).
     bool debugKeys_ = false;
     void* origTermios_; // puntero opaco a struct termios (evita incluir <termios.h> aqui)
+
+    // Estado mínimo compartido con los signal handlers C. Dueño con
+    // lifetime del Terminal (se publica vía puntero crudo solo mientras
+    // algún modo está activo). unique_ptr + forward decl: este header no ve
+    // <termios.h>/<signal.h>. El handler jamás toca el resto del objeto.
+    // El dtor está definido en Terminal.cpp (tipo completo ahí).
+    std::unique_ptr<TtySignalState> signalState_;
 
     // Significado de cada tecla/secuencia. Se consulta en readEvent();
     // remapeable en tiempo de ejecucion via keymap().
