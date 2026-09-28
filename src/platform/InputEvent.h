@@ -94,12 +94,14 @@ struct InputEvent {
     // multibyte (2-4 bytes, p.ej. "á", "ñ", "—", "😀"). Asi el Editor
     // recibee el caracter completo, no byte por byte.
     std::string text;
-    // DEUDA (docs/architecture.md §2): estos int exponen transporte TTY
-    // (formato SGR). La representación neutral es CellPos (ver
-    // cellPos()/setCellPos()): los backends deben traducir su formato
-    // físico a ella, y en un parche futuro CellPos debe quedar como única
-    // representación. No agregar más campos de transporte aquí.
-    // Coordenadas 1-based de terminal, solo validas si type == MousePress.
+    // DEPRECATED-transición (Fase A, shim en tests/helpers/event_shim.h):
+    // estos int exponen transporte TTY (formato SGR 1-based). Se conservan
+    // solo para compat temporal; el código nuevo usa CellPos vía
+    // cellPos()/setCellPos() o las fábricas de MouseEvent.h. No agregar
+    // más campos de transporte aquí. En la migración a CellPos 0-based
+    // estos campos desaparecen.
+    // Coordenadas 1-based de terminal, solo validas si type == MousePress,
+    // MouseDrag o MouseRelease.
     // (columna, fila) tal como las emite SGR (Cx, Cy).
     int mouseCol = 0;
     int mouseRow = 0;

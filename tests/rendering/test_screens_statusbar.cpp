@@ -70,9 +70,11 @@ std::string frameBuffer(int content, int width, int selected = 1) {
 
 std::string frameFile(int content, int width) {
     Renderer r;
-    return r.buildFileListScreen({"a.txt", "b.txt", "c.txt"}, 0, 0,
-                                 "/datos/proyecto", Message("ayuda: direcc de naveg"),
-                                 width, content);
+    return r.buildFileListScreen(
+        std::vector<FileListItem>{
+            {"a.txt", false}, {"b.txt", false}, {"c.txt", false}},
+        0, 0, "/datos/proyecto", Message("ayuda: direcc de naveg"),
+        width, content);
 }
 
 // Las DOS filas inferiores del frame (la barra comun) en texto visible.

@@ -23,27 +23,26 @@ struct MouseEvent {
 };
 
 // Fábricas Event <- tipos comunes (azúcar, sin lógica TTY).
+// Punto único de conversión CellPos -> Event (hoy identidad 1-based vía
+// setCellPos; al migrar a 0-based se ajusta acá, no en cada caller).
 inline Event makeMousePressEvent(CellPos p) {
     Event e;
     e.type = EventType::MousePress;
-    e.mouseCol = p.col;
-    e.mouseRow = p.row;
+    e.setCellPos(p);
     return e;
 }
 
 inline Event makeMouseDragEvent(CellPos p) {
     Event e;
     e.type = EventType::MouseDrag;
-    e.mouseCol = p.col;
-    e.mouseRow = p.row;
+    e.setCellPos(p);
     return e;
 }
 
 inline Event makeMouseReleaseEvent(CellPos p) {
     Event e;
     e.type = EventType::MouseRelease;
-    e.mouseCol = p.col;
-    e.mouseRow = p.row;
+    e.setCellPos(p);
     return e;
 }
 

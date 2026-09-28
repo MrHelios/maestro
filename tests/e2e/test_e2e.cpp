@@ -863,10 +863,13 @@ TEST(e2e_08_filebrowser_open_edit_save_switch) {
     ed.fileBrowser.path_ = base;                // sembrar dir inicial
     ed.fileBrowser.reload();
     ed.fileBrowser.index_ = 0;
-    CHECK_EQ(ed.fileBrowser.displayNames_.size(), 3u);
-    CHECK_EQ(ed.fileBrowser.displayNames_[0], "../");      // siempre arriba
-    CHECK_EQ(ed.fileBrowser.displayNames_[1], "beta/");   // carpetas primero
-    CHECK_EQ(ed.fileBrowser.displayNames_[2], "alpha.txt");
+    CHECK_EQ(ed.fileBrowser.entries_.size(), 3u);
+    CHECK_EQ(ed.fileBrowser.entries_[0].name, "..");      // siempre arriba
+    CHECK(ed.fileBrowser.entries_[0].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[1].name, "beta");   // carpetas primero
+    CHECK(ed.fileBrowser.entries_[1].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[2].name, "alpha.txt");
+    CHECK(!ed.fileBrowser.entries_[2].isDirectory);
 
     // navegar directorios: bajar a "beta/" y entrar.
     press(ed, EventType::MoveDown);             // 0 -> 1 "beta/"
@@ -874,9 +877,11 @@ TEST(e2e_08_filebrowser_open_edit_save_switch) {
     enter.type = EventType::InsertNewline;
     ed.handleEvent(enter);                      // enter() -> entrar a beta/
     CHECK(ed.fileBrowser.path_ == dirBeta);
-    CHECK_EQ(ed.fileBrowser.displayNames_.size(), 2u);
-    CHECK_EQ(ed.fileBrowser.displayNames_[0], "../");
-    CHECK_EQ(ed.fileBrowser.displayNames_[1], "gamma.txt");
+    CHECK_EQ(ed.fileBrowser.entries_.size(), 2u);
+    CHECK_EQ(ed.fileBrowser.entries_[0].name, "..");
+    CHECK(ed.fileBrowser.entries_[0].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[1].name, "gamma.txt");
+    CHECK(!ed.fileBrowser.entries_[1].isDirectory);
 
     // openFileInBuffer B: bajar a "gamma.txt" y Enter.
     press(ed, EventType::MoveDown);             // 0 -> 1 "gamma.txt"
@@ -1412,10 +1417,13 @@ TEST(e2e_14_filebrowser_open_error_preserves_state) {
     ed.fileBrowser.path_ = base;
     ed.fileBrowser.reload();
     ed.fileBrowser.index_ = 0;
-    CHECK_EQ(ed.fileBrowser.displayNames_.size(), 3u);
-    CHECK_EQ(ed.fileBrowser.displayNames_[0], "../");
-    CHECK_EQ(ed.fileBrowser.displayNames_[1], "alpha.txt");
-    CHECK_EQ(ed.fileBrowser.displayNames_[2], "no_perm.txt");
+    CHECK_EQ(ed.fileBrowser.entries_.size(), 3u);
+    CHECK_EQ(ed.fileBrowser.entries_[0].name, "..");
+    CHECK(ed.fileBrowser.entries_[0].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[1].name, "alpha.txt");
+    CHECK(!ed.fileBrowser.entries_[1].isDirectory);
+    CHECK_EQ(ed.fileBrowser.entries_[2].name, "no_perm.txt");
+    CHECK(!ed.fileBrowser.entries_[2].isDirectory);
 
     // intentar abrir el archivo sin permisos.
     Event enter;

@@ -38,7 +38,7 @@ public:
     void start();
     void startAt(const std::string& path);
 
-    // (Re)lista path_ en entries_/displayNames_. Devuelve un mensaje de
+    // (Re)lista path_ en entries_. Devuelve un mensaje de
     // error si no se pudo leer el directorio ("" si fue bien).
     std::string reload();
 
@@ -64,7 +64,6 @@ public:
     // Estado del explorador (accesible para los tests).
     std::string path_;
     std::vector<FileBrowserEntry> entries_;
-    std::vector<std::string> displayNames_;
     int index_ = 0;   // indice de la entrada seleccionada
     int scroll_ = 0;  // offset de la ventana visible
 

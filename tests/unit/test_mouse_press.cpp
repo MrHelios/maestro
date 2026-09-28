@@ -3,34 +3,29 @@
 #include "layout/Layout.h"
 #include "layout/ScreenToCursor.h"
 #include "layout/Viewport.h"
+#include "platform/CellPos.h"
 #include "platform/Event.h"
 #include "platform/tty/Terminal.h"
+#include "event_shim.h"
 #include "test_framework.h"
 
 namespace {
 
+// Shim Fase A: los helpers conservan firma (col,row) con literales 1-based
+// tal como los emite SGR, y delegan en makeMouseEventSgr(col, row), cuyo
+// punto único de conversión es cellFromSgr(). Único punto a cambiar cuando
+// CellPos migre a 0-based. makeMouseEvent(type, CellPos) queda reservado
+// para tests ya migrados (dominio destino).
 Event mousePress(int col, int row) {
-    Event e;
-    e.type = EventType::MousePress;
-    e.mouseCol = col;
-    e.mouseRow = row;
-    return e;
+    return testshim::makeMouseEventSgr(EventType::MousePress, col, row);
 }
 
 Event mouseDrag(int col, int row) {
-    Event e;
-    e.type = EventType::MouseDrag;
-    e.mouseCol = col;
-    e.mouseRow = row;
-    return e;
+    return testshim::makeMouseEventSgr(EventType::MouseDrag, col, row);
 }
 
 Event mouseRelease(int col, int row) {
-    Event e;
-    e.type = EventType::MouseRelease;
-    e.mouseCol = col;
-    e.mouseRow = row;
-    return e;
+    return testshim::makeMouseEventSgr(EventType::MouseRelease, col, row);
 }
 
 Event insertCh(char c) {

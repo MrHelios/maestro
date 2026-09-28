@@ -19,6 +19,14 @@
 #include "rendering/tty/TtyEncoder.h"
 #include "syntax/SyntaxCache.h"
 
+// Item estructurado de la lista de archivos (Alcance 1): `name` es el
+// nombre base sin sufijos; `isDirectory` dice si es carpeta. El sufijo
+// visual "/" lo pone el Renderer al pintar, no el app/.
+struct FileListItem {
+    std::string name;
+    bool isDirectory = false;
+};
+
 // ---------------------------------------------------------------------------
 // Renderer: SHIM de compatibilidad (Fase B/C-1).
 //
@@ -95,9 +103,9 @@ public:
                           int width,
                           int height);
 
-    // Precondición FileBrowser: 0 <= scroll <= names.size(), 0 <= selected < names.size() (si no vacío)
+    // Precondición FileBrowser: 0 <= scroll <= items.size(), 0 <= selected < items.size() (si no vacío)
     // y selected en [scroll, scroll+height). El caller (Editor) debe clampear antes de renderizar.
-    std::string buildFileListScreen(const std::vector<std::string>& names,
+    std::string buildFileListScreen(const std::vector<FileListItem>& items,
                                      int selected,
                                      int scroll,
                                      const std::string& path,
@@ -105,7 +113,7 @@ public:
                                      int width,
                                      int height);
 
-    void renderFileList(const std::vector<std::string>& names,
+    void renderFileList(const std::vector<FileListItem>& items,
                          int selected,
                          int scroll,
                          const std::string& path,
@@ -137,10 +145,10 @@ private:
 
     // Requiere las mismas invariantes de scroll/selected que buildFileListScreen().
     void renderFileListContent(std::string& out,
-                                 const std::vector<std::string>& names,
-                                 int selected,
-                                 int scroll,
-                                 const Rect& area) const;
+                                  const std::vector<FileListItem>& items,
+                                  int selected,
+                                  int scroll,
+                                  const Rect& area) const;
 
     void renderStatusBar(std::string& out,
                            const Rect& area,

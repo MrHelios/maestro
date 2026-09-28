@@ -1,22 +1,13 @@
 #include "test_framework.h"
+#include "event_shim.h"
 #include "app/Editor.h"
 #include "platform/Event.h"
 #include "document/Document.h"
 #include <string>
 
-static Event makeCharEvent(const std::string& text) {
-    Event e;
-    e.type = EventType::InsertChar;
-    e.text = text;
-    return e;
-}
-
-static Event makeKeyEvent(EventType type) {
-    Event e;
-    e.type = type;
-    e.text = "";
-    return e;
-}
+// Shim Fase A: uso directo del shim, sin wrappers locales.
+using testshim::makeCharEvent;
+using testshim::makeKeyEvent;
 
 static void setupDocumentWithLines(Editor& editor, int numLines) {
     Buffer& buffer = editor.getActiveBufferForTesting();

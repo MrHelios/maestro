@@ -1048,7 +1048,16 @@ void Editor::renderFrame() {
                                    b.viewport.width, b.viewport.height);
     } else if (state_ == State::FileBrowser) {
         fileBrowser.clampScroll(b.viewport.height);
-        renderer_.renderFileList(fileBrowser.displayNames_,
+        // DEUDA (Alcance 1): el vector adaptado se reconstruye por frame
+        // (O(n) copias + 1 alloc). Aceptable fuera del camino critico y
+        // consistente con bufferNames(); a futuro cachearlo en
+        // FileBrowser::reload() o pasar una vista no propietaria al Renderer.
+        std::vector<FileListItem> items;
+        items.reserve(fileBrowser.entries_.size());
+        for (const FileBrowserEntry& e : fileBrowser.entries_) {
+            items.push_back(FileListItem{e.name, e.isDirectory});
+        }
+        renderer_.renderFileList(items,
                                  fileBrowser.index_, fileBrowser.scroll_,
                                  fileBrowser.path_, statusMessage_,
                                  b.viewport.width, b.viewport.height);

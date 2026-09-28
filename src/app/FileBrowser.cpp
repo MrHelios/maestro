@@ -94,11 +94,6 @@ void FileBrowser::startAt(const std::string& path) {
 std::string FileBrowser::reload() {
     std::string err;
     entries_ = listDirectory(path_, err);
-    displayNames_.clear();
-    displayNames_.reserve(entries_.size());
-    for (const FileBrowserEntry& e : entries_) {
-        displayNames_.push_back(e.isDirectory ? e.name + "/" : e.name);
-    }
     return err;
 }
 

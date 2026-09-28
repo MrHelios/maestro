@@ -216,26 +216,26 @@ void Renderer::renderBufferList(const std::vector<std::string>& names,
 }
 
 std::string Renderer::buildFileListScreen(
-    const std::vector<std::string>& names, int selected, int scroll,
+    const std::vector<FileListItem>& items, int selected, int scroll,
     const std::string& path, const Message& message, int width, int height) {
     std::string out;
     encoder_.beginFrame(out);
 
     Layout layout = frameBuilder_.calculateLayout(height, width);
-    renderFileListContent(out, names, selected, scroll, layout.content);
+    renderFileListContent(out, items, selected, scroll, layout.content);
 
     StatusBarData data;
     data.name = path.empty() ? "/" : collapseHome(path);
     data.estado = "ABRIR ARCHIVO";
     data.estadoAccent = encoder_.theme().accentAbrir;
-    const int total = static_cast<int>(names.size());
+    const int total = static_cast<int>(items.size());
     data.right = total == 0 ? "0/0"
                             : std::to_string(selected - scroll + 1) + "/" +
                                   std::to_string(total);
     data.message = message;
     renderStatusBar(out, layout.statusBar, data);
 
-    int rows = std::min(static_cast<int>(names.size()) - scroll, height);
+    int rows = std::min(static_cast<int>(items.size()) - scroll, height);
     if (rows > 0) {
         int cursorRow = selected - scroll + 1;
         encoder_.moveCursorTo(out, cursorRow, 1);
@@ -246,15 +246,17 @@ std::string Renderer::buildFileListScreen(
 }
 
 void Renderer::renderFileListContent(
-    std::string& out, const std::vector<std::string>& names, int selected,
+    std::string& out, const std::vector<FileListItem>& items, int selected,
     int scroll, const Rect& area) const {
     const Theme& T = encoder_.theme();
     int rows = 0;
     for (int row = 0; row < area.height; ++row, ++rows) {
         int idx = scroll + row;
         out += "\x1b[K";
-        if (idx < static_cast<int>(names.size())) {
-            std::string line = "  " + names[static_cast<size_t>(idx)];
+        if (idx < static_cast<int>(items.size())) {
+            const FileListItem& item = items[static_cast<size_t>(idx)];
+            std::string line =
+                "  " + item.name + (item.isDirectory ? "/" : "");
 
             bool isSelected = (idx == selected);
             renderFilledRow(out, line, area.width,
@@ -266,11 +268,11 @@ void Renderer::renderFileListContent(
     }
 }
 
-void Renderer::renderFileList(const std::vector<std::string>& names,
+void Renderer::renderFileList(const std::vector<FileListItem>& items,
                               int selected, int scroll, const std::string& path,
                               const Message& message, int width, int height) {
     diff_.invalidateCache();
     std::string buffer =
-        buildFileListScreen(names, selected, scroll, path, message, width, height);
+        buildFileListScreen(items, selected, scroll, path, message, width, height);
     writeAll(STDOUT_FILENO, buffer);
 }

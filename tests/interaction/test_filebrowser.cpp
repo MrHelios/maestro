@@ -488,9 +488,13 @@ TEST(browser_folders_listed_before_files) {
     CHECK_EQ(ed.fileBrowser.entries_[3].name, "a.txt");
     CHECK(!ed.fileBrowser.entries_[3].isDirectory);
     CHECK_EQ(ed.fileBrowser.entries_[4].name, "b.txt");
-    // Los nombres para dibujar marcan las carpetas con "/".
-    CHECK_EQ(ed.fileBrowser.displayNames_[1], "alfa/");
-    CHECK_EQ(ed.fileBrowser.displayNames_[3], "a.txt");
+    // El Renderer marca las carpetas con "/" al pintar.
+    Renderer rTmp;
+    const std::string outTmp = rTmp.buildFileListScreen(
+        std::vector<FileListItem>{{"alfa", true}, {"a.txt", false}}, 0, 0,
+        "/", Message{}, 80, 5);
+    CHECK(contains(outTmp, "  alfa/"));
+    CHECK(contains(outTmp, "  a.txt"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1390,8 +1394,12 @@ TEST(browser_status_label_is_abrir_archivo) {
     CHECK(!ed.statusMessage_.empty());           // ayuda al entrar
 
     Renderer r;
+    std::vector<FileListItem> items;
+    items.reserve(ed.fileBrowser.entries_.size());
+    for (const auto& e : ed.fileBrowser.entries_)
+        items.push_back({e.name, e.isDirectory});
     const std::string out = r.buildFileListScreen(
-        ed.fileBrowser.displayNames_, ed.fileBrowser.index_, ed.fileBrowser.scroll_,
+        items, ed.fileBrowser.index_, ed.fileBrowser.scroll_,
         ed.fileBrowser.path_, ed.statusMessage_, 80, 10);
     CHECK(contains(out, "ABRIR ARCHIVO"));
 }
@@ -1409,8 +1417,12 @@ TEST(browser_status_path_matches_current_dir) {
     CHECK_EQ(ed.fileBrowser.path_, t.path + "/x");
 
     Renderer r;
+    std::vector<FileListItem> items;
+    items.reserve(ed.fileBrowser.entries_.size());
+    for (const auto& e : ed.fileBrowser.entries_)
+        items.push_back({e.name, e.isDirectory});
     const std::string out = r.buildFileListScreen(
-        ed.fileBrowser.displayNames_, ed.fileBrowser.index_, ed.fileBrowser.scroll_,
+        items, ed.fileBrowser.index_, ed.fileBrowser.scroll_,
         ed.fileBrowser.path_, ed.statusMessage_, 80, 10);
     CHECK(contains(out, t.path + "/x"));
 }
@@ -1437,7 +1449,9 @@ TEST(browser_exit_clears_status_message) {
 TEST(renderer_file_list_layout) {
     Renderer r;
     std::string out = r.buildFileListScreen(
-        {"..", "sub/", "a.txt", "b.txt"}, 1, 0, "/tmp/sandbox",
+        std::vector<FileListItem>{
+            {"..", true}, {"sub", true}, {"a.txt", false}, {"b.txt", false}},
+        1, 0, "/tmp/sandbox",
         "ABRIR: arriba/abajo mover | Enter abrir/entrar | ESC cancelar", 80, 10);
     // Entradas: sin estilo la no seleccionada; la activa lleva el gris del
     // item marcado (listSelected: mismo lenguaje ACTIVO que el editor).
@@ -1469,7 +1483,12 @@ TEST(renderer_file_list_scroll_hides_off_window) {
     Renderer r;
     // scroll=2 sobre 4 entradas con altura 2: se ven b.txt y c.txt, no a.txt.
     std::string out = r.buildFileListScreen(
-        {"..", "a.txt", "b.txt", "c.txt"}, 3, 2, "/", "x", 80, 2);
+        std::vector<FileListItem>{
+            {"..", true},
+            {"a.txt", false},
+            {"b.txt", false},
+            {"c.txt", false}},
+        3, 2, "/", "x", 80, 2);
     CHECK(contains(out, "  b.txt"));
     std::string styledText = std::string(kListSelectedStyle) + "  c.txt";
     size_t stylePos = out.find(styledText);

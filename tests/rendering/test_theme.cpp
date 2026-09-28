@@ -63,7 +63,9 @@ std::string bufferFrameWithSelection(const Theme& theme, int width = 200) {
 std::string fileFrameWithSelection(const Theme& theme, int width = 200) {
     Renderer r;
     r.setTheme(theme);
-    return r.buildFileListScreen({"aa.txt", "bb.txt"}, 0, 0, "/tmp", Message{}, width, 5);
+    return r.buildFileListScreen(
+        std::vector<FileListItem>{{"aa.txt", false}, {"bb.txt", false}}, 0, 0,
+        "/tmp", Message{}, width, 5);
 }
 
 } // namespace
@@ -208,8 +210,9 @@ TEST(theme_renderer_propagates_to_statusbar) {
     CHECK(buf.find(t.statusBar) != std::string::npos);
 
     // FileBrowser: idem.
-    std::string file = r.buildFileListScreen({"a.txt"}, 0, 0, "/ruta",
-                                             Message("ayuda"), 80, 5);
+    std::string file = r.buildFileListScreen(
+        std::vector<FileListItem>{{"a.txt", false}}, 0, 0, "/ruta",
+        Message("ayuda"), 80, 5);
     CHECK(file.find(t.statusBar) != std::string::npos);
 
     // Con el default theme la barra usaria otro color: el Theme se propaga.
