@@ -1,13 +1,13 @@
-#include "platform/tty/Keymap.h"
+#include "platform/tty/TtyKeymap.h"
 #include "platform/Event.h"  // shim legacy: este test usa EventType
 #include "test_framework.h"
 
 // ---------------------------------------------------------------------------
-// Paso: traduccion input -> Evento externalizada en un Keymap remapeable.
+// Paso: traduccion input -> Evento externalizada en un TtyKeymap remapeable.
 //
 // Terminal solo lee/ensambla bytes; el SIGNIFICADO de cada tecla vive en
-// Keymap como datos. Estas pruebas verifican los enlaces por defecto y que
-// el Keymap acepte rebindearse (reconfiguracion en tiempo de ejecucion) sin
+// TtyKeymap como datos. Estas pruebas verifican los enlaces por defecto y que
+// el TtyKeymap acepte rebindearse (reconfiguracion en tiempo de ejecucion) sin
 // que el Editor tenga que cambiar. Tambien cubren el fallback de
 // modificadores: "[1;2A" (flecha arriba con modificador) se resuelve igual
 // que "[A".
@@ -18,7 +18,7 @@ namespace {
 // Comprueba que el enlace de un byte de control produzca el Evento
 // esperado, y que un byte sin enlazar no produzca nada.
 void checkControl(unsigned char byte, EventType expected) {
-    Keymap km;
+    TtyKeymap km;
     const auto t = km.control(byte);
     CHECK(t.has_value());
     if (t) CHECK_EQ(static_cast<int>(*t), static_cast<int>(expected));
@@ -26,7 +26,7 @@ void checkControl(unsigned char byte, EventType expected) {
 
 // Idem para secuencias de escape (contenido tras el ESC).
 void checkSequence(const std::string& contents, EventType expected) {
-    Keymap km;
+    TtyKeymap km;
     const auto t = km.sequence(contents);
     CHECK(t.has_value());
     if (t) CHECK_EQ(static_cast<int>(*t), static_cast<int>(expected));
@@ -88,7 +88,7 @@ TEST(keymap_seq_arrow_with_modifier_falls_back) {
 
 // --- Rebindeo en tiempo de ejecucion ---
 TEST(keymap_remap_control) {
-    Keymap km;
+    TtyKeymap km;
     km.bindControl(18, EventType::PageDown); // Ctrl+R -> AvPag (reconfigurado)
     const auto t = km.control(18);
     CHECK(t.has_value());
@@ -96,7 +96,7 @@ TEST(keymap_remap_control) {
 }
 
 TEST(keymap_remap_sequence) {
-    Keymap km;
+    TtyKeymap km;
     // El Editor no depende de las teclas fisicas: le da igual que MoveLeft
     // venga de la flecha o de otra secuencia remapeada. La clave es la que
     // realmente pasa Terminal (con '[' y modificador), no "1;2D" pelado.
@@ -105,23 +105,23 @@ TEST(keymap_remap_sequence) {
              static_cast<int>(EventType::PageDown));
     // Sin binding explicito, el fallback de modificadores resuelve "[1;2D"
     // como "[D" (MoveLeft); con binding, gana el valor remapeado.
-    Keymap km2;
+    TtyKeymap km2;
     CHECK_EQ(static_cast<int>(*km2.sequence("[1;2D")),
              static_cast<int>(EventType::MoveLeft));
 }
 
 TEST(keymap_unbound_control) {
-    Keymap km;
+    TtyKeymap km;
     CHECK(!km.control(9).has_value()); // Tab sin enlazar por defecto
 }
 
 TEST(keymap_unbound_sequence) {
-    Keymap km;
+    TtyKeymap km;
     CHECK(!km.sequence("[9~").has_value()); // secuencia desconocida
 }
 
 TEST(keymap_reset_defaults) {
-    Keymap km;
+    TtyKeymap km;
     km.bindControl(17, EventType::PageDown);    // romper Ctrl+Q
     km.bindSequence("[A", EventType::MoveRight); // romper flecha arriba
     km.resetDefaults();

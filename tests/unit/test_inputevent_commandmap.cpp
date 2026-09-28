@@ -37,7 +37,6 @@
 #include "platform/tty/ITtyKeymap.h"
 
 #include "platform/MouseEvent.h"
-#include "platform/tty/Keymap.h"
 #include "platform/tty/TtyKeymap.h"
 #include "platform/tty/Terminal.h"
 #include "app/CommandMap.h"

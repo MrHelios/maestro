@@ -1,10 +1,61 @@
 #pragma once
 
-#include "platform/tty/Keymap.h"
+#include <map>
+#include <optional>
+#include <string>
 
-// Frontier (10): TtyKeymap — implementación TTY de ITtyKeymap.
+#include "platform/InputEvent.h"
+#include "platform/tty/ITtyKeymap.h"
+
+// Tabla de datos que traduce las teclas crudas a InputEvent de alto nivel,
+// y que se puede reconfigurar en tiempo de ejecucion.
 //
-// `Keymap` se conserva como nombre histórico (tests y Terminal lo usan);
-// este alias es el nombre canónico del paso 10. La interfaz vive en
-// platform/tty/ITtyKeymap.h (TTY-only); la GUI tendrá la suya propia.
-using TtyKeymap = Keymap;
+// Antes ese significado vivia hardcodeado en switchs/ifs dentro de
+// Terminal::readEvent. Aqui lo sacamos a una tabla remapeable: Terminal
+// sigue siendo el unico que sabe leer bytes crudos y ensamblar secuencias
+// (distingue un ESC suelto de una secuencia de escape, acumula parametros
+// con timeout, arma el caracter UTF-8 multibyte), pero el SIGNIFICADO -
+// "que hace cada tecla" - queda como datos.
+//
+// Esto completa la separacion "bytes TTY -> InputEvent": el Editor ya
+// trabajaba con eventos semanticos (no fisicos); ahora el mapeo
+// input->InputEvent deja de estar atornillado y se vuelve remapeable
+// (micros, plugins, personalizacion de teclas...) sin tocar la logica del
+// Editor: un mismo evento puede venir de distintas teclas o secuencias sin
+// que el Editor cambie una linea.
+//
+// Hay DOS tablas, una por "forma de llegar por la terminal":
+//   - controlBytes_: teclas de UN byte de control (Ctrl+X, Enter, BS...).
+//   - sequences_: secuencias de escape, identificadas por su CONTENIDO
+//     (lo que sigue al ESC hasta el caracter final), p.ej. "A" (ESC[A
+//     = flecha arriba), "[B", "[1;2C", "3~", "OH", ...
+// TtyKeymap: implementación TTY de ITtyKeymap (ver tty/ITtyKeymap.h).
+// Es el único tipo concreto y Terminal solo lo expone vía ITtyKeymap
+// (keymapIface()), nunca como concreto: la frontera obliga a usarla.
+class TtyKeymap : public ITtyKeymap {
+public:
+    TtyKeymap();
+
+    // --- Teclas de control de un byte (Ctrl+..., Enter, Backspace) ---
+    // Asocia `byte` de control a un Evento. Reemplaza el anterior.
+    void bindControl(unsigned char byte, InputEventType type) override;
+    // Evento asociado al byte, o std::nullopt si no esta enlazado.
+    std::optional<InputEventType> control(unsigned char byte) const override;
+
+    // --- Secuencias de escape ---
+    // Asocia el CONTENIDO de una secuencia (sin el ESC inicial) a un
+    // Evento. Reemplaza el anterior. Se guarda tal cual se acumula
+    // despues del ESC: "[C" para flecha derecha, "[1;2C" con modificador,
+    // "3~" para Delete, "OH" para fin...
+    void bindSequence(const std::string& contents, InputEventType type) override;
+    // Evento asociado al contenido, o std::nullopt si no esta enlazado.
+    std::optional<InputEventType> sequence(const std::string& contents) const override;
+
+    // Restaura los enlaces por defecto del editor. Util para "volver a
+    // cero" (p.ej. tras una sesion que los reconfiguro).
+    void resetDefaults() override;
+
+private:
+    std::map<unsigned char, InputEventType> controlBytes_;
+    std::map<std::string, InputEventType> sequences_;
+};

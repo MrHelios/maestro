@@ -1,4 +1,4 @@
-#include "platform/tty/Keymap.h"
+#include "platform/tty/TtyKeymap.h"
 
 // Enlaces por defecto del editor. Son los mismos que hasta v0.7 estaban
 // hardcodeados en Terminal::readEvent; ahora viven como datos y pueden
@@ -7,8 +7,8 @@
 // Vendria muy bien conservar los comentarios de por que cada tecla hace lo
 // que hace (Ctrl+K es el prefijo de comando, Ctrl+U/Y deshacer/rehacer,
 // v0.5 no da significado a los modificadores, etc.); quedan en el .h de
-// Keymap y en esta tabla se mantienen los nombres distinguibles.
-void Keymap::resetDefaults() {
+// TtyKeymap y en esta tabla se mantienen los nombres distinguibles.
+void TtyKeymap::resetDefaults() {
     controlBytes_.clear();
     sequences_.clear();
 
@@ -58,25 +58,25 @@ void Keymap::resetDefaults() {
     bindSequence("[6~", InputEventType::PageDown);
 }
 
-Keymap::Keymap() {
+TtyKeymap::TtyKeymap() {
     resetDefaults();
 }
 
-void Keymap::bindControl(unsigned char byte, InputEventType type) {
+void TtyKeymap::bindControl(unsigned char byte, InputEventType type) {
     controlBytes_[byte] = type;
 }
 
-std::optional<InputEventType> Keymap::control(unsigned char byte) const {
+std::optional<InputEventType> TtyKeymap::control(unsigned char byte) const {
     auto it = controlBytes_.find(byte);
     return it == controlBytes_.end() ? std::nullopt
                                      : std::optional<InputEventType>(it->second);
 }
 
-void Keymap::bindSequence(const std::string& contents, InputEventType type) {
+void TtyKeymap::bindSequence(const std::string& contents, InputEventType type) {
     sequences_[contents] = type;
 }
 
-std::optional<InputEventType> Keymap::sequence(const std::string& contents) const {
+std::optional<InputEventType> TtyKeymap::sequence(const std::string& contents) const {
     auto it = sequences_.find(contents);
     if (it != sequences_.end()) return it->second;
     if (contents.size() >= 3) {

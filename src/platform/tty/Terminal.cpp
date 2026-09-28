@@ -372,7 +372,7 @@ bool Terminal::readEvent(InputEvent& e, int timeoutMs) {
     };
 
     // Teclas de control de UN byte (Ctrl+Q, Ctrl+S, Ctrl+K, Ctrl+U,
-    // Ctrl+Y, Backspace, Enter). El significado vive en el Keymap
+    // Ctrl+Y, Backspace, Enter). El significado vive en el TtyKeymap
     // (remapeable); aqui solo se hace la busqueda.
     if (auto type = keymap_.control(static_cast<unsigned char>(c)); type) {
         e.type = *type;
@@ -414,7 +414,7 @@ bool Terminal::readEvent(InputEvent& e, int timeoutMs) {
             e.type = InputEventType::None; dumpUnrecognized(); return true;
         }
 
-        // Busqueda en el Keymap: primero tal cual la emitio la terminal
+        // Busqueda en el TtyKeymap: primero tal cual la emitio la terminal
         // ("[1;2A"), y si no esta, en su forma simple sin modificadores
         // ("[A"). El significado de cada secuencia es remapeable.
         auto type = keymap_.sequence(contents);

@@ -15,11 +15,11 @@
 #include "helpers/perf_time_utils.h"
 #include "helpers/alloc_stats.h"
 
-#include "platform/tty/Keymap.h"
+#include "platform/tty/TtyKeymap.h"
 
 TEST(bench_perf_terminal_decode_checked) {
     perf_arch::reportVerbose("\n== perf_terminal_decode (Keymap lookup, 0 allocs) ==\n");
-    Keymap km; // defaults fuera de medicion
+    TtyKeymap km; // defaults fuera de medicion
     // Secuencias pre-construidas fuera del Scoped (evita costo artificial).
     const std::vector<std::string> seqs = {
         "[A", "[B", "[C", "[D", "[1;2C", "[1;5D", "3~", "OH", "OF", "[200~",

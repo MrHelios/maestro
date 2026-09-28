@@ -5,7 +5,9 @@
 #include "platform/Event.h"  // shim legacy: este test usa Event/EventType
 #include "helpers/FakeClipboard.h"
 #include "platform/clipboard/SystemClipboard.h"
+#ifdef HAVE_X11
 #include "platform/clipboard/X11Clipboard.h"
+#endif
 #define private public
 #include "app/Editor.h"
 #undef private
@@ -242,6 +244,7 @@ TEST(system_clipboard_editor_external_is_source_of_truth) {
     CHECK_EQ(ed.active().document.lineAt(0), "AB");
 }
 
+#ifdef HAVE_X11
 TEST(system_clipboard_x11_fallback_no_display) {
     const char* oldDisplay = std::getenv("DISPLAY");
     std::string saved = oldDisplay ? oldDisplay : "";
@@ -259,3 +262,4 @@ TEST(system_clipboard_x11_fallback_no_display) {
     cb.processEvents();
     CHECK(cb.ownsClipboard());
 }
+#endif

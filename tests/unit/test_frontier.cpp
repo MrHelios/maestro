@@ -8,7 +8,6 @@
 #include "platform/MouseEvent.h"
 #include "platform/ResizeEvent.h"
 #include "platform/tty/ITtyKeymap.h"
-#include "platform/tty/Keymap.h"
 #include "platform/tty/TtyKeymap.h"
 #include "platform/tty/Terminal.h"
 #include "platform/tty/TtyMouse.h"
@@ -115,7 +114,7 @@ TEST(frontier_factories_return_interfaces) {
     CHECK(nullW != nullptr);
 }
 
-// 10: Keymap implementa ITtyKeymap (alias TtyKeymap, TTY-only).
+// 10: TtyKeymap implementa ITtyKeymap (TTY-only).
 TEST(frontier_ikeymap_interface) {
     TtyKeymap km;
     ITtyKeymap& iface = km;

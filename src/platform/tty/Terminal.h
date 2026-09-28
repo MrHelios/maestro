@@ -6,7 +6,7 @@
 #include "platform/InputEvent.h"
 #include "platform/IEventSource.h"
 #include "platform/tty/ITtyKeymap.h"
-#include "platform/tty/Keymap.h"
+#include "platform/tty/TtyKeymap.h"
 
 // Estado mínimo compartido con los signal handlers C. Forward declarado
 // para no exponer <termios.h>/<signal.h> a los consumidores de este header
@@ -21,7 +21,7 @@ struct TtySignalState;
 // Terminal es quien LEE y ENSAMBLA los bytes crudos (distingue un ESC
 // suelto de una secuencia, acumula parametros con timeout, arma el
 // caracter UTF-8 multibyte), pero NO decide el significado de cada tecla:
-// eso vive en el Keymap (remapeable), que Terminal consulta para traducir
+// eso vive en el TtyKeymap (remapeable), que Terminal consulta para traducir
 // lo leido a un Evento.
 class Terminal : public IEventSource {
 public:
@@ -64,10 +64,11 @@ public:
     bool hasResized();
 
     // Tabla tecla -> Evento que readEvent() consulta. El usuario puede
-    // rebindear las teclas en tiempo de ejecucion (keymap().bindSequence(...)
-    // / keymap().bindControl(...)) sin tocar la logica del Editor.
-    // Tipo concreto (compat tests); keymapIface() expone la interfaz TTY (2).
-    Keymap& keymap() { return keymap_; }
+    // rebindear las teclas en tiempo de ejecucion
+    // (keymapIface().bindSequence(...) / keymapIface().bindControl(...))
+    // sin tocar la logica del Editor.
+    // Única vía pública: la interfaz TTY (decisión 2). El tipo concreto
+    // TtyKeymap es detalle privado de este miembro, nunca se expone.
     ITtyKeymap& keymapIface() { return keymap_; }
     const ITtyKeymap& keymapIface() const { return keymap_; }
 
@@ -99,8 +100,8 @@ private:
     std::unique_ptr<TtySignalState> signalState_;
 
     // Significado de cada tecla/secuencia. Se consulta en readEvent();
-    // remapeable en tiempo de ejecucion via keymap().
-    Keymap keymap_;
+    // remapeable en tiempo de ejecucion via keymapIface().
+    TtyKeymap keymap_;
 
     // Terminal es un recurso unico ligado a la terminal fisica del
     // proceso (modo raw, tamano de la ventana, el mismo STDIN_FILENO).

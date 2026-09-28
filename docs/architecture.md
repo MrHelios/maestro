@@ -59,6 +59,16 @@ representación neutral ya existe y es `CellPos`
 a ella. En un parche futuro `CellPos` debe quedar como única
 representación de celda y los `int` SGR deben eliminarse de `InputEvent`.
 
+POSIX transport leak — tolerated during migration: `FileWatcher::fd()`
+(`int`, `-1` si no hay nada que sondear) expone transporte POSIX en la
+interfaz común, igual que `SystemClipboard::fd()`. Es la misma clase de
+fuga que los `int` SGR de `InputEvent`, y contrasta con `IEventSource`,
+que deliberadamente no expone `fd`. El camino neutral ya existe
+(`pollEvents()`); `fd()` lo consume solo el loop TTY
+(`TtyRunLoop`, vía `ppoll`). No bloquea FASE B; en un parche futuro el
+loop debe depender solo de `pollEvents()` (o de una abstracción de
+wake-up neutral) y `fd()` debe salir de la interfaz común.
+
 ## 3. Keymaps por backend, no compartidos
 
 - `platform/tty/ITtyKeymap.h` = interfaz TTY-only

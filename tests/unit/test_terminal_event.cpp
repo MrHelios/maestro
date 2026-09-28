@@ -121,7 +121,7 @@ TEST(terminal_remapped_modified_arrow_via_keymap) {
     PipedStdin p;
     p.feed("\x1b[1;2D");
     Terminal t;
-    t.keymap().bindSequence("[1;2D", EventType::PageDown);
+    t.keymapIface().bindSequence("[1;2D", EventType::PageDown);
     Event e = t.readEvent();
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::PageDown));
 }

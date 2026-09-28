@@ -7,6 +7,19 @@ CXX := g++
 # "app/Editor.h", "platform/tty/Terminal.h"), asi que se compila desde la raiz.
 CXXFLAGS := -std=c++17 -Wall -Wextra -Wpedantic -Isrc -MMD -MP -pthread
 
+# --- Portabilidad X11 (build sin X11) ---
+# WITH_X11=1 (default si hay headers de X11) compila X11Clipboard y linkea
+# -lX11. WITH_X11=0 excluye X11Clipboard.cpp/tests x11 y el factory cae a
+# NullClipboard; MouseButton.cpp compila su stub sin X11 (ver #ifdef
+# HAVE_X11). Override: make WITH_X11=0 / make WITH_X11=1.
+WITH_X11 ?= $(shell test -f /usr/include/X11/Xlib.h && echo 1 || echo 0)
+ifeq ($(WITH_X11),1)
+CXXFLAGS += -DHAVE_X11
+X11_LIBS := -lX11
+else
+X11_LIBS :=
+endif
+
 # El binario final se llama "maestro" y vive en build/: el punto de
 # entrada del proyecto para el usuario es el script wrapper ./maestro en
 # la raiz (ver README), que decide si compila+abre el editor o delega en
@@ -16,6 +29,9 @@ BIN := build/maestro
 # Program sources por capa (app / document / layout / syntax / rendering /
 # platform / filesystem / diagnostics, todas bajo src/).
 SRC := $(wildcard src/app/*.cpp src/document/*.cpp src/layout/*.cpp src/syntax/*.cpp src/rendering/*.cpp src/rendering/frame/*.cpp src/rendering/tty/*.cpp src/platform/*.cpp src/platform/tty/*.cpp src/platform/clipboard/*.cpp src/filesystem/*.cpp src/diagnostics/*.cpp)
+ifeq ($(WITH_X11),0)
+SRC := $(filter-out src/platform/clipboard/X11Clipboard.cpp,$(SRC))
+endif
 
 # --- Tests ---
 # Los tests se agrupan por nivel: unit/ (document/layout puros),
@@ -45,6 +61,10 @@ TEST_SRC_PERF := $(TEST_DIR)/test_main.cpp \
             $(TEST_PERF_SRCS)
 TEST_SRC_TERM := $(TEST_DIR)/test_main.cpp \
             $(wildcard $(TEST_DIR)/rendering/*.cpp)
+ifeq ($(WITH_X11),0)
+TEST_SRC_ALL := $(filter-out $(TEST_DIR)/integration/x11_clipboard/%,$(TEST_SRC_ALL))
+TEST_SRC := $(filter-out $(TEST_DIR)/integration/x11_clipboard/%,$(TEST_SRC))
+endif
 TEST_BIN := build/edit_tests
 TEST_BIN_ALL := build/edit_tests_all
 TEST_BIN_PERF := build/edit_tests_performance
@@ -230,34 +250,34 @@ build build-san:
 	@mkdir -p $@
 
 $(BIN): $(OBJ) | build
-	$(CXX) $(OBJ) -o $(BIN) -lX11 -pthread
+	$(CXX) $(OBJ) -o $(BIN) -pthread $(X11_LIBS)
 
 $(TEST_BIN): $(TEST_OBJ) $(OBJ_NO_MAIN) | build
-	$(CXX) $(TEST_OBJ) $(OBJ_NO_MAIN) -o $(TEST_BIN) -lX11 -pthread
+	$(CXX) $(TEST_OBJ) $(OBJ_NO_MAIN) -o $(TEST_BIN) -pthread $(X11_LIBS)
 
 $(TEST_BIN_ALL): $(TEST_OBJ_ALL) $(OBJ_NO_MAIN) | build
-	$(CXX) $(TEST_OBJ_ALL) $(OBJ_NO_MAIN) -o $(TEST_BIN_ALL) -lX11 -pthread
+	$(CXX) $(TEST_OBJ_ALL) $(OBJ_NO_MAIN) -o $(TEST_BIN_ALL) -pthread $(X11_LIBS)
 
 $(TEST_BIN_PERF): $(TEST_OBJ_PERF) $(OBJ_NO_MAIN) | build
-	$(CXX) $(TEST_OBJ_PERF) $(OBJ_NO_MAIN) -o $(TEST_BIN_PERF) -lX11 -pthread
+	$(CXX) $(TEST_OBJ_PERF) $(OBJ_NO_MAIN) -o $(TEST_BIN_PERF) -pthread $(X11_LIBS)
 
 $(TEST_BIN_TERM): $(TEST_OBJ_TERM) $(OBJ_NO_MAIN) | build
-	$(CXX) $(TEST_OBJ_TERM) $(OBJ_NO_MAIN) -o $(TEST_BIN_TERM) -lX11 -pthread
+	$(CXX) $(TEST_OBJ_TERM) $(OBJ_NO_MAIN) -o $(TEST_BIN_TERM) -pthread $(X11_LIBS)
 
 $(SAN_BIN): $(SAN_OBJ) | build-san
-	$(CXX) $(SANFLAGS) $(SAN_OBJ) -o $(SAN_BIN) -lX11 -pthread
+	$(CXX) $(SANFLAGS) $(SAN_OBJ) -o $(SAN_BIN) -pthread $(X11_LIBS)
 
 $(SAN_TEST_BIN): $(SAN_TEST_OBJ) $(SAN_OBJ_NO_MAIN) | build-san
-	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN) -lX11 -pthread
+	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN) -pthread $(X11_LIBS)
 
 $(SAN_TEST_BIN_ALL): $(SAN_TEST_OBJ_ALL) $(SAN_OBJ_NO_MAIN) | build-san
-	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ_ALL) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN_ALL) -lX11 -pthread
+	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ_ALL) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN_ALL) -pthread $(X11_LIBS)
 
 $(SAN_TEST_BIN_PERF): $(SAN_TEST_OBJ_PERF) $(SAN_OBJ_NO_MAIN) | build-san
-	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ_PERF) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN_PERF) -lX11 -pthread
+	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ_PERF) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN_PERF) -pthread $(X11_LIBS)
 
 $(SAN_TEST_BIN_TERM): $(SAN_TEST_OBJ_TERM) $(SAN_OBJ_NO_MAIN) | build-san
-	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ_TERM) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN_TERM) -lX11 -pthread
+	$(CXX) $(SANFLAGS) $(SAN_TEST_OBJ_TERM) $(SAN_OBJ_NO_MAIN) -o $(SAN_TEST_BIN_TERM) -pthread $(X11_LIBS)
 
 edit-san: $(SAN_BIN)
 
@@ -335,7 +355,7 @@ test-one: $(test-one-core-objs) | $(test-one-build-dir)
 		OBJS="$$OBJS $$o"; \
 	done; \
 	echo "  LINK $(test-one-one-bin)"; \
-	$(CXX) $(if $(SAN),$(SANFLAGS),) $$OBJS $(test-one-core-objs) -o $(test-one-one-bin) -lX11 -pthread; \
+	$(CXX) $(if $(SAN),$(SANFLAGS),) $$OBJS $(test-one-core-objs) -o $(test-one-one-bin) -pthread $(X11_LIBS); \
 	./$(test-one-one-bin) --gtest_filter="$(FILTER)"
 
 INSTALL_DIR := $(HOME)/.local/bin

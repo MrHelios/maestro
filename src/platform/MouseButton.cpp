@@ -1,11 +1,14 @@
 #include "platform/MouseButton.h"
 
+#ifdef HAVE_X11
 #include <X11/Xlib.h>
+#endif
 
 // Ver MouseButton.h por semantica del fallback (siempre true = conservar
 // conducta) y ownership (Display con dueño explícito, sin static de proceso).
 namespace platform {
 
+#ifdef HAVE_X11
 void X11MouseButtonQuery::ensureDisplay() const {
     if (opened_) return;
     opened_ = true;
@@ -31,5 +34,21 @@ bool X11MouseButtonQuery::held() const {
     }
     return (mask & Button1Mask) != 0;
 }
+
+#else
+
+// Build portable sin X11: misma semantica del fallback ("presionado").
+// display_ queda siempre nulo; opened_ solo evita trabajo repetido.
+void X11MouseButtonQuery::ensureDisplay() const {
+    opened_ = true;
+}
+
+X11MouseButtonQuery::~X11MouseButtonQuery() = default;
+
+bool X11MouseButtonQuery::held() const {
+    return true;
+}
+
+#endif
 
 } // namespace platform
