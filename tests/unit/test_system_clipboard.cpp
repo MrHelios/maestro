@@ -2,6 +2,7 @@
 #include <string>
 
 #include "test_framework.h"
+#include "platform/Event.h"  // shim legacy: este test usa Event/EventType
 #include "helpers/FakeClipboard.h"
 #include "platform/clipboard/SystemClipboard.h"
 #include "platform/clipboard/X11Clipboard.h"

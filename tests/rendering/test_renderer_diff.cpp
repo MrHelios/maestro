@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "platform/Event.h"  // shim legacy: este test usa Event/EventType
 
 #define private public
 #include "app/Editor.h"

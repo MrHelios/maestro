@@ -5,7 +5,7 @@
 // Coordenada 1-based de terminal (lo que emite SGR: Cx, Cy).
 // Es el tipo común entre el decoder TTY (produce) y
 // ScreenToCursor (consume). Nada de `int mouseRow/mouseCol`
-// sueltos fuera de Event (compat legacy).
+// sueltos fuera de InputEvent (compat legacy).
 struct CellPos {
     int col = 0; // 1-based, eje X
     int row = 0; // 1-based, eje Y

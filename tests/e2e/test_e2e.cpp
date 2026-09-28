@@ -8,6 +8,7 @@
 
 #include <string>
 #include <vector>
+#include "platform/Event.h"  // shim legacy: este test usa Event/EventType
 #define private public
 #include "app/Editor.h"
 #undef private

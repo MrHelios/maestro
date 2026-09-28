@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "platform/Event.h"  // shim legacy: este test usa Event/EventType
 #include "helpers/perf_arch.h"
 #include "helpers/perf_limits.h"
 #include "helpers/perf_time_utils.h"

@@ -1,4 +1,5 @@
 #include "platform/tty/Keymap.h"
+#include "platform/Event.h"  // shim legacy: este test usa EventType
 #include "test_framework.h"
 
 // ---------------------------------------------------------------------------

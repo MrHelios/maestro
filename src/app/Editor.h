@@ -20,7 +20,7 @@
 #include "app/FileBrowser.h"
 #include "app/Message.h"
 #include "rendering/Renderer.h"
-#include "platform/Event.h"
+#include "platform/InputEvent.h"
 
 // Sink de escritura (frontera de I/O del Renderer). Forward declarado para
 // no acoplar este header a rendering/tty/: el dueño real vive en el .cpp.
@@ -36,7 +36,7 @@ class Sink;
 // Frontier (12): Editor común — no incluye Terminal/Keymap, no conoce
 // pollfd/fd(), no construye X11/Inotify (eso lo hacen las factories y el
 // TtyRunLoop). El tamaño de ventana es estado propio (currentRows_/Cols_)
-// actualizado por cada EventType::Resize con su payload.
+// actualizado por cada InputEventType::Resize con su payload.
 class Editor {
     friend class TtyRunLoop;
 public:
@@ -82,7 +82,7 @@ public:
 
     // Método público para testing: permite inyectar eventos directamente
     // Solo debe usarse en tests, no en el flujo normal de la aplicación
-    void processEventForTesting(const Event& event) {
+    void processEventForTesting(const InputEvent& event) {
         handleEvent(event);
     }
 
@@ -177,14 +177,14 @@ private:
     std::vector<std::string> bufferNames() const;
 
     // Maneja los eventos mientras state_ == State::BufferSelector.
-    void handleBufferSelectorEvent(const Event& event);
+    void handleBufferSelectorEvent(const InputEvent& event);
 
     // ---- Explorador de archivos (v0.6.4) ----
     // Ctrl+K o -> startFileBrowser(). El estado y la navegacion viven en
     // fileBrowser (FileBrowser); el Editor decide las consecuencias
     // (abrir archivo, entrar a carpeta, cancelar) sobre state_/statusMessage_.
     void startFileBrowser();
-    void handleFileBrowserEvent(const Event& event);
+    void handleFileBrowserEvent(const InputEvent& event);
     void fileBrowserEnterSelected();
     // Abre `path` (absoluta) en un buffer NUEVO, o activa el existente
     // si ya hay uno con esa ruta. Sale del explorador a Navegacion.
@@ -198,7 +198,7 @@ private:
     Sink* sink_ = nullptr;
     // Tamaño actual de la ventana (estado del editor, no del backend).
     // Default 24x80 (igual que el fallback de Terminal sin TTY).
-    // Lo actualiza cada EventType::Resize via handleResize(rows, cols):
+    // Lo actualiza cada InputEventType::Resize via handleResize(rows, cols):
     // el evento es autónomo (trae su payload) y vale para TTY y GUI
     // sin instalar ningún provider.
     int currentRows_ = 24;
@@ -281,7 +281,7 @@ private:
     Position searchOrigin_{0, 0};
     std::optional<Selection> searchHighlight_;
     void startSearch();
-    void handleBusquedaEvent(const Event& event);
+    void handleBusquedaEvent(const InputEvent& event);
     void updateSearch();
     void navigateSearch(int dir);
     void updateSearchMessage(bool found, int current, int total);
@@ -293,7 +293,7 @@ private:
     // ---- Ir a fila (feature g) ----
     std::string goToLineQuery_;
     void startGoToLine();
-    void handleIrAFilaEvent(const Event& event);
+    void handleIrAFilaEvent(const InputEvent& event);
 
     // ---- Bracket matching (feature h) ----
     std::optional<BracketPair> bracketPair_;
@@ -322,7 +322,7 @@ private:
     // Seleccion que cubre el documento entero: [BOF, EOF].
     std::optional<Selection> selectAllSelection() const;
     // Maneja los eventos mientras selectAllActive_ es true.
-    void handleSelectAllEvent(const Event& event);
+    void handleSelectAllEvent(const InputEvent& event);
 
     // ---- Helpers de seleccion ----
     // Si no hay seleccion, la inicia poniendo el anchor en la posicion
@@ -332,24 +332,24 @@ private:
     void updateSelectionPosition();
     void clearSelection();
 
-    void handleEvent(const Event& event);
+    void handleEvent(const InputEvent& event);
     // Click izquierdo en el viewport: si venia de Seleccion cancela el
     // highlight EN EL PRESS (valido o en ~/statusbar) y vuelve a
     // Navegacion; luego arma el gesto (mueve el cursor y guarda
     // dragAnchor_) sin crear rango. El drag posterior crea la nueva
     // seleccion, el release sin drag es no-op.
-    void handleMousePress(const Event& event);
+    void handleMousePress(const InputEvent& event);
     // Arrastre con boton presionado: solo valido si un press previo lo
     // armo (mouseGestureActive_). El primer drag efectivo entra a Seleccion
     // (o descarta el rango previo si ya estaba) con anchor=dragAnchor_;
     // los siguientes extienden selection.position. Incluye autoscroll
     // de 1 linea / 1 celda por evento en bordes.
-    void handleMouseDrag(const Event& event);
+    void handleMouseDrag(const InputEvent& event);
     // Cierre del gesto: sin drag previo es no-op (el press ya cancelo la
     // seleccion si venia de Seleccion); con drag previo permanece en
     // Seleccion. Siempre desarma el gesto. Se conserva la rama historica
     // pressState_==Seleccion por robustez.
-    void handleMouseRelease(const Event& event);
+    void handleMouseRelease(const InputEvent& event);
     // Resuelve la posicion de un MouseDrag: dentro del viewport usa
     // screenToCursor(); fuera calcula scroll ±1 + posicion de borde, y si
     // ya esta en el limite (scroll imposible) devuelve la posicion
@@ -382,7 +382,7 @@ private:
     // (tras Ctrl+K). Ctrl+S/Guardar persiste, Ctrl+Q sale, Ctrl+K n crea
     // buffer, Ctrl+K t abre el selector, Ctrl+K w cierra buffer; cualquier
     // otra tecla descarta el evento y cancela el prefijo.
-    void handlePrefixKey(const Event& event);
+    void handlePrefixKey(const InputEvent& event);
 
     // ---- Guardar como (v0.7) ----
     // Ctrl+K Ctrl+S sobre un buffer sin nombre (p.ej. creado con Ctrl+K n)
@@ -391,16 +391,16 @@ private:
     // destino. Enter confirma (commitSaveAs), ESC cancela.
     void startSaveAs();
     // Maneja los eventos mientras state_ == State::SaveAs.
-    void handleSaveAsEvent(const Event& event);
+    void handleSaveAsEvent(const InputEvent& event);
     // Resuelve la ruta escrita (relativa -> absoluta contra cwd), rechaza
     // carpetas y persiste el buffer con su nuevo nombre. Ante exito sale
     // del prompt; ante error se queda para corregir la ruta.
     void commitSaveAs();
 
     // --- Despacho por modo ---
-    void handleNavegacionEvent(const Event& event);
-    void handleInteraccionEvent(const Event& event);
-    void handleSeleccionEvent(const Event& event);
+    void handleNavegacionEvent(const InputEvent& event);
+    void handleInteraccionEvent(const InputEvent& event);
+    void handleSeleccionEvent(const InputEvent& event);
 
     // RePag/AvPag: desplaza el viewport y el cursor la misma cantidad de
     // paginas (viewport.height lineas), conservando la posicion relativa

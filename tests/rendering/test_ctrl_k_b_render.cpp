@@ -1,4 +1,5 @@
 #include "test_framework.h"
+#include "platform/Event.h"  // shim legacy: este test usa Event/EventType
 #include "helpers/test_render_utils.h"
 #include <algorithm>
 #define private public

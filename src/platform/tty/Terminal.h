@@ -3,7 +3,7 @@
 #include <memory>
 #include <string_view>
 
-#include "platform/Event.h"
+#include "platform/InputEvent.h"
 #include "platform/IEventSource.h"
 #include "platform/tty/ITtyKeymap.h"
 #include "platform/tty/Keymap.h"
@@ -46,17 +46,17 @@ public:
     void enterAlternateScreen();
     void leaveAlternateScreen();
 
-    // Bloquea hasta leer una tecla y la traduce a un Event de alto
+    // Bloquea hasta leer una tecla y la traduce a un InputEvent de alto
     // nivel (esta es la unica funcion que "sabe" de teclas). Bloquea
     // indefinidamente.
-    Event readEvent();
+    InputEvent readEvent();
 
     // Igual que readEvent(), pero espera a lo sumo `timeoutMs` milisegundos
     // (0 = no bloquea, negativo = indefinido). Devuelve true si se leyo y
     // tradujo una tecla; false si el timeout expiro sin entrada. Es el
     // mecanismo que permite al Editor despertar el ciclo para limpiar un
     // mensaje de accion expirado sin que el usuario aprete ninguna tecla.
-    bool readEvent(Event& event, int timeoutMs) override;
+    bool readEvent(InputEvent& event, int timeoutMs) override;
 
     // Tamano actual de la terminal.
     void getWindowSize(int& rows, int& cols);
@@ -71,7 +71,7 @@ public:
     ITtyKeymap& keymapIface() { return keymap_; }
     const ITtyKeymap& keymapIface() const { return keymap_; }
 
-    static bool parseMouseSgr(std::string_view seq, Event& e);
+    static bool parseMouseSgr(std::string_view seq, InputEvent& e);
 
     // Observabilidad solo para tests: leen el estado PUBLICADO POR ESTE
     // objeto (su signalState_ miembro), nunca el puntero global. Incluso

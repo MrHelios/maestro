@@ -340,20 +340,20 @@ static std::string simpleEscapeForm(const std::string& contents) {
     return std::string(1, prefix) + final; // "[1;2A" -> "[A"
 }
 
-bool Terminal::parseMouseSgr(std::string_view seq, Event& e) {
+bool Terminal::parseMouseSgr(std::string_view seq, InputEvent& e) {
     // Frontier (11): el parseo vive en TtyMouse (produce CellPos);
     // acá solo se delega para no duplicar la tabla Cb.
     CellPos pos;
     return decodeMouseSgr(seq, e, pos);
 }
 
-Event Terminal::readEvent() {
-    Event e;
+InputEvent Terminal::readEvent() {
+    InputEvent e;
     readEvent(e, -1); // -1: bloquea indefinidamente
     return e;
 }
 
-bool Terminal::readEvent(Event& e, int timeoutMs) {
+bool Terminal::readEvent(InputEvent& e, int timeoutMs) {
     char c = 0;
     // Espera el primer byte con el timeout pedido. Si no llega nada en
     // `timeoutMs` (poll devuelve 0), no hay tecla que traducir.
@@ -383,7 +383,7 @@ bool Terminal::readEvent(Event& e, int timeoutMs) {
     //
     // Leemos los parametros (numeros y ';') hasta el caracter final,
     // esperando cada byte con un timeout corto. Si no llega nada tras el
-    // ESC, era un ESC suelto (EventType::Escape); si una secuencia queda
+    // ESC, era un ESC suelto (InputEventType::Escape); si una secuencia queda
     // a medias, se descarta sin colgar el editor.
     if (c == 27) { // ESC
         std::string contents;
@@ -391,10 +391,10 @@ bool Terminal::readEvent(Event& e, int timeoutMs) {
             char b = 0;
             if (!readByteWithTimeout(&b, kEscapeSequenceTimeoutMs)) {
                 if (contents.empty()) {
-                    e.type = EventType::Escape; // ESC sin nada mas
+                    e.type = InputEventType::Escape; // ESC sin nada mas
                     return true;
                 }
-                e.type = EventType::None; dumpUnrecognized(); return true;
+                e.type = InputEventType::None; dumpUnrecognized(); return true;
             }
             contents.push_back(b);
             raw.push_back(b);
@@ -411,7 +411,7 @@ bool Terminal::readEvent(Event& e, int timeoutMs) {
         // secuencias (p.ej. ESC ~) no nos interesan.
         const char prefix = contents.empty() ? 0 : contents[0];
         if (prefix != '[' && prefix != 'O') {
-            e.type = EventType::None; dumpUnrecognized(); return true;
+            e.type = InputEventType::None; dumpUnrecognized(); return true;
         }
 
         // Busqueda en el Keymap: primero tal cual la emitio la terminal
@@ -423,12 +423,12 @@ bool Terminal::readEvent(Event& e, int timeoutMs) {
             e.type = *type;
             return true;
         }
-        e.type = EventType::None; dumpUnrecognized(); return true;
+        e.type = InputEventType::None; dumpUnrecognized(); return true;
     }
 
     // Caracter imprimible normal.
     if (c >= 32 && c < 127) {
-        e.type = EventType::InsertChar;
+        e.type = InputEventType::InsertChar;
         e.text = std::string(1, c);
         return true;
     }
@@ -444,7 +444,7 @@ bool Terminal::readEvent(Event& e, int timeoutMs) {
         else if ((uc & 0xF8) == 0xF0) len = 4; // 11110xxx -> 4 bytes
         else {
             // Byte de continuacion suelto o lead invalido: no es imprimible.
-            e.type = EventType::None;
+            e.type = InputEventType::None;
             return true;
         }
 
@@ -456,12 +456,12 @@ bool Terminal::readEvent(Event& e, int timeoutMs) {
             raw.push_back(b);
             // Todo byte salvo el lead debe ser de continuacion (10xxxxxx).
             if ((static_cast<unsigned char>(b) & 0xC0) != 0x80) {
-                e.type = EventType::None; dumpUnrecognized(); return true;
+                e.type = InputEventType::None; dumpUnrecognized(); return true;
             }
             bytes.push_back(b);
         }
 
-        e.type = EventType::InsertChar;
+        e.type = InputEventType::InsertChar;
         e.text = bytes;
         return true;
     }

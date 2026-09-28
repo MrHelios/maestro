@@ -871,26 +871,26 @@ std::vector<std::string> Editor::bufferNames() const {
     return buffers.names();
 }
 
-void Editor::handleBufferSelectorEvent(const Event& event) {
+void Editor::handleBufferSelectorEvent(const InputEvent& event) {
     switch (event.type) {
-        case EventType::MoveUp:
+        case InputEventType::MoveUp:
             if (bufferSelectorIndex_ > 0) bufferSelectorIndex_--;
             break;
-        case EventType::MoveDown:
+        case InputEventType::MoveDown:
             if (bufferSelectorIndex_ + 1 < buffers.count())
                 bufferSelectorIndex_++;
             break;
-        case EventType::ScrollUp:
+        case InputEventType::ScrollUp:
             if (bufferSelectorIndex_ > 0) bufferSelectorIndex_--;
             break;
-        case EventType::ScrollDown:
+        case InputEventType::ScrollDown:
             if (bufferSelectorIndex_ + 1 < buffers.count())
                 bufferSelectorIndex_++;
             break;
-        case EventType::InsertNewline: // Enter: abrir el buffer seleccionado
+        case InputEventType::InsertNewline: // Enter: abrir el buffer seleccionado
             activateBuffer(bufferSelectorIndex_);
             break;
-        case EventType::Escape:
+        case InputEventType::Escape:
             // Se cancela el selector y se vuelve al buffer que estaba
             // activo antes de entrar (no se cambio nada).
             state_ = priorState_;
@@ -926,29 +926,29 @@ void Editor::startFileBrowser() {
     state_ = State::FileBrowser;
 }
 
-void Editor::handleFileBrowserEvent(const Event& event) {
+void Editor::handleFileBrowserEvent(const InputEvent& event) {
     switch (event.type) {
-        case EventType::MoveUp:
+        case InputEventType::MoveUp:
             fileBrowser.moveUp();
             fileBrowser.clampScroll(active().viewport.height);
             break;
-        case EventType::MoveDown:
+        case InputEventType::MoveDown:
             fileBrowser.moveDown();
             fileBrowser.clampScroll(active().viewport.height);
             break;
-        case EventType::ScrollUp:
+        case InputEventType::ScrollUp:
             fileBrowser.moveUp();
             fileBrowser.clampScroll(active().viewport.height);
             break;
-        case EventType::ScrollDown:
+        case InputEventType::ScrollDown:
             fileBrowser.moveDown();
             fileBrowser.clampScroll(active().viewport.height);
             break;
-        case EventType::InsertNewline: // Enter: abrir/entrar la seleccion
+        case InputEventType::InsertNewline: // Enter: abrir/entrar la seleccion
             fileBrowserEnterSelected();
             break;
-        case EventType::Escape:
-        case EventType::Prefix: // Ctrl+K dentro tambien cancela (modal puro)
+        case InputEventType::Escape:
+        case InputEventType::Prefix: // Ctrl+K dentro tambien cancela (modal puro)
             state_ = priorState_;
             setStatusMessage("");
             break;
@@ -1116,7 +1116,7 @@ void Editor::renderFrame() {
     }
 }
 
-void Editor::handleMousePress(const Event& event) {
+void Editor::handleMousePress(const InputEvent& event) {
     if (state_ != State::Navegacion && state_ != State::Interaccion &&
         state_ != State::Seleccion) {
         return;
@@ -1355,7 +1355,7 @@ bool Editor::tickMouseAutoscroll(
     return true;
 }
 
-void Editor::handleMouseDrag(const Event& event) {
+void Editor::handleMouseDrag(const InputEvent& event) {
     if (state_ != State::Navegacion && state_ != State::Interaccion &&
         state_ != State::Seleccion) {
         return;
@@ -1367,7 +1367,7 @@ void Editor::handleMouseDrag(const Event& event) {
     applyMouseDragPosition(*pos);
 }
 
-void Editor::handleMouseRelease(const Event& event) {
+void Editor::handleMouseRelease(const InputEvent& event) {
     (void)event;
     if (!mouseGestureActive_) return;
     if (state_ != State::Navegacion && state_ != State::Interaccion &&
@@ -1396,20 +1396,20 @@ void Editor::handleMouseRelease(const Event& event) {
     mouseAutoscrollDirection_ = MouseAutoscrollDirection::None;
 }
 
-void Editor::handleEvent(const Event& event) {
-    if (event.type == EventType::Resize) {
+void Editor::handleEvent(const InputEvent& event) {
+    if (event.type == InputEventType::Resize) {
         handleResize(event.resizeRows, event.resizeCols);
         return;
     }
-    if (event.type == EventType::MousePress) {
+    if (event.type == InputEventType::MousePress) {
         handleMousePress(event);
         return;
     }
-    if (event.type == EventType::MouseDrag) {
+    if (event.type == InputEventType::MouseDrag) {
         handleMouseDrag(event);
         return;
     }
-    if (event.type == EventType::MouseRelease) {
+    if (event.type == InputEventType::MouseRelease) {
         handleMouseRelease(event);
         return;
     }
@@ -1451,9 +1451,9 @@ void Editor::handleEvent(const Event& event) {
     // modo. Nota: Ctrl+S (Save) SOLO tiene efecto tras el prefijo (lo
     // consume handlePrefixKey). Sin prefijo llega aqui y cae como no-op
     // en cada modo: Ctrl+S deja de tener significado especial.
-    if (event.type == EventType::Undo) { commands_.execute("edicion.deshacer"); return; }
-    if (event.type == EventType::Redo) { commands_.execute("edicion.rehacer"); return; }
-    if (event.type == EventType::Prefix) {
+    if (event.type == InputEventType::Undo) { commands_.execute("edicion.deshacer"); return; }
+    if (event.type == InputEventType::Redo) { commands_.execute("edicion.rehacer"); return; }
+    if (event.type == InputEventType::Prefix) {
         priorState_ = state_;
         state_ = State::Prefix;
         setStatusMessage(kHelpPrefix);
@@ -1466,7 +1466,7 @@ void Editor::handleEvent(const Event& event) {
     // evento lo sella: la proxima escritura empieza un grupo nuevo (por
     // caracter, si es escritura normal).
     if (!(state_ == State::Interaccion &&
-          event.type == EventType::InsertChar && coalescingTyping_)) {
+          event.type == InputEventType::InsertChar && coalescingTyping_)) {
         coalescingTyping_ = false;
     }
 
@@ -1492,9 +1492,9 @@ void Editor::handleEvent(const Event& event) {
     }
 }
 
-void Editor::handleNavegacionEvent(const Event& event) {
+void Editor::handleNavegacionEvent(const InputEvent& event) {
     switch (event.type) {
-        case EventType::InsertChar:
+        case InputEventType::InsertChar:
             // En navegacion no se escribe: las letras solo pueden ser
             // comandos de modo. 'i' entra a edicion; 's' a seleccion;
             // 'p' pega el contenido del buffer (si hay). 'c'/'x' y
@@ -1525,16 +1525,16 @@ void Editor::handleNavegacionEvent(const Event& event) {
 
         // Movimientos libres, sin iniciar seleccion (a diferencia de
         // como Select extendia en v0.3-v0.4). La acción vive en commands_.
-        case EventType::MoveLeft: commands_.execute("cursor.mover.izquierda"); break;
-        case EventType::MoveRight: commands_.execute("cursor.mover.derecha"); break;
-        case EventType::MoveUp: commands_.execute("cursor.mover.arriba"); break;
-        case EventType::MoveDown: commands_.execute("cursor.mover.abajo"); break;
-        case EventType::MoveHome: commands_.execute("cursor.mover.inicio"); break;
-        case EventType::MoveEnd: commands_.execute("cursor.mover.fin"); break;
-        case EventType::PageUp: commands_.execute("cursor.pagina.arriba"); break;
-        case EventType::PageDown: commands_.execute("cursor.pagina.abajo"); break;
-        case EventType::ScrollUp: commands_.execute("vista.scroll.arriba"); break;
-        case EventType::ScrollDown: commands_.execute("vista.scroll.abajo"); break;
+        case InputEventType::MoveLeft: commands_.execute("cursor.mover.izquierda"); break;
+        case InputEventType::MoveRight: commands_.execute("cursor.mover.derecha"); break;
+        case InputEventType::MoveUp: commands_.execute("cursor.mover.arriba"); break;
+        case InputEventType::MoveDown: commands_.execute("cursor.mover.abajo"); break;
+        case InputEventType::MoveHome: commands_.execute("cursor.mover.inicio"); break;
+        case InputEventType::MoveEnd: commands_.execute("cursor.mover.fin"); break;
+        case InputEventType::PageUp: commands_.execute("cursor.pagina.arriba"); break;
+        case InputEventType::PageDown: commands_.execute("cursor.pagina.abajo"); break;
+        case InputEventType::ScrollUp: commands_.execute("vista.scroll.arriba"); break;
+        case InputEventType::ScrollDown: commands_.execute("vista.scroll.abajo"); break;
 
         // InsertNewline/Backspace/Delete y Escape: no-op (no hay edicion
         // posible y ya estamos en navegacion, no hay a donde volver).
@@ -1543,7 +1543,7 @@ void Editor::handleNavegacionEvent(const Event& event) {
     }
 }
 
-void Editor::handleInteraccionEvent(const Event& event) {
+void Editor::handleInteraccionEvent(const InputEvent& event) {
     Buffer& b = active();
     // Una seleccion DEGENERADA (anchor == position) no tiene significado en
     // edicion: significa "no hay nada seleccionado". Si queda persistida
@@ -1555,7 +1555,7 @@ void Editor::handleInteraccionEvent(const Event& event) {
         b.selection.reset();
     }
     switch (event.type) {
-        case EventType::InsertChar:
+        case InputEventType::InsertChar:
             // Edicion libre real: cualquier letra (incluida i/s/p/c/x)
             // se inserta como texto. Aqui no son comandos de modo.
             // P0 interaction: si venimos de un reemplazo de seleccion
@@ -1583,7 +1583,7 @@ void Editor::handleInteraccionEvent(const Event& event) {
             }
             break;
 
-        case EventType::InsertNewline: {
+        case InputEventType::InsertNewline: {
             HistoryEntry e = b.beginHistoryEntry();
             Position at{b.cursor.line, b.cursor.col};
             // Indentación lógica de la línea original: prefijo
@@ -1630,15 +1630,15 @@ void Editor::handleInteraccionEvent(const Event& event) {
             break;
         }
 
-        case EventType::Backspace:
-        case EventType::Delete: {
+        case InputEventType::Backspace:
+        case InputEventType::Delete: {
             // interaction P0: si hay una seleccion vigente (p.ej. por entrar
             // a edicion sin cancelarla antes), Backspace/Delete borran el
             // rango entero en vez de un solo caracter. deleteSelection()
             // ya registra su propia entrada de historial.
             if (deleteSelection()) break;
             HistoryEntry e = b.beginHistoryEntry();
-            if (event.type == EventType::Backspace) {
+            if (event.type == InputEventType::Backspace) {
                 bool willMergeLines = (b.cursor.col == 0 && b.cursor.line > 0);
                 if (willMergeLines) {
                     int prevLineLen = b.document.lineLength(b.cursor.line - 1);
@@ -1717,28 +1717,28 @@ void Editor::handleInteraccionEvent(const Event& event) {
             break;
         }
 
-        case EventType::Escape:
+        case InputEventType::Escape:
             state_ = State::Navegacion;
             setStatusMessage(kHelpEmpty);
             break;
 
-        case EventType::MoveLeft: commands_.execute("cursor.mover.izquierda"); break;
-        case EventType::MoveRight: commands_.execute("cursor.mover.derecha"); break;
-        case EventType::MoveUp: commands_.execute("cursor.mover.arriba"); break;
-        case EventType::MoveDown: commands_.execute("cursor.mover.abajo"); break;
-        case EventType::MoveHome: commands_.execute("cursor.mover.inicio"); break;
-        case EventType::MoveEnd: commands_.execute("cursor.mover.fin"); break;
-        case EventType::PageUp: commands_.execute("cursor.pagina.arriba"); break;
-        case EventType::PageDown: commands_.execute("cursor.pagina.abajo"); break;
-        case EventType::ScrollUp: commands_.execute("vista.scroll.arriba"); break;
-        case EventType::ScrollDown: commands_.execute("vista.scroll.abajo"); break;
+        case InputEventType::MoveLeft: commands_.execute("cursor.mover.izquierda"); break;
+        case InputEventType::MoveRight: commands_.execute("cursor.mover.derecha"); break;
+        case InputEventType::MoveUp: commands_.execute("cursor.mover.arriba"); break;
+        case InputEventType::MoveDown: commands_.execute("cursor.mover.abajo"); break;
+        case InputEventType::MoveHome: commands_.execute("cursor.mover.inicio"); break;
+        case InputEventType::MoveEnd: commands_.execute("cursor.mover.fin"); break;
+        case InputEventType::PageUp: commands_.execute("cursor.pagina.arriba"); break;
+        case InputEventType::PageDown: commands_.execute("cursor.pagina.abajo"); break;
+        case InputEventType::ScrollUp: commands_.execute("vista.scroll.arriba"); break;
+        case InputEventType::ScrollDown: commands_.execute("vista.scroll.abajo"); break;
 
         default:
             break;
     }
 }
 
-void Editor::handleSeleccionEvent(const Event& event) {
+void Editor::handleSeleccionEvent(const InputEvent& event) {
     Buffer& b = active();
     // Si el prefijo 'a' (seleccion total) esta activo, casi todos los
     // eventos se interpretan de forma especial, no como extension normal
@@ -1753,27 +1753,27 @@ void Editor::handleSeleccionEvent(const Event& event) {
         // completa (begin + mover + update, o salto a extremo en seleccion
         // total) vive en el comando (regla InputEvent/CommandMap), así el
         // botón GUI produce lo mismo que el teclado. Igual que v0.3-v0.4.
-        case EventType::MoveLeft:
+        case InputEventType::MoveLeft:
             commands_.execute("cursor.mover.izquierda"); break;
-        case EventType::MoveRight:
+        case InputEventType::MoveRight:
             commands_.execute("cursor.mover.derecha"); break;
-        case EventType::MoveUp:
+        case InputEventType::MoveUp:
             commands_.execute("cursor.mover.arriba"); break;
-        case EventType::MoveDown:
+        case InputEventType::MoveDown:
             commands_.execute("cursor.mover.abajo"); break;
-        case EventType::MoveHome:
+        case InputEventType::MoveHome:
             commands_.execute("cursor.mover.inicio"); break;
-        case EventType::MoveEnd:
+        case InputEventType::MoveEnd:
             commands_.execute("cursor.mover.fin"); break;
         // RePag/AvPag extienden la seleccion como una flecha (Up/Down):
         // el anchor permanece y el cursor salta una pagina (en el comando).
-        case EventType::PageUp:
+        case InputEventType::PageUp:
             commands_.execute("cursor.pagina.arriba"); break;
-        case EventType::PageDown:
+        case InputEventType::PageDown:
             commands_.execute("cursor.pagina.abajo"); break;
-        case EventType::ScrollUp:
+        case InputEventType::ScrollUp:
             commands_.execute("vista.scroll.arriba"); break;
-        case EventType::ScrollDown:
+        case InputEventType::ScrollDown:
             commands_.execute("vista.scroll.abajo"); break;
 
         // 'c' copia el rango al buffer y 'x' lo copia y lo borra; ambos
@@ -1785,7 +1785,7 @@ void Editor::handleSeleccionEvent(const Event& event) {
         // ordena los puntos). Usar el segundo sobreescribiria el buffer con
         // un rango vacio y, en 'x', empujaria un historial inutil que ademas
         // limpia el redo.
-        case EventType::InsertChar:
+        case InputEventType::InsertChar:
             // 'a' entra al prefijo de "seleccion total": cubre el archivo
             // entero sin mover el cursor. 'c' copia el rango al buffer y 'x'
             // lo copia y lo borra; ambos terminan la seleccion y vuelven a
@@ -1858,7 +1858,7 @@ void Editor::handleSeleccionEvent(const Event& event) {
                 setActionMessage("Reemplazando seleccion...");
             }
             break;
-        case EventType::Escape:
+        case InputEventType::Escape:
             clearSelection();
             state_ = State::Navegacion;
             setActionMessage("Seleccion cancelada.");
@@ -1866,8 +1866,8 @@ void Editor::handleSeleccionEvent(const Event& event) {
 
         // Delete/Backspace si borran el rango seleccionado (interaction P0)
         // y vuelven a navegacion.
-        case EventType::Delete:
-        case EventType::Backspace:
+        case InputEventType::Delete:
+        case InputEventType::Backspace:
             if (deleteSelection()) {
                 state_ = State::Navegacion;
                 setActionMessage("Borrado.");
@@ -1884,12 +1884,12 @@ void Editor::handleSeleccionEvent(const Event& event) {
 // Prefijo 'a' (seleccion total): interpreta los eventos mientras
 // selectAllActive es true. La seleccion entera ya esta puesta en
 // selection ([BOF, EOF]); aqui se decide que hace cada tecla con ella.
-void Editor::handleSelectAllEvent(const Event& event) {
+void Editor::handleSelectAllEvent(const InputEvent& event) {
     Buffer& b = active();
     switch (event.type) {
         // 'a' de nuevo: toggle -> volvemos a la seleccion previa (o, si la
         // previa era sin seleccion, a sin seleccion) y se desactiva el modo.
-        case EventType::InsertChar:
+        case InputEventType::InsertChar:
             if (event.text == "a") {
                 b.selection = b.selectAllPrevious;
                 b.selectAllPrevious.reset();
@@ -1920,40 +1920,40 @@ void Editor::handleSelectAllEvent(const Event& event) {
         // cursor.pagina.* / vista.scroll.*, que son dueños del salto a
         // extremo en seleccion total (jumpSelectAllEdge) y del no-op donde
         // el teclado no hace nada (regla InputEvent/CommandMap).
-        case EventType::MoveRight:
+        case InputEventType::MoveRight:
             commands_.execute("cursor.mover.derecha");
             break;
-        case EventType::MoveDown:
+        case InputEventType::MoveDown:
             commands_.execute("cursor.mover.abajo");
             break;
-        case EventType::MoveLeft:
+        case InputEventType::MoveLeft:
             commands_.execute("cursor.mover.izquierda");
             break;
-        case EventType::MoveUp:
+        case InputEventType::MoveUp:
             commands_.execute("cursor.mover.arriba");
             break;
-        case EventType::MoveHome:
+        case InputEventType::MoveHome:
             commands_.execute("cursor.mover.inicio");
             break;
-        case EventType::MoveEnd:
+        case InputEventType::MoveEnd:
             commands_.execute("cursor.mover.fin");
             break;
-        case EventType::PageUp:
+        case InputEventType::PageUp:
             commands_.execute("cursor.pagina.arriba");
             break;
-        case EventType::PageDown:
+        case InputEventType::PageDown:
             commands_.execute("cursor.pagina.abajo");
             break;
-        case EventType::ScrollUp:
+        case InputEventType::ScrollUp:
             commands_.execute("vista.scroll.arriba");
             break;
-        case EventType::ScrollDown:
+        case InputEventType::ScrollDown:
             commands_.execute("vista.scroll.abajo");
             break;
 
         // ESC: cancela la seleccion total (y toda seleccion) y vuelve a
         // navegacion, igual que en el modo Seleccion normal.
-        case EventType::Escape:
+        case InputEventType::Escape:
             clearSelection();
             b.selectAllPrevious.reset();
             b.selectAllActive = false;
@@ -1966,8 +1966,8 @@ void Editor::handleSelectAllEvent(const Event& event) {
         // normal. deleteSelection() ya empuja historial y deja el cursor
         // al inicio. Si el rango es degenerado (archivo vacio) no hay
         // nada que borrar: no-op, el prefijo sigue activo.
-        case EventType::Delete:
-        case EventType::Backspace:
+        case InputEventType::Delete:
+        case InputEventType::Backspace:
             // Si el archivo está vacío, no hay nada que borrar.
             if (b.document.lineCount() == 1 && b.document.lineAt(0).empty()) {
                 // No-op: el prefijo sigue activo, no cambiamos estado.
@@ -1996,19 +1996,19 @@ std::optional<Selection> Editor::selectAllSelection() const {
     return Selection{{0, 0}, end};
 }
 
-void Editor::handlePrefixKey(const Event& event) {
+void Editor::handlePrefixKey(const InputEvent& event) {
     switch (event.type) {
-        case EventType::Save:
+        case InputEventType::Save:
             commands_.execute("buffer.guardar.como");
             break;
 
-        case EventType::Quit:
+        case InputEventType::Quit:
             commands_.execute("app.salir.forzado");
             break;
 
         // v0.6.3: comandos de buffer dentro del prefijo. El mapeo tecla ->
         // comando -> handler vive en commands_.
-        case EventType::InsertChar:
+        case InputEventType::InsertChar:
             if (event.text == "n") {           // Ctrl+K n: nuevo buffer
                 commands_.execute("buffer.nuevo");
                 break;
@@ -2076,14 +2076,14 @@ void Editor::startSaveAs() {
     setStatusMessage(kHelpSaveAsPrompt + saveAsPath_, MessageKind::Prompt);
 }
 
-void Editor::handleSaveAsEvent(const Event& event) {
+void Editor::handleSaveAsEvent(const InputEvent& event) {
     switch (event.type) {
-        case EventType::InsertChar:
+        case InputEventType::InsertChar:
             saveAsPath_ += event.text;
             setStatusMessage(kHelpSaveAsPrompt + saveAsPath_,
                              MessageKind::Prompt);
             break;
-        case EventType::Backspace:
+        case InputEventType::Backspace:
             if (!saveAsPath_.empty()) {
                 int cols = utf8::columnOf(saveAsPath_,
                                           static_cast<int>(saveAsPath_.size()));
@@ -2092,10 +2092,10 @@ void Editor::handleSaveAsEvent(const Event& event) {
             setStatusMessage(kHelpSaveAsPrompt + saveAsPath_,
                              MessageKind::Prompt);
             break;
-        case EventType::InsertNewline: // Enter: guardar en la ruta escrita
+        case InputEventType::InsertNewline: // Enter: guardar en la ruta escrita
             commitSaveAs();
             break;
-        case EventType::Escape:
+        case InputEventType::Escape:
             state_ = priorState_;
             setActionMessage("Guardado cancelado.", MessageKind::Warning);
             break;
@@ -2266,32 +2266,32 @@ void Editor::navigateSearch(int dir) {
     updateSearchMessage(true, next + 1, static_cast<int>(matches.size()));
 }
 
-void Editor::handleBusquedaEvent(const Event& event) {
+void Editor::handleBusquedaEvent(const InputEvent& event) {
     switch (event.type) {
-        case EventType::InsertChar:
+        case InputEventType::InsertChar:
             searchQuery_ += event.text;
             updateSearch();
             break;
-        case EventType::Backspace:
+        case InputEventType::Backspace:
             if (!searchQuery_.empty()) {
                 int cols = utf8::columnOf(searchQuery_, static_cast<int>(searchQuery_.size()));
                 searchQuery_ = utf8::truncate(searchQuery_, cols - 1);
             }
             updateSearch();
             break;
-        case EventType::MoveDown:
+        case InputEventType::MoveDown:
             navigateSearch(+1);
             break;
-        case EventType::MoveUp:
+        case InputEventType::MoveUp:
             navigateSearch(-1);
             break;
-        case EventType::InsertNewline:
+        case InputEventType::InsertNewline:
             clearSearchHighlight();
             state_ = State::Navegacion;
             searchQuery_.clear();
             setStatusMessage("", MessageKind::Info);
             break;
-        case EventType::Escape: {
+        case InputEventType::Escape: {
             Buffer& b = active();
             b.cursor.line = searchOrigin_.line;
             b.cursor.col = searchOrigin_.col;
@@ -2580,22 +2580,22 @@ void Editor::startGoToLine() {
     setStatusMessage(std::string(kHelpIrAFila), MessageKind::Prompt);
 }
 
-void Editor::handleIrAFilaEvent(const Event& event) {
+void Editor::handleIrAFilaEvent(const InputEvent& event) {
     switch (event.type) {
-        case EventType::InsertChar:
+        case InputEventType::InsertChar:
             // Solo aceptar dígitos, descartando cualquier otro carácter
             if (event.text.size() == 1 && event.text[0] >= '0' && event.text[0] <= '9') {
                 goToLineQuery_ += event.text;
                 setStatusMessage(std::string(kHelpIrAFila) + goToLineQuery_, MessageKind::Prompt);
             }
             break;
-        case EventType::Backspace:
+        case InputEventType::Backspace:
             if (!goToLineQuery_.empty()) {
                 goToLineQuery_.pop_back();
                 setStatusMessage(std::string(kHelpIrAFila) + goToLineQuery_, MessageKind::Prompt);
             }
             break;
-        case EventType::InsertNewline: {
+        case InputEventType::InsertNewline: {
             if (!goToLineQuery_.empty()) {
                 try {
                     int lineNum = std::stoi(goToLineQuery_);
@@ -2626,7 +2626,7 @@ void Editor::handleIrAFilaEvent(const Event& event) {
             }
             break;
         }
-        case EventType::Escape:
+        case InputEventType::Escape:
             state_ = State::Navegacion;
             goToLineQuery_.clear();
             setStatusMessage("", MessageKind::Info);

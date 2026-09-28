@@ -4,10 +4,10 @@
 #include <optional>
 #include <string>
 
-#include "platform/Event.h"
+#include "platform/InputEvent.h"
 #include "platform/tty/ITtyKeymap.h"
 
-// Tabla de datos que traduce las teclas crudas a Eventos de alto nivel,
+// Tabla de datos que traduce las teclas crudas a InputEvent de alto nivel,
 // y que se puede reconfigurar en tiempo de ejecucion.
 //
 // Antes ese significado vivia hardcodeado en switchs/ifs dentro de
@@ -17,11 +17,11 @@
 // con timeout, arma el caracter UTF-8 multibyte), pero el SIGNIFICADO -
 // "que hace cada tecla" - queda como datos.
 //
-// Esto completa la separacion "InputEvent -> Event" que describe el README:
-// el Editor ya trabajaba con Eventos (semanticos, no fisicos); ahora el
-// mapeo input->Event deja de estar atornillado y se vuelve remapeable
+// Esto completa la separacion "bytes TTY -> InputEvent": el Editor ya
+// trabajaba con eventos semanticos (no fisicos); ahora el mapeo
+// input->InputEvent deja de estar atornillado y se vuelve remapeable
 // (micros, plugins, personalizacion de teclas...) sin tocar la logica del
-// Editor: un mismo Evento puede venir de distintas teclas o secuencias sin
+// Editor: un mismo evento puede venir de distintas teclas o secuencias sin
 // que el Editor cambie una linea.
 //
 // Hay DOS tablas, una por "forma de llegar por la terminal":

@@ -17,12 +17,12 @@ void TtyRunLoop::run() {
 
     // Sincronización inicial como un Resize más: el tamaño viaja en el
     // payload del evento y el Editor lo aplica sin consultar backends.
-    // Flujo limpio: terminal.getWindowSize() -> Event::Resize -> Editor.
+    // Flujo limpio: terminal.getWindowSize() -> InputEventType::Resize -> Editor.
     {
         int rows, cols;
         terminal.getWindowSize(rows, cols);
-        Event init;
-        init.type = EventType::Resize;
+        InputEvent init;
+        init.type = InputEventType::Resize;
         init.resizeRows = rows;
         init.resizeCols = cols;
         editor_.handleEvent(init);
@@ -51,12 +51,12 @@ void TtyRunLoop::run() {
 
     while (editor_.running_) {
         if (terminal.hasResized()) {
-            // SIGWINCH -> EventType::Resize: el Editor lo maneja como
+            // SIGWINCH -> InputEventType::Resize: el Editor lo maneja como
             // cualquier otro evento (Frontier 3).
             int rows, cols;
             terminal.getWindowSize(rows, cols);
-            Event rs;
-            rs.type = EventType::Resize;
+            InputEvent rs;
+            rs.type = InputEventType::Resize;
             rs.resizeRows = rows;
             rs.resizeCols = cols;
             editor_.handleEvent(rs);
@@ -126,8 +126,8 @@ void TtyRunLoop::run() {
             if (errno == EINTR && terminal.hasResized()) {
                 int rows, cols;
                 terminal.getWindowSize(rows, cols);
-                Event rs;
-                rs.type = EventType::Resize;
+                InputEvent rs;
+                rs.type = InputEventType::Resize;
                 rs.resizeRows = rows;
                 rs.resizeCols = cols;
                 editor_.handleEvent(rs);
@@ -151,7 +151,7 @@ void TtyRunLoop::run() {
             });
         }
         if (inReady) {
-            Event event;
+            InputEvent event;
             if (!terminal.readEvent(event, 0)) {
                 if (xReady || watcherReady) continue;
             } else {

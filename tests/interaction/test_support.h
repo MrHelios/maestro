@@ -8,6 +8,7 @@
 #include <vector>
 #include <unistd.h>
 #include "test_framework.h"
+#include "platform/Event.h"  // shim legacy: los tests usan Event/EventType
 #define private public
 #include "app/Editor.h"
 #undef private

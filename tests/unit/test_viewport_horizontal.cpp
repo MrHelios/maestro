@@ -5,6 +5,7 @@
 #include "layout/Layout.h"
 #include "base/utf8.h"
 #include "rendering/Renderer.h"
+#include "platform/Event.h"  // shim legacy: este test usa Event/EventType
 #include "test_framework.h"
 #include <string>
 #include <vector>
