@@ -187,7 +187,7 @@ TEST(editor_open_relative_directory_rejected) {
 TEST(editor_move_left) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveLeft);
+    press(ed, InputEventType::MoveLeft);
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 2);
 }
@@ -195,15 +195,15 @@ TEST(editor_move_left) {
 TEST(editor_move_right) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveLeft);
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveLeft);
+    press(ed, InputEventType::MoveRight);
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 3);
 }
 
 TEST(editor_move_left_at_start_noop) {
     Editor ed;
-    press(ed, EventType::MoveLeft);
+    press(ed, InputEventType::MoveLeft);
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
 }
@@ -211,7 +211,7 @@ TEST(editor_move_left_at_start_noop) {
 TEST(editor_move_right_at_end_noop) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 3);
 }
@@ -219,8 +219,8 @@ TEST(editor_move_right_at_end_noop) {
 TEST(editor_move_left_wraps_to_previous_line) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::InsertNewline); // cursor en (1,0)
-    press(ed, EventType::MoveLeft);      // salta al final de la linea anterior
+    press(ed, InputEventType::InsertNewline); // cursor en (1,0)
+    press(ed, InputEventType::MoveLeft);      // salta al final de la linea anterior
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 3);
 }
@@ -228,9 +228,9 @@ TEST(editor_move_left_wraps_to_previous_line) {
 TEST(editor_move_right_wraps_to_next_line) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::InsertNewline); // cursor en (1,0)
-    press(ed, EventType::MoveLeft);      // -> (0,3)
-    press(ed, EventType::MoveRight);     // -> (1,0)
+    press(ed, InputEventType::InsertNewline); // cursor en (1,0)
+    press(ed, InputEventType::MoveLeft);      // -> (0,3)
+    press(ed, InputEventType::MoveRight);     // -> (1,0)
     CHECK_EQ(ed.active().cursor.line, 1);
     CHECK_EQ(ed.active().cursor.col, 0);
 }
@@ -238,23 +238,23 @@ TEST(editor_move_right_wraps_to_next_line) {
 TEST(editor_move_up_at_top_noop) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveUp);
+    press(ed, InputEventType::MoveUp);
     CHECK_EQ(ed.active().cursor.line, 0);
 }
 
 TEST(editor_move_down_at_bottom_noop) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::InsertNewline); // dos lineas, cursor en (1,0)
-    press(ed, EventType::MoveDown);
+    press(ed, InputEventType::InsertNewline); // dos lineas, cursor en (1,0)
+    press(ed, InputEventType::MoveDown);
     CHECK_EQ(ed.active().cursor.line, 1);
 }
 
 TEST(editor_move_up_changes_line) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::InsertNewline); // cursor en (1,0)
-    press(ed, EventType::MoveUp);        // -> (0,0)
+    press(ed, InputEventType::InsertNewline); // cursor en (1,0)
+    press(ed, InputEventType::MoveUp);        // -> (0,0)
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
 }
@@ -262,9 +262,9 @@ TEST(editor_move_up_changes_line) {
 TEST(editor_move_down_changes_line) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::InsertNewline); // cursor en (1,0)
-    press(ed, EventType::MoveUp);        // -> (0,0)
-    press(ed, EventType::MoveDown);      // -> (1,0)
+    press(ed, InputEventType::InsertNewline); // cursor en (1,0)
+    press(ed, InputEventType::MoveUp);        // -> (0,0)
+    press(ed, InputEventType::MoveDown);      // -> (1,0)
     CHECK_EQ(ed.active().cursor.line, 1);
     CHECK_EQ(ed.active().cursor.col, 0);
 }
@@ -272,8 +272,8 @@ TEST(editor_move_down_changes_line) {
 TEST(editor_move_home) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveEnd);
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveEnd);
+    press(ed, InputEventType::MoveHome);
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
 }
@@ -281,8 +281,8 @@ TEST(editor_move_home) {
 TEST(editor_move_end) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveHome);
-    press(ed, EventType::MoveEnd);
+    press(ed, InputEventType::MoveHome);
+    press(ed, InputEventType::MoveEnd);
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 3);
 }
@@ -290,11 +290,11 @@ TEST(editor_move_end) {
 TEST(editor_move_up_down) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     type(ed, "def");
-    press(ed, EventType::MoveUp);
+    press(ed, InputEventType::MoveUp);
     CHECK_EQ(ed.active().cursor.line, 0);
-    press(ed, EventType::MoveDown);
+    press(ed, InputEventType::MoveDown);
     CHECK_EQ(ed.active().cursor.line, 1);
 }
 
@@ -302,12 +302,12 @@ TEST(editor_vertical_clamps_to_shorter_line) {
     // "abcdef" / "xy": bajar desde col 5 debe aterrizar en col 2 (fin de "xy").
     Editor ed;
     type(ed, "abcdef");
-    press(ed, EventType::InsertNewline); // (1,0), line0 sigue "abcdef"
+    press(ed, InputEventType::InsertNewline); // (1,0), line0 sigue "abcdef"
     type(ed, "xy");                      // line1="xy", cursor (1,2)
-    press(ed, EventType::MoveUp);        // -> (0,0)
+    press(ed, InputEventType::MoveUp);        // -> (0,0)
     for (int i = 0; i < 5; ++i)
-        press(ed, EventType::MoveRight); // -> (0,5), preferredCol=5
-    press(ed, EventType::MoveDown);      // -> (1,2): col se clampa a 2
+        press(ed, InputEventType::MoveRight); // -> (0,5), preferredCol=5
+    press(ed, InputEventType::MoveDown);      // -> (1,2): col se clampa a 2
     CHECK_EQ(ed.active().cursor.line, 1);
     CHECK_EQ(ed.active().cursor.col, 2);
 }
@@ -315,13 +315,13 @@ TEST(editor_vertical_clamps_to_shorter_line) {
 TEST(editor_vertical_remembers_preferred_column) {
     Editor ed;
     type(ed, "abcdef");
-    press(ed, EventType::InsertNewline); // line0 sigue "abcdef"
+    press(ed, InputEventType::InsertNewline); // line0 sigue "abcdef"
     type(ed, "xy");                      // line1="xy", cursor (1,2)
-    press(ed, EventType::MoveUp);        // -> (0,0)
+    press(ed, InputEventType::MoveUp);        // -> (0,0)
     for (int i = 0; i < 5; ++i)
-        press(ed, EventType::MoveRight); // -> (0,5), preferredCol=5
-    press(ed, EventType::MoveDown);      // -> (1,2), preferredCol sigue 5
-    press(ed, EventType::MoveUp);        // -> (0,5): recupera la columna deseada
+        press(ed, InputEventType::MoveRight); // -> (0,5), preferredCol=5
+    press(ed, InputEventType::MoveDown);      // -> (1,2), preferredCol sigue 5
+    press(ed, InputEventType::MoveUp);        // -> (0,5): recupera la columna deseada
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 5);
 }
@@ -342,7 +342,7 @@ TEST(editor_insert_character) {
 TEST(editor_insert_inserts_at_cursor_position) {
     Editor ed;
     type(ed, "ac");
-    press(ed, EventType::MoveLeft);       // cursor en col 1
+    press(ed, InputEventType::MoveLeft);       // cursor en col 1
     ed.handleEvent(insert('b'));          // inserta en medio
     CHECK_EQ(ed.active().document.lineAt(0), "abc");
     CHECK_EQ(ed.active().cursor.col, 2);
@@ -362,7 +362,7 @@ TEST(editor_insert_marks_modified) {
 TEST(editor_backspace) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
     CHECK_EQ(ed.active().cursor.col, 2);
     CHECK(ed.active().modified);
@@ -372,11 +372,11 @@ TEST(editor_backspace_at_line_start_joins) {
     // "abc" / "def" -> backspace al inicio de "def" une las lineas.
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     type(ed, "def");
 
-    press(ed, EventType::MoveHome);       // cursor al inicio de "def" (1,0)
-    press(ed, EventType::Backspace);      // une las dos lineas
+    press(ed, InputEventType::MoveHome);       // cursor al inicio de "def" (1,0)
+    press(ed, InputEventType::Backspace);      // une las dos lineas
 
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "abcdef");
@@ -388,12 +388,12 @@ TEST(editor_backspace_at_line_start_joins) {
 TEST(editor_backspace_join_then_undo_restores) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     type(ed, "def");
 
-    press(ed, EventType::MoveHome);
-    press(ed, EventType::Backspace);      // une: "abcdef"
-    press(ed, EventType::Undo);           // restaura la division
+    press(ed, InputEventType::MoveHome);
+    press(ed, InputEventType::Backspace);      // une: "abcdef"
+    press(ed, InputEventType::Undo);           // restaura la division
 
     CHECK_EQ(ed.active().document.lineCount(), 2);
     CHECK_EQ(ed.active().document.lineAt(0), "abc");
@@ -402,7 +402,7 @@ TEST(editor_backspace_join_then_undo_restores) {
 
 TEST(editor_backspace_at_absolute_start_noop) {
     Editor ed;
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK_EQ(ed.active().cursor.line, 0);
@@ -413,8 +413,8 @@ TEST(editor_backspace_at_absolute_start_noop) {
 TEST(editor_delete) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveLeft);       // cursor en col 2
-    press(ed, EventType::Delete);         // borra la "c"
+    press(ed, InputEventType::MoveLeft);       // cursor en col 2
+    press(ed, InputEventType::Delete);         // borra la "c"
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
     CHECK_EQ(ed.active().cursor.col, 2);
     CHECK(ed.active().modified);
@@ -423,12 +423,12 @@ TEST(editor_delete) {
 TEST(editor_delete_at_line_end_joins_next) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     type(ed, "def");
 
-    press(ed, EventType::MoveUp);         // -> renglón 0
-    press(ed, EventType::MoveEnd);        // cursor al final de "abc" (0,3)
-    press(ed, EventType::Delete);         // une la línea siguiente
+    press(ed, InputEventType::MoveUp);         // -> renglón 0
+    press(ed, InputEventType::MoveEnd);        // cursor al final de "abc" (0,3)
+    press(ed, InputEventType::Delete);         // une la línea siguiente
 
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "abcdef");
@@ -441,8 +441,8 @@ TEST(editor_delete_at_line_end_joins_next) {
 TEST(editor_delete_at_end_of_document_noop) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveEnd);
-    press(ed, EventType::Delete);
+    press(ed, InputEventType::MoveEnd);
+    press(ed, InputEventType::Delete);
     CHECK_EQ(ed.active().document.lineAt(0), "abc");
 }
 
@@ -453,7 +453,7 @@ TEST(editor_undo_insertion) {
     Editor ed;
     type(ed, "x");
     CHECK_EQ(ed.active().document.lineAt(0), "x");
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK_EQ(ed.active().cursor.col, 0);
 }
@@ -462,29 +462,29 @@ TEST(editor_undo_backspace) {
     Editor ed;
     type(ed, "a");
     CHECK_EQ(ed.active().document.lineAt(0), "a");
-    press(ed, EventType::Backspace); // borra "a"
+    press(ed, InputEventType::Backspace); // borra "a"
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK(!ed.active().modified);
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "a");
 }
 
 TEST(editor_undo_delete) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveLeft); // cursor en col 2
-    press(ed, EventType::Delete);   // borra el 'c'
+    press(ed, InputEventType::MoveLeft); // cursor en col 2
+    press(ed, InputEventType::Delete);   // borra el 'c'
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "abc");
 }
 
 TEST(editor_undo_newline) {
     Editor ed;
     type(ed, "a");
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.active().document.lineCount(), 2);
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "a");
     CHECK_EQ(ed.active().cursor.line, 0);
@@ -495,25 +495,25 @@ TEST(editor_undo_mixed_operations) {
     // Contrato: cada InsertChar / InsertNewline genera su propia entrada.
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     type(ed, "def");
 
     CHECK_EQ(ed.active().document.lineCount(), 2);
     CHECK_EQ(ed.active().document.lineAt(1), "def");
 
     for (int step = 0; step < 3; ++step)   // 'f' -> 'e' -> 'd'
-        press(ed, EventType::Undo);
+        press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(1), "");
 
-    press(ed, EventType::Undo);            // deshace el Enter
+    press(ed, InputEventType::Undo);            // deshace el Enter
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "abc");
 
     for (int step = 0; step < 3; ++step)   // 'c' -> 'b' -> 'a'
-        press(ed, EventType::Undo);
+        press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "");
 
-    press(ed, EventType::Undo);            // ya no hay nada que deshacer
+    press(ed, InputEventType::Undo);            // ya no hay nada que deshacer
     CHECK_EQ(ed.active().document.lineAt(0), "");
 }
 
@@ -522,13 +522,13 @@ TEST(editor_undo_back_to_start_of_mixed) {
     // estaba al principio (una línea vacía, cursor 0,0).
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     type(ed, "def");
-    press(ed, EventType::MoveHome);
-    press(ed, EventType::Backspace);       // une: "abcdef"
+    press(ed, InputEventType::MoveHome);
+    press(ed, InputEventType::Backspace);       // une: "abcdef"
 
     for (int i = 0; i < 20; ++i)
-        press(ed, EventType::Undo);
+        press(ed, InputEventType::Undo);
 
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
@@ -539,17 +539,17 @@ TEST(editor_undo_back_to_start_of_mixed) {
 TEST(editor_undo_multiple) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "a");
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "");
 }
 
 TEST(editor_undo_empty_noop) {
     Editor ed;
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "");
 }
 
@@ -557,7 +557,7 @@ TEST(editor_undo_everything) {
     Editor ed;
     type(ed, "hello");
     for (int i = 0; i < 6; ++i)
-        press(ed, EventType::Undo);
+        press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
@@ -569,42 +569,42 @@ TEST(editor_undo_everything) {
 TEST(editor_redo_after_undo) {
     Editor ed;
     type(ed, "x");
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "");
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "x");
 }
 
 TEST(editor_redo_several) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Undo);
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "a");
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "abc");
 }
 
 TEST(editor_redo_invalidated_by_new_change) {
     Editor ed;
     type(ed, "a");
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     type(ed, "Z");
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "Z");
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 1);
     // Un Redo adicional no recupera la rama descartada: sigue en "Z".
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "Z");
     CHECK_EQ(ed.active().cursor.col, 1);
 }
 
 TEST(editor_redo_empty_noop) {
     Editor ed;
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "");
 }
 
@@ -640,10 +640,10 @@ TEST(editor_save_overwrites_content) {
 
     // El cursor abre en (0,0): muevo al final, entro en Interaccion para
     // poder borrar "old" y luego escribo "new".
-    press(ed, EventType::MoveEnd);
+    press(ed, InputEventType::MoveEnd);
     enterInteraccion(ed);
     for (int i = 0; i < 3; ++i)
-        press(ed, EventType::Backspace);
+        press(ed, InputEventType::Backspace);
     type(ed, "new");
     save(ed);
 
@@ -682,7 +682,7 @@ TEST(editor_modified_after_change_after_save) {
     type(ed, "b");
     CHECK(ed.active().modified);
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(!ed.active().modified);
 }
 
@@ -704,10 +704,10 @@ TEST(editor_modified_undo_redo) {
     type(ed, "b");
     CHECK(ed.active().modified);
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(!ed.active().modified);
 
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK(ed.active().modified);
 }
 
@@ -716,9 +716,9 @@ TEST(editor_modified_until_undo_then_redo) {
     type(ed, "x");
     CHECK(ed.active().modified);
     // Undo vuelve al estado inicial (igual al guardado): modified_ se limpia.
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(!ed.active().modified);
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK(ed.active().modified);
 }
 
@@ -730,7 +730,7 @@ TEST(editor_quit_illegals_without_prefix) {
     // NO sale del editor. Debe pasarse por el prefijo (Ctrl+K -> Ctrl+Q).
     Editor ed;
     CHECK(ed.running_);
-    press(ed, EventType::Quit);
+    press(ed, InputEventType::Quit);
     CHECK(ed.running_);
 }
 
@@ -741,11 +741,11 @@ TEST(editor_quit_after_save_via_prefix) {
     type(ed, "a");
     save(ed);
     // Quit suelto no sale...
-    press(ed, EventType::Quit);
+    press(ed, InputEventType::Quit);
     CHECK(ed.running_);
     // ...pero con el prefijo (Ctrl+K -> Ctrl+Q) si.
-    press(ed, EventType::Prefix);
-    press(ed, EventType::Quit);
+    press(ed, InputEventType::Prefix);
+    press(ed, InputEventType::Quit);
     CHECK(!ed.running_);
 }
 
@@ -756,10 +756,10 @@ TEST(editor_quit_with_unsaved_changes_via_prefix) {
     Editor ed;
     type(ed, "a");
     CHECK(ed.active().modified);
-    press(ed, EventType::Quit);
+    press(ed, InputEventType::Quit);
     CHECK(ed.running_);
-    press(ed, EventType::Prefix);
-    press(ed, EventType::Quit);
+    press(ed, InputEventType::Prefix);
+    press(ed, InputEventType::Quit);
     CHECK(!ed.running_);
 }
 
@@ -786,20 +786,20 @@ TEST(editor_cursor_moves_char_by_char_consecutive_utf8) {
 
         // Avanzar de a un caracter: 0 -> nbytes -> 2*nbytes -> ... -> fin.
         for (int i = 1; i <= nchars; ++i) {
-            press(ed, EventType::MoveRight);
+            press(ed, InputEventType::MoveRight);
             CHECK_EQ(ed.active().cursor.col, cs.nbytes * i);
         }
         // Al final, mover derecha no pasa del largo (no "entra" en nul).
         const int endByte = static_cast<int>(std::string(cs.line).size());
-        press(ed, EventType::MoveRight);
+        press(ed, InputEventType::MoveRight);
         CHECK_EQ(ed.active().cursor.col, endByte);
 
         // Volver: fin -> ... -> 2*nbytes -> nbytes -> 0.
         for (int i = nchars - 1; i >= 1; --i) {
-            press(ed, EventType::MoveLeft);
+            press(ed, InputEventType::MoveLeft);
             CHECK_EQ(ed.active().cursor.col, cs.nbytes * i);
         }
-        press(ed, EventType::MoveLeft);
+        press(ed, InputEventType::MoveLeft);
         CHECK_EQ(ed.active().cursor.col, 0);
     }
 }
@@ -854,11 +854,11 @@ TEST(editor_backspace_removes_whole_multibyte) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 4; // tras "á"
     enterInteraccion(ed); // Backspace solo actua en Interaccion (v0.5)
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineAt(0), "\xc3\xb1"); // queda "ñ"
     CHECK_EQ(ed.active().cursor.col, 2); // limite tras "ñ", no un byte suelto
 
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK_EQ(ed.active().cursor.col, 0);
 }

@@ -4,39 +4,38 @@
 #include "layout/ScreenToCursor.h"
 #include "layout/Viewport.h"
 #include "platform/CellPos.h"
-#include "platform/Event.h"
+#include "platform/InputEvent.h"
+#include "platform/MouseEvent.h"
 #include "platform/tty/Terminal.h"
-#include "event_shim.h"
 #include "test_framework.h"
 
 namespace {
 
-// Shim Fase A: los helpers conservan firma (col,row) con literales 1-based
-// tal como los emite SGR, y delegan en makeMouseEventSgr(col, row), cuyo
-// punto único de conversión es cellFromSgr(). Único punto a cambiar cuando
-// CellPos migre a 0-based. makeMouseEvent(type, CellPos) queda reservado
-// para tests ya migrados (dominio destino).
-Event mousePress(int col, int row) {
-    return testshim::makeMouseEventSgr(EventType::MousePress, col, row);
+// Los helpers conservan firma (col,row) con literales 1-based tal como los
+// emite SGR; la conversión a CellPos 0-based (-1) vive acá, espejando lo
+// que el decoder real hace en TtyMouse.h. Los tests de editor no cambian
+// sus literales ante el flip de dominio.
+InputEvent mousePress(int col, int row) {
+    return makeMousePressEvent(CellPos{col - 1, row - 1});
 }
 
-Event mouseDrag(int col, int row) {
-    return testshim::makeMouseEventSgr(EventType::MouseDrag, col, row);
+InputEvent mouseDrag(int col, int row) {
+    return makeMouseDragEvent(CellPos{col - 1, row - 1});
 }
 
-Event mouseRelease(int col, int row) {
-    return testshim::makeMouseEventSgr(EventType::MouseRelease, col, row);
+InputEvent mouseRelease(int col, int row) {
+    return makeMouseReleaseEvent(CellPos{col - 1, row - 1});
 }
 
-Event insertCh(char c) {
-    Event e;
-    e.type = EventType::InsertChar;
+InputEvent insertCh(char c) {
+    InputEvent e;
+    e.type = InputEventType::InsertChar;
     e.text = std::string(1, c);
     return e;
 }
 
 // Geometria de test: viewport chico, gutter 3 (docs chicos), content en (0,0).
-// mouseRow = relRow+1, mouseCol = relCol+1.
+// CellPos 0-based: celda = (relCol, relRow).
 Layout testLayout(const Viewport& vp) {
     return computeLayout(vp.height + kStatusBarRows, vp.width);
 }
@@ -55,89 +54,93 @@ Viewport testViewport(int height = 10, int width = 20) {
 // --- Parser SGR ---
 
 TEST(mouse_sgr_left_press_basic) {
-    Event e;
+    InputEvent e;
     Terminal::parseMouseSgr("[<0;10;5M", e);
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MousePress));
-    CHECK_EQ(e.mouseCol, 10);
-    CHECK_EQ(e.mouseRow, 5);
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MousePress));
+    CHECK_EQ(e.cell.col, 9);
+    CHECK_EQ(e.cell.row, 4);
 }
 
 TEST(mouse_sgr_left_press_with_modifiers) {
     // code == 0 con Shift(4)/Alt(8)/Ctrl(16): los modificadores no alteran
     // el press izquierdo, solo viajan enmascarados en Cb.
     for (int cb : {4, 8, 16}) {
-        Event e;
+        InputEvent e;
         std::string seq = "[<" + std::to_string(cb) + ";10;5M";
         Terminal::parseMouseSgr(seq, e);
         CHECK_EQ(static_cast<int>(e.type),
-                 static_cast<int>(EventType::MousePress));
-        CHECK_EQ(e.mouseCol, 10);
-        CHECK_EQ(e.mouseRow, 5);
+                 static_cast<int>(InputEventType::MousePress));
+        CHECK_EQ(e.cell.col, 9);
+        CHECK_EQ(e.cell.row, 4);
     }
 }
 
 TEST(mouse_sgr_release_left) {
-    Event e;
+    InputEvent e;
     Terminal::parseMouseSgr("[<3;10;5m", e);
     CHECK_EQ(static_cast<int>(e.type),
-             static_cast<int>(EventType::MouseRelease));
-    CHECK_EQ(e.mouseCol, 10);
-    CHECK_EQ(e.mouseRow, 5);
+             static_cast<int>(InputEventType::MouseRelease));
+    CHECK_EQ(e.cell.col, 9);
+    CHECK_EQ(e.cell.row, 4);
 }
 
 TEST(mouse_sgr_release_nonleft_ignored) {
-    Event e;
+    InputEvent e;
     Terminal::parseMouseSgr("[<0;10;5m", e);
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
 }
 
 TEST(mouse_sgr_left_drag_basic) {
-    Event e;
+    InputEvent e;
     Terminal::parseMouseSgr("[<32;10;5M", e);
     CHECK_EQ(static_cast<int>(e.type),
-             static_cast<int>(EventType::MouseDrag));
-    CHECK_EQ(e.mouseCol, 10);
-    CHECK_EQ(e.mouseRow, 5);
+             static_cast<int>(InputEventType::MouseDrag));
+    CHECK_EQ(e.cell.col, 9);
+    CHECK_EQ(e.cell.row, 4);
 }
 
 TEST(mouse_sgr_left_drag_with_modifiers) {
     // 32 + Shift(4)/Alt(8)/Ctrl(16) sigue siendo drag izquierdo.
     for (int cb : {36, 40, 48}) {
-        Event e;
+        InputEvent e;
         std::string seq = "[<" + std::to_string(cb) + ";10;5M";
         Terminal::parseMouseSgr(seq, e);
         CHECK_EQ(static_cast<int>(e.type),
-                 static_cast<int>(EventType::MouseDrag));
+                 static_cast<int>(InputEventType::MouseDrag));
+        CHECK_EQ(e.cell.col, 9);
+        CHECK_EQ(e.cell.row, 4);
     }
 }
 
 TEST(mouse_sgr_left_release_with_modifiers) {
     // 3 + mods + 'm' sigue siendo release (7=3+Shift, 11=3+Alt, 19=3+Ctrl).
     for (int cb : {7, 11, 19}) {
-        Event e;
+        InputEvent e;
         std::string seq = "[<" + std::to_string(cb) + ";10;5m";
         Terminal::parseMouseSgr(seq, e);
         CHECK_EQ(static_cast<int>(e.type),
-                 static_cast<int>(EventType::MouseRelease));
+                 static_cast<int>(InputEventType::MouseRelease));
+        CHECK_EQ(e.cell.col, 9);
+        CHECK_EQ(e.cell.row, 4);
     }
 }
 
 TEST(mouse_sgr_drag_middle_right_ignored) {
-    Event e;
+    InputEvent e;
     Terminal::parseMouseSgr("[<33;10;5M", e);
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
     Terminal::parseMouseSgr("[<1;10;5M", e);
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
     Terminal::parseMouseSgr("[<2;10;5M", e);
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
 }
 
 TEST(mouse_sgr_malformed_no_click) {
-    Event e;
+    InputEvent e;
     Terminal::parseMouseSgr("[<0;10M", e);
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
     Terminal::parseMouseSgr("[<M", e);
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
 }
 
 // --- Mapper puro ---
@@ -147,8 +150,8 @@ TEST(mouse_map_text_click) {
     d.restore({"hello", "world"});
     Viewport vp = testViewport();
     Layout lo = testLayout(vp);
-    // gutter=3: texto de fila 0 col visual 1 => relCol=4 => mouseCol=5
-    auto p = screenToCursor(1, 5, lo, vp, d);
+    // gutter=3: texto de fila 0 col visual 1 => relCol=4 => celda (4,0)
+    auto p = screenToCursor(CellPos{4, 0}, lo, vp, d);
     CHECK(p.has_value());
     CHECK_EQ(p->line, 0);
     CHECK_EQ(p->col, 1);
@@ -159,7 +162,7 @@ TEST(mouse_map_gutter_goes_to_start) {
     d.restore({"hello"});
     Viewport vp = testViewport();
     Layout lo = testLayout(vp);
-    auto p = screenToCursor(1, 1, lo, vp, d); // dentro del gutter
+    auto p = screenToCursor(CellPos{0, 0}, lo, vp, d); // dentro del gutter
     CHECK(p.has_value());
     CHECK_EQ(p->line, 0);
     CHECK_EQ(p->col, 0);
@@ -171,13 +174,13 @@ TEST(mouse_map_gutter_text_border) {
     Viewport vp = testViewport();
     Layout lo = testLayout(vp);
     // gutterW=3: relCol 2 = ultima de gutter, relCol 3 = primera de texto
-    auto g = screenToCursor(1, 3, lo, vp, d);
+    auto g = screenToCursor(CellPos{2, 0}, lo, vp, d);
     CHECK(g.has_value());
     CHECK_EQ(g->col, 0);
-    auto t = screenToCursor(1, 4, lo, vp, d);
+    auto t = screenToCursor(CellPos{3, 0}, lo, vp, d);
     CHECK(t.has_value());
     CHECK_EQ(t->col, 0);
-    auto t1 = screenToCursor(1, 5, lo, vp, d);
+    auto t1 = screenToCursor(CellPos{4, 0}, lo, vp, d);
     CHECK(t1.has_value());
     CHECK_EQ(t1->col, 1);
 }
@@ -187,7 +190,7 @@ TEST(mouse_map_past_eol_clamps) {
     d.restore({"hi"});
     Viewport vp = testViewport();
     Layout lo = testLayout(vp);
-    auto p = screenToCursor(1, 50, lo, vp, d); // muy a la derecha
+    auto p = screenToCursor(CellPos{49, 0}, lo, vp, d); // muy a la derecha
     CHECK(p.has_value());
     CHECK_EQ(p->line, 0);
     CHECK_EQ(p->col, 2);
@@ -199,8 +202,8 @@ TEST(mouse_map_wide_char_both_cells) {
     Viewport vp = testViewport();
     Layout lo = testLayout(vp);
     // gutter=3: 'a'=relCol3, 'b'=4, 'c'=5, emoji celdas=6,7, 'd'=8
-    auto first = screenToCursor(1, 1 + 6, lo, vp, d);
-    auto second = screenToCursor(1, 1 + 7, lo, vp, d);
+    auto first = screenToCursor(CellPos{6, 0}, lo, vp, d);
+    auto second = screenToCursor(CellPos{7, 0}, lo, vp, d);
     CHECK(first.has_value());
     CHECK(second.has_value());
     CHECK_EQ(first->col, 3); // byte inicio del emoji
@@ -214,11 +217,11 @@ TEST(mouse_map_tab_cells) {
     Layout lo = testLayout(vp);
     // TAB = 4 celdas visuales (relCol 3..6), 'x' en visual 4
     for (int c = 3; c <= 6; ++c) {
-        auto p = screenToCursor(1, 1 + c, lo, vp, d);
+        auto p = screenToCursor(CellPos{c, 0}, lo, vp, d);
         CHECK(p.has_value());
         CHECK_EQ(p->col, 0); // dentro del tab => byte 0
     }
-    auto x = screenToCursor(1, 1 + 7, lo, vp, d);
+    auto x = screenToCursor(CellPos{7, 0}, lo, vp, d);
     CHECK(x.has_value());
     CHECK_EQ(x->col, 1);
 }
@@ -232,7 +235,8 @@ TEST(mouse_map_with_scroll_offsets) {
     vp.left = 2;
     Layout lo = testLayout(vp);
     // fila visible 0 = docLine 10; visual 0 => byte 2 ("c")
-    auto p = screenToCursor(1, 4, lo, vp, d);
+    // mouseRow=1, mouseCol=4 -> CellPos{3, 0}
+    auto p = screenToCursor(CellPos{3, 0}, lo, vp, d);
     CHECK(p.has_value());
     CHECK_EQ(p->line, 10);
     CHECK_EQ(p->col, 2);
@@ -243,10 +247,10 @@ TEST(mouse_map_first_last_visible_row) {
     d.restore({"a", "b", "c", "d", "e"});
     Viewport vp = testViewport(4, 20);
     Layout lo = testLayout(vp);
-    auto first = screenToCursor(1, 4, lo, vp, d);
+    auto first = screenToCursor(CellPos{3, 0}, lo, vp, d);
     CHECK(first.has_value());
     CHECK_EQ(first->line, 0);
-    auto last = screenToCursor(4, 4, lo, vp, d);
+    auto last = screenToCursor(CellPos{3, 3}, lo, vp, d);
     CHECK(last.has_value());
     CHECK_EQ(last->line, 3);
 }
@@ -257,10 +261,10 @@ TEST(mouse_map_below_doc_and_statusbar_ignored) {
     Viewport vp = testViewport(10, 20);
     Layout lo = testLayout(vp);
     // fila visible 2 = docLine 2 >= lineCount => nullopt (fila `~`)
-    auto below = screenToCursor(3, 10, lo, vp, d);
+    auto below = screenToCursor(CellPos{9, 2}, lo, vp, d);
     CHECK(!below.has_value());
-    // status bar: primera fila fuera de content (relRow=10 => mouseRow=11)
-    auto bar = screenToCursor(11, 10, lo, vp, d);
+    // status bar: primera fila fuera de content (relRow=10 => celda row=10)
+    auto bar = screenToCursor(CellPos{9, 10}, lo, vp, d);
     CHECK(!bar.has_value());
 }
 
@@ -323,8 +327,8 @@ TEST(mouse_editor_modal_ignored) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    Event prefix;
-    prefix.type = EventType::Prefix;
+    InputEvent prefix;
+    prefix.type = InputEventType::Prefix;
     ed.processEventForTesting(prefix);
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Prefix));
@@ -659,7 +663,7 @@ TEST(mouse_drag_multiple_anchor_fixed_position_follows) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    // gutter=3: mouseCol = 1 + 3 + visual.
+    // gutter=3: celda col = 3 + visual (0-based).
     ed.processEventForTesting(mousePress(4, 1)); // anchor (0,0)
     ed.processEventForTesting(mouseDrag(6, 2));  // (1,2)
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),

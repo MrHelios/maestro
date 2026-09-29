@@ -127,7 +127,8 @@ void TtyEncoder::appendFrame(std::string& out, const Frame& f) const {
     // Cubre Busqueda y cursor fuera del viewport (rueda con
     // suppressScrollToCursor_): se deja oculto (beginFrame hizo hide).
     if (!f.cursor.visible) return;
-    moveCursorTo(out, f.cursor.pos.row, f.cursor.pos.col);
+    // FrameCursor.pos es 0-based; CUP es 1-based ANSI: único +1 de salida.
+    moveCursorTo(out, f.cursor.pos.row + 1, f.cursor.pos.col + 1);
     setCursorStyle(out, f.cursor.shape);
     endFrame(out);
 }

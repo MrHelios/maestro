@@ -156,8 +156,8 @@ TEST(bench_perf_ciclo_tecla_mas_frame_checked) {
     RenderFixture fx(300);
     fx.ed.state_ = State::Interaccion;
 
-    Event e;
-    e.type = EventType::InsertChar;
+    InputEvent e;
+    e.type = InputEventType::InsertChar;
     e.text = "a";
     int keys = 0;
     const double us = [&] {
@@ -194,8 +194,8 @@ TEST(bench_perf_bytes_por_evento_hacia_terminal_checked) {
     // Nota: buildDiffFrame se mide aqui pero el ciclo real (perf_ciclo_tecla)
     // aun usa buildScreen; el diff es feature medida pero no integrada.
 
-    Event e;
-    e.type = EventType::InsertChar;
+    InputEvent e;
+    e.type = InputEventType::InsertChar;
     e.text = "a";
 
     // Caso A: una tecla que solo cambia UNA fila.
@@ -253,13 +253,13 @@ TEST(bench_perf_ciclo_diff_integrado_checked) {
     // primar cache con un frame completo
     std::string base = fx.frame();
     (void)base;
-    Event e; e.type = EventType::InsertChar; e.text = "a";
+    InputEvent e; e.type = InputEventType::InsertChar; e.text = "a";
     perf_time::bench_ns("handleEvent+buildDiffFrame", 2000, [&]{
         fx.ed.handleEvent(e);
         auto out = fx.ed.renderer_.buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor, fx.ed.active().viewport, "perf.txt", false, fx.msg, fx.ed.state_, std::nullopt);
         perf_time::g_sink += out.size();
         // volver atras para no crecer indefinidamente
-        Event back; back.type = EventType::Backspace;
+        InputEvent back; back.type = InputEventType::Backspace;
         fx.ed.handleEvent(back);
         auto out2 = fx.ed.renderer_.buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor, fx.ed.active().viewport, "perf.txt", false, fx.msg, fx.ed.state_, std::nullopt);
         perf_time::g_sink += out2.size();
@@ -278,18 +278,18 @@ TEST(bench_perf_movimiento_horizontal_y_saltos_checked) {
     fx.ed.active().cursor.line = 5; fx.ed.active().cursor.col = 2000;
     fx.ed.active().viewport.width = 80; fx.ed.active().viewport.height = 10;
     perf_time::bench_ns("MoveLeft/Right x1000", 1000, [&]{
-        for(int i=0;i<500;++i){ fx.ed.handleEvent(moveEvent(EventType::MoveLeft)); fx.ed.handleEvent(moveEvent(EventType::MoveRight)); }
+        for(int i=0;i<500;++i){ fx.ed.handleEvent(moveEvent(InputEventType::MoveLeft)); fx.ed.handleEvent(moveEvent(InputEventType::MoveRight)); }
         perf_time::g_sink += fx.ed.active().cursor.col;
     });
     RenderFixture fx2(3000);
     fx2.ed.state_ = State::Navegacion;
     fx2.ed.active().viewport.height = 24;
     perf_time::bench_ns("PageUp/PageDown x200", 200, [&]{
-        for(int i=0;i<100;++i){ fx2.ed.handleEvent(moveEvent(EventType::PageUp)); fx2.ed.handleEvent(moveEvent(EventType::PageDown)); }
+        for(int i=0;i<100;++i){ fx2.ed.handleEvent(moveEvent(InputEventType::PageUp)); fx2.ed.handleEvent(moveEvent(InputEventType::PageDown)); }
         perf_time::g_sink += fx2.ed.active().cursor.line;
     });
     perf_time::bench_ns("Home/End x200", 200, [&]{
-        for(int i=0;i<100;++i){ fx2.ed.handleEvent(moveEvent(EventType::MoveHome)); fx2.ed.handleEvent(moveEvent(EventType::MoveEnd)); }
+        for(int i=0;i<100;++i){ fx2.ed.handleEvent(moveEvent(InputEventType::MoveHome)); fx2.ed.handleEvent(moveEvent(InputEventType::MoveEnd)); }
         perf_time::g_sink += fx2.ed.active().cursor.col;
     });
     CHECK(perf_time::g_sink > 0);
@@ -308,11 +308,11 @@ TEST(bench_perf_paste_multibyte_y_carga_checked) {
     {
         RenderFixture fx2(300);
         fx2.ed.state_ = State::Interaccion;
-        Event e_accent; e_accent.type = EventType::InsertChar; e_accent.text = "\xC3\xA9";
+        InputEvent e_accent; e_accent.type = InputEventType::InsertChar; e_accent.text = "\xC3\xA9";
         perf_time::bench_ns("Insert multibyte \xC3\xA9 x10", 100, [&]{
             for(int i=0;i<10;++i) fx2.ed.handleEvent(e_accent);
             perf_time::g_sink += fx2.ed.active().document.lineLength(10);
-            for(int i=0;i<10;++i) fx2.ed.handleEvent(moveEvent(EventType::Backspace));
+            for(int i=0;i<10;++i) fx2.ed.handleEvent(moveEvent(InputEventType::Backspace));
         });
     }
     {

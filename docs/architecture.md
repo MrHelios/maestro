@@ -46,18 +46,14 @@ representación semántica de `InputEvent`. `InputEvent` no debe exponer
 formatos de transporte propios de TTY, GUI, SGR, keycodes, etc.
 
 - `InputEvent` = "el usuario hizo click en esta celda" (común).
-- `mouseCol/mouseRow` 1-based según SGR, keycodes crudos, bytes de control,
-  contenidos de secuencias ESC, `pollfd`/`fd()` = transporte del backend
-  (TTY). Nunca suben al vocabulario común.
+- Bytes de control, contenidos de secuencias ESC, keycodes crudos,
+  `pollfd`/`fd()` = transporte del backend (TTY). Nunca suben al
+  vocabulario común. Las coordenadas viajan como `CellPos` 0-based: en
+  entrada el decoder TTY convierte SGR 1-based restando 1 (único lugar
+  que conoce el offset en entrada); en salida `FrameBuilder` resta 1 al
+  producir `CellPos` y `TtyEncoder` suma 1 al emitir CUP 1-based ANSI.
 
 ### Deuda conocida (no bloquea; parche futuro)
-
-`InputEvent.mouseCol/mouseRow` (`int`, documentados como "1-based de
-terminal", es decir formato SGR) todavía exponen transporte TTY. La
-representación neutral ya existe y es `CellPos`
-(`cellPos()`/`setCellPos()`): los backends deben traducir su formato físico
-a ella. En un parche futuro `CellPos` debe quedar como única
-representación de celda y los `int` SGR deben eliminarse de `InputEvent`.
 
 POSIX transport leak — tolerated during migration: `FileWatcher::fd()`
 (`int`, `-1` si no hay nada que sondear) expone transporte POSIX en la

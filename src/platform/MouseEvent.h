@@ -5,9 +5,10 @@
 
 // A — Frontier (2): MouseEvent / InputEvent.
 //
-// Tipos comunes del borde de entrada, ANTES de la traducción a
-// InputEvent semántico. El decoder TTY produce estos; Keymap
-// los convierte a InputEventType. No mezclan Clipboard/Watcher/TTY:
+// Tipos comunes del borde de entrada. El decoder TTY produce
+// InputEvent + CellPos directo (ver platform/tty/TtyMouse.h); este header
+// conserva el tipo clasico MouseEvent y las fabricas MouseEvent ->
+// InputEvent. No mezclan Clipboard/Watcher/TTY:
 // son datos puros, sin fd ni terminal.
 
 // Botón físico (lo que SGR distingue).
@@ -23,30 +24,29 @@ struct MouseEvent {
 };
 
 // Fábricas InputEvent <- tipos comunes (azúcar, sin lógica TTY).
-// Punto único de conversión CellPos -> InputEvent (hoy identidad 1-based vía
-// setCellPos; al migrar a 0-based se ajusta acá, no en cada caller).
+// Punto único de construcción con CellPos 0-based: el decoder ya
+// convirtió SGR; los callers trabajan siempre en dominio destino.
 inline InputEvent makeMousePressEvent(CellPos p) {
     InputEvent e;
     e.type = InputEventType::MousePress;
-    e.setCellPos(p);
+    e.cell = p;
     return e;
 }
 
 inline InputEvent makeMouseDragEvent(CellPos p) {
     InputEvent e;
     e.type = InputEventType::MouseDrag;
-    e.setCellPos(p);
+    e.cell = p;
     return e;
 }
 
 inline InputEvent makeMouseReleaseEvent(CellPos p) {
     InputEvent e;
     e.type = InputEventType::MouseRelease;
-    e.setCellPos(p);
+    e.cell = p;
     return e;
 }
 
-// Nota: el nombre canónico es el vocabulario semántico de
-// platform/InputEvent.h (`Event` en platform/Event.h es solo un alias
-// legacy para tests). Este header solo conserva MouseEvent y las
-// fábricas MouseEvent -> InputEvent.
+// Nota: este header solo conserva MouseEvent y las fábricas
+// MouseEvent -> InputEvent (vocabulario semántico de
+// platform/InputEvent.h).

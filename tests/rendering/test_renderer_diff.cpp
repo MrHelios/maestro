@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "test_framework.h"
-#include "platform/Event.h"  // shim legacy: este test usa Event/EventType
+#include "platform/InputEvent.h"  // shim legacy: este test usa InputEvent/InputEventType
 
 #define private public
 #include "app/Editor.h"
@@ -165,15 +165,15 @@ void checkDiffMatchesFull(TinyTerm& viaDiff, TinyTerm& viaFull,
     }
 }
 
-Event key(char c) {
-    Event e;
-    e.type = EventType::InsertChar;
+InputEvent key(char c) {
+    InputEvent e;
+    e.type = InputEventType::InsertChar;
     e.text = std::string(1, c);
     return e;
 }
 
-Event move(EventType t) {
-    Event e;
+InputEvent move(InputEventType t) {
+    InputEvent e;
     e.type = t;
     return e;
 }
@@ -226,17 +226,17 @@ TEST(render_diff_pantalla_identica_al_frame_completo) {
         syncBoth([&] { for (int i = 0; i < 20; ++i) h.ed.handleEvent(key('a')); });
     }
 
-    syncBoth([&] { h.ed.handleEvent(move(EventType::Backspace)); });
-    syncBoth([&] { h.ed.handleEvent(move(EventType::InsertNewline)); });
+    syncBoth([&] { h.ed.handleEvent(move(InputEventType::Backspace)); });
+    syncBoth([&] { h.ed.handleEvent(move(InputEventType::InsertNewline)); });
     syncBoth([&] {
-        for (int i = 0; i < 40; ++i) h.ed.handleEvent(move(EventType::MoveDown));
+        for (int i = 0; i < 40; ++i) h.ed.handleEvent(move(InputEventType::MoveDown));
     });
     syncBoth([&] {
-        for (int i = 0; i < 60; ++i) h.ed.handleEvent(move(EventType::MoveUp));
+        for (int i = 0; i < 60; ++i) h.ed.handleEvent(move(InputEventType::MoveUp));
     });
 
-    syncBoth([&] { h.ed.handleEvent(move(EventType::Undo)); });
-    syncBoth([&] { h.ed.handleEvent(move(EventType::Redo)); });
+    syncBoth([&] { h.ed.handleEvent(move(InputEventType::Undo)); });
+    syncBoth([&] { h.ed.handleEvent(move(InputEventType::Redo)); });
 }
 
 TEST(render_diff_tecla_emite_menos_que_frame_completo) {
@@ -313,7 +313,7 @@ TEST(render_diff_linea_se_encoge_no_deja_basura) {
     std::string full = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, Message(""), State::Navegacion, b.selection);
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, allow1);
 
-    for (int i = 0; i < 10; ++i) h.ed.handleEvent(move(EventType::Backspace));
+    for (int i = 0; i < 10; ++i) h.ed.handleEvent(move(InputEventType::Backspace));
     b.viewport.scrollToCursor(b.cursor);
 
     delta = h.getDiffOutput();
@@ -352,7 +352,7 @@ TEST(render_diff_scroll_realista_reescribe_filas_sin_borrado_total) {
 
     h.getDiffOutput();
 
-    for (int i = 0; i < 30; ++i) h.ed.handleEvent(move(EventType::MoveDown));
+    for (int i = 0; i < 30; ++i) h.ed.handleEvent(move(InputEventType::MoveDown));
     b.viewport.scrollToCursor(b.cursor);
 
     const std::string delta = h.getDiffOutput();

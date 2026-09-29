@@ -7,7 +7,8 @@
 
 // Frontier (11): decoder SGR → tipos comunes.
 //
-// Traduce "[<Cb;Cx;CyM/m" (sin ESC inicial) a InputEvent + CellPos.
+// Traduce "[<Cb;Cx;CyM/m" (sin ESC inicial, 1-based SGR) a InputEvent +
+// CellPos 0-based (resta 1: único lugar que conoce el offset SGR).
 // Es la única función que entiende Cb: 64/65 rueda, 0 press, 32 drag,
 // 3+m release. Terminal::parseMouseSgr delega acá para no duplicar.
 inline bool decodeMouseSgr(std::string_view seq, InputEvent& e, CellPos& pos) {
@@ -32,13 +33,13 @@ inline bool decodeMouseSgr(std::string_view seq, InputEvent& e, CellPos& pos) {
         return true;
     }
 
-    pos = CellPos{cx, cy};
+    pos = CellPos{cx - 1, cy - 1};
     const int code = cb & ~0x1C; // preserva Shift/Alt/Ctrl en el match
 
     if (finalCh == 'm') {
         if (code == 3) {
             e.type = InputEventType::MouseRelease;
-            e.setCellPos(pos);
+            e.cell = pos;
             return true;
         }
         e.type = InputEventType::None;
@@ -48,12 +49,12 @@ inline bool decodeMouseSgr(std::string_view seq, InputEvent& e, CellPos& pos) {
     if (code == 65) { e.type = InputEventType::ScrollDown; return true; }
     if (code == 0) {
         e.type = InputEventType::MousePress;
-        e.setCellPos(pos);
+        e.cell = pos;
         return true;
     }
     if (code == 32) {
         e.type = InputEventType::MouseDrag;
-        e.setCellPos(pos);
+        e.cell = pos;
         return true;
     }
     e.type = InputEventType::None;

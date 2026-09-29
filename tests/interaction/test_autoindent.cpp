@@ -13,7 +13,7 @@ TEST(autoindent_enter_conserva_tabulacion) {
     ed.active().cursor.col = ed.active().document.lineLength(0);
     enterInteraccion(ed);
 
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
 
     // La línea nueva debe heredar los 4 espacios y el cursor queda después.
     CHECK_EQ(ed.active().document.lineCount(), 3);
@@ -29,7 +29,7 @@ TEST(autoindent_backspace_borra_tabulacion) {
     ed.active().cursor.col = 4;  // justo después de la tabulación
     enterInteraccion(ed);
 
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
 
     // Un solo Backspace debe borrar el nivel completo de tabulación.
     CHECK_EQ(ed.active().document.lineAt(0), "codigo");
@@ -46,7 +46,7 @@ TEST(autoindent_enter_sin_indent_no_copia) {
     ed.active().cursor.col = ed.active().document.lineLength(0);
     enterInteraccion(ed);
 
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
 
     CHECK_EQ(ed.active().document.lineCount(), 2);
     CHECK_EQ(ed.active().document.lineAt(0), "codigo");
@@ -64,7 +64,7 @@ TEST(autoindent_enter_conserva_tab_real) {
     ed.active().cursor.col = ed.active().document.lineLength(0);
     enterInteraccion(ed);
 
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
 
     CHECK_EQ(ed.active().document.lineCount(), 2);
     CHECK_EQ(ed.active().document.lineAt(1), "\t");
@@ -81,7 +81,7 @@ TEST(autoindent_enter_linea_solo_blancos_conserva_indent) {
     ed.active().cursor.col = 4;
     enterInteraccion(ed);
 
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
 
     CHECK_EQ(ed.active().document.lineCount(), 2);
     CHECK_EQ(ed.active().document.lineAt(0), "    ");
@@ -101,7 +101,7 @@ TEST(autoindent_backspace_borra_indent_parcial) {
     ed.active().cursor.col = 2;  // justo después del indent parcial
     enterInteraccion(ed);
 
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
 
     CHECK_EQ(ed.active().document.lineAt(0), "codigo");
     CHECK_EQ(ed.active().cursor.line, 0);
@@ -118,9 +118,9 @@ TEST(autoindent_enter_undo_restores_original) {
     ed.active().cursor.col = 10;  // fin de "    codigo"
     enterInteraccion(ed);
 
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.active().document.lineCount(), 2);
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
 
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "    codigo");
@@ -135,9 +135,9 @@ TEST(autoindent_enter_undo_redo_roundtrip) {
     ed.active().cursor.col = 10;
     enterInteraccion(ed);
 
-    press(ed, EventType::InsertNewline);
-    press(ed, EventType::Undo);
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::InsertNewline);
+    press(ed, InputEventType::Undo);
+    press(ed, InputEventType::Redo);
 
     CHECK_EQ(ed.active().document.lineCount(), 2);
     CHECK_EQ(ed.active().document.lineAt(0), "    codigo");
@@ -154,17 +154,17 @@ TEST(autoindent_enter_mid_code_undo_redo) {
     ed.active().cursor.col = 6;  // "    fo|o"
     enterInteraccion(ed);
 
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.active().document.lineAt(0), "    fo");
     CHECK_EQ(ed.active().document.lineAt(1), "    o");
     CHECK_EQ(ed.active().cursor.col, 4);
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "    foo");
     CHECK_EQ(ed.active().cursor.col, 6);
 
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "    fo");
     CHECK_EQ(ed.active().document.lineAt(1), "    o");
     CHECK_EQ(ed.active().cursor.col, 4);
@@ -179,19 +179,19 @@ TEST(autoindent_enter_inside_indent_undo_redo) {
     ed.active().cursor.col = 2;
     enterInteraccion(ed);
 
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.active().document.lineAt(0), "  ");
     CHECK_EQ(ed.active().document.lineAt(1), "    codigo");
     CHECK_EQ(ed.active().cursor.line, 1);
     CHECK_EQ(ed.active().cursor.col, 4);
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "    codigo");
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 2);
 
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineCount(), 2);
     CHECK_EQ(ed.active().document.lineAt(0), "  ");
     CHECK_EQ(ed.active().document.lineAt(1), "    codigo");
@@ -206,9 +206,9 @@ TEST(autoindent_backspace_undo_restores) {
     ed.active().cursor.col = 4;
     enterInteraccion(ed);
 
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineAt(0), "codigo");
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
 
     CHECK_EQ(ed.active().document.lineAt(0), "    codigo");
     CHECK_EQ(ed.active().cursor.line, 0);
@@ -222,9 +222,9 @@ TEST(autoindent_backspace_undo_redo) {
     ed.active().cursor.col = 4;
     enterInteraccion(ed);
 
-    press(ed, EventType::Backspace);
-    press(ed, EventType::Undo);
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Backspace);
+    press(ed, InputEventType::Undo);
+    press(ed, InputEventType::Redo);
 
     CHECK_EQ(ed.active().document.lineAt(0), "codigo");
     CHECK_EQ(ed.active().cursor.line, 0);

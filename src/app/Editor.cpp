@@ -1126,7 +1126,7 @@ void Editor::handleMousePress(const InputEvent& event) {
     // es altura de CONTENIDO, computeLayout espera filas totales.
     const Layout layout =
         computeLayout(b.viewport.height + kStatusBarRows, b.viewport.width);
-    auto pos = screenToCursor(event.mouseRow, event.mouseCol, layout,
+    auto pos = screenToCursor(event.cell, layout,
                               b.viewport, b.document);
     if (!pos.has_value()) {
         if (state_ == State::Seleccion) {
@@ -1162,8 +1162,7 @@ void Editor::handleMousePress(const InputEvent& event) {
     mouseAutoscrollDirection_ = MouseAutoscrollDirection::None;
 }
 
-std::optional<Position> Editor::resolveMouseDragPosition(int mouseRow,
-                                                         int mouseCol) {
+std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
     Buffer& b = active();
     const Layout layout =
         computeLayout(b.viewport.height + kStatusBarRows, b.viewport.width);
@@ -1173,8 +1172,8 @@ std::optional<Position> Editor::resolveMouseDragPosition(int mouseRow,
     const int count = b.document.lineCount();
     if (count <= 0) return std::nullopt;
 
-    const int relRow = mouseRow - 1 - layout.content.row;
-    const int relCol = mouseCol - 1 - layout.content.col;
+    const int relRow = cell.row - layout.content.row;
+    const int relCol = cell.col - layout.content.col;
     const int gutterW = gutterWidth(count, totalW);
     const int textW = totalW - gutterW;
     const int maxTop = (count - h) > 0 ? (count - h) : 0;
@@ -1185,7 +1184,7 @@ std::optional<Position> Editor::resolveMouseDragPosition(int mouseRow,
     // "estrictamente fuera":
     // - relRow == 0 ES contenido (primera fila visible), no fuera. Pero el
     //   fuera real hacia arriba (relRow < 0) no existe: la terminal reporta
-    //   filas 1-based y el contenido arranca en la fila 1, asi que jamas
+    //   filas 0-based y el contenido arranca en la fila 0, asi que jamas
     //   llega relRow < 0. DECISION: tratar la primera fila como intencion
     //   de scroll-up, como sustituto del fuera inalcanzable. Consecuencia
     //   conocida y aceptada: un drag que termina justo en la primera fila
@@ -1206,8 +1205,7 @@ std::optional<Position> Editor::resolveMouseDragPosition(int mouseRow,
         if (want != MouseAutoscrollDirection::None) {
             if (mouseAutoscrollDirection_ == MouseAutoscrollDirection::None)
                 mouseAutoscrollLastStep_ = std::chrono::steady_clock::now();
-            mouseAutoscrollRow_ = mouseRow;
-            mouseAutoscrollCol_ = mouseCol;
+            mouseAutoscrollCell_ = cell;
         }
         mouseAutoscrollDirection_ = want;
     }
@@ -1277,7 +1275,7 @@ std::optional<Position> Editor::resolveMouseDragPosition(int mouseRow,
         // Sin scroll: mapeo normal (puede ser nullopt en statusbar, que
         // aqui ya se trato como borde inferior si habia scroll posible;
         // si no habia scroll posible se ignora el evento).
-        return screenToCursor(mouseRow, mouseCol, layout, b.viewport,
+        return screenToCursor(cell, layout, b.viewport,
                               b.document);
     }
 
@@ -1347,8 +1345,7 @@ bool Editor::tickMouseAutoscroll(
     // Un paso: re-ejecuta el ultimo drag fuera (resolve scrollea como
     // maximo 1 linea, o sostiene el borde si ya esta en el limite). Sin
     // deuda acumulada: lastStep = ahora, no += intervalo.
-    auto pos = resolveMouseDragPosition(mouseAutoscrollRow_,
-                                        mouseAutoscrollCol_);
+    auto pos = resolveMouseDragPosition(mouseAutoscrollCell_);
     mouseAutoscrollLastStep_ = now;
     if (!pos.has_value()) return false;
     applyMouseDragPosition(*pos);
@@ -1362,7 +1359,7 @@ void Editor::handleMouseDrag(const InputEvent& event) {
     }
     if (!mouseGestureActive_) return;
     if (!dragAnchor_.has_value()) return;
-    auto pos = resolveMouseDragPosition(event.mouseRow, event.mouseCol);
+    auto pos = resolveMouseDragPosition(event.cell);
     if (!pos.has_value()) return;
     applyMouseDragPosition(*pos);
 }

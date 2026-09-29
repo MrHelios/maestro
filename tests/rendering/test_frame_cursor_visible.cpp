@@ -46,7 +46,7 @@ TEST(frame_cursor_visible_inside_viewport) {
                            std::nullopt);
     CHECK(f.cursor.visible);
     CHECK(f.cursor.pos.valid());
-    CHECK_EQ(f.cursor.pos.row, 25 - 20 + 1);
+    CHECK_EQ(f.cursor.pos.row, 25 - 20); // 0-based
     CHECK(f.cursor.shape == FrameCursorShape::Block);
 }
 

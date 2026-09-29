@@ -1,8 +1,8 @@
-#include "platform/Event.h"
+#include "platform/InputEvent.h"
 #include "test_framework.h"
 
 TEST(event_default_state) {
-    Event e;
-    CHECK(e.type == EventType::None);
+    InputEvent e;
+    CHECK(e.type == InputEventType::None);
     CHECK(e.text.empty());
 }

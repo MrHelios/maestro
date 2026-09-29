@@ -1,36 +1,36 @@
 #include "test_framework.h"
-#include "platform/Event.h"  // shim legacy: este test usa Event/EventType
+#include "platform/InputEvent.h"  // shim legacy: este test usa InputEvent/InputEventType
 #include "helpers/test_render_utils.h"
 #include <algorithm>
 #define private public
 #include "app/Editor.h"
 #undef private
 
-static Event insert(char c){ Event e; e.type=EventType::InsertChar; e.text=std::string(1,c); return e;}
-static void press(Editor& ed, EventType t){ Event e; e.type=t; ed.handleEvent(e);}
-static void pressEvent(Editor& ed, const Event& ev){ ed.handleEvent(ev);}
+static InputEvent insert(char c){ InputEvent e; e.type=InputEventType::InsertChar; e.text=std::string(1,c); return e;}
+static void press(Editor& ed, InputEventType t){ InputEvent e; e.type=t; ed.handleEvent(e);}
+static void pressEvent(Editor& ed, const InputEvent& ev){ ed.handleEvent(ev);}
 static void type(Editor& ed, const std::string& s){
     if(s.empty()) return;
     if(ed.state_!=State::Interaccion){
-        if(ed.state_==State::Seleccion){ Event esc; esc.type=EventType::Escape; ed.handleEvent(esc); }
+        if(ed.state_==State::Seleccion){ InputEvent esc; esc.type=InputEventType::Escape; ed.handleEvent(esc); }
         ed.handleEvent(insert('i'));
     }
     for(char c: s) ed.handleEvent(insert(c));
 }
-static void newBuffer(Editor& ed){ press(ed, EventType::Prefix); pressEvent(ed, insert('n')); }
-static void previousBuffer(Editor& ed){ press(ed, EventType::Prefix); pressEvent(ed, insert('b')); }
+static void newBuffer(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('n')); }
+static void previousBuffer(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('b')); }
 
 TEST(ctrl_k_b_renders_new_buffer_immediately){
     Editor ed;
     ed.active().viewport.height=5;
     ed.active().viewport.width=30;
     type(ed, "AAA_CONTENT");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     ed.active().viewport.height=5;
     ed.active().viewport.width=30;
     type(ed, "BBB_CONTENT");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
 
     Renderer& r = ed.renderer_;
     Buffer& curBBB = ed.active();
@@ -56,12 +56,12 @@ TEST(ctrl_k_b_diff_equals_full_after_switch){
     ed.active().viewport.height=5;
     ed.active().viewport.width=30;
     type(ed, "HELLO");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     ed.active().viewport.height=5;
     ed.active().viewport.width=30;
     type(ed, "WORLD");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
 
     Renderer& r = ed.renderer_;
     r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
@@ -86,12 +86,12 @@ TEST(ctrl_k_b_toggle_twice_renders_correctly){
     ed.active().viewport.height=5;
     ed.active().viewport.width=30;
     type(ed, "AAA_TOGGLE");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     ed.active().viewport.height=5;
     ed.active().viewport.width=30;
     type(ed, "BBB_TOGGLE");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
 
     Renderer& r = ed.renderer_;
     r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
@@ -115,7 +115,7 @@ TEST(ctrl_k_b_no_previous_buffer_no_crash){
     ed.active().viewport.height=5;
     ed.active().viewport.width=30;
     type(ed, "ONLY_ONE");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     Renderer& r = ed.renderer_;
     std::string prime = r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
     (void)prime;

@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "test_framework.h"
-#include "platform/Event.h"  // shim legacy: este test usa Event/EventType
+#include "platform/InputEvent.h"  // shim legacy: este test usa InputEvent/InputEventType
 #include "helpers/perf_arch.h"
 #include "helpers/perf_limits.h"
 #include "helpers/perf_time_utils.h"
@@ -127,16 +127,16 @@ TEST(bench_perf_render_diff_25k_checked) {
         alloc_stats::Scoped s(alloc_stats::kRenderFrame);
         for (int i = 0; i < iters; ++i) {
             // tecla que cambia 1 fila (1 frame por tecla, 2 frames por iter)
-            Event e;
-            e.type = EventType::InsertChar;
+            InputEvent e;
+            e.type = InputEventType::InsertChar;
             e.text = "a";
             ed.handleEvent(e);
             auto out = ed.renderer_.buildDiffFrame(ed.active().document, ed.active().cursor,
                 ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
             perf_time::g_sink += out.size();
             ++frames;
-            Event b;
-            b.type = EventType::Backspace;
+            InputEvent b;
+            b.type = InputEventType::Backspace;
             ed.handleEvent(b);
             auto out2 = ed.renderer_.buildDiffFrame(ed.active().document, ed.active().cursor,
                 ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);

@@ -575,8 +575,8 @@ Frame FrameBuilder::buildFrame(    const Document& doc,
     const bool visible = state != State::Busqueda && inViewport;
     f.cursor.visible = visible;
     if (visible)
-        f.cursor.pos = CellPos(curCol, curRow);
+        f.cursor.pos = CellPos(curCol - 1, curRow - 1); // editorCursorPos es 1-based
     else
-        f.cursor.pos = CellPos(0, 0); // invalida: no usar (ver FrameCursor)
+        f.cursor.pos = CellPos(-1, -1); // invalida: no usar (ver FrameCursor)
     return f;
 }

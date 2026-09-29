@@ -8,7 +8,7 @@
 #include <vector>
 #include <unistd.h>
 #include "test_framework.h"
-#include "platform/Event.h"  // shim legacy: los tests usan Event/EventType
+#include "platform/InputEvent.h"
 #define private public
 #include "app/Editor.h"
 #undef private
@@ -16,10 +16,10 @@
 #include "helpers/test_render_utils.h"
 
 using testfw::TempFile;
-inline Event insert(char c){ Event e; e.type=EventType::InsertChar; e.text=std::string(1,c); return e; }
-inline Event ev(EventType t){ Event e; e.type=t; return e; }
-inline Event escapeEvent(){ Event e; e.type=EventType::Escape; return e; }
-inline Event insertBytes(const std::string& text){ Event e; e.type=EventType::InsertChar; e.text=text; return e; }
+inline InputEvent insert(char c){ InputEvent e; e.type=InputEventType::InsertChar; e.text=std::string(1,c); return e; }
+inline InputEvent ev(InputEventType t){ InputEvent e; e.type=t; return e; }
+inline InputEvent escapeEvent(){ InputEvent e; e.type=InputEventType::Escape; return e; }
+inline InputEvent insertBytes(const std::string& text){ InputEvent e; e.type=InputEventType::InsertChar; e.text=text; return e; }
 // Devuelve la longitud esperada de una secuencia UTF-8 a partir del byte
 // inicial. No valida la secuencia ni rechaza bytes iniciales inválidos (ej. 0xFF→1).
 inline int utf8Len(unsigned char b){
@@ -28,10 +28,10 @@ inline int utf8Len(unsigned char b){
     if((b&0xF8)==0xF0) return 4;
     return 1;
 }
-inline void press(Editor& ed, EventType type){ Event e; e.type=type; ed.handleEvent(e); }
-inline void pressEvent(Editor& ed, const Event& e){ ed.handleEvent(e); }
+inline void press(Editor& ed, InputEventType type){ InputEvent e; e.type=type; ed.handleEvent(e); }
+inline void pressEvent(Editor& ed, const InputEvent& e){ ed.handleEvent(e); }
 // Precondición: estado Navegacion o Interaccion/Seleccion. No maneja modales (Prefix/SaveAs/Busqueda/etc.).
-inline void enterInteraccion(Editor& ed){ if(ed.state_!=State::Interaccion){ if(ed.state_==State::Seleccion){ Event esc; esc.type=EventType::Escape; ed.handleEvent(esc); } ed.handleEvent(insert('i')); } }
+inline void enterInteraccion(Editor& ed){ if(ed.state_!=State::Interaccion){ if(ed.state_==State::Seleccion){ InputEvent esc; esc.type=InputEventType::Escape; ed.handleEvent(esc); } ed.handleEvent(insert('i')); } }
 // Precondición: estado Navegacion o Interaccion. No maneja modales (Prefix/SaveAs/Busqueda/etc.).
 inline void enterSeleccion(Editor& ed){ if(ed.state_!=State::Seleccion){ if(ed.state_==State::Interaccion){ ed.handleEvent(escapeEvent()); } ed.handleEvent(insert('s')); } }
 inline void type(Editor& ed, const std::string& s){
@@ -49,21 +49,21 @@ inline void type(Editor& ed, const std::string& s){
 inline void typeBytes(Editor& ed, const std::string& s){ for(unsigned char c: s) ed.handleEvent(insert(c)); }
 // typePrompt(): alias semántico de typeBytes para prompt modal SaveAs.
 inline void typePrompt(Editor& ed, const std::string& s){ typeBytes(ed, s); }
-inline void clearPrompt(Editor& ed){ while(!ed.saveAsPath_.empty()) press(ed, EventType::Backspace); }
+inline void clearPrompt(Editor& ed){ while(!ed.saveAsPath_.empty()) press(ed, InputEventType::Backspace); }
 // save(): Ctrl+K s (InsertChar 's') → guarda directo si tiene nombre, si no abre SaveAs.
-inline void save(Editor& ed){ press(ed, EventType::Prefix); Event e; e.type=EventType::InsertChar; e.text="s"; ed.handleEvent(e); }
-inline void newBuffer(Editor& ed){ press(ed, EventType::Prefix); pressEvent(ed, insert('n')); }
-inline void openSelector(Editor& ed){ press(ed, EventType::Prefix); pressEvent(ed, insert('t')); }
-inline void closeBuffer(Editor& ed){ press(ed, EventType::Prefix); pressEvent(ed, insert('w')); }
-inline void openFileBrowser(Editor& ed){ press(ed, EventType::Prefix); pressEvent(ed, insert('o')); }
-inline void previousBuffer(Editor& ed){ press(ed, EventType::Prefix); pressEvent(ed, insert('b')); }
-inline void safeQuit(Editor& ed){ press(ed, EventType::Prefix); pressEvent(ed, insert('q')); }
-inline void forcedQuit(Editor& ed){ press(ed, EventType::Prefix); press(ed, EventType::Quit); }
-// openSaveAs(): Ctrl+K Ctrl+S (EventType::Save) → siempre abre prompt SaveAs, incluso con nombre.
-inline void openSaveAs(Editor& ed){ press(ed, EventType::Prefix); press(ed, EventType::Save); }
-inline void prefix(Editor& ed, EventType a, EventType b){ press(ed,a); press(ed,b); }
-inline void selectFirstChars(Editor& ed, int n){ press(ed, EventType::MoveHome); enterSeleccion(ed); for(int i=0;i<n;++i) press(ed, EventType::MoveRight); }
-inline void selectPress(Editor& ed, EventType t){ enterSeleccion(ed); press(ed,t); }
+inline void save(Editor& ed){ press(ed, InputEventType::Prefix); InputEvent e; e.type=InputEventType::InsertChar; e.text="s"; ed.handleEvent(e); }
+inline void newBuffer(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('n')); }
+inline void openSelector(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('t')); }
+inline void closeBuffer(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('w')); }
+inline void openFileBrowser(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('o')); }
+inline void previousBuffer(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('b')); }
+inline void safeQuit(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('q')); }
+inline void forcedQuit(Editor& ed){ press(ed, InputEventType::Prefix); press(ed, InputEventType::Quit); }
+// openSaveAs(): Ctrl+K Ctrl+S (InputEventType::Save) → siempre abre prompt SaveAs, incluso con nombre.
+inline void openSaveAs(Editor& ed){ press(ed, InputEventType::Prefix); press(ed, InputEventType::Save); }
+inline void prefix(Editor& ed, InputEventType a, InputEventType b){ press(ed,a); press(ed,b); }
+inline void selectFirstChars(Editor& ed, int n){ press(ed, InputEventType::MoveHome); enterSeleccion(ed); for(int i=0;i<n;++i) press(ed, InputEventType::MoveRight); }
+inline void selectPress(Editor& ed, InputEventType t){ enterSeleccion(ed); press(ed,t); }
 inline void copySelection(Editor& ed){ ed.handleEvent(insert('c')); }
 inline bool contains(const std::string& hay, const std::string& needle){ return hay.find(needle)!=std::string::npos; }
 inline bool validUtf8(const std::string& s){ return utf8::isValid(s); }
@@ -161,9 +161,9 @@ inline void assertUndoRedoRoundtrip(Editor& ed){
     ed.active().redoStack.clear();
     bool wasModified = ed.active().modified;
     const BufferState finalState=capture(ed.active());
-    size_t undone=0; while(!ed.active().undoStack.empty()){ ed.handleEvent(ev(EventType::Undo)); assertStateConsistent(ed); ++undone; }
-    CHECK(undone>0); assertStateConsistent(ed); ed.handleEvent(ev(EventType::Undo)); assertStateConsistent(ed);
-    size_t redone=0; while(!ed.active().redoStack.empty()){ ed.handleEvent(ev(EventType::Redo)); assertStateConsistent(ed); ++redone; }
+    size_t undone=0; while(!ed.active().undoStack.empty()){ ed.handleEvent(ev(InputEventType::Undo)); assertStateConsistent(ed); ++undone; }
+    CHECK(undone>0); assertStateConsistent(ed); ed.handleEvent(ev(InputEventType::Undo)); assertStateConsistent(ed);
+    size_t redone=0; while(!ed.active().redoStack.empty()){ ed.handleEvent(ev(InputEventType::Redo)); assertStateConsistent(ed); ++redone; }
     CHECK_EQ(redone, undone);
     const BufferState restored=capture(ed.active());
     CHECK(stateEqual(restored, finalState));

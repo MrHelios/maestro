@@ -15,27 +15,26 @@
 namespace {
 const auto kStep = Editor::kMouseAutoscrollInterval;
 
-Event mousePressAt(int col, int row) {
-    Event e;
-    e.type = EventType::MousePress;
-    e.mouseCol = col;
-    e.mouseRow = row;
+// Helpers con firma en dominio SGR 1-based (literales de los tests); la
+// conversión a CellPos 0-based (-1) vive acá, como en el decoder real.
+InputEvent mousePressAt(int col, int row) {
+    InputEvent e;
+    e.type = InputEventType::MousePress;
+    e.cell = CellPos{col - 1, row - 1};
     return e;
 }
 
-Event mouseDragAt(int col, int row) {
-    Event e;
-    e.type = EventType::MouseDrag;
-    e.mouseCol = col;
-    e.mouseRow = row;
+InputEvent mouseDragAt(int col, int row) {
+    InputEvent e;
+    e.type = InputEventType::MouseDrag;
+    e.cell = CellPos{col - 1, row - 1};
     return e;
 }
 
-Event mouseReleaseAt(int col, int row) {
-    Event e;
-    e.type = EventType::MouseRelease;
-    e.mouseCol = col;
-    e.mouseRow = row;
+InputEvent mouseReleaseAt(int col, int row) {
+    InputEvent e;
+    e.type = InputEventType::MouseRelease;
+    e.cell = CellPos{col - 1, row - 1};
     return e;
 }
 

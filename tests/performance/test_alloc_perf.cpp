@@ -32,16 +32,16 @@ namespace {
 
 using perf_helpers::makeLines;
 
-Event charEvent(char c) {
-    Event e;
-    e.type = EventType::InsertChar;
+InputEvent charEvent(char c) {
+    InputEvent e;
+    e.type = InputEventType::InsertChar;
     e.text = std::string(1, c);
     return e;
 }
 
 using perf_helpers::moveEvent;
 
-void press(Editor& ed, EventType type) { ed.handleEvent(moveEvent(type)); }
+void press(Editor& ed, InputEventType type) { ed.handleEvent(moveEvent(type)); }
 
 } // namespace
 
@@ -117,8 +117,8 @@ TEST(bench_alloc_scroll_bordes_viewport_checked) {
     {
         alloc_stats::Scoped scope(alloc_stats::kCursorMove);
         for (int i = 0; i < 1000; ++i) {
-            press(ed, EventType::MoveUp);
-            press(ed, EventType::MoveDown);
+            press(ed, InputEventType::MoveUp);
+            press(ed, InputEventType::MoveDown);
         }
     }
     CHECK_EQ(ed.active().cursor.line, 3);
@@ -130,8 +130,8 @@ TEST(bench_alloc_scroll_bordes_viewport_checked) {
     {
         alloc_stats::Scoped scope(alloc_stats::kCursorMove);
         for (int i = 0; i < 1000; ++i) {
-            press(ed, EventType::MoveDown);
-            press(ed, EventType::MoveUp);
+            press(ed, InputEventType::MoveDown);
+            press(ed, InputEventType::MoveUp);
         }
     }
     CHECK_EQ(ed.active().cursor.line, 298);
@@ -197,8 +197,8 @@ TEST(bench_alloc_delete_backspace_1000_checked) {
     alloc_stats::resetAll();
     {
         alloc_stats::Scoped scope(alloc_stats::kTyping);
-        for (int i = 0; i < 500; ++i) ed.handleEvent(moveEvent(EventType::Backspace));
-        for (int i = 0; i < 500; ++i) ed.handleEvent(moveEvent(EventType::Delete));
+        for (int i = 0; i < 500; ++i) ed.handleEvent(moveEvent(InputEventType::Backspace));
+        for (int i = 0; i < 500; ++i) ed.handleEvent(moveEvent(InputEventType::Delete));
     }
     alloc_stats::report("Delete: 500 Backspace + 500 Delete en linea 4k");
     CHECK_EQ(ed.active().document.lineLength(10), 3000);
@@ -218,8 +218,8 @@ TEST(bench_alloc_undo_redo_500_checked) {
     alloc_stats::resetAll();
     {
         alloc_stats::Scoped scope(alloc_stats::kHistoryCommit);
-        for (int i = 0; i < 500; ++i) ed.handleEvent(moveEvent(EventType::Undo));
-        for (int i = 0; i < 500; ++i) ed.handleEvent(moveEvent(EventType::Redo));
+        for (int i = 0; i < 500; ++i) ed.handleEvent(moveEvent(InputEventType::Undo));
+        for (int i = 0; i < 500; ++i) ed.handleEvent(moveEvent(InputEventType::Redo));
     }
     alloc_stats::report("Undo/Redo: 500 Undo + 500 Redo tras 500 inserts");
     CHECK_EQ(ed.active().cursor.col, 500);
@@ -235,8 +235,8 @@ TEST(bench_alloc_insert_multibyte_1000_checked) {
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().cursor.line = 10;
     ed.state_ = State::Interaccion;
-    Event e_accent; e_accent.type = EventType::InsertChar; e_accent.text = "\xC3\xA9";
-    Event e_emoji; e_emoji.type = EventType::InsertChar; e_emoji.text = "\xF0\x9F\x98\x80";
+    InputEvent e_accent; e_accent.type = InputEventType::InsertChar; e_accent.text = "\xC3\xA9";
+    InputEvent e_emoji; e_emoji.type = InputEventType::InsertChar; e_emoji.text = "\xF0\x9F\x98\x80";
     alloc_stats::resetAll();
     {
         alloc_stats::Scoped scope(alloc_stats::kTyping);
@@ -299,7 +299,7 @@ TEST(bench_alloc_movimiento_horizontal_2000_checked) {
     alloc_stats::resetAll();
     {
         alloc_stats::Scoped scope(alloc_stats::kCursorMove);
-        for (int i = 0; i < 1000; ++i) { press(ed, EventType::MoveLeft); press(ed, EventType::MoveRight); }
+        for (int i = 0; i < 1000; ++i) { press(ed, InputEventType::MoveLeft); press(ed, InputEventType::MoveRight); }
     }
     alloc_stats::report("Mov horizontal: 1000 pares Left/Right en linea 4k");
     CHECK_EQ(ed.active().cursor.col, 2000);
@@ -319,8 +319,8 @@ TEST(bench_alloc_saltos_grandes_checked) {
     alloc_stats::resetAll();
     {
         alloc_stats::Scoped scope(alloc_stats::kCursorMove);
-        for (int i = 0; i < 200; ++i) { press(ed, EventType::PageUp); press(ed, EventType::PageDown); }
-        for (int i = 0; i < 100; ++i) { press(ed, EventType::MoveHome); press(ed, EventType::MoveEnd); }
+        for (int i = 0; i < 200; ++i) { press(ed, InputEventType::PageUp); press(ed, InputEventType::PageDown); }
+        for (int i = 0; i < 100; ++i) { press(ed, InputEventType::MoveHome); press(ed, InputEventType::MoveEnd); }
     }
     alloc_stats::report("Saltos: 200 PageUp/Down + 100 Home/End");
     CHECK_EQ(ed.active().cursor.line, 1500);
@@ -350,7 +350,7 @@ TEST(bench_alloc_handleEvent_moveLeft_1000_checked) {
     alloc_stats::resetAll();
     {
         alloc_stats::Scoped scope(alloc_stats::kCursorMove);
-        for (int i = 0; i < 1000; ++i) press(ed, EventType::MoveLeft);
+        for (int i = 0; i < 1000; ++i) press(ed, InputEventType::MoveLeft);
     }
     alloc_stats::report("handleEvent: 1000 MoveLeft");
     CHECK_EQ(ed.active().cursor.col, 0);
@@ -407,8 +407,8 @@ TEST(bench_alloc_multibuffer_checked) {
     {
         alloc_stats::Scoped scope(alloc_stats::kOther);
         for (int i = 0; i < 20; ++i) {
-            ed.handleEvent(moveEvent(EventType::Prefix));
-            Event ev; ev.type = EventType::InsertChar; ev.text = "n";
+            ed.handleEvent(moveEvent(InputEventType::Prefix));
+            InputEvent ev; ev.type = InputEventType::InsertChar; ev.text = "n";
             ed.handleEvent(ev);
             ed.active().document.restore(makeLines(10, 40));
         }
@@ -417,8 +417,8 @@ TEST(bench_alloc_multibuffer_checked) {
     CHECK_EQ(ed.buffers.count(), 21);
     // switch rapido entre buffers existentes - verificar que alterna
     Buffer* before = &ed.buffers.active();
-    ed.handleEvent(moveEvent(EventType::Prefix));
-    Event evb; evb.type = EventType::InsertChar; evb.text = "b";
+    ed.handleEvent(moveEvent(InputEventType::Prefix));
+    InputEvent evb; evb.type = InputEventType::InsertChar; evb.text = "b";
     ed.handleEvent(evb);
     CHECK(&ed.buffers.active() != before);
     bool switchedEveryTime = true;
@@ -427,8 +427,8 @@ TEST(bench_alloc_multibuffer_checked) {
         alloc_stats::Scoped scope(alloc_stats::kOther);
         for (int i = 0; i < 99; ++i) {
             Buffer* beforeLoop = &ed.buffers.active();
-            ed.handleEvent(moveEvent(EventType::Prefix));
-            Event ev; ev.type = EventType::InsertChar; ev.text = "b";
+            ed.handleEvent(moveEvent(InputEventType::Prefix));
+            InputEvent ev; ev.type = InputEventType::InsertChar; ev.text = "b";
             ed.handleEvent(ev);
             if (&ed.buffers.active() == beforeLoop) switchedEveryTime = false;
         }
@@ -453,15 +453,15 @@ TEST(bench_alloc_sesion_realista_mixta_checked) {
             ed.state_ = State::Interaccion;
             for (int i = 0; i < 10; ++i) ed.handleEvent(charEvent('a'));
             ed.state_ = State::Navegacion;
-            for (int i = 0; i < 5; ++i) press(ed, EventType::MoveLeft);
+            for (int i = 0; i < 5; ++i) press(ed, InputEventType::MoveLeft);
             ed.state_ = State::Interaccion;
-            for (int i = 0; i < 2; ++i) ed.handleEvent(moveEvent(EventType::Backspace));
-            ed.handleEvent(moveEvent(EventType::Undo));
-            ed.handleEvent(moveEvent(EventType::Redo));
+            for (int i = 0; i < 2; ++i) ed.handleEvent(moveEvent(InputEventType::Backspace));
+            ed.handleEvent(moveEvent(InputEventType::Undo));
+            ed.handleEvent(moveEvent(InputEventType::Redo));
             ed.state_ = State::Navegacion;
-            press(ed, EventType::MoveDown);
-            press(ed, EventType::MoveUp);
-            if (cycle % 10 == 0) { press(ed, EventType::PageDown); press(ed, EventType::PageUp); }
+            press(ed, InputEventType::MoveDown);
+            press(ed, InputEventType::MoveUp);
+            if (cycle % 10 == 0) { press(ed, InputEventType::PageDown); press(ed, InputEventType::PageUp); }
         }
     }
     alloc_stats::report("Sesion realista: 100 ciclos mixtos (type/move/del/undo/scroll)");

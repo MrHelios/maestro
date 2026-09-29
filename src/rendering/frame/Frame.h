@@ -69,7 +69,7 @@ inline FrameCursorShape cursorShapeFor(State state) {
 
 // Cursor visual con contrato explícito (comun TTY/GUI):
 //
-//   visible == true  -> `pos` es la posicion visual real (1-based) y el
+//   visible == true  -> `pos` es la posicion visual real (0-based) y el
 //                       backend debe pintar el cursor ahi con `shape`.
 //   visible == false -> el cursor logico esta fuera del viewport (ej. rueda
 //                       con suppressScrollToCursor_) o el modo lo oculta
@@ -79,13 +79,13 @@ inline FrameCursorShape cursorShapeFor(State state) {
 // tampoco clampa: si no es visible deja el cursor oculto (hideCursor sin
 // show posterior). `state` se conserva para el estilo legacy/TTY.
 struct FrameCursor {
-    CellPos pos; // 1-based (col=X, row=Y); valido solo si visible==true
-    // Default seguro: oculto, consistente con pos invalida (0,0).
+    CellPos pos; // 0-based (col=X, row=Y); valido solo si visible==true
+    // Default seguro: oculto, consistente con pos invalida (-1,-1).
     // Todo Frame valido lo rellena FrameBuilder::buildFrame.
     bool visible = false;
     FrameCursorShape shape = FrameCursorShape::Block;
     State state = State::Navegacion;
-    // Compatibilidad con el camino TTY anterior (row/col 1-based).
+    // Accesos en dominio 0-based (igual que pos).
     // Solo validos si visible==true; no usar cuando visible==false.
     int row() const { return pos.row; }
     int col() const { return pos.col; }

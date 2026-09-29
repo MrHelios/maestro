@@ -88,16 +88,16 @@ static void runCase(
         prepareScenario(ed, lines, a, p);
         expectState(ed, lines, p, true, a, p, false); // inicial
 
-        press(ed, EventType::Delete);
+        press(ed, InputEventType::Delete);
         expectState(ed, afterDelete, cursorAfterDelete, false,
                     {0, 0}, {0, 0}, true);             // despues de delete
 
-        press(ed, EventType::Undo);
+        press(ed, InputEventType::Undo);
         // undo restaura seleccion y cursor originales; modified vuelve al
         // guardado (indiferente respecto a savedLines).
         expectState(ed, lines, p, true, a, p, false);  // despues de undo
 
-        press(ed, EventType::Redo);
+        press(ed, InputEventType::Redo);
         expectState(ed, afterDelete, cursorAfterDelete, false,
                     {0, 0}, {0, 0}, true);             // despues de redo
     }
@@ -115,14 +115,14 @@ static void runCaseBackspace(
         prepareScenario(ed, lines, a, p);
         expectState(ed, lines, p, true, a, p, false);
 
-        press(ed, EventType::Backspace);
+        press(ed, InputEventType::Backspace);
         expectState(ed, afterDelete, cursorAfterDelete, false,
                     {0, 0}, {0, 0}, true);
 
-        press(ed, EventType::Undo);
+        press(ed, InputEventType::Undo);
         expectState(ed, lines, p, true, a, p, false);
 
-        press(ed, EventType::Redo);
+        press(ed, InputEventType::Redo);
         expectState(ed, afterDelete, cursorAfterDelete, false,
                     {0, 0}, {0, 0}, true);
     }
@@ -152,13 +152,13 @@ static void runCutCase(
                 {0, 0}, {0, 0}, true);               // despues de cut
     CHECK(ed.getClipboardBlock() == clipboard);
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     // undo restaura documento, cursor y seleccion; modified vuelve al
     // guardado; el clipboard NO se deshace y conserva lo cortado.
     expectState(ed, lines, p, true, a, p, false);    // despues de undo
     CHECK(ed.getClipboardBlock() == clipboard);
 
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     // redo reproduce EXACTAMENTE el estado tras el corte.
     expectState(ed, afterCut, cursorAfterCut, false,
                 {0, 0}, {0, 0}, true);               // despues de redo
@@ -259,11 +259,11 @@ TEST(interaction_delete_and_backspace_produce_same_result) {
         // DELETE
         Editor edDel;
         prepareScenario(edDel, c.lines, c.a, c.p);
-        press(edDel, EventType::Delete);
+        press(edDel, InputEventType::Delete);
         // BACKSPACE
         Editor edBs;
         prepareScenario(edBs, c.lines, c.a, c.p);
-        press(edBs, EventType::Backspace);
+        press(edBs, InputEventType::Backspace);
 
         // Mismo documento y misma posicion de cursor finales.
         CHECK(edDel.active().document.snapshot() == edBs.active().document.snapshot());
@@ -271,8 +271,8 @@ TEST(interaction_delete_and_backspace_produce_same_result) {
         CHECK_EQ(edDel.active().cursor.col, edBs.active().cursor.col);
 
         // undo restaura todo por igual en ambas.
-        press(edDel, EventType::Undo);
-        press(edBs, EventType::Undo);
+        press(edDel, InputEventType::Undo);
+        press(edBs, InputEventType::Undo);
         CHECK(edDel.active().document.snapshot() == c.lines);
         CHECK(edBs.active().document.snapshot() == c.lines);
         CHECK(edDel.active().cursor.line == c.p.line);
@@ -301,7 +301,7 @@ TEST(interaction_delete_without_selection_still_single_char) {
     ed.active().cursor.col = 1;
     ed.state_ = State::Interaccion;
 
-    press(ed, EventType::Delete); // borra 'b' en (0,1)
+    press(ed, InputEventType::Delete); // borra 'b' en (0,1)
 
     CHECK_EQ(ed.active().document.lineAt(0), "ac");
     CHECK_EQ(ed.active().cursor.col, 1);
@@ -315,15 +315,15 @@ TEST(interaction_delete_selection_undo_restores_selection) {
     Editor ed;
     prepareScenario(ed, {"hello world"}, {0, 6}, {0, 11});
 
-    press(ed, EventType::Delete);
+    press(ed, InputEventType::Delete);
     CHECK(!ed.hasSelection());
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(ed.hasSelection());
     CHECK((ed.active().selection->anchor == Position{0, 6}));
     CHECK((ed.active().selection->position == Position{0, 11}));
 
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK(!ed.hasSelection());
 }
 
@@ -339,7 +339,7 @@ TEST(interaction_delete_selection_from_interaccion) {
     ed.active().cursor.col = 11;
     ed.state_ = State::Interaccion;
 
-    press(ed, EventType::Delete);
+    press(ed, InputEventType::Delete);
 
     CHECK_EQ(ed.active().document.lineAt(0), "hello ");
     CHECK_EQ(ed.active().cursor.col, 6);
@@ -347,7 +347,7 @@ TEST(interaction_delete_selection_from_interaccion) {
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "hello world");
     CHECK(ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
@@ -403,7 +403,7 @@ static void runPasteCase(
                 {0, 0}, {0, 0}, true);        // despues de paste
     CHECK(ed.getClipboardBlock() == clipboard);        // clipboard intacto
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     // undo elimina EXACTAMENTE el texto insertado y restaura cursor;
     // modified vuelve al guardado; no habia seleccion que restaurar.
     expectState(ed, lines, cursorPos, false,
@@ -431,7 +431,7 @@ static void runPasteReplaceCase(
                 {0, 0}, {0, 0}, true);        // despues de paste
     CHECK(ed.getClipboardBlock() == clipboard);
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     // restaure documento, cursor y SELECCION; modified vuelve al guardado.
     expectState(ed, lines, p, true, a, p, false);    // despues de undo
     CHECK(ed.getClipboardBlock() == clipboard);
@@ -494,7 +494,7 @@ static void runReplaceTypeCase(const std::vector<std::string>& lines,
     // Toda la escritura fue UNA sola edicion: una unica entrada de undo.
     CHECK_EQ(ed.active().undoStack.size(), undoBefore + 1);
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     // UN solo undo devuelve exactamente texto + cursor + seleccion previos
     // (y modified vuelve al guardado).
     expectState(ed, lines, p, true, a, p, false);  // despues de undo
@@ -547,7 +547,7 @@ TEST(interaction_cut_selection_utf8_undo_redo) {
     CHECK(ed.getClipboardBlock() == (std::vector<std::string>{selText}));
     CHECK(ed.active().document.lineAt(0) == std::string("caf"));
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     // Verificar que los bytes quedaron EXACTAMENTE iguales (no solo el
     // contenido "logico"): misma longitud byte a byte y mismo contenido.
     expectState(ed, {line}, {0, 22}, true, {0, 3}, {0, 22}, false);
@@ -555,7 +555,7 @@ TEST(interaction_cut_selection_utf8_undo_redo) {
     CHECK(ed.active().document.lineAt(0).size() == 22u);   // cuenta de bytes
     CHECK(ed.getClipboardBlock() == (std::vector<std::string>{selText})); // conservado
 
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     expectState(ed, {"caf"}, {0, 3}, false, {0, 0}, {0, 0}, true);
     CHECK(ed.active().document.lineAt(0) == std::string("caf"));
     CHECK(ed.active().document.lineAt(0).size() == 3u);
@@ -612,11 +612,11 @@ static void runCursorUtf8Tour(const std::string& line, int startCol) {
     assertCursorOnCodepointBoundary(ed);
 
     while (ed.active().cursor.col < len) {
-        press(ed, EventType::MoveRight);
+        press(ed, InputEventType::MoveRight);
         assertCursorOnCodepointBoundary(ed);
     }
     while (ed.active().cursor.col > 0) {
-        press(ed, EventType::MoveLeft);
+        press(ed, InputEventType::MoveLeft);
         assertCursorOnCodepointBoundary(ed);
     }
 }
@@ -638,7 +638,7 @@ TEST(interaction_cursor_utf8_ascii_to_utf8) {
     Editor ed;
     ed.active().document.restore({line});
     setCursor(ed, 0, 6);                 // despues de la 'f', antes del 'é'
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
     CHECK_EQ(ed.active().cursor.col, 7); // inicio del 'é'
     assertCursorOnCodepointBoundary(ed);
 }
@@ -650,7 +650,7 @@ TEST(interaction_cursor_utf8_utf8_to_ascii) {
     Editor ed;
     ed.active().document.restore({line});
     setCursor(ed, 0, 7);                 // inicio del 'é'
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
     CHECK_EQ(ed.active().cursor.col, 9); // salto 2 bytes, borde en el espacio
     assertCursorOnCodepointBoundary(ed);
 }
@@ -662,7 +662,7 @@ TEST(interaction_cursor_utf8_utf8_to_utf8) {
     Editor ed;
     ed.active().document.restore({line});
     setCursor(ed, 0, 0);                 // inicio del 'é'
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
     CHECK_EQ(ed.active().cursor.col, 2); // inicio del '😀' (0 + 2 bytes)
     assertCursorOnCodepointBoundary(ed);
 }
@@ -674,7 +674,7 @@ TEST(interaction_cursor_utf8_emoji_to_ascii) {
     Editor ed;
     ed.active().document.restore({line});
     setCursor(ed, 0, 4);                 // inicio del '😀' (despues de "abc ")
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
     CHECK_EQ(ed.active().cursor.col, 8); // tras los 4 bytes del '😀'
     assertCursorOnCodepointBoundary(ed);
 }
@@ -686,7 +686,7 @@ TEST(interaction_cursor_utf8_ascii_to_emoji) {
     Editor ed;
     ed.active().document.restore({line});
     setCursor(ed, 0, 3);                 // el espacio antes del '😀'
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
     CHECK_EQ(ed.active().cursor.col, 4); // inicio del '😀'
     assertCursorOnCodepointBoundary(ed);
 }
@@ -707,7 +707,7 @@ TEST(interaction_selection_utf8_boundaries_never_inside_codepoint) {
     // Hacia la derecha hasta el fin de la linea: ambos extremos del rango
     // (anchor y position) y el cursor deben quedar en borde de codepoint.
     while (ed.active().cursor.col < ed.active().document.lineLength(0)) {
-        press(ed, EventType::MoveRight);
+        press(ed, InputEventType::MoveRight);
         assertCursorOnCodepointBoundary(ed);
         if (ed.active().selection.has_value()) {
             assertPositionOnCodepointBoundary(ed,
@@ -718,7 +718,7 @@ TEST(interaction_selection_utf8_boundaries_never_inside_codepoint) {
     }
     // Hacia la izquierda hasta el inicio.
     while (ed.active().cursor.col > 0) {
-        press(ed, EventType::MoveLeft);
+        press(ed, InputEventType::MoveLeft);
         assertCursorOnCodepointBoundary(ed);
         if (ed.active().selection.has_value())
             assertPositionOnCodepointBoundary(ed, ed.active().selection->position);
@@ -746,7 +746,7 @@ TEST(interaction_save_edit_undo_edit_b_clears_redo) {
     CHECK(ed.active().modified);
     CHECK_EQ(ed.active().document.lineAt(0), "holaA");
 
-    press(ed, EventType::Undo);                  // -> "hola" guardado
+    press(ed, InputEventType::Undo);                  // -> "hola" guardado
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
     CHECK(!ed.active().modified);
     CHECK(ed.active().redoStack.size() > 0);     // la edicion A quedo rehacible
@@ -785,7 +785,7 @@ TEST(interaction_save_edit_save_undo_modified_true) {
     CHECK(!ed.active().modified);
 
     // undo -> vuelve a "A": el estado actual queda ANTERIOR al ultimo save.
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "A");
     CHECK(ed.active().document.snapshot() != ed.active().originalSnapshot_);
     CHECK(ed.active().modified);             // A != ultimo save (B)
@@ -816,10 +816,10 @@ TEST(interaction_save_edit_save_undo_redo_modified_false) {
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
     ed.active().modified = false;
 
-    press(ed, EventType::Undo);              // -> "A" (anterior al save B)
+    press(ed, InputEventType::Undo);              // -> "A" (anterior al save B)
     CHECK_EQ(ed.active().document.lineAt(0), "A");
 
-    press(ed, EventType::Redo);              // -> vuelve a "AB" (el save B)
+    press(ed, InputEventType::Redo);              // -> vuelve a "AB" (el save B)
     CHECK_EQ(ed.active().document.lineAt(0), "AB");
     // El estado final coincide con el ultimo guardado -> NO modificado.
     CHECK(ed.active().document.snapshot() == ed.active().originalSnapshot_);
@@ -871,10 +871,10 @@ TEST(interaction_buffers_do_not_mix_edit_states) {
 
     // El HISTORIAL tambien es independiente: deshacer A (-1 '!') y B (-'?')
     // no se "ven" entre si.
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "hello!");   // A
     ed.activateBuffer(1);
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "world");    // B
     ed.activateBuffer(0);
     CHECK_EQ(ed.active().document.lineAt(0), "hello!");   // A intacto
@@ -1063,13 +1063,13 @@ TEST(interaction_undo_switching_buffers_isolated) {
 
     // volver a A y deshacer: A "ab" -> "a", B "xy" intacto.
     ed.activateBuffer(0);
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "a");     // solo A se deshizo
     CHECK_EQ(ed.buffers.count(), 2);
 
     // pasar a B y deshacer: B "xy" -> "x", A "a" intacto.
     ed.activateBuffer(1);
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "x");     // solo B se deshizo
 
     // cada buffer conserva su propio estado final tras el undo del otro.
@@ -1098,7 +1098,7 @@ TEST(interaction_redo_switching_buffers_isolated) {
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
 
     // undo(A): A "ab" -> "a", dejando redo pendiente en A.
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "a");
     CHECK(!ed.active().redoStack.empty());     // A tiene redo pendiente
 
@@ -1115,7 +1115,7 @@ TEST(interaction_redo_switching_buffers_isolated) {
     CHECK(!ed.active().redoStack.empty());     // redo de A intacto
 
     // redo(A): A vuelve "a" -> "ab"; B "xy" intacto.
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "ab");     // A rehizo
     CHECK(ed.active().redoStack.empty());
 

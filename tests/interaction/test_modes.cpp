@@ -36,7 +36,7 @@ TEST(navigation_s_does_not_modify_document) {
     // 's' solo cambia el modo: no inserta, no borra, no crea undo.
     Editor ed;
     type(ed, "abc");              // doc "abc", con historial
-    press(ed, EventType::Escape); // -> Navegacion
+    press(ed, InputEventType::Escape); // -> Navegacion
     size_t undoBefore = ed.active().undoStack.size();
     CHECK(ed.active().modified);
     ed.handleEvent(insert('s'));
@@ -50,7 +50,7 @@ TEST(navigation_s_anchor_equals_cursor_initial) {
     // Al entrar con 's' (sin mover el cursor), anchor == cursor.
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     ed.handleEvent(insert('s'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     CHECK(ed.active().selection.has_value());
@@ -66,11 +66,11 @@ TEST(navigation_s_then_right_produces_selection) {
     // s -> Right: la seleccion extiende y ya hay texto marcado.
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Escape);
-    press(ed, EventType::MoveLeft); // cursor (0,2), no en el fin de linea
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::MoveLeft); // cursor (0,2), no en el fin de linea
     ed.handleEvent(insert('s'));
     CHECK(!ed.hasSelection());
-    press(ed, EventType::MoveRight); // extiende a (0,3)
+    press(ed, InputEventType::MoveRight); // extiende a (0,3)
     CHECK(ed.hasSelection());        // ya hay rango no vacio
     auto sel = ed.selection();
     CHECK(sel.has_value());
@@ -81,10 +81,10 @@ TEST(navigation_s_then_right_selects_from_anchor) {
     // Con cursor en medio del texto, s -> Right marca exactamente 1 char.
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Escape);
-    press(ed, EventType::MoveLeft);  // cursor (0,2)
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::MoveLeft);  // cursor (0,2)
     ed.handleEvent(insert('s'));     // anchor = (0,2)
-    press(ed, EventType::MoveRight); // position = (0,3)
+    press(ed, InputEventType::MoveRight); // position = (0,3)
     CHECK(ed.hasSelection());
     auto sel = ed.selection();
     CHECK(sel.has_value());
@@ -109,9 +109,9 @@ TEST(navigation_movement_free_no_selection) {
     // Las flechas/Home/End se mueven libremente sin iniciar seleccion.
     Editor ed;
     type(ed, "abc");              // Interaccion
-    press(ed, EventType::MoveHome);
-    press(ed, EventType::MoveRight);
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveHome);
+    press(ed, InputEventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
     CHECK(!ed.hasSelection());
     CHECK_EQ(ed.active().cursor.col, 2);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
@@ -120,15 +120,15 @@ TEST(navigation_movement_free_no_selection) {
 TEST(navigation_escape_noop) {
     // En navegacion el ESC no tiene a donde volver: no-op.
     Editor ed;
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
 TEST(navigation_backspace_delete_enter_noop) {
     Editor ed;
-    press(ed, EventType::Backspace);
-    press(ed, EventType::Delete);
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::Backspace);
+    press(ed, InputEventType::Delete);
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK(!ed.active().modified);
@@ -148,7 +148,7 @@ TEST(interaction_types_every_letter_literal) {
 TEST(interaction_escape_returns_navegacion) {
     Editor ed;
     type(ed, "hola");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
 }
@@ -161,7 +161,7 @@ TEST(interaction_escape_does_not_modify_document) {
     type(ed, "abc");
     CHECK(ed.active().modified);
     size_t before = ed.active().undoStack.size();
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().document.lineAt(0), "abc"); // el doc queda tal cual
     CHECK(ed.active().modified);                     // el estado guardado sigue pendiente
@@ -175,14 +175,14 @@ TEST(interaction_escape_does_not_clear_redo) {
     // antes del ESC para ejercitar el camino Interaccion -> ESC de verdad.
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Undo);   // -> "ab", redo pendiente
+    press(ed, InputEventType::Undo);   // -> "ab", redo pendiente
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
     CHECK(!ed.active().redoStack.empty());
     size_t redoBefore = ed.active().redoStack.size();
     size_t undoBefore = ed.active().undoStack.size();
     ed.handleEvent(insert('i'));  // Interaccion explicito
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().redoStack.size(), redoBefore); // el redo sigue vivo
     CHECK_EQ(ed.active().undoStack.size(), undoBefore); // y nada nuevo en undo
@@ -192,7 +192,7 @@ TEST(interaction_escape_then_char_is_noop) {
     // Tras ESC, un caracter no se escribe: estamos en Navegacion.
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     ed.handleEvent(insert('z'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -202,7 +202,7 @@ TEST(interaction_escape_then_char_is_noop) {
 TEST(interaction_escape_then_i_returns_to_interaccion) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     ed.handleEvent(insert('i'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
@@ -213,7 +213,7 @@ TEST(interaction_cycle_i_type_esc_i_type) {
     // el texto esperado, sin perdidas ni repeticiones.
     Editor ed;
     type(ed, "ho");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     type(ed, "la");
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
@@ -223,9 +223,9 @@ TEST(interaction_cycle_i_type_esc_i_type) {
 TEST(interaction_newline_and_backspace_work) {
     Editor ed;
     type(ed, "ab");
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.active().document.lineCount(), 2);
-    press(ed, EventType::Backspace); // une de nuevo
+    press(ed, InputEventType::Backspace); // une de nuevo
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
 }
@@ -352,10 +352,10 @@ TEST(interaction_p_inserts_literal) {
 TEST(selection_s_enters_and_arrows_extend) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     enterSeleccion(ed);
-    press(ed, EventType::MoveRight); // [a]
-    press(ed, EventType::MoveRight); // [ab]
+    press(ed, InputEventType::MoveRight); // [a]
+    press(ed, InputEventType::MoveRight); // [ab]
     CHECK(ed.hasSelection());
     auto sel = ed.selection();
     CHECK(sel.has_value());
@@ -367,9 +367,9 @@ TEST(selection_s_enters_and_arrows_extend) {
 TEST(selection_c_exits_to_navegacion) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     enterSeleccion(ed);
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
     CHECK(ed.hasSelection());
     ed.handleEvent(insert('c'));
     CHECK(!ed.hasSelection());
@@ -382,9 +382,9 @@ TEST(selection_x_exits_to_navegacion) {
     // La "a" queda cortada: doc "bc", buffer ["a"].
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     enterSeleccion(ed);
-    press(ed, EventType::MoveRight); // [a]
+    press(ed, InputEventType::MoveRight); // [a]
     ed.handleEvent(insert('x'));
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -396,11 +396,11 @@ TEST(selection_x_exits_to_navegacion) {
 TEST(selection_escape_cancels) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     enterSeleccion(ed);
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
     CHECK(ed.hasSelection());
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
@@ -411,9 +411,9 @@ TEST(selection_char_replaces) {
     // grupo de escritura consecutivo) y entra a Interaccion.
     Editor ed;
     type(ed, "hello");
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     enterSeleccion(ed);
-    press(ed, EventType::MoveRight); // [h]
+    press(ed, InputEventType::MoveRight); // [h]
     ed.handleEvent(insert('H'));
     CHECK_EQ(ed.active().document.lineAt(0), "Hello"); // 'h' -> 'H'
     CHECK(!ed.hasSelection());
@@ -426,14 +426,14 @@ TEST(selection_newline_noop_backspace_delete_borran) {
     // seleccionado y vuelven a Navegacion.
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     enterSeleccion(ed);
-    press(ed, EventType::MoveRight); // [a]
-    press(ed, EventType::InsertNewline); // no-op: sigue igual
+    press(ed, InputEventType::MoveRight); // [a]
+    press(ed, InputEventType::InsertNewline); // no-op: sigue igual
     CHECK_EQ(ed.active().document.lineAt(0), "abc");
     CHECK(ed.hasSelection());
 
-    press(ed, EventType::Delete); // borra la seleccion [a]
+    press(ed, InputEventType::Delete); // borra la seleccion [a]
     CHECK_EQ(ed.active().document.lineAt(0), "bc");
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -459,7 +459,7 @@ TEST(prefix_save_returns_to_navegacion) {
     Editor ed;
     ed.loadIntoActiveBuffer(f.path);
     type(ed, "abc");
-    press(ed, EventType::Escape); // -> Navegacion
+    press(ed, InputEventType::Escape); // -> Navegacion
     save(ed);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
@@ -477,7 +477,7 @@ TEST(prefix_save_keeps_interaction_mode) {
 
 TEST(prefix_quit_sets_running_false) {
     Editor ed;
-    prefix(ed, EventType::Prefix, EventType::Quit);
+    prefix(ed, InputEventType::Prefix, InputEventType::Quit);
     CHECK(!ed.running_);
 }
 
@@ -486,9 +486,9 @@ TEST(prefix_other_key_cancels_and_discards) {
     // sin mover el cursor (el evento de la flecha no se propaga).
     Editor ed;
     type(ed, "abc");              // Interaccion, cursor (0,3)
-    press(ed, EventType::Escape); // -> Navegacion
-    press(ed, EventType::Prefix);
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::Escape); // -> Navegacion
+    press(ed, InputEventType::Prefix);
+    press(ed, InputEventType::MoveRight);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().cursor.col, 3);
     CHECK(ed.hasSelection() == false);
@@ -500,8 +500,8 @@ TEST(prefix_cancel_from_interaction_returns_interaction) {
     // vuelve a Interaccion.
     Editor ed;
     type(ed, "abc");              // Interaccion
-    press(ed, EventType::Prefix);
-    press(ed, EventType::MoveRight); // cancela (no guarda/sale)
+    press(ed, InputEventType::Prefix);
+    press(ed, InputEventType::MoveRight); // cancela (no guarda/sale)
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
     CHECK_EQ(ed.active().cursor.col, 3);      // la flecha NO se propago
 }
@@ -511,11 +511,11 @@ TEST(prefix_cancel_keeps_selection) {
     // pero la seleccion (si habia) NO se toca.
     Editor ed;
     type(ed, "hello");
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     enterSeleccion(ed);
-    press(ed, EventType::MoveRight); // [h]
+    press(ed, InputEventType::MoveRight); // [h]
     CHECK(ed.hasSelection());
-    prefix(ed, EventType::Prefix, EventType::MoveRight);
+    prefix(ed, InputEventType::Prefix, InputEventType::MoveRight);
     CHECK(ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
 }
@@ -527,9 +527,9 @@ TEST(prefix_save_from_selection_keeps_mode) {
     Editor ed;
     ed.loadIntoActiveBuffer(f.path);
     type(ed, "hello");
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     enterSeleccion(ed);
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
     CHECK(ed.hasSelection());
     CHECK(ed.active().modified);
 
@@ -543,7 +543,7 @@ TEST(prefix_save_from_selection_keeps_mode) {
 TEST(prefix_quit_in_selection_quits) {
     Editor ed;
     enterSeleccion(ed);
-    prefix(ed, EventType::Prefix, EventType::Quit);
+    prefix(ed, InputEventType::Prefix, InputEventType::Quit);
     CHECK(!ed.running_);
 }
 
@@ -556,7 +556,7 @@ TEST(undo_after_interaction_returns_navegacion) {
     Editor ed;
     type(ed, "abc");
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
@@ -566,19 +566,19 @@ TEST(undo_redo_work_in_selection_mode) {
     // incluso dentro del modo seleccion.
     Editor ed;
     type(ed, "x");
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "");
     enterSeleccion(ed);           // entramos a seleccion (sin seleccion)
-    press(ed, EventType::Redo);   // el redo se aplica igual
+    press(ed, InputEventType::Redo);   // el redo se aplica igual
     CHECK_EQ(ed.active().document.lineAt(0), "x");
 }
 
 TEST(redo_restores_content_in_navegacion) {
     Editor ed;
     type(ed, "x");
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "");
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "x");
 }
 
@@ -586,13 +586,13 @@ TEST(selection_does_not_clear_redo) {
     // Entrar en seleccion es estado, no edicion: no consume el redo.
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Undo);   // -> "ab", redo pendiente "abc"
+    press(ed, InputEventType::Undo);   // -> "ab", redo pendiente "abc"
     CHECK(!ed.active().redoStack.empty());
-    press(ed, EventType::MoveLeft);
+    press(ed, InputEventType::MoveLeft);
     enterSeleccion(ed);
-    press(ed, EventType::MoveRight); // selecciona "b"
+    press(ed, InputEventType::MoveRight); // selecciona "b"
     CHECK(ed.hasSelection());
-    press(ed, EventType::Redo);   // el redo sigue vivo
+    press(ed, InputEventType::Redo);   // el redo sigue vivo
     CHECK_EQ(ed.active().document.lineAt(0), "abc");
 }
 
@@ -677,7 +677,7 @@ TEST(initial_state_after_save_is_navegacion) {
     Editor ed;
     ed.loadIntoActiveBuffer(f.path);
     type(ed, "hola");                    // Interaccion
-    press(ed, EventType::Escape);        // -> Navegacion
+    press(ed, InputEventType::Escape);        // -> Navegacion
     save(ed); // guarda -> vuelve
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(!ed.active().modified);
@@ -690,7 +690,7 @@ TEST(initial_state_after_quit_ends_running) {
     // Quit (Ctrl+K Ctrl+Q) detiene el bucle: running_ == false.
     Editor ed;
     assertInitialState(ed);
-    prefix(ed, EventType::Prefix, EventType::Quit);
+    prefix(ed, InputEventType::Prefix, InputEventType::Quit);
     CHECK(!ed.running_);
     CHECK(!ed.active().modified);
     CHECK(ed.getClipboardBlock().empty());
@@ -700,7 +700,7 @@ TEST(initial_state_after_cancel_prefix_returns_navegacion) {
     // Ctrl+K + tecla cualquiera cancela el prefijo y vuelve al estado
     // previo sin introducir cambios: Navegacion limpia.
     Editor ed;
-    prefix(ed, EventType::Prefix, EventType::MoveRight);
+    prefix(ed, InputEventType::Prefix, InputEventType::MoveRight);
     assertInitialState(ed);
 }
 
@@ -729,7 +729,7 @@ TEST(clipboard_c_with_empty_selection_copies_nothing) {
     Editor ed;
     type(ed, "abc");
     ed.setClipboardBlock(std::vector<std::string>{"precioso"}); // contenido previo
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     enterSeleccion(ed);            // modo seleccion, pero sin texto marcado
     CHECK(!ed.hasSelection());
     ed.handleEvent(insert('c'));
@@ -754,12 +754,12 @@ TEST(clipboard_x_cuts_and_pushes_history) {
 TEST(clipboard_x_with_empty_selection_cuts_nothing) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Undo);    // deja algo pendiente en redoStack_
+    press(ed, InputEventType::Undo);    // deja algo pendiente en redoStack_
     CHECK(!ed.active().redoStack.empty());
     size_t undoBefore = ed.active().undoStack.size();
     size_t redoBefore = ed.active().redoStack.size();
     ed.setClipboardBlock(std::vector<std::string>{"precioso"}); // contenido previo
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     enterSeleccion(ed);
     CHECK(!ed.hasSelection());
     ed.handleEvent(insert('x'));
@@ -774,7 +774,7 @@ TEST(clipboard_x_with_empty_selection_cuts_nothing) {
 TEST(clipboard_p_with_empty_buffer_noop) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Escape);   // -> Navegacion
+    press(ed, InputEventType::Escape);   // -> Navegacion
     // 'p' con buffer vacio es no-op sobre el documento y NO entra al
     // historial (cuenta de undo antes/despues identica).
     size_t undoBefore = ed.active().undoStack.size();
@@ -894,12 +894,12 @@ TEST(clipboard_p_in_selection_replaces_selection) {
     Editor ed;
     type(ed, "abcdef");
     ed.setClipboardBlock(std::vector<std::string>{"PEGAR"}); // buffer con contenido
-    press(ed, EventType::Escape);       // -> Navegacion
-    press(ed, EventType::MoveHome);     // (0,0)
+    press(ed, InputEventType::Escape);       // -> Navegacion
+    press(ed, InputEventType::MoveHome);     // (0,0)
     enterSeleccion(ed);                 // 's': anchor (0,0)
-    press(ed, EventType::MoveRight);    // (0,1)
-    press(ed, EventType::MoveRight);    // (0,2): seleccion [0,0)-(0,2)
-    press(ed, EventType::MoveRight);    // (0,3): seleccion [0,0)-(0,3) == "abc"
+    press(ed, InputEventType::MoveRight);    // (0,1)
+    press(ed, InputEventType::MoveRight);    // (0,2): seleccion [0,0)-(0,2)
+    press(ed, InputEventType::MoveRight);    // (0,3): seleccion [0,0)-(0,3) == "abc"
     CHECK(ed.hasSelection());
     const auto clipBefore = ed.getClipboardBlock();
     const size_t undoBefore = ed.active().undoStack.size();
@@ -930,11 +930,11 @@ TEST(clipboard_p_from_navegacion_empty_buffer_noop) {
     // cursor exactamente donde estaba.
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Escape);   // -> Navegacion
+    press(ed, InputEventType::Escape);   // -> Navegacion
     ed.active().modified = false;           // simula estado guardado
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
-    press(ed, EventType::MoveHome);
-    press(ed, EventType::MoveRight); // cursor (0,1)
+    press(ed, InputEventType::MoveHome);
+    press(ed, InputEventType::MoveRight); // cursor (0,1)
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 1);
     const size_t undoBefore = ed.active().undoStack.size();
@@ -1229,7 +1229,7 @@ TEST(clipboard_paste_undo_removes_paste) {
     CHECK_EQ(ed.active().document.lineAt(0), "abcXYZdef");
     CHECK_EQ(ed.active().undoStack.size(), undoBefore + 1); // pegar es una edicion
 
-    press(ed, EventType::Undo);      // elimina el pegado
+    press(ed, InputEventType::Undo);      // elimina el pegado
 
     CHECK_EQ(ed.active().document.lineAt(0), "abcdef");  // doc como antes de pegar
     CHECK_EQ(ed.active().document.lineCount(), 1);
@@ -1247,10 +1247,10 @@ TEST(clipboard_paste_redo_restores_paste) {
     ed.setClipboardBlock({"XYZ"});
 
     ed.handleEvent(insert('p'));     // "abcXYZdef"
-    press(ed, EventType::Undo);      // -> "abcdef"
+    press(ed, InputEventType::Undo);      // -> "abcdef"
     CHECK_EQ(ed.active().document.lineAt(0), "abcdef");
 
-    press(ed, EventType::Redo);      // vuelve a pegar
+    press(ed, InputEventType::Redo);      // vuelve a pegar
 
     CHECK_EQ(ed.active().document.lineAt(0), "abcXYZdef");
     CHECK_EQ(ed.active().cursor.line, 0);    // cursor al final del bloque pegado
@@ -1269,9 +1269,9 @@ TEST(clipboard_paste_undo_redo_clipboard_stays_constant) {
 
     ed.handleEvent(insert('p'));     // "hoabcla"
     CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"abc"}));
-    press(ed, EventType::Undo);      // -> "hola"
+    press(ed, InputEventType::Undo);      // -> "hola"
     CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"abc"}));
-    press(ed, EventType::Redo);      // -> "hoabcla"
+    press(ed, InputEventType::Redo);      // -> "hoabcla"
     CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"abc"}));
 
     CHECK_EQ(ed.active().document.lineAt(0), "hoabcla");
@@ -1289,7 +1289,7 @@ TEST(clipboard_cut_then_undo_keeps_buffer) {
     CHECK_EQ(ed.active().document.lineAt(0), "la");
     CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ho"}));
 
-    press(ed, EventType::Undo);     // deshace el corte
+    press(ed, InputEventType::Undo);     // deshace el corte
     CHECK_EQ(ed.active().document.lineAt(0), "hola");        // el documento SI se restaura
     CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"ho"})); // el buffer NO
 }
@@ -1308,16 +1308,16 @@ TEST(undo_after_interaction_esc_restores_navegacion) {
     // Interaccion (el historial no la distingue); vuelve a Navegacion con
     // el documento deshecho y redo disponible.
     Editor ed;
-    press(ed, EventType::MoveEnd);            // (0,0) seguros
+    press(ed, InputEventType::MoveEnd);            // (0,0) seguros
     ed.handleEvent(insert('i'));              // -> Interaccion
     ed.handleEvent(insert('a'));
     ed.handleEvent(insert('b'));              // "ab"
-    press(ed, EventType::Escape);             // -> Navegacion
+    press(ed, InputEventType::Escape);             // -> Navegacion
 
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
 
-    press(ed, EventType::Undo);               // deshace la 'b'
+    press(ed, InputEventType::Undo);               // deshace la 'b'
 
     CHECK_EQ(ed.active().document.lineAt(0), "a");
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -1325,7 +1325,7 @@ TEST(undo_after_interaction_esc_restores_navegacion) {
     CHECK(!ed.hasSelection());
     CHECK(!ed.active().redoStack.empty());
 
-    press(ed, EventType::Redo);               // rehace la 'b'
+    press(ed, InputEventType::Redo);               // rehace la 'b'
 
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -1342,7 +1342,7 @@ TEST(undo_after_cut_restores_selection_state) {
     ed.active().cursor.col = 0;
 
     ed.handleEvent(insert('s'));              // -> Seleccion
-    press(ed, EventType::MoveEnd);            // selecciona "hola" (0,0)-(0,4)
+    press(ed, InputEventType::MoveEnd);            // selecciona "hola" (0,0)-(0,4)
     CHECK(ed.hasSelection());
     ed.handleEvent(insert('x'));              // corta: doc {"","mundo"}
 
@@ -1350,7 +1350,7 @@ TEST(undo_after_cut_restores_selection_state) {
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"", "mundo"}));
     CHECK(!ed.hasSelection());
 
-    press(ed, EventType::Undo);               // deshace el corte
+    press(ed, InputEventType::Undo);               // deshace el corte
 
     // El estado restaurado es Seleccion (se restauro anchor != position).
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
@@ -1359,7 +1359,7 @@ TEST(undo_after_cut_restores_selection_state) {
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 4);              // final de la seleccion restaurada
 
-    press(ed, EventType::Redo);               // reaplica el corte
+    press(ed, InputEventType::Redo);               // reaplica el corte
 
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(!ed.hasSelection());
@@ -1376,9 +1376,9 @@ TEST(undo_of_empty_selection_stays_navegacion) {
     ed.active().cursor.col = 0;
 
     ed.handleEvent(insert('s'));              // -> Seleccion (sin marcar)
-    press(ed, EventType::Escape);             // -> Navegacion
+    press(ed, InputEventType::Escape);             // -> Navegacion
 
-    press(ed, EventType::Undo);               // no hay nada que deshacer
+    press(ed, InputEventType::Undo);               // no hay nada que deshacer
 
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(!ed.hasSelection());
@@ -1398,17 +1398,17 @@ TEST(undo_cut_redo_then_undo_cycles_selection) {
 
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"cdef"}));
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());
     CHECK_EQ(ed.active().cursor.col, 2);
 
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(!ed.hasSelection());
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"cdef"}));
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"abcdef"}));
@@ -1435,20 +1435,20 @@ static void setupUndoRedoPendientes(Editor& ed) {
     ed.handleEvent(insert('a'));
     ed.handleEvent(insert('b'));
     ed.handleEvent(insert('c'));
-    press(ed, EventType::Undo);            // "ab", redo=["c"]
+    press(ed, InputEventType::Undo);            // "ab", redo=["c"]
 }
 
 TEST(global_undo_from_navegacion) {
     Editor ed;
     setupUndoRedoPendientes(ed);
-    press(ed, EventType::Escape);          // -> Navegacion
+    press(ed, InputEventType::Escape);          // -> Navegacion
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "a");
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
 }
 
@@ -1456,15 +1456,15 @@ TEST(global_undo_redo_from_interaccion_not_literal) {
     // Ctrl+U desde Interaccion deshace; NO inserta una 'u' literal.
     Editor ed;
     setupUndoRedoPendientes(ed);
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     ed.handleEvent(insert('i'));           // -> Interaccion
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
 
-    press(ed, EventType::Undo);            // deshace la 'b', no escribe "u"
+    press(ed, InputEventType::Undo);            // deshace la 'b', no escribe "u"
     CHECK_EQ(ed.active().document.lineAt(0), "a");
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
-    press(ed, EventType::Redo);            // rehace la 'b', no escribe "y"
+    press(ed, InputEventType::Redo);            // rehace la 'b', no escribe "y"
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
@@ -1473,26 +1473,26 @@ TEST(global_undo_from_selection_works) {
     // Ctrl+U funciona incluso mientras se esta seleccionando.
     Editor ed;
     setupUndoRedoPendientes(ed);
-    press(ed, EventType::Escape);
-    press(ed, EventType::MoveHome);        // cursor a (0,0)
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::MoveHome);        // cursor a (0,0)
     ed.handleEvent(insert('s'));           // -> Seleccion
-    press(ed, EventType::MoveEnd);         // selecciona "ab"
+    press(ed, InputEventType::MoveEnd);         // selecciona "ab"
     CHECK(ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
 
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "a");
 }
 
 TEST(global_redo_from_selection_works) {
     Editor ed;
     setupUndoRedoPendientes(ed);
-    press(ed, EventType::Escape);
-    press(ed, EventType::MoveHome);        // cursor a (0,0)
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::MoveHome);        // cursor a (0,0)
     ed.handleEvent(insert('s'));
-    press(ed, EventType::MoveEnd);         // selecciona "ab"
+    press(ed, InputEventType::MoveEnd);         // selecciona "ab"
 
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "abc");   // rehace la 'c' pendiente
 }
 
@@ -1504,10 +1504,10 @@ TEST(prefix_from_navegacion_returns_to_navegacion) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    press(ed, EventType::Prefix);          // Ctrl+K
+    press(ed, InputEventType::Prefix);          // Ctrl+K
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Prefix));
 
-    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e); // Ctrl+K s
+    InputEvent e; e.type = InputEventType::InsertChar; e.text = "s"; ed.handleEvent(e); // Ctrl+K s
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
@@ -1520,10 +1520,10 @@ TEST(prefix_from_interaccion_returns_to_interaccion) {
     ed.active().cursor.col = 0;
     ed.handleEvent(insert('i'));           // -> Interaccion
 
-    press(ed, EventType::Prefix);          // Ctrl+K
+    press(ed, InputEventType::Prefix);          // Ctrl+K
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Prefix));
 
-    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e); // Ctrl+K s
+    InputEvent e; e.type = InputEventType::InsertChar; e.text = "s"; ed.handleEvent(e); // Ctrl+K s
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
 }
 
@@ -1535,12 +1535,12 @@ TEST(prefix_from_seleccion_returns_to_seleccion) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
     ed.handleEvent(insert('s'));
-    press(ed, EventType::MoveEnd);         // selecciona "abc"
+    press(ed, InputEventType::MoveEnd);         // selecciona "abc"
 
-    press(ed, EventType::Prefix);          // Ctrl+K
+    press(ed, InputEventType::Prefix);          // Ctrl+K
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Prefix));
 
-    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e); // Ctrl+K s
+    InputEvent e; e.type = InputEventType::InsertChar; e.text = "s"; ed.handleEvent(e); // Ctrl+K s
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());              // la seleccion se conserva
 }
@@ -1552,9 +1552,9 @@ TEST(prefix_quit_from_all_modes) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    press(ed, EventType::Prefix);
-    Event q;
-    q.type = EventType::Quit;
+    press(ed, InputEventType::Prefix);
+    InputEvent q;
+    q.type = InputEventType::Quit;
     ed.handleEvent(q);
     CHECK(!ed.running_);
 
@@ -1563,7 +1563,7 @@ TEST(prefix_quit_from_all_modes) {
     ed2.active().cursor.line = 0;
     ed2.active().cursor.col = 0;
     ed2.handleEvent(insert('i'));          // Interaccion
-    press(ed2, EventType::Prefix);
+    press(ed2, InputEventType::Prefix);
     ed2.handleEvent(q);
     CHECK(!ed2.running_);
 
@@ -1572,7 +1572,7 @@ TEST(prefix_quit_from_all_modes) {
     ed3.active().cursor.line = 0;
     ed3.active().cursor.col = 0;
     ed3.handleEvent(insert('s'));          // Seleccion
-    press(ed3, EventType::Prefix);
+    press(ed3, InputEventType::Prefix);
     ed3.handleEvent(q);
     CHECK(!ed3.running_);
 }
@@ -1592,8 +1592,8 @@ TEST(regression_ctrl_q_alone_does_not_quit) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    Event q;
-    q.type = EventType::Quit;
+    InputEvent q;
+    q.type = InputEventType::Quit;
     ed.handleEvent(q);
 
     CHECK(ed.running_);
@@ -1610,12 +1610,12 @@ TEST(regression_ctrl_q_in_navegacion_does_not_quit) {
     ed.handleEvent(insert('i'));
     ed.handleEvent(insert('a'));
     ed.handleEvent(insert('b'));
-    press(ed, EventType::Escape);          // -> Navegacion, undo=2
+    press(ed, InputEventType::Escape);          // -> Navegacion, undo=2
     size_t undoBefore = ed.active().undoStack.size();
     CHECK(undoBefore > size_t{0});
 
-    Event q;
-    q.type = EventType::Quit;
+    InputEvent q;
+    q.type = InputEventType::Quit;
     ed.handleEvent(q);
 
     CHECK(ed.running_);
@@ -1630,10 +1630,10 @@ TEST(regression_ctrl_q_in_interaccion_does_not_quit_or_insert) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
     ed.handleEvent(insert('i'));           // -> Interaccion
-    press(ed, EventType::MoveEnd);
+    press(ed, InputEventType::MoveEnd);
 
-    Event q;
-    q.type = EventType::Quit;
+    InputEvent q;
+    q.type = InputEventType::Quit;
     ed.handleEvent(q);
 
     CHECK(ed.running_);
@@ -1648,11 +1648,11 @@ TEST(regression_ctrl_q_in_seleccion_does_not_quit_or_clear) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
     ed.handleEvent(insert('s'));
-    press(ed, EventType::MoveEnd);         // selecciona "abc"
+    press(ed, InputEventType::MoveEnd);         // selecciona "abc"
     CHECK(ed.hasSelection());
 
-    Event q;
-    q.type = EventType::Quit;
+    InputEvent q;
+    q.type = InputEventType::Quit;
     ed.handleEvent(q);
 
     CHECK(ed.running_);
@@ -1667,7 +1667,7 @@ TEST(regression_ctrl_q_as_incomplete_prefix_does_not_quit) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    press(ed, EventType::Prefix);          // Ctrl+K
+    press(ed, InputEventType::Prefix);          // Ctrl+K
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Prefix));
     CHECK(ed.running_);
 }
@@ -1680,8 +1680,8 @@ TEST(regression_ctrl_q_followed_by_invalid_key_cancels) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    press(ed, EventType::Prefix);          // Ctrl+K
-    press(ed, EventType::MoveLeft);        // tecla invalida en prefijo
+    press(ed, InputEventType::Prefix);          // Ctrl+K
+    press(ed, InputEventType::MoveLeft);        // tecla invalida en prefijo
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(ed.running_);
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"abc"}));
@@ -1694,9 +1694,9 @@ TEST(regression_ctrl_q_after_prefix_quits) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    press(ed, EventType::Prefix);
-    Event q;
-    q.type = EventType::Quit;
+    press(ed, InputEventType::Prefix);
+    InputEvent q;
+    q.type = InputEventType::Quit;
     ed.handleEvent(q);
 
     CHECK(!ed.running_);
@@ -1717,7 +1717,7 @@ TEST(prefix_enters_prefix_state) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
 
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Prefix));
     CHECK(ed.running_);
@@ -1732,8 +1732,8 @@ TEST(prefix_valid_save_command_returns_to_prior_state) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    press(ed, EventType::Prefix);
-    Event s; s.type = EventType::InsertChar; s.text = "s";
+    press(ed, InputEventType::Prefix);
+    InputEvent s; s.type = InputEventType::InsertChar; s.text = "s";
     ed.handleEvent(s);
 
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -1747,8 +1747,8 @@ TEST(prefix_invalid_command_cancels_and_returns) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    press(ed, EventType::Prefix);
-    press(ed, EventType::MoveLeft);        // tecla invalida en prefijo
+    press(ed, InputEventType::Prefix);
+    press(ed, InputEventType::MoveLeft);        // tecla invalida en prefijo
 
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"abc"}));
@@ -1760,8 +1760,8 @@ TEST(prefix_escape_cancels_and_returns) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    press(ed, EventType::Prefix);
-    press(ed, EventType::Escape);          // ESC cancela el prefijo
+    press(ed, InputEventType::Prefix);
+    press(ed, InputEventType::Escape);          // ESC cancela el prefijo
 
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"abc"}));
@@ -1774,8 +1774,8 @@ TEST(prefix_ctrl_k_inside_prefix_cancels) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    press(ed, EventType::Prefix);
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
+    press(ed, InputEventType::Prefix);
 
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
@@ -1790,11 +1790,11 @@ TEST(prefix_ctrl_u_inside_prefix_does_not_undo) {
     ed.handleEvent(insert('i'));
     ed.handleEvent(insert('a'));
     ed.handleEvent(insert('b'));
-    press(ed, EventType::Escape);          // Navegacion, undo=2
+    press(ed, InputEventType::Escape);          // Navegacion, undo=2
     size_t undoBefore = ed.active().undoStack.size();
 
-    press(ed, EventType::Prefix);
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Prefix);
+    press(ed, InputEventType::Undo);
 
     CHECK_EQ(ed.active().undoStack.size(), undoBefore);   // NO deshizo
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
@@ -1808,13 +1808,13 @@ TEST(prefix_ctrl_y_inside_prefix_does_not_redo) {
     ed.active().cursor.col = 0;
     ed.handleEvent(insert('i'));
     ed.handleEvent(insert('a'));
-    press(ed, EventType::Escape);
-    press(ed, EventType::Undo);            // "a" -> "", redo=["a"]
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::Undo);            // "a" -> "", redo=["a"]
     size_t redoBefore = ed.active().redoStack.size();
     CHECK(redoBefore > size_t{0});
 
-    press(ed, EventType::Prefix);
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Prefix);
+    press(ed, InputEventType::Redo);
 
     CHECK_EQ(ed.active().redoStack.size(), redoBefore);   // NO rehizo
     CHECK_EQ(ed.active().document.lineAt(0), "");
@@ -1832,43 +1832,43 @@ TEST(prefix_letters_inside_prefix_do_not_leak) {
     ed.handleEvent(insert('a'));
     ed.handleEvent(insert('b'));
     ed.handleEvent(insert('c'));
-    press(ed, EventType::Escape);          // Navegacion, doc "abc"
+    press(ed, InputEventType::Escape);          // Navegacion, doc "abc"
     size_t undoBefore = ed.active().undoStack.size();
     CHECK(ed.getClipboardBlock().empty());
 
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     ed.handleEvent(insert('s'));           // seleccionar "abc"
-    press(ed, EventType::MoveEnd);
+    press(ed, InputEventType::MoveEnd);
     CHECK(ed.hasSelection());
-    press(ed, EventType::Escape);          // -> Navegacion
+    press(ed, InputEventType::Escape);          // -> Navegacion
 
     // 'c' en Prefix: no copia.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('c'));
     CHECK(ed.getClipboardBlock().empty());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     // 'x' en Prefix: no corta.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('x'));
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"abc"}));
     CHECK_EQ(ed.active().undoStack.size(), undoBefore);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     // 'p' en Prefix: no pega.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('p'));
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"abc"}));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     // 'i' en Prefix: no entra a Interaccion.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('i'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().document.lineAt(0), "abc");   // no inserto 'i'
 
     // 'z' en Prefix: no entra a Seleccion.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('z'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(!ed.hasSelection());
@@ -1881,9 +1881,9 @@ TEST(prefix_quit_from_prefix_quits) {
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
 
-    press(ed, EventType::Prefix);
-    Event q;
-    q.type = EventType::Quit;
+    press(ed, InputEventType::Prefix);
+    InputEvent q;
+    q.type = InputEventType::Quit;
     ed.handleEvent(q);
 
     CHECK(!ed.running_);
@@ -1906,7 +1906,7 @@ TEST(selection_page_down_up_keeps_anchor_no_undo) {
     CHECK(ed.state_ == State::Seleccion);
 
     // AvPag: anchor = cursor (10,0); cursor y viewport saltan +20.
-    press(ed, EventType::PageDown);
+    press(ed, InputEventType::PageDown);
     CHECK(ed.active().selection->anchor == (Position{10, 0}));
     CHECK_EQ(ed.active().cursor.line, 30);
     CHECK_EQ(ed.active().viewport.top, 20);
@@ -1914,7 +1914,7 @@ TEST(selection_page_down_up_keeps_anchor_no_undo) {
           ed.active().selection->position.col == ed.active().cursor.col);
 
     // AvPag de nuevo: el anchor NO cambia, el cursor sigue saltando.
-    press(ed, EventType::PageDown);
+    press(ed, InputEventType::PageDown);
     CHECK(ed.active().selection->anchor == (Position{10, 0}));
     CHECK_EQ(ed.active().cursor.line, 50);
     CHECK_EQ(ed.active().viewport.top, 40);
@@ -1922,7 +1922,7 @@ TEST(selection_page_down_up_keeps_anchor_no_undo) {
           ed.active().selection->position.col == ed.active().cursor.col);
 
     // RePag: cursor y viewport retroceden -20 (anchor intacto).
-    press(ed, EventType::PageUp);
+    press(ed, InputEventType::PageUp);
     CHECK(ed.active().selection->anchor == (Position{10, 0}));
     CHECK_EQ(ed.active().cursor.line, 30);
     CHECK_EQ(ed.active().viewport.top, 20);
@@ -1942,12 +1942,12 @@ TEST(selection_page_down_up_keeps_anchor_no_undo) {
 TEST(selection_arrow_extend_keeps_anchor_exact_cursor) {
     // Cada flecha parte de un editor nuevo: cursor (1,1) sobre
     // {"abc","def","ghi"} (linea "def"), entra a Seleccion, pulse la flecha.
-    auto run = [](EventType arrow, Position expectCursor) {
+    auto run = [](InputEventType arrow, Position expectCursor) {
         Editor ed;
         ed.active().document.restore({"abc", "def", "ghi"});
         ed.active().cursor.line = 1;
         ed.active().cursor.col = 0;
-        press(ed, EventType::MoveRight);  // (1,1): fija preferredCol_=1
+        press(ed, InputEventType::MoveRight);  // (1,1): fija preferredCol_=1
         enterSeleccion(ed);              // Seleccion, anchor aun vacio
         press(ed, arrow);
 
@@ -1960,10 +1960,10 @@ TEST(selection_arrow_extend_keeps_anchor_exact_cursor) {
         CHECK(ed.active().undoStack.empty());            // no genera undo
     };
 
-    run(EventType::MoveLeft,  Position{1, 0});
-    run(EventType::MoveRight, Position{1, 2});
-    run(EventType::MoveUp,    Position{0, 1});
-    run(EventType::MoveDown,  Position{2, 1});
-    run(EventType::MoveHome,  Position{1, 0});
-    run(EventType::MoveEnd,   Position{1, 3});   // "def" -> final col 3
+    run(InputEventType::MoveLeft,  Position{1, 0});
+    run(InputEventType::MoveRight, Position{1, 2});
+    run(InputEventType::MoveUp,    Position{0, 1});
+    run(InputEventType::MoveDown,  Position{2, 1});
+    run(InputEventType::MoveHome,  Position{1, 0});
+    run(InputEventType::MoveEnd,   Position{1, 3});   // "def" -> final col 3
 }

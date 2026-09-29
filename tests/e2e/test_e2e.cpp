@@ -8,7 +8,7 @@
 
 #include <string>
 #include <vector>
-#include "platform/Event.h"  // shim legacy: este test usa Event/EventType
+#include "platform/InputEvent.h"
 #define private public
 #include "app/Editor.h"
 #undef private
@@ -34,15 +34,15 @@ using testfw::TempFile;
 // ---------------------------------------------------------------------------
 namespace {
 
-Event insert(char c) {
-    Event e;
-    e.type = EventType::InsertChar;
+InputEvent insert(char c) {
+    InputEvent e;
+    e.type = InputEventType::InsertChar;
     e.text = std::string(1, c);
     return e;
 }
 
-void press(Editor& ed, EventType type) {
-    Event e;
+void press(Editor& ed, InputEventType type) {
+    InputEvent e;
     e.type = type;
     ed.handleEvent(e);
 }
@@ -53,8 +53,8 @@ void press(Editor& ed, EventType type) {
 void type(Editor& ed, const std::string& typed) {
     if (ed.state_ != State::Interaccion) {
         if (ed.state_ == State::Seleccion) {
-            Event e;
-            e.type = EventType::Escape;
+            InputEvent e;
+            e.type = InputEventType::Escape;
             ed.handleEvent(e);
         }
         ed.handleEvent(insert('i'));
@@ -63,14 +63,14 @@ void type(Editor& ed, const std::string& typed) {
         ed.handleEvent(insert(c));
 }
 
-void prefix(Editor& ed, EventType first, EventType second) {
+void prefix(Editor& ed, InputEventType first, InputEventType second) {
     press(ed, first);
     press(ed, second);
 }
 
 static void saveViaS(Editor& ed) {
-    press(ed, EventType::Prefix);
-    Event e; e.type = EventType::InsertChar; e.text = "s"; ed.handleEvent(e);
+    press(ed, InputEventType::Prefix);
+    InputEvent e; e.type = InputEventType::InsertChar; e.text = "s"; ed.handleEvent(e);
 }
 
 // Lee el archivo fuera del editor como bytes crudos (verificacion externa).
@@ -126,7 +126,7 @@ TEST(e2e_01_edit_and_save_byte_exact) {
     CHECK(!ed.active().modified);
 
     // insert: " mundo" al final de la linea.
-    press(ed, EventType::MoveEnd);              // (0,4)
+    press(ed, InputEventType::MoveEnd);              // (0,4)
     type(ed, " mundo");
     CHECK_EQ(ed.active().document.lineAt(0), "hola mundo");
     CHECK_EQ(ed.active().cursor.col, 10);
@@ -134,24 +134,24 @@ TEST(e2e_01_edit_and_save_byte_exact) {
     CHECK_EQ(ed.active().document.lineCount(), 1);
 
     // delete: 3x Backspace -> quita "ndo".
-    press(ed, EventType::Backspace);
-    press(ed, EventType::Backspace);
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
+    press(ed, InputEventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineAt(0), "hola mu");
     CHECK_EQ(ed.active().cursor.col, 7);
     CHECK_EQ(ed.active().document.lineCount(), 1);
 
     // move + insert al inicio.
-    press(ed, EventType::MoveHome);             // (0,0)
+    press(ed, InputEventType::MoveHome);             // (0,0)
     type(ed, "Hi");
     CHECK_EQ(ed.active().document.lineAt(0), "Hihola mu");
     CHECK_EQ(ed.active().cursor.col, 2);
     CHECK_EQ(ed.active().document.lineCount(), 1);
 
     // move al final + nueva linea + texto en la segunda.
-    press(ed, EventType::MoveEnd);              // (0,9)
-    Event nl;
-    nl.type = EventType::InsertNewline;
+    press(ed, InputEventType::MoveEnd);              // (0,9)
+    InputEvent nl;
+    nl.type = InputEventType::InsertNewline;
     ed.handleEvent(nl);
     CHECK_EQ(ed.active().document.lineCount(), 2);
     CHECK_EQ(ed.active().cursor.line, 1);
@@ -164,7 +164,7 @@ TEST(e2e_01_edit_and_save_byte_exact) {
     CHECK(!ed.active().modified);
 
     // quit: Ctrl+K Ctrl+Q.
-    prefix(ed, EventType::Prefix, EventType::Quit);
+    prefix(ed, InputEventType::Prefix, InputEventType::Quit);
     CHECK(!ed.running_);
 
     // read file externally y verificar bytes exactos.
@@ -214,19 +214,19 @@ TEST(e2e_02_undo_redo_full_byte_exact) {
     CHECK_EQ(ed.active().undoStack.size(), 2u);
 
     // undo x2
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "Xhola");
     CHECK_EQ(ed.active().cursor.col, 1);
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
     CHECK_EQ(ed.active().cursor.col, 0);
     CHECK_EQ(ed.active().undoStack.size(), 0u);
 
     // redo x2
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "Xhola");
     CHECK_EQ(ed.active().cursor.col, 1);
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "XYhola");
     CHECK_EQ(ed.active().cursor.col, 2);
     CHECK_EQ(ed.active().redoStack.size(), 0u);
@@ -234,7 +234,7 @@ TEST(e2e_02_undo_redo_full_byte_exact) {
     // save + quit
     saveViaS(ed);
     CHECK(!ed.active().modified);
-    prefix(ed, EventType::Prefix, EventType::Quit);
+    prefix(ed, InputEventType::Prefix, InputEventType::Quit);
     CHECK(!ed.running_);
 
     // comparar archivo final (byte a byte, conservando el '\n' final).
@@ -272,14 +272,14 @@ TEST(e2e_03_selection_replacement_byte_exact) {
 
     // navigate hasta la "w" de "world" (col 6).
     for (int i = 0; i < 6; ++i)
-        press(ed, EventType::MoveRight);     // (0,6)
+        press(ed, InputEventType::MoveRight);     // (0,6)
     CHECK_EQ(ed.active().cursor.col, 6);
 
     // seleccionar "world" = [6,11).
     ed.handleEvent(insert('s'));             // Navegacion -> Seleccion
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     for (int i = 0; i < 5; ++i)
-        press(ed, EventType::MoveRight);     // extiende la seleccion
+        press(ed, InputEventType::MoveRight);     // extiende la seleccion
     CHECK(ed.hasSelection());
     CHECK_EQ(ed.active().selection->anchor.line, 0);
     CHECK_EQ(ed.active().selection->anchor.col, 6);
@@ -300,21 +300,21 @@ TEST(e2e_03_selection_replacement_byte_exact) {
     CHECK_EQ(ed.active().undoStack.size(), 1u);
 
     // undo: restaura "hello world" con la seleccion [6,11).
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "hello world");
     CHECK(ed.hasSelection());
     CHECK_EQ(ed.active().selection->anchor.col, 6);
     CHECK_EQ(ed.active().selection->position.col, 11);
 
     // redo: vuelve al reemplazo.
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "hello Maestro");
     CHECK(!ed.hasSelection());
 
     // save + quit.
     saveViaS(ed);
     CHECK(!ed.active().modified);
-    prefix(ed, EventType::Prefix, EventType::Quit);
+    prefix(ed, InputEventType::Prefix, InputEventType::Quit);
     CHECK(!ed.running_);
 
     // comparar archivo final (byte a byte, conservando el '\n' final).
@@ -359,10 +359,10 @@ TEST(e2e_04_multiline_selection_delete_undo_redo_byte_exact) {
     ed.handleEvent(insert('s'));                // Navegacion -> Seleccion
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     for (int i = 0; i < 3; ++i)
-        press(ed, EventType::MoveRight);        // (0,3) fin de "aaa"
-    press(ed, EventType::MoveDown);             // (1,3) fin de "bbb"
-    press(ed, EventType::MoveDown);             // (2,3) fin de "ccc"
-    press(ed, EventType::MoveLeft);             // (2,2)
+        press(ed, InputEventType::MoveRight);        // (0,3) fin de "aaa"
+    press(ed, InputEventType::MoveDown);             // (1,3) fin de "bbb"
+    press(ed, InputEventType::MoveDown);             // (2,3) fin de "ccc"
+    press(ed, InputEventType::MoveLeft);             // (2,2)
     CHECK(ed.hasSelection());
     // rango [anchor(0,0), position(2,2)]: "aaa\nbbb\ncc".
     CHECK_EQ(ed.active().selection->anchor.line, 0);
@@ -371,7 +371,7 @@ TEST(e2e_04_multiline_selection_delete_undo_redo_byte_exact) {
     CHECK_EQ(ed.active().selection->position.col, 2);
 
     // delete: borrar el rango MULTILINEA completo.
-    press(ed, EventType::Delete);
+    press(ed, InputEventType::Delete);
     CHECK_EQ(ed.active().document.lineAt(0), "c");
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -380,7 +380,7 @@ TEST(e2e_04_multiline_selection_delete_undo_redo_byte_exact) {
     CHECK_EQ(ed.active().cursor.col, 0);
 
     // undo: reconstruye texto + cursor + seleccion exactos.
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(ed.active().document.snapshot() ==
           (std::vector<std::string>{"aaa", "bbb", "ccc"}));
     CHECK(ed.hasSelection());
@@ -392,7 +392,7 @@ TEST(e2e_04_multiline_selection_delete_undo_redo_byte_exact) {
     CHECK_EQ(ed.active().cursor.col, 2);
 
     // redo: reproduce el borrado multilinea.
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "c");
     CHECK(!ed.hasSelection());
     CHECK_EQ(ed.active().cursor.line, 0);
@@ -401,7 +401,7 @@ TEST(e2e_04_multiline_selection_delete_undo_redo_byte_exact) {
     // save + quit.
     saveViaS(ed);
     CHECK(!ed.active().modified);
-    prefix(ed, EventType::Prefix, EventType::Quit);
+    prefix(ed, InputEventType::Prefix, InputEventType::Quit);
     CHECK(!ed.running_);
 
     // comparar archivo final (byte a byte): queda solo "c\n".
@@ -478,7 +478,7 @@ TEST(e2e_05_utf8_workflow_byte_exact) {
     CHECK(!ed.active().modified);
 
     // navigate -> a la linea "mañana" (line1).
-    press(ed, EventType::MoveDown);             // (1,0)
+    press(ed, InputEventType::MoveDown);             // (1,0)
     CHECK_EQ(ed.active().cursor.line, 1);
     CHECK_EQ(ed.active().cursor.col, 0);
 
@@ -486,11 +486,11 @@ TEST(e2e_05_utf8_workflow_byte_exact) {
     // cursor al INICIO de la celda multibyte (col 2) y recien ahi entramos a
     // Seleccion (el ancla se fija donde estaba el cursor); luego MoveRight
     // salta la celda completa y el rango queda [1,2..1,4] = "ñ".
-    press(ed, EventType::MoveRight);            // (1,1)
-    press(ed, EventType::MoveRight);            // (1,2) inicio de "ñ"
+    press(ed, InputEventType::MoveRight);            // (1,1)
+    press(ed, InputEventType::MoveRight);            // (1,2) inicio de "ñ"
     ed.handleEvent(insert('s'));                // Navegacion -> Seleccion, ancla (1,2)
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
-    press(ed, EventType::MoveRight);            // (1,4) fin de "ñ" (salta 2 bytes)
+    press(ed, InputEventType::MoveRight);            // (1,4) fin de "ñ" (salta 2 bytes)
     CHECK(ed.hasSelection());
     CHECK_EQ(ed.active().selection->anchor.line, 1);
     CHECK_EQ(ed.active().selection->anchor.col, 2);
@@ -498,7 +498,7 @@ TEST(e2e_05_utf8_workflow_byte_exact) {
     CHECK_EQ(ed.active().selection->position.col, 4);
 
     // delete: borra la celda multibyte "ñ" -> "maana".
-    press(ed, EventType::Delete);
+    press(ed, InputEventType::Delete);
     CHECK_EQ(ed.active().document.lineAt(1), "maana");
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -506,7 +506,7 @@ TEST(e2e_05_utf8_workflow_byte_exact) {
 
     // undo: reconstruye "mañana" EXACTA (mismas 7 bytes) + cursor (1,4) +
     // seleccion [1,2..1,4] restaurada.
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(1), "ma" "\xC3\xB1" "ana");
     CHECK_EQ(ed.active().document.lineAt(1).size(), 7u);   // byte-exacto
     CHECK(ed.active().document.snapshot() == originalLines);
@@ -517,14 +517,14 @@ TEST(e2e_05_utf8_workflow_byte_exact) {
     // Resetear el ancla de la seleccion restaurada: el undo devuelve el
     // editor al modo Seleccion (la seleccion restaurada esta vigente), asi
     // que Escape la limpia directamente (cursor queda en (1,4), Navegacion).
-    press(ed, EventType::Escape);               // limpia la seleccion
+    press(ed, InputEventType::Escape);               // limpia la seleccion
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     // select "mañana" entera para copiarla.
-    press(ed, EventType::MoveHome);             // (1,0)
+    press(ed, InputEventType::MoveHome);             // (1,0)
     ed.handleEvent(insert('s'));                // -> Seleccion, anchor (1,0)
-    press(ed, EventType::MoveEnd);              // (1,7) = fin de "mañana"
+    press(ed, InputEventType::MoveEnd);              // (1,7) = fin de "mañana"
     CHECK(ed.hasSelection());
     CHECK_EQ(ed.active().selection->anchor.col, 0);
     CHECK_EQ(ed.active().selection->position.col, 7);
@@ -537,9 +537,9 @@ TEST(e2e_05_utf8_workflow_byte_exact) {
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     // paste: bajar hasta la ultima linea (la de "😀") y pegar al final.
-    press(ed, EventType::MoveDown);             // (2,3) fin de "€"
-    press(ed, EventType::MoveDown);             // (3,3) fin de "—"
-    press(ed, EventType::MoveDown);             // (4,4) fin de "😀"
+    press(ed, InputEventType::MoveDown);             // (2,3) fin de "€"
+    press(ed, InputEventType::MoveDown);             // (3,3) fin de "—"
+    press(ed, InputEventType::MoveDown);             // (4,4) fin de "😀"
     CHECK_EQ(ed.active().cursor.line, 4);
     CHECK_EQ(ed.active().cursor.col, 4);
     ed.handleEvent(insert('p'));                // pega "mañana" despues de "😀"
@@ -550,7 +550,7 @@ TEST(e2e_05_utf8_workflow_byte_exact) {
     // save + quit.
     saveViaS(ed);
     CHECK(!ed.active().modified);
-    prefix(ed, EventType::Prefix, EventType::Quit);
+    prefix(ed, InputEventType::Prefix, InputEventType::Quit);
     CHECK(!ed.running_);
 
     // comparar todo el archivo FINAL byte a byte.
@@ -596,7 +596,7 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     CHECK(ed.active().filename == fileA.path);
 
     // Ctrl+K n: buffer B nuevo SIN nombre, activo, en Navegacion.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('n'));                // buffer.nuevo
     CHECK_EQ(ed.buffers.count(), 2);
     CHECK(ed.active().filename.empty());        // B no tiene nombre aun
@@ -609,12 +609,12 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     CHECK_EQ(ed.active().cursor.col, 3);
 
     // volver A: selector Ctrl+K t, subir una posicion, Enter.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));                // buffer.selector
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::BufferSelector));
-    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
-    Event enter;
-    enter.type = EventType::InsertNewline;
+    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
+    InputEvent enter;
+    enter.type = InputEventType::InsertNewline;
     ed.handleEvent(enter);                      // activar A
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
     CHECK_EQ(ed.active().cursor.line, 0);
@@ -622,41 +622,41 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     CHECK(!ed.active().modified);               // A intacto (su modified)
 
     // editar A: mover al final y anexar "A2".
-    press(ed, EventType::MoveEnd);              // (0,3)
+    press(ed, InputEventType::MoveEnd);              // (0,3)
     type(ed, "A2");
     CHECK_EQ(ed.active().document.lineAt(0), "AAAA2");
     CHECK(ed.active().modified);
 
     // volver B: selector, bajar una posicion, Enter.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
+    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
     ed.handleEvent(enter);                      // activar B
     CHECK_EQ(ed.active().document.lineAt(0), "BBB");   // B sigue como quedo
     CHECK_EQ(ed.active().cursor.col, 3);
 
     // editar B: anexar "B2".
-    press(ed, EventType::MoveEnd);              // (0,3)
+    press(ed, InputEventType::MoveEnd);              // (0,3)
     type(ed, "B2");
     CHECK_EQ(ed.active().document.lineAt(0), "BBBB2");
     CHECK(ed.active().modified);
 
     // save A: volver a A (selector, subir) y Ctrl+K Ctrl+S.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
+    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "AAAA2");
     saveViaS(ed);
     CHECK(!ed.active().modified);               // A guardado
 
     // save B: volver a B y Ctrl+K Ctrl+S -> prompt Guardar archivo.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
+    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "BBBB2");
-    prefix(ed, EventType::Prefix, EventType::Save);
+    prefix(ed, InputEventType::Prefix, InputEventType::Save);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
     ed.saveAsPath_.clear();
     for (char c : fileB.path)
@@ -666,7 +666,7 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     CHECK(!ed.active().modified);
 
     // quit.
-    prefix(ed, EventType::Prefix, EventType::Quit);
+    prefix(ed, InputEventType::Prefix, InputEventType::Quit);
     CHECK(!ed.running_);
 
     // comprobar AMBOS archivos en disco (byte a byte, independientes).
@@ -710,28 +710,28 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
     CHECK(!ed.active().modified);
 
     // Ctrl+K n: buffer B nuevo (vacio), activo.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('n'));
     CHECK_EQ(ed.buffers.count(), 2);
     CHECK_EQ(ed.active().document.lineAt(0), "");
 
     // ---- A edit: volver a A y anexar 'X' -> "AAAX".
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));                // selector
-    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
-    Event enter;
-    enter.type = EventType::InsertNewline;
+    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
+    InputEvent enter;
+    enter.type = InputEventType::InsertNewline;
     ed.handleEvent(enter);                      // activar A
-    press(ed, EventType::MoveEnd);              // (0,3)
+    press(ed, InputEventType::MoveEnd);              // (0,3)
     type(ed, "X");                              // A = "AAAX"
     CHECK_EQ(ed.active().document.lineAt(0), "AAAX");
     CHECK(ed.active().modified);
     CHECK_EQ(ed.active().undoStack.size(), 1u);
 
     // ---- B edit: volver a B y escribir 'B' -> "B".
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
+    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
     ed.handleEvent(enter);
     type(ed, "B");                              // B = "B"
     CHECK_EQ(ed.active().document.lineAt(0), "B");
@@ -739,74 +739,74 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
     CHECK_EQ(ed.active().undoStack.size(), 1u);
 
     // ---- A undo: volver a A y deshacer -> "AAA".
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
+    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
     ed.handleEvent(enter);
-    press(ed, EventType::Undo);                 // A deshace
+    press(ed, InputEventType::Undo);                 // A deshace
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().undoStack.size(), 0u);
     CHECK_EQ(ed.active().redoStack.size(), 1u); // A dejo una rama rehacible
 
     // ---- B undo: volver a B y deshacer -> "".
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
+    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
     ed.handleEvent(enter);
-    press(ed, EventType::Undo);                 // B deshace
+    press(ed, InputEventType::Undo);                 // B deshace
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().undoStack.size(), 0u);
     CHECK_EQ(ed.active().redoStack.size(), 1u);
     // Editar/deshacer B NO toco la rama de redo pendiente de A.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
+    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().redoStack.size(), 1u); // A aun puede rehacer
 
     // ---- B edit tras undo: editar B NO debe limpiar el redo de A.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
+    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
     ed.handleEvent(enter);
     type(ed, "C");
     CHECK_EQ(ed.active().document.lineAt(0), "C");
     CHECK_EQ(ed.active().redoStack.size(), 0u); // B perdio su propia rama de redo
     CHECK_EQ(ed.active().undoStack.size(), 1u);
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
+    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().redoStack.size(), 1u); // A sigue rehacible pese a editar B
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
 
     // ---- A redo: rehacer en A (el redo de A sigue vivo) -> "AAAX".
-    press(ed, EventType::Redo);                 // A rehace
+    press(ed, InputEventType::Redo);                 // A rehace
     CHECK_EQ(ed.active().document.lineAt(0), "AAAX");
     CHECK(ed.active().modified);
     CHECK_EQ(ed.active().redoStack.size(), 0u);
 
     // ---- B sigue en "C" y sin redo pendiente.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
+    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "C");
     CHECK(ed.active().modified);
     CHECK_EQ(ed.active().redoStack.size(), 0u);
 
     // Estado final: A="AAAX", B="C", cada uno con su propio modificado.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
+    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "AAAX");
     CHECK(ed.active().modified);
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
+    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "C");
     CHECK(ed.active().modified);
@@ -858,7 +858,7 @@ TEST(e2e_08_filebrowser_open_edit_save_switch) {
 
     // Ctrl+K o: entrar al explorador, luego sembrar el directorio de arranque
     // (el explorador por defecto arranca en cwd; fijamos base/ para el test).
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('o'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::FileBrowser));
     ed.fileBrowser.path_ = base;                // sembrar dir inicial
@@ -873,9 +873,9 @@ TEST(e2e_08_filebrowser_open_edit_save_switch) {
     CHECK(!ed.fileBrowser.entries_[2].isDirectory);
 
     // navegar directorios: bajar a "beta/" y entrar.
-    press(ed, EventType::MoveDown);             // 0 -> 1 "beta/"
-    Event enter;
-    enter.type = EventType::InsertNewline;
+    press(ed, InputEventType::MoveDown);             // 0 -> 1 "beta/"
+    InputEvent enter;
+    enter.type = InputEventType::InsertNewline;
     ed.handleEvent(enter);                      // enter() -> entrar a beta/
     CHECK(ed.fileBrowser.path_ == dirBeta);
     CHECK_EQ(ed.fileBrowser.entries_.size(), 2u);
@@ -885,7 +885,7 @@ TEST(e2e_08_filebrowser_open_edit_save_switch) {
     CHECK(!ed.fileBrowser.entries_[1].isDirectory);
 
     // openFileInBuffer B: bajar a "gamma.txt" y Enter.
-    press(ed, EventType::MoveDown);             // 0 -> 1 "gamma.txt"
+    press(ed, InputEventType::MoveDown);             // 0 -> 1 "gamma.txt"
     ed.handleEvent(enter);                      // abrir archivo -> buffer B
     CHECK_EQ(ed.buffers.count(), 2);            // A + B
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -893,7 +893,7 @@ TEST(e2e_08_filebrowser_open_edit_save_switch) {
     CHECK(ed.active().filename == pathB);
 
     // editar B: anexar 'X'.
-    press(ed, EventType::MoveEnd);              // (0,3)
+    press(ed, InputEventType::MoveEnd);              // (0,3)
     type(ed, "X");                              // B = "BBBX"
     CHECK_EQ(ed.active().document.lineAt(0), "BBBX");
     CHECK(ed.active().modified);
@@ -904,9 +904,9 @@ TEST(e2e_08_filebrowser_open_edit_save_switch) {
     CHECK_EQ(readBytes(pathB), "BBBX\n");       // conservo el '\n' final de B
 
     // volver A: selector Ctrl+K t, subir, Enter.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, EventType::MoveUp);               // 1 -> 0 (A)
+    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
     CHECK(!ed.active().modified);
@@ -939,7 +939,7 @@ TEST(e2e_09_new_buffer_save_as_byte_exact) {
 
     Editor ed;
     // Ctrl+K n: buffer nuevo sin nombre, activo.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('n'));
     CHECK(ed.active().filename.empty());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -948,8 +948,8 @@ TEST(e2e_09_new_buffer_save_as_byte_exact) {
     // escribir el contenido: "Hola\nmundo".
     type(ed, "Hola");
     CHECK_EQ(ed.active().document.lineAt(0), "Hola");
-    Event nl;
-    nl.type = EventType::InsertNewline;
+    InputEvent nl;
+    nl.type = InputEventType::InsertNewline;
     ed.handleEvent(nl);                         // -> ["Hola", ""]
     type(ed, "mundo");                          // -> ["Hola", "mundo"]
     CHECK(ed.active().document.snapshot() ==
@@ -957,7 +957,7 @@ TEST(e2e_09_new_buffer_save_as_byte_exact) {
     CHECK(ed.active().modified);
 
     // Save As: Ctrl+K Ctrl+S -> prompt (buffer sin nombre).
-    prefix(ed, EventType::Prefix, EventType::Save);
+    prefix(ed, InputEventType::Prefix, InputEventType::Save);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
     ed.saveAsPath_.clear();
 
@@ -971,7 +971,7 @@ TEST(e2e_09_new_buffer_save_as_byte_exact) {
           (std::vector<std::string>{"Hola", "mundo"}));   // el texto se conserva
 
     // quit.
-    prefix(ed, EventType::Prefix, EventType::Quit);
+    prefix(ed, InputEventType::Prefix, InputEventType::Quit);
     CHECK(!ed.running_);
 
     // verificar filesystem: el archivo fue creado en disco con los bytes.
@@ -1002,14 +1002,14 @@ TEST(e2e_10_new_buffer_save_as_cancel_keeps_state) {
 
     Editor ed;
     // Ctrl+K n: buffer nuevo sin nombre, activo.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('n'));
     CHECK(ed.active().filename.empty());
 
     // escribir "Hola\nmundo".
     type(ed, "Hola");
-    Event nl;
-    nl.type = EventType::InsertNewline;
+    InputEvent nl;
+    nl.type = InputEventType::InsertNewline;
     ed.handleEvent(nl);
     type(ed, "mundo");
     CHECK(ed.active().document.snapshot() ==
@@ -1018,13 +1018,13 @@ TEST(e2e_10_new_buffer_save_as_cancel_keeps_state) {
     CHECK_EQ(ed.active().cursor.col, 5);        // fin de "mundo" (1,5)
 
     // Save As: Ctrl+K Ctrl+S -> prompt.
-    prefix(ed, EventType::Prefix, EventType::Save);
+    prefix(ed, InputEventType::Prefix, InputEventType::Save);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
 
     // elegir algo de ruta y luego cancelar con Esc (no llega a confirmarse).
     for (char c : f.path)
         ed.handleEvent(insert(c));
-    press(ed, EventType::Escape);               // cancela el prompt
+    press(ed, InputEventType::Escape);               // cancela el prompt
 
     // El estado se CONSERVA: volvio al modo previo (Interaccion), el buffer
     // sigue sin nombre, con su texto intacto y sigue modificado.
@@ -1036,14 +1036,14 @@ TEST(e2e_10_new_buffer_save_as_cancel_keeps_state) {
     CHECK_EQ(ed.active().cursor.col, 5);        // el cursor no se movio
 
     // seguir editando: anexar '!' a "mundo".
-    press(ed, EventType::MoveEnd);              // (1,5)
+    press(ed, InputEventType::MoveEnd);              // (1,5)
     ed.handleEvent(insert('!'));                // -> "mundo!"
     CHECK(ed.active().document.snapshot() ==
           (std::vector<std::string>{"Hola", "mundo!"}));
     CHECK(ed.active().modified);
 
     // quit.
-    prefix(ed, EventType::Prefix, EventType::Quit);
+    prefix(ed, InputEventType::Prefix, InputEventType::Quit);
     CHECK(!ed.running_);
 
     // cancelar el Save As NO escribio nada: sin nombre y sin archivo creado.
@@ -1078,81 +1078,81 @@ TEST(e2e_11_buffer_selector_abc_verify_states) {
 
     Editor ed;
     CHECK(ed.loadIntoActiveBuffer(fileA.path));             // buffer 0 = A
-    Event enter;
-    enter.type = EventType::InsertNewline;
+    InputEvent enter;
+    enter.type = InputEventType::InsertNewline;
 
     // B, C, D: buffer nuevo + escribir contenido.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('n'));
     type(ed, "BBB");                            // buffer 1 = B "BBB"
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('n'));
     type(ed, "CCC");                            // buffer 2 = C "CCC"
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('n'));
     type(ed, "DDD");                            // buffer 3 = D "DDD" (activo)
     CHECK_EQ(ed.buffers.count(), 4);
 
     // Activar A para arrancar el flujo desde el tope del selector.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));                // selector @ D(3)
-    press(ed, EventType::MoveUp);               // -> ...
-    press(ed, EventType::MoveUp);
-    press(ed, EventType::MoveUp);               // -> 0 (A)
+    press(ed, InputEventType::MoveUp);               // -> ...
+    press(ed, InputEventType::MoveUp);
+    press(ed, InputEventType::MoveUp);               // -> 0 (A)
     ed.handleEvent(enter);                      // activar A
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
 
     // ---- Ctrl+K t -> Down -> Down -> Enter: activar C (indice 2).
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::BufferSelector));
-    press(ed, EventType::MoveDown);             // 0 -> 1 (B)
-    press(ed, EventType::MoveDown);             // 1 -> 2 (C)
+    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
+    press(ed, InputEventType::MoveDown);             // 1 -> 2 (C)
     ed.handleEvent(enter);                      // activar C
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().document.lineAt(0), "CCC");
 
     // ---- editar C: anexar '!' -> "CCC!".
-    press(ed, EventType::MoveEnd);              // (0,3)
+    press(ed, InputEventType::MoveEnd);              // (0,3)
     type(ed, "!");                              // C = "CCC!"
     CHECK_EQ(ed.active().document.lineAt(0), "CCC!");
     CHECK(ed.active().modified);
 
     // ---- volver selector y elegir A.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));                // selector @ C(2)
-    press(ed, EventType::MoveUp);               // -> 1 (B)
-    press(ed, EventType::MoveUp);               // -> 0 (A)
+    press(ed, InputEventType::MoveUp);               // -> 1 (B)
+    press(ed, InputEventType::MoveUp);               // -> 0 (A)
     ed.handleEvent(enter);                      // activar A
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
     CHECK(!ed.active().modified);               // A intacto/no modificado
 
     // ---- volver a C: el buffer C conserva su edicion "CCC!".
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));                // selector @ A(0)
-    press(ed, EventType::MoveDown);             // -> 1 (B)
-    press(ed, EventType::MoveDown);             // -> 2 (C)
+    press(ed, InputEventType::MoveDown);             // -> 1 (B)
+    press(ed, InputEventType::MoveDown);             // -> 2 (C)
     ed.handleEvent(enter);                      // activar C
     CHECK_EQ(ed.active().document.lineAt(0), "CCC!");
     CHECK_EQ(ed.active().cursor.col, 4);        // cursor conservado (fin "CCC!")
 
     // ---- verificar todos los estados: B y D quedaron como estaban.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));                // selector @ C(2)
-    press(ed, EventType::MoveDown);             // -> 3 (D)
+    press(ed, InputEventType::MoveDown);             // -> 3 (D)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "DDD");
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));                // selector @ D(3)
-    press(ed, EventType::MoveUp);               // -> 2 (C)
-    press(ed, EventType::MoveUp);               // -> 1 (B)
+    press(ed, InputEventType::MoveUp);               // -> 2 (C)
+    press(ed, InputEventType::MoveUp);               // -> 1 (B)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "BBB");
 
     // de vuelta a C (el estado final pedido), aun con su edicion.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));                // selector @ B(1)
-    press(ed, EventType::MoveDown);             // -> 2 (C)
+    press(ed, InputEventType::MoveDown);             // -> 2 (C)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "CCC!");
     CHECK_EQ(ed.buffers.count(), 4);            // nadie se perdio
@@ -1211,25 +1211,25 @@ TEST(e2e_12_binary_bytes_00_to_ff_roundtrip) {
 
     // move: ejercitar el cursor sobre bytes arbitrarios (incluidos 0x80..0xFF).
     // La linea 0 es 0x00..0x09 y la linea 1 es 0x0B..0xFF; hay que llegar a >=0x80.
-    press(ed, EventType::MoveEnd);   // (0,10) fin linea 0
-    press(ed, EventType::MoveDown);  // (1,10) ~0x15 en linea 1
-    press(ed, EventType::MoveHome);  // (1,0) -> 0x0B
-    press(ed, EventType::MoveRight); // (1,1) -> 0x0C
+    press(ed, InputEventType::MoveEnd);   // (0,10) fin linea 0
+    press(ed, InputEventType::MoveDown);  // (1,10) ~0x15 en linea 1
+    press(ed, InputEventType::MoveHome);  // (1,0) -> 0x0B
+    press(ed, InputEventType::MoveRight); // (1,1) -> 0x0C
     CHECK_EQ(b.cursor.line, 1);
     CHECK_EQ(b.cursor.col, 1);
-    for (int i = 0; i < 116; ++i) press(ed, EventType::MoveRight); // (1,117) -> 0x80
+    for (int i = 0; i < 116; ++i) press(ed, InputEventType::MoveRight); // (1,117) -> 0x80
     CHECK_EQ(b.cursor.col, 117);
     CHECK_EQ(static_cast<unsigned char>(b.document.lineAt(1)[117]), static_cast<unsigned char>(0x80));
-    for (int i = 0; i < 10; ++i) press(ed, EventType::MoveRight); // recorre zona alta
+    for (int i = 0; i < 10; ++i) press(ed, InputEventType::MoveRight); // recorre zona alta
     CHECK_EQ(b.cursor.col, 127);
-    press(ed, EventType::MoveEnd); // (1,245) fin linea 1
+    press(ed, InputEventType::MoveEnd); // (1,245) fin linea 1
     CHECK_EQ(b.cursor.col, b.document.lineLength(1));
     CHECK_EQ(serialize(), content);
 
     // edit: insertar el byte crudo 0xE9 (secuencia UTF-8 incompleta), bien en Interaccion.
     ed.handleEvent(insert('i'));                 // entrar a Interaccion
-    Event raw;
-    raw.type = EventType::InsertChar;
+    InputEvent raw;
+    raw.type = InputEventType::InsertChar;
     raw.text = std::string(1, static_cast<char>(0xE9));
     ed.handleEvent(raw);                         // insertar 0xE9
     CHECK(b.modified);
@@ -1249,7 +1249,7 @@ TEST(e2e_12_binary_bytes_00_to_ff_roundtrip) {
     }
 
     // undo: restaurar el documento exacto (incluida la cola sin \n).
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(b.modified);
     CHECK_EQ(serialize(), content);
 
@@ -1283,11 +1283,11 @@ TEST(e2e_13_save_error_invalid_path) {
     TempFile f;                                 // ruta valida de recuperacion
 
     Editor ed;
-    Event nl;
-    nl.type = EventType::InsertNewline;
+    InputEvent nl;
+    nl.type = InputEventType::InsertNewline;
 
     // buffer nuevo (sin nombre) y escribir contenido.
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('n'));
     CHECK(ed.active().filename.empty());
     type(ed, "AAA_world");                       // -> Interaccion
@@ -1295,7 +1295,7 @@ TEST(e2e_13_save_error_invalid_path) {
     CHECK(ed.active().modified);
 
     // Save As a una ruta invalida: Ctrl+K Ctrl+S -> escribir path -> Enter.
-    prefix(ed, EventType::Prefix, EventType::Save);
+    prefix(ed, InputEventType::Prefix, InputEventType::Save);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
     ed.saveAsPath_.clear();
     for (char c : badPath)
@@ -1314,12 +1314,12 @@ TEST(e2e_13_save_error_invalid_path) {
 
     // editor sigue funcionando: ESC sale del prompt (vuelve a priorState_,
     // que aqui es Interaccion, porque la edicion se hizo con type)...
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
     CHECK_EQ(ed.active().document.lineAt(0), "AAA_world");   // intacto
 
     // ...y un Save As a una ruta VALIDA termina en disco ya sin error.
-    prefix(ed, EventType::Prefix, EventType::Save);
+    prefix(ed, InputEventType::Prefix, InputEventType::Save);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
     ed.saveAsPath_.clear();
     for (char c : f.path)
@@ -1388,19 +1388,19 @@ TEST(e2e_14_filebrowser_open_error_preserves_state) {
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
 
     // editar: crear historial de undo/redo (sin guardar) - sin coalescing.
-    press(ed, EventType::MoveEnd);              // (0,3)
+    press(ed, InputEventType::MoveEnd);              // (0,3)
     type(ed, "XYZ");                            // -> "AAAXYZ"
     CHECK_EQ(ed.active().document.lineAt(0), "AAAXYZ");
     CHECK(ed.active().modified);
     CHECK_EQ(ed.active().undoStack.size(), 3u); // verifica contrato: 3 ediciones por caracter
 
     // seleccionar "XY": ESC a Navegacion, 's' (anchor=cursor), MoveLeft x2.
-    press(ed, EventType::Escape);               // Interaccion -> Navegacion
+    press(ed, InputEventType::Escape);               // Interaccion -> Navegacion
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     ed.handleEvent(insert('s'));                // Seleccion, anchor=(0,6)
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
-    press(ed, EventType::MoveLeft);             // position -> (0,5)
-    press(ed, EventType::MoveLeft);             // position -> (0,4)
+    press(ed, InputEventType::MoveLeft);             // position -> (0,5)
+    press(ed, InputEventType::MoveLeft);             // position -> (0,4)
     CHECK(ed.hasSelection());
 
     // recordar el estado previo, para comparar que nada cambia.
@@ -1412,7 +1412,7 @@ TEST(e2e_14_filebrowser_open_error_preserves_state) {
     const auto posBefore = ed.active().selection->position;
 
     // Ctrl+K o: abrir el FileBrowser y sembrar base/ (ver E2E-08).
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('o'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::FileBrowser));
     ed.fileBrowser.path_ = base;
@@ -1427,10 +1427,10 @@ TEST(e2e_14_filebrowser_open_error_preserves_state) {
     CHECK(!ed.fileBrowser.entries_[2].isDirectory);
 
     // intentar abrir el archivo sin permisos.
-    Event enter;
-    enter.type = EventType::InsertNewline;
-    press(ed, EventType::MoveDown);             // 0 -> 1 "alpha.txt"
-    press(ed, EventType::MoveDown);             // 1 -> 2 "no_perm.txt"
+    InputEvent enter;
+    enter.type = InputEventType::InsertNewline;
+    press(ed, InputEventType::MoveDown);             // 0 -> 1 "alpha.txt"
+    press(ed, InputEventType::MoveDown);             // 1 -> 2 "no_perm.txt"
     ed.handleEvent(enter);                      // Enter: intenta abrir
 
     // --- error visible, editor vivo, nada cambio ---
@@ -1446,20 +1446,20 @@ TEST(e2e_14_filebrowser_open_error_preserves_state) {
     CHECK_EQ(ed.active().redoStack.size(), 0u);
 
     // historial intacto: undo por caracter -> "AAA", redo -> "AAAXYZ".
-    press(ed, EventType::Escape);               // FileBrowser -> Seleccion
+    press(ed, InputEventType::Escape);               // FileBrowser -> Seleccion
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());                   // seleccion intacta
     CHECK(ed.active().selection->anchor == anchorBefore);
     CHECK(ed.active().selection->position == posBefore);
 
-    press(ed, EventType::Escape);               // Seleccion -> Navegacion
+    press(ed, InputEventType::Escape);               // Seleccion -> Navegacion
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     // historial intacto: undo por caracter -> "AAA", redo -> "AAAXYZ".
     for (int i = 0; i < 3; ++i)
-        press(ed, EventType::Undo);
+        press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
     for (int i = 0; i < 3; ++i)
-        press(ed, EventType::Redo);
+        press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "AAAXYZ");
     CHECK(ed.active().filename == pathA);       // nunca se cambio de buffer
 }
@@ -1483,14 +1483,14 @@ TEST(e2e_15_indent_selection_save_byte_exact) {
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     ed.handleEvent(insert('s'));               // entrar a Seleccion (anchor 0,0)
-    press(ed, EventType::MoveDown);            // (1,0)
-    press(ed, EventType::MoveRight);           // (1,1): seleccion lineas 0..1
+    press(ed, InputEventType::MoveDown);            // (1,0)
+    press(ed, InputEventType::MoveRight);           // (1,1): seleccion lineas 0..1
     ed.handleEvent(insert('}'));               // tabular las lineas 0..1
     CHECK_EQ(ed.active().document.lineAt(0), "    aaa");
     CHECK_EQ(ed.active().document.lineAt(1), "    bbb");
     CHECK_EQ(ed.active().document.lineAt(2), "ccc");   // fuera del rango
 
-    press(ed, EventType::Escape);              // -> Navegacion
+    press(ed, InputEventType::Escape);              // -> Navegacion
     saveViaS(ed);
 
     CHECK_EQ(readBytes(f.path), "    aaa\n    bbb\nccc\n");
@@ -1530,16 +1530,16 @@ TEST(e2e_16_delete_to_empty_and_save_byte_exact) {
     };
 
     // borrar todo: MoveEnd + entrar a Interaccion + 3x Backspace -> ""
-    press(ed, EventType::MoveEnd);              // (0,3)
+    press(ed, InputEventType::MoveEnd);              // (0,3)
     CHECK_EQ(ed.active().cursor.col, 3);
     ed.handleEvent(insert('i'));                // Navegacion -> Interaccion
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineAt(0), "ab");
     CHECK(ed.active().modified);
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineAt(0), "a");
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().cursor.line, 0);
@@ -1559,7 +1559,7 @@ TEST(e2e_16_delete_to_empty_and_save_byte_exact) {
     CHECK_EQ(ed.active().document.lineCount(), 1);
 
     // quit: Ctrl+K Ctrl+Q -> running=false (no bloqueado)
-    prefix(ed, EventType::Prefix, EventType::Quit);
+    prefix(ed, InputEventType::Prefix, InputEventType::Quit);
     CHECK(!ed.running_);
     CHECK_EQ(readBytes(f.path), afterDelete);
 }
@@ -1582,10 +1582,10 @@ TEST(e2e_18_backward_selection_delete_replace_undo) {
     CHECK(ed.active().document.snapshot() == original);
 
     // ---- backward single-line delete: anchor 8 > position 3 -> [3,8) "lo wo"
-    for (int i = 0; i < 8; ++i) press(ed, EventType::MoveRight); // (0,8) 'r'
+    for (int i = 0; i < 8; ++i) press(ed, InputEventType::MoveRight); // (0,8) 'r'
     ed.handleEvent(insert('s')); // anchor (0,8)
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
-    for (int i = 0; i < 5; ++i) press(ed, EventType::MoveLeft); // (0,3)
+    for (int i = 0; i < 5; ++i) press(ed, InputEventType::MoveLeft); // (0,3)
     CHECK(ed.hasSelection());
     CHECK_EQ(ed.active().selection->anchor.col, 8);
     CHECK_EQ(ed.active().selection->position.col, 3);
@@ -1598,38 +1598,38 @@ TEST(e2e_18_backward_selection_delete_replace_undo) {
         CHECK_EQ(sel->start.col, 3);
         CHECK_EQ(sel->end.col, 8);
     }
-    press(ed, EventType::Delete);
+    press(ed, InputEventType::Delete);
     CHECK_EQ(ed.active().document.lineAt(0), "helrld");
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"helrld", "second line", "third line"}));
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().cursor.col, 3);
     // undo restaura texto + seleccion backward exacta
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(ed.active().document.snapshot() == original);
     CHECK(ed.hasSelection());
     CHECK_EQ(ed.active().selection->anchor.col, 8);
     CHECK_EQ(ed.active().selection->position.col, 3);
     CHECK_EQ(ed.active().cursor.col, 3);
     // redo reproduce borrado
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "helrld");
     CHECK(!ed.hasSelection());
     // undo de nuevo para fase replace
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(ed.active().document.snapshot() == original);
     CHECK(ed.hasSelection());
     // Escape limpia para siguiente fase
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(!ed.hasSelection());
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 
     // ---- backward single-line replace: mismo rango [3,8) reemplazado por "XYZ"
     // reconstruir seleccion backward
-    press(ed, EventType::MoveHome); // (0,0)
-    for (int i = 0; i < 8; ++i) press(ed, EventType::MoveRight); // (0,8)
+    press(ed, InputEventType::MoveHome); // (0,0)
+    for (int i = 0; i < 8; ++i) press(ed, InputEventType::MoveRight); // (0,8)
     ed.handleEvent(insert('s')); // anchor 8
-    for (int i = 0; i < 5; ++i) press(ed, EventType::MoveLeft); // (0,3)
+    for (int i = 0; i < 5; ++i) press(ed, InputEventType::MoveLeft); // (0,3)
     CHECK_EQ(ed.active().selection->anchor.col, 8);
     CHECK_EQ(ed.active().selection->position.col, 3);
     // primer caracter reemplaza y abre grupo coalescente
@@ -1644,22 +1644,22 @@ TEST(e2e_18_backward_selection_delete_replace_undo) {
     CHECK_EQ(ed.active().undoStack.size(), afterX); // coalescido
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
     // undo del replace restaura seleccion backward
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(ed.active().document.snapshot() == original);
     CHECK(ed.hasSelection());
     CHECK_EQ(ed.active().selection->anchor.col, 8);
     CHECK_EQ(ed.active().selection->position.col, 3);
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(!ed.hasSelection());
 
     // ---- backward multiline delete: anchor (2,3) > position (0,3) -> [0,3)-(2,3)
-    press(ed, EventType::MoveDown); // (1,3)
-    press(ed, EventType::MoveDown); // (2,3)
+    press(ed, InputEventType::MoveDown); // (1,3)
+    press(ed, InputEventType::MoveDown); // (2,3)
     CHECK_EQ(ed.active().cursor.line, 2);
     CHECK_EQ(ed.active().cursor.col, 3);
     ed.handleEvent(insert('s')); // anchor (2,3)
-    press(ed, EventType::MoveUp); // (1,3)
-    press(ed, EventType::MoveUp); // (0,3)
+    press(ed, InputEventType::MoveUp); // (1,3)
+    press(ed, InputEventType::MoveUp); // (0,3)
     CHECK(ed.hasSelection());
     CHECK_EQ(ed.active().selection->anchor.line, 2);
     CHECK_EQ(ed.active().selection->anchor.col, 3);
@@ -1672,23 +1672,23 @@ TEST(e2e_18_backward_selection_delete_replace_undo) {
         CHECK_EQ(sel->end.line, 2);
         CHECK_EQ(sel->end.col, 3);
     }
-    press(ed, EventType::Delete);
+    press(ed, InputEventType::Delete);
     CHECK_EQ(ed.active().document.lineAt(0), "helrd line");
     CHECK_EQ(ed.active().document.lineCount(), 1);
     // borrar [0,3)-(2,3) sobre ["hello world","second line","third line"] deja una sola linea "hel" + "rd line"
     // undo multiline restaura
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(ed.active().document.snapshot() == original);
     CHECK(ed.hasSelection());
     CHECK_EQ(ed.active().selection->anchor.line, 2);
     CHECK_EQ(ed.active().selection->position.line, 0);
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "helrd line");
     CHECK(!ed.hasSelection());
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(ed.active().document.snapshot() == original);
     CHECK(ed.hasSelection());
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(!ed.hasSelection());
     CHECK(ed.active().document.snapshot() == original);
 }
@@ -1711,12 +1711,12 @@ TEST(e2e_19_line_merge_backspace_delete) {
     CHECK(!ed.active().modified);
 
     // ---- Backspace en (1,0) une "aaa" + "bbb" -> ["aaabbb","ccc"]
-    press(ed, EventType::MoveDown); // (1,0)
+    press(ed, InputEventType::MoveDown); // (1,0)
     CHECK_EQ(ed.active().cursor.line, 1);
     CHECK_EQ(ed.active().cursor.col, 0);
     ed.handleEvent(insert('i')); // Navegacion -> Interaccion
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineCount(), 2);
     CHECK_EQ(ed.active().document.lineAt(0), "aaabbb");
     CHECK_EQ(ed.active().document.lineAt(1), "ccc");
@@ -1725,28 +1725,28 @@ TEST(e2e_19_line_merge_backspace_delete) {
     CHECK(ed.active().modified);
     CHECK_EQ(ed.active().undoStack.size(), 1u);
     // undo -> vuelve a 3 líneas, cursor (1,0)
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(ed.active().document.snapshot() == original);
     CHECK_EQ(ed.active().cursor.line, 1);
     CHECK_EQ(ed.active().cursor.col, 0);
     CHECK(!ed.active().modified);
     // redo -> reunion
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "aaabbb");
     CHECK_EQ(ed.active().cursor.col, 3);
     // undo de nuevo para probar Delete
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(ed.active().document.snapshot() == original);
 
     // ---- Delete al final de línea 0 une "aaa" + "bbb" -> mismo resultado
     // cursor está en (1,0) tras undo; subir y ir al final de línea 0
-    press(ed, EventType::MoveUp); // (0,0)
-    press(ed, EventType::MoveEnd); // (0,3)
+    press(ed, InputEventType::MoveUp); // (0,0)
+    press(ed, InputEventType::MoveEnd); // (0,3)
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 3);
     ed.handleEvent(insert('i')); // entrar a Interaccion para Delete
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
-    press(ed, EventType::Delete);
+    press(ed, InputEventType::Delete);
     CHECK_EQ(ed.active().document.lineCount(), 2);
     CHECK_EQ(ed.active().document.lineAt(0), "aaabbb");
     CHECK_EQ(ed.active().document.lineAt(1), "ccc");
@@ -1754,11 +1754,11 @@ TEST(e2e_19_line_merge_backspace_delete) {
     CHECK_EQ(ed.active().cursor.col, 3);
     CHECK(ed.active().modified);
     // undo/redo del Delete
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(ed.active().document.snapshot() == original);
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 3);
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "aaabbb");
 
     // save byte-exacto: "aaabbb\nccc\n"
@@ -1768,11 +1768,11 @@ TEST(e2e_19_line_merge_backspace_delete) {
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"aaabbb", "ccc"}));
 
     // undo tras save -> vuelve a original pero modified=true
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(ed.active().document.snapshot() == original);
     CHECK(ed.active().modified);
     // redo -> merge de nuevo
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "aaabbb");
     CHECK(!ed.active().modified);
     CHECK_EQ(readBytes(f.path), "aaabbb\nccc\n");
@@ -1795,72 +1795,72 @@ TEST(e2e_20_utf8_backspace_delete) {
     CHECK(!ed.active().modified);
 
     // ---- cursor después de "ñ" (col 4) + Backspace -> borra "ñ" (2 bytes)
-    press(ed, EventType::MoveRight); // (0,1)
-    press(ed, EventType::MoveRight); // (0,2) inicio "ñ"
-    press(ed, EventType::MoveRight); // (0,4) después "ñ" (salta 2 bytes)
+    press(ed, InputEventType::MoveRight); // (0,1)
+    press(ed, InputEventType::MoveRight); // (0,2) inicio "ñ"
+    press(ed, InputEventType::MoveRight); // (0,4) después "ñ" (salta 2 bytes)
     CHECK_EQ(ed.active().cursor.col, 4);
     ed.handleEvent(insert('i')); // -> Interaccion
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineAt(0), "maana");
     CHECK_EQ(ed.active().document.lineAt(0).size(), 5u);
     CHECK_EQ(ed.active().cursor.col, 2);
     CHECK(ed.active().modified);
     CHECK_EQ(ed.active().undoStack.size(), 1u);
     // undo restaura "mañana" byte-exacto
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "ma" "\xC3\xB1" "ana");
     CHECK_EQ(ed.active().document.lineAt(0).size(), 7u);
     CHECK_EQ(ed.active().cursor.col, 4);
     CHECK(!ed.active().modified);
     // redo
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "maana");
     CHECK_EQ(ed.active().cursor.col, 2);
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "ma" "\xC3\xB1" "ana");
 
     // ---- cursor antes de "ñ" (col 2) + Delete -> borra "ñ"
-    press(ed, EventType::Escape); // Interaccion -> Navegacion
+    press(ed, InputEventType::Escape); // Interaccion -> Navegacion
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
-    press(ed, EventType::MoveHome); // (0,0)
-    press(ed, EventType::MoveRight); // (0,1)
-    press(ed, EventType::MoveRight); // (0,2) inicio "ñ"
+    press(ed, InputEventType::MoveHome); // (0,0)
+    press(ed, InputEventType::MoveRight); // (0,1)
+    press(ed, InputEventType::MoveRight); // (0,2) inicio "ñ"
     CHECK_EQ(ed.active().cursor.col, 2);
     ed.handleEvent(insert('i')); // -> Interaccion
-    press(ed, EventType::Delete);
+    press(ed, InputEventType::Delete);
     CHECK_EQ(ed.active().document.lineAt(0), "maana");
     CHECK_EQ(ed.active().cursor.col, 2);
     CHECK(ed.active().modified);
     // undo restaura
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "ma" "\xC3\xB1" "ana");
     CHECK_EQ(ed.active().cursor.col, 2);
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "maana");
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "ma" "\xC3\xB1" "ana");
     CHECK(!ed.active().modified);
 
     // ---- persistencia byte-exacta: borrar con Backspace y guardar
     // mover a después de "ñ" y borrar de nuevo
-    press(ed, EventType::Escape);
-    press(ed, EventType::MoveHome);
-    press(ed, EventType::MoveRight);
-    press(ed, EventType::MoveRight);
-    press(ed, EventType::MoveRight); // (0,4)
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::MoveHome);
+    press(ed, InputEventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
+    press(ed, InputEventType::MoveRight); // (0,4)
     ed.handleEvent(insert('i'));
-    press(ed, EventType::Backspace); // -> "maana"
+    press(ed, InputEventType::Backspace); // -> "maana"
     CHECK_EQ(ed.active().document.lineAt(0), "maana");
     saveViaS(ed);
     CHECK(!ed.active().modified);
     CHECK_EQ(readBytes(f.path), "maana\n");
     // undo tras save -> vuelve a "mañana" y modified=true
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "ma" "\xC3\xB1" "ana");
     CHECK(ed.active().modified);
     CHECK_EQ(readBytes(f.path), "maana\n");
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "maana");
     CHECK(!ed.active().modified);
 }

@@ -359,7 +359,7 @@ private:
     // primera fila —contenido— se trata como intencion por decision, ya que
     // el fuera hacia arriba no es reportable; abajo: solo el fuera real en
     // statusbar; el resto apaga); solo util durante el gesto de mouse.
-    std::optional<Position> resolveMouseDragPosition(int mouseRow, int mouseCol);
+    std::optional<Position> resolveMouseDragPosition(CellPos cell);
     // Aplica una posicion de drag a cursor+seleccion: primer drag efectivo
     // entra a Seleccion (o reinicia el rango), los siguientes extienden
     // selection.position. Cola compartida de handleMouseDrag y del tick.
@@ -447,12 +447,11 @@ private:
     enum class MouseAutoscrollDirection { None, Up, Down };
     MouseAutoscrollDirection mouseAutoscrollDirection_ =
         MouseAutoscrollDirection::None;
-    // Ultimo drag en zona de scroll (coords 1-based de terminal): fuera
-    // real por abajo (statusbar) o primera fila por sustitucion hacia
-    // arriba (ver DECISION en el bloque de armado). El tick lo re-ejecuta
+    // Ultimo drag en zona de scroll (celda 0-based): fuera real por
+    // abajo (statusbar) o primera fila por sustitucion hacia arriba
+    // (ver DECISION en el bloque de armado). El tick lo re-ejecuta
     // para dar un paso.
-    int mouseAutoscrollRow_ = 0;
-    int mouseAutoscrollCol_ = 0;
+    CellPos mouseAutoscrollCell_;
     // Oraculo del boton fisico (ver setter): por defecto "presionado".
     std::function<bool()> mouseButtonHeldOracle_ = [] { return true; };
     // Instante del ultimo paso (o del armado): el primer tick mueve solo

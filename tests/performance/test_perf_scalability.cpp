@@ -568,7 +568,7 @@ TEST(bench_perf_typing_render_cycle_checked) {
         ed.state_ = State::Interaccion;
         ed.renderer_.activeCache().setLanguage(SyntaxLanguage::Cpp);
         ed.renderer_.activeCache().ensureValid(ed.active().document, n);
-        Event e; e.type=EventType::InsertChar; e.text="a";
+        InputEvent e; e.type=InputEventType::InsertChar; e.text="a";
         int iters = n==1000?500 : n==10000?200 : 100;
         char label[64]; std::snprintf(label,sizeof(label),"typing cycle %5d",n);
         auto t0 = std::chrono::steady_clock::now();
@@ -580,7 +580,7 @@ TEST(bench_perf_typing_render_cycle_checked) {
                 std::string out = ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out.size();
                 // undo char to keep doc size stable
-                Event b; b.type=EventType::Backspace;
+                InputEvent b; b.type=InputEventType::Backspace;
                 ed.handleEvent(b);
                 std::string out2 = ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out2.size();
@@ -613,11 +613,11 @@ TEST(bench_perf_backspace_render_cycle_checked) {
         {
             alloc_stats::Scoped s(alloc_stats::kTyping);
             for (int i=0;i<iters;++i){
-                Event b; b.type=EventType::Backspace;
+                InputEvent b; b.type=InputEventType::Backspace;
                 ed.handleEvent(b);
                 std::string out = ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out.size();
-                Event e; e.type=EventType::InsertChar; e.text="x";
+                InputEvent e; e.type=InputEventType::InsertChar; e.text="x";
                 ed.handleEvent(e);
                 std::string out2 = ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out2.size();
@@ -643,7 +643,7 @@ TEST(bench_perf_handleEvent_insertChar_checked) {
         ed.state_ = State::Interaccion;
         ed.renderer_.activeCache().setLanguage(SyntaxLanguage::Cpp);
         ed.renderer_.activeCache().ensureValid(ed.active().document, n);
-        Event e; e.type=EventType::InsertChar; e.text="a";
+        InputEvent e; e.type=InputEventType::InsertChar; e.text="a";
         int iters = n==1000?1000 : n==10000?500 : 200;
         char label[64]; std::snprintf(label,sizeof(label),"handleEvent insert %5d",n);
         auto t0 = std::chrono::steady_clock::now();
@@ -653,7 +653,7 @@ TEST(bench_perf_handleEvent_insertChar_checked) {
             for (int i=0;i<iters;++i){
                 ed.handleEvent(e);
                 perf_time::g_sink += ed.active().cursor.col;
-                Event b; b.type=EventType::Backspace;
+                InputEvent b; b.type=InputEventType::Backspace;
                 ed.handleEvent(b);
                 perf_time::g_sink += ed.active().cursor.col;
             }
@@ -679,7 +679,7 @@ TEST(bench_perf_handleEvent_backspace_checked) {
         ed.renderer_.activeCache().setLanguage(SyntaxLanguage::Cpp);
         ed.renderer_.activeCache().ensureValid(ed.active().document, n);
         // preparar un char extra para poder borrar
-        Event ins; ins.type=EventType::InsertChar; ins.text="x";
+        InputEvent ins; ins.type=InputEventType::InsertChar; ins.text="x";
         ed.handleEvent(ins);
         int iters = n==1000?1000:500;
         char label[64]; std::snprintf(label,sizeof(label),"handleEvent bspace %5d",n);
@@ -688,10 +688,10 @@ TEST(bench_perf_handleEvent_backspace_checked) {
         {
             alloc_stats::Scoped s(alloc_stats::kTyping);
             for (int i=0;i<iters;++i){
-                Event b; b.type=EventType::Backspace;
+                InputEvent b; b.type=InputEventType::Backspace;
                 ed.handleEvent(b);
                 perf_time::g_sink += ed.active().cursor.col;
-                Event e; e.type=EventType::InsertChar; e.text="x";
+                InputEvent e; e.type=InputEventType::InsertChar; e.text="x";
                 ed.handleEvent(e);
                 perf_time::g_sink += ed.active().cursor.col;
             }
@@ -723,10 +723,10 @@ TEST(bench_perf_move_left_right_checked) {
         {
             alloc_stats::Scoped s(alloc_stats::kOther);
             for (int i=0;i<iters;++i){
-                ed.handleEvent(moveEvent(EventType::MoveLeft));
+                ed.handleEvent(moveEvent(InputEventType::MoveLeft));
                 std::string out = ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out.size();
-                ed.handleEvent(moveEvent(EventType::MoveRight));
+                ed.handleEvent(moveEvent(InputEventType::MoveRight));
                 std::string out2 = ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out2.size();
             }
@@ -759,10 +759,10 @@ TEST(bench_perf_page_up_down_render_cycle_checked) {
         {
             alloc_stats::Scoped s(alloc_stats::kOther);
             for (int i=0;i<iters;++i){
-                ed.handleEvent(moveEvent(EventType::PageUp));
+                ed.handleEvent(moveEvent(InputEventType::PageUp));
                 std::string out = ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out.size();
-                ed.handleEvent(moveEvent(EventType::PageDown));
+                ed.handleEvent(moveEvent(InputEventType::PageDown));
                 std::string out2 = ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out2.size();
             }
@@ -796,7 +796,7 @@ TEST(bench_perf_scroll_checked) {
         {
             alloc_stats::Scoped s(alloc_stats::kOther);
             for (int i=0;i<iters;++i){
-                ed.handleEvent(moveEvent(EventType::MoveDown));
+                ed.handleEvent(moveEvent(InputEventType::MoveDown));
                 std::string out = ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out.size();
             }
@@ -835,7 +835,7 @@ TEST(bench_perf_insert_line_checked) {
                 auto s = std::chrono::steady_clock::now();
                 {
                     alloc_stats::Scoped sc(alloc_stats::kOther);
-                    ed.handleEvent(moveEvent(EventType::InsertNewline));
+                    ed.handleEvent(moveEvent(InputEventType::InsertNewline));
                     perf_time::g_sink += ed.active().document.lineCount();
                 }
                 auto e = std::chrono::steady_clock::now();
@@ -873,7 +873,7 @@ TEST(bench_perf_insert_line_render_cycle_checked) {
                 auto s = std::chrono::steady_clock::now();
                 {
                     alloc_stats::Scoped sc(alloc_stats::kOther);
-                    ed.handleEvent(moveEvent(EventType::InsertNewline));
+                    ed.handleEvent(moveEvent(InputEventType::InsertNewline));
                     std::string out = ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                     perf_time::g_sink += out.size();
                 }
@@ -881,7 +881,7 @@ TEST(bench_perf_insert_line_render_cycle_checked) {
                 total_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(e-s).count();
                 auto st = alloc_stats::statsFor(alloc_stats::kGlobal);
                 total_allocs += st.allocs; total_bytes += st.bytesAllocated;
-                ed.handleEvent(moveEvent(EventType::Undo));
+                ed.handleEvent(moveEvent(InputEventType::Undo));
             }
             double us = (double)total_ns/iters/1000.0;
             perf_arch::reportVerbose("%-48s %6d iters  %8.1f us/op  %6lld allocs/op  %8lld bytes/op\n", label, iters, us, total_allocs/iters, total_bytes/iters);
@@ -909,13 +909,13 @@ TEST(bench_perf_undo_checked) {
                 ed.state_ = State::Interaccion;
                 ed.active().cursor.line = line;
                 ed.active().cursor.col = 0;
-                ed.handleEvent(moveEvent(EventType::InsertNewline));
+                ed.handleEvent(moveEvent(InputEventType::InsertNewline));
                 // medir solo undo
                 alloc_stats::resetAll();
                 auto s = std::chrono::steady_clock::now();
                 {
                     alloc_stats::Scoped sc(alloc_stats::kOther);
-                    ed.handleEvent(moveEvent(EventType::Undo));
+                    ed.handleEvent(moveEvent(InputEventType::Undo));
                 }
                 auto e = std::chrono::steady_clock::now();
                 total_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(e-s).count();
@@ -993,17 +993,17 @@ TEST(bench_perf_editor_large_cpp_checked) {
             for (int i=0;i<cycles;++i){
                 // load already done
                 // move
-                ed.handleEvent(moveEvent(EventType::MoveLeft));
+                ed.handleEvent(moveEvent(InputEventType::MoveLeft));
                 ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 // insert char
-                Event e; e.type=EventType::InsertChar; e.text="a";
+                InputEvent e; e.type=InputEventType::InsertChar; e.text="a";
                 ed.handleEvent(e);
                 ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 // left/right
-                ed.handleEvent(moveEvent(EventType::MoveRight));
+                ed.handleEvent(moveEvent(InputEventType::MoveRight));
                 ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 // page down
-                ed.handleEvent(moveEvent(EventType::PageDown));
+                ed.handleEvent(moveEvent(InputEventType::PageDown));
                 ed.renderer_.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 // bracket match
                 Position bpos{ed.active().cursor.line, ed.active().cursor.col};

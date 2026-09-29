@@ -11,19 +11,18 @@
 namespace {
 const auto kStep = Editor::kMouseAutoscrollInterval;
 
-Event pressAt(int col, int row) {
-    Event e;
-    e.type = EventType::MousePress;
-    e.mouseCol = col;
-    e.mouseRow = row;
+// Helpers con firma en dominio SGR 1-based; conversión a 0-based acá.
+InputEvent pressAt(int col, int row) {
+    InputEvent e;
+    e.type = InputEventType::MousePress;
+    e.cell = CellPos{col - 1, row - 1};
     return e;
 }
 
-Event dragAt(int col, int row) {
-    Event e;
-    e.type = EventType::MouseDrag;
-    e.mouseCol = col;
-    e.mouseRow = row;
+InputEvent dragAt(int col, int row) {
+    InputEvent e;
+    e.type = InputEventType::MouseDrag;
+    e.cell = CellPos{col - 1, row - 1};
     return e;
 }
 

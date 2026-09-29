@@ -22,8 +22,6 @@
 //   CommandMap = traducción de intención/comando a acción de aplicación.
 //   El teclado siempre pasa por InputEvent; un botón GUI llama a
 //   Editor::executeCommand(nombre) sin sintetizar Prefix ni teclas.
-// Compatibilidad transitoria: Event/EventType son alias (ver
-// platform/Event.h). El código nuevo usa estos nombres.
 enum class InputEventType {
     None,
     InsertChar,
@@ -66,10 +64,8 @@ enum class InputEventType {
     // Busqueda se ignora (no rompe el modo).
     ScrollUp,
     ScrollDown,
-    // Click izquierdo (press SGR `...M`). Fase 1: solo existe el press del
-    // boton izquierdo; release (`...m`), medio/derecho, drag y motion se
-    // traducen a None. Las coordenadas van en mouseRow/mouseCol (1-based
-    // de terminal), nunca en `text`.
+    // Click izquierdo (press SGR `...M`). Botones medio/derecho y motion
+    // se traducen a None. La celda va en `cell` (0-based), nunca en `text`.
     MousePress,
     // Arrastre con boton izquierdo (SGR Cb=32 + 'M', con ?1002h). Solo se
     // emite mientras un press previo lo armo (mouseGestureActive_); el Editor
@@ -94,23 +90,13 @@ struct InputEvent {
     // multibyte (2-4 bytes, p.ej. "á", "ñ", "—", "😀"). Asi el Editor
     // recibee el caracter completo, no byte por byte.
     std::string text;
-    // DEPRECATED-transición (Fase A, shim en tests/helpers/event_shim.h):
-    // estos int exponen transporte TTY (formato SGR 1-based). Se conservan
-    // solo para compat temporal; el código nuevo usa CellPos vía
-    // cellPos()/setCellPos() o las fábricas de MouseEvent.h. No agregar
-    // más campos de transporte aquí. En la migración a CellPos 0-based
-    // estos campos desaparecen.
-    // Coordenadas 1-based de terminal, solo validas si type == MousePress,
-    // MouseDrag o MouseRelease.
-    // (columna, fila) tal como las emite SGR (Cx, Cy).
-    int mouseCol = 0;
-    int mouseRow = 0;
+    // Celda del evento, solo válida si type == MousePress, MouseDrag o
+    // MouseRelease. Dominio neutro 0-based (CellPos): el decoder TTY
+    // convierte SGR restando 1; el código común nunca ve 1-based.
+    CellPos cell;
     // Tamaño nuevo, solo válido si type == Resize.
     int resizeCols = 0;
     int resizeRows = 0;
-    // Vista común (Frontier 1): misma coordenada que mouseCol/Row.
-    CellPos cellPos() const { return CellPos{mouseCol, mouseRow}; }
-    void setCellPos(CellPos p) { mouseCol = p.col; mouseRow = p.row; }
     // Nota: desde v0.3 no hay campo "shift". La seleccion no depende del
     // modificador Shift (que cada terminal emite de forma distinta); la
     // entrada a seleccion se hace con la letra 's' en modo Navegacion.

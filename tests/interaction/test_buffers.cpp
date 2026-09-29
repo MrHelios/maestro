@@ -33,23 +33,23 @@ TEST(buffers_isolate_documents) {
 TEST(buffers_isolate_undo_history) {
     Editor ed;
     type(ed, "hola");          // B0: h,ho,hol,hola -> 4 entradas
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);             // B1 activo
     type(ed, "mundo");         // B1: 5 entradas
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(ed.buffers.buffers_[0].undoStack.size(), size_t(4));
     CHECK_EQ(ed.buffers.buffers_[1].undoStack.size(), size_t(5));
 
     // Undo en B1 no toca el historial de B0.
     ed.activateBuffer(1);
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "mund");
     CHECK_EQ(ed.buffers.buffers_[1].undoStack.size(), size_t(4));
 
     ed.activateBuffer(0);
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
     CHECK_EQ(ed.buffers.buffers_[0].undoStack.size(), size_t(4));
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK_EQ(ed.active().document.lineAt(0), "hol");
 
     // Volver a B1: sigue en "mund" con su propia pila.
@@ -61,23 +61,23 @@ TEST(buffers_isolate_undo_history) {
 TEST(buffers_isolate_redo_history) {
     Editor ed;
     type(ed, "hola");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     type(ed, "mundo");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
 
     ed.activateBuffer(1);
-    press(ed, EventType::Undo);
-    press(ed, EventType::Undo);
+    press(ed, InputEventType::Undo);
+    press(ed, InputEventType::Undo);
     CHECK(!ed.buffers.buffers_[1].redoStack.empty());
 
     ed.activateBuffer(0);
     CHECK(ed.buffers.buffers_[0].redoStack.empty());  // B0 no tiene redo propio
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "hola"); // no-op en B0
 
     ed.activateBuffer(1);
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::Redo);
     CHECK_EQ(ed.active().document.lineAt(0), "mund");
     CHECK_EQ(ed.buffers.buffers_[0].document.lineAt(0), "hola");
 }
@@ -85,15 +85,15 @@ TEST(buffers_isolate_redo_history) {
 TEST(buffers_isolate_cursor_and_preferred_col) {
     Editor ed;
     type(ed, "hola mundo");
-    press(ed, EventType::MoveHome);
-    press(ed, EventType::MoveRight);
-    press(ed, EventType::MoveRight);   // B0 cursor col 2
+    press(ed, InputEventType::MoveHome);
+    press(ed, InputEventType::MoveRight);
+    press(ed, InputEventType::MoveRight);   // B0 cursor col 2
     const int col0 = ed.active().cursor.col;
     CHECK_EQ(col0, 2);
 
     newBuffer(ed);
     type(ed, "xyz");
-    press(ed, EventType::MoveEnd);     // B1 cursor col 3
+    press(ed, InputEventType::MoveEnd);     // B1 cursor col 3
     const int col1 = ed.active().cursor.col;
     CHECK_EQ(col1, 3);
 
@@ -116,10 +116,10 @@ TEST(buffers_isolate_cursor_and_preferred_col) {
 TEST(buffers_isolate_selection) {
     Editor ed;
     type(ed, "abcdef");
-    press(ed, EventType::Escape);
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::MoveHome);
     pressEvent(ed, insert('s'));            // modo seleccion
-    press(ed, EventType::MoveRight);   // selecciona "a"
+    press(ed, InputEventType::MoveRight);   // selecciona "a"
     CHECK(ed.hasSelection());
     CHECK(ed.buffers.buffers_[0].selection.has_value());
 
@@ -136,8 +136,8 @@ TEST(buffers_isolate_selection) {
 TEST(buffers_isolate_select_all) {
     Editor ed;
     type(ed, "abcdef");
-    press(ed, EventType::Escape);
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::MoveHome);
     pressEvent(ed, insert('s'));
     pressEvent(ed, insert('a'));            // seleccion total en B0
     CHECK(ed.buffers.buffers_[0].selectAllActive);
@@ -205,10 +205,10 @@ TEST(buffer_display_name_uses_filename_when_present) {
 TEST(clipboard_global_across_buffers) {
     Editor ed;
     type(ed, "abc");
-    press(ed, EventType::Escape);
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::MoveHome);
     pressEvent(ed, insert('s'));
-    press(ed, EventType::MoveRight);   // [a]
+    press(ed, InputEventType::MoveRight);   // [a]
     pressEvent(ed, insert('c'));            // copia "a" -> Navegacion
     CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"a"}));
 
@@ -306,13 +306,13 @@ TEST(ctrl_k_n_names_are_session_global) {
 
     // Cerrar el primero (SinNombre) via selector + w.
     openSelector(ed);
-    press(ed, EventType::MoveUp);
-    press(ed, EventType::MoveUp);          // index 0
-    press(ed, EventType::InsertNewline);   // activar SinNombre
+    press(ed, InputEventType::MoveUp);
+    press(ed, InputEventType::MoveUp);          // index 0
+    press(ed, InputEventType::InsertNewline);   // activar SinNombre
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
     closeBuffer(ed);                       // cerrar SinNombre (sin modificar)
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
-    press(ed, EventType::Escape);          // salir del selector
+    press(ed, InputEventType::Escape);          // salir del selector
 
     // El contador NO reutiliza nombres: el siguiente es SinNombre3.
     newBuffer(ed);
@@ -331,15 +331,15 @@ TEST(ctrl_k_t_opens_selector_on_active) {
     CHECK_EQ(ed.bufferSelectorIndex_, 2);
     CHECK_EQ(ed.buffers.activeBuffer_, 2);         // el activo no cambia al abrir
 
-    press(ed, EventType::MoveUp);
+    press(ed, InputEventType::MoveUp);
     CHECK_EQ(ed.bufferSelectorIndex_, 1);
-    press(ed, EventType::MoveDown);
+    press(ed, InputEventType::MoveDown);
     CHECK_EQ(ed.bufferSelectorIndex_, 2);
-    press(ed, EventType::MoveDown);        // clamp abajo
+    press(ed, InputEventType::MoveDown);        // clamp abajo
     CHECK_EQ(ed.bufferSelectorIndex_, 2);
-    press(ed, EventType::MoveUp);
-    press(ed, EventType::MoveUp);
-    press(ed, EventType::MoveUp);          // clamp arriba
+    press(ed, InputEventType::MoveUp);
+    press(ed, InputEventType::MoveUp);
+    press(ed, InputEventType::MoveUp);          // clamp arriba
     CHECK_EQ(ed.bufferSelectorIndex_, 0);
 }
 
@@ -349,8 +349,8 @@ TEST(ctrl_k_t_enter_switches_buffer) {
     newBuffer(ed);
     type(ed, "mundo");                     // B1 activo
     openSelector(ed);
-    press(ed, EventType::MoveUp);          // seleccionar B0
-    press(ed, EventType::InsertNewline);   // Enter
+    press(ed, InputEventType::MoveUp);          // seleccionar B0
+    press(ed, InputEventType::InsertNewline);   // Enter
     CHECK(ed.state_ == State::Navegacion);
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
@@ -359,12 +359,12 @@ TEST(ctrl_k_t_enter_switches_buffer) {
 TEST(ctrl_k_t_escape_returns_to_previous_buffer_and_mode) {
     Editor ed;
     type(ed, "hola");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     type(ed, "mundo");                     // B1 activo en Interaccion
     openSelector(ed);
     CHECK(ed.state_ == State::BufferSelector);
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.state_ == State::Interaccion); // vuelve al modo previo
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK_EQ(ed.active().document.lineAt(0), "mundo");
@@ -382,9 +382,9 @@ TEST(ctrl_k_t_other_keys_are_noop) {
     pressEvent(ed, insert('x'));
     pressEvent(ed, insert('p'));
     pressEvent(ed, insert('j'));
-    press(ed, EventType::MoveRight);
-    press(ed, EventType::Undo);
-    press(ed, EventType::Redo);
+    press(ed, InputEventType::MoveRight);
+    press(ed, InputEventType::Undo);
+    press(ed, InputEventType::Redo);
     CHECK(ed.state_ == State::BufferSelector);
     CHECK_EQ(ed.bufferSelectorIndex_, 2);
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(3));
@@ -396,9 +396,9 @@ TEST(ctrl_k_t_already_in_selector_is_noop) {
     newBuffer(ed);
     openSelector(ed);
     CHECK(ed.state_ == State::BufferSelector);
-    press(ed, EventType::Prefix);          // Ctrl+K dentro del selector
+    press(ed, InputEventType::Prefix);          // Ctrl+K dentro del selector
     CHECK(ed.state_ == State::BufferSelector); // no hay segunda capa
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.state_ == State::Navegacion);
 }
 
@@ -424,12 +424,12 @@ TEST(ctrl_k_t_single_buffer_message) {
 TEST(ctrl_k_t_return_same_buffer_preserves_selection) {
     Editor ed;
     type(ed, "abcdef");                  // B0 con contenido
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);                       // B1 vacio activo
     ed.activateBuffer(0);                // seleccion sobre B0
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     pressEvent(ed, insert('s'));         // modo seleccion
-    press(ed, EventType::MoveRight);     // rango [0,0)-(0,1) sobre "abcdef"
+    press(ed, InputEventType::MoveRight);     // rango [0,0)-(0,1) sobre "abcdef"
     CHECK(ed.hasSelection());
 
     const auto anchor = ed.active().selection->anchor;
@@ -439,7 +439,7 @@ TEST(ctrl_k_t_return_same_buffer_preserves_selection) {
     openSelector(ed);                    // Ctrl+K t
     CHECK(ed.state_ == State::BufferSelector);
     CHECK_EQ(ed.bufferSelectorIndex_, 0);  // activo = B0
-    press(ed, EventType::InsertNewline);   // Enter: mismo buffer
+    press(ed, InputEventType::InsertNewline);   // Enter: mismo buffer
 
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK_EQ(ed.active().document.lineAt(0), "abcdef");          // contenido intacto
@@ -454,12 +454,12 @@ TEST(ctrl_k_t_return_same_buffer_preserves_selection) {
 TEST(ctrl_k_t_switch_away_and_back_preserves_selection) {
     Editor ed;
     type(ed, "abcdef");                  // B0
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);                       // B1 vacio activo
     ed.activateBuffer(0);                // sobre B0 fijamos la seleccion
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     pressEvent(ed, insert('s'));         // seleccion en B0
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK(ed.hasSelection());
 
@@ -467,14 +467,14 @@ TEST(ctrl_k_t_switch_away_and_back_preserves_selection) {
     const auto pos = ed.active().selection->position;
 
     openSelector(ed);                    // Ctrl+K t (activo = B0)
-    press(ed, EventType::MoveDown);      // -> B1
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::MoveDown);      // -> B1
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK(ed.state_ == State::Navegacion);   // B1 sin seleccion
 
     openSelector(ed);                    // Ctrl+K t (activo = B1)
-    press(ed, EventType::MoveUp);        // -> B0
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::MoveUp);        // -> B0
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK(ed.state_ == State::Seleccion);    // B0 conserva su seleccion
     CHECK(ed.hasSelection());
@@ -491,7 +491,7 @@ TEST(ctrl_k_t_mode_table_per_source_mode) {
         newBuffer(ed);
         CHECK(ed.state_ == State::Navegacion);
         openSelector(ed);
-        press(ed, EventType::InsertNewline);   // mismo buffer (B1)
+        press(ed, InputEventType::InsertNewline);   // mismo buffer (B1)
         CHECK(ed.state_ == State::Navegacion);
         CHECK_EQ(ed.buffers.activeBuffer_, 1);
     }
@@ -501,7 +501,7 @@ TEST(ctrl_k_t_mode_table_per_source_mode) {
         newBuffer(ed);                   // 2 buffers para poder abrir selector
         type(ed, "hola");
         openSelector(ed);                // priorState_ = Interaccion
-        press(ed, EventType::InsertNewline);   // mismo buffer (B1)
+        press(ed, InputEventType::InsertNewline);   // mismo buffer (B1)
         CHECK(ed.state_ == State::Navegacion); // reconcile, no priorState_
         CHECK_EQ(ed.active().document.lineAt(0), "hola");  // contenido intacto
     }
@@ -509,12 +509,12 @@ TEST(ctrl_k_t_mode_table_per_source_mode) {
     {
         Editor ed;
         type(ed, "abc");
-        press(ed, EventType::Escape);
-        press(ed, EventType::MoveHome);
+        press(ed, InputEventType::Escape);
+        press(ed, InputEventType::MoveHome);
         pressEvent(ed, insert('s'));
-        press(ed, EventType::MoveRight);
+        press(ed, InputEventType::MoveRight);
         openSelector(ed);
-        press(ed, EventType::InsertNewline);
+        press(ed, InputEventType::InsertNewline);
         CHECK(ed.state_ == State::Seleccion);
         CHECK(ed.hasSelection());
     }
@@ -526,17 +526,17 @@ TEST(ctrl_k_t_mode_table_per_source_mode) {
 TEST(ctrl_k_t_escape_from_selection_keeps_selection) {
     Editor ed;
     type(ed, "abcdef");                  // B0
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);                       // B1 vacio activo
     ed.activateBuffer(0);                // seleccion sobre B0
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::MoveHome);
     pressEvent(ed, insert('s'));
-    press(ed, EventType::MoveRight);
+    press(ed, InputEventType::MoveRight);
     CHECK(ed.state_ == State::Seleccion);
 
     openSelector(ed);
     CHECK(ed.state_ == State::BufferSelector);
-    press(ed, EventType::Escape);          // cancelar
+    press(ed, InputEventType::Escape);          // cancelar
 
     CHECK(ed.state_ == State::Seleccion);  // restaura priorState_
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
@@ -551,11 +551,11 @@ TEST(ctrl_k_t_escape_from_selection_keeps_selection) {
 TEST(ctrl_k_t_buffer_switch_returns_preserves_named_selection) {
     Editor ed;
     type(ed, "hello world");             // A = B0
-    press(ed, EventType::Escape);
-    press(ed, EventType::MoveHome);      // col 0
-    for (int i = 0; i < 6; ++i) press(ed, EventType::MoveRight); // col 6
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::MoveHome);      // col 0
+    for (int i = 0; i < 6; ++i) press(ed, InputEventType::MoveRight); // col 6
     pressEvent(ed, insert('s'));         // seleccion: anchor (0,6)
-    for (int i = 0; i < 5; ++i) press(ed, EventType::MoveRight); // -> (0,11)
+    for (int i = 0; i < 5; ++i) press(ed, InputEventType::MoveRight); // -> (0,11)
     CHECK(ed.state_ == State::Seleccion);
 
     auto span = [&] {                     // texto seleccionado (una linea)
@@ -573,8 +573,8 @@ TEST(ctrl_k_t_buffer_switch_returns_preserves_named_selection) {
     CHECK_EQ(ed.active().document.lineAt(0), "");
 
     openSelector(ed);                    // Ctrl+K t
-    press(ed, EventType::MoveUp);        // -> A (B0)
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::MoveUp);        // -> A (B0)
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK(ed.state_ == State::Seleccion);      // vuelve a seleccion...
     CHECK(ed.hasSelection());
@@ -602,13 +602,13 @@ TEST(ctrl_k_w_closes_active_and_activates_neighbor) {
 TEST(ctrl_k_w_close_middle_buffer_preserves_others) {
     Editor ed;
     type(ed, "AAA");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     type(ed, "BBB");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     type(ed, "CCC");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
 
     // activar el buffer del medio (B1)
     ed.activateBuffer(1);
@@ -624,7 +624,7 @@ TEST(ctrl_k_w_close_middle_buffer_preserves_others) {
 TEST(ctrl_k_w_last_buffer_resets_not_removes) {
     Editor ed;
     type(ed, "contenido");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     ed.active().modified = false;                          // limpio para cerrar
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
     closeBuffer(ed);
@@ -657,7 +657,7 @@ TEST(ctrl_k_w_modified_blocked_until_save) {
     Editor ed;
     ed.loadIntoActiveBuffer(f.path);
     type(ed, "x");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     closeBuffer(ed);                       // bloqueado
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK(ed.active().modified);
@@ -691,7 +691,7 @@ TEST(ctrl_k_w_modified_multi_buffer_blocked) {
 TEST(save_unnamed_buffer_opens_save_as_prompt) {
     Editor ed;
     type(ed, "hola");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     openSaveAs(ed);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
     std::string cwd = FileBrowser::getCwd();
@@ -706,7 +706,7 @@ TEST(save_unnamed_buffer_opens_save_as_prompt) {
 TEST(save_as_prompt_collects_typed_path) {
     Editor ed;
     type(ed, "hola");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     openSaveAs(ed);
     clearPrompt(ed);
     typePrompt(ed, "/tmp/nuevo.txt");
@@ -722,11 +722,11 @@ TEST(save_as_prompt_backspace_removes_characters) {
     openSaveAs(ed);
     clearPrompt(ed);
     typePrompt(ed, "abc");
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.saveAsPath_, "ab");
     CHECK_EQ(ed.statusMessage_, "Save file: ab");
-    press(ed, EventType::Backspace);
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.saveAsPath_, "");
     CHECK_EQ(ed.statusMessage_, "Save file: ");
 }
@@ -735,7 +735,7 @@ TEST(save_as_prompt_backspace_on_empty_is_noop) {
     Editor ed;
     openSaveAs(ed);
     clearPrompt(ed);
-    press(ed, EventType::Backspace);
+    press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.saveAsPath_, "");
     CHECK_EQ(ed.statusMessage_, "Save file: ");
 }
@@ -745,8 +745,8 @@ TEST(save_as_prompt_ignores_other_keys) {
     openSaveAs(ed);
     clearPrompt(ed);
     typePrompt(ed, "abc");
-    press(ed, EventType::MoveRight);
-    press(ed, EventType::Prefix);
+    press(ed, InputEventType::MoveRight);
+    press(ed, InputEventType::Prefix);
     CHECK_EQ(ed.saveAsPath_, "abc");
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
 }
@@ -755,11 +755,11 @@ TEST(save_as_enter_saves_file) {
     TempFile f;
     Editor ed;
     type(ed, "hola");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     openSaveAs(ed);
     clearPrompt(ed);
     typePrompt(ed, f.path);
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().filename, f.path);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Navegacion));
@@ -771,7 +771,7 @@ TEST(save_as_enter_saves_file) {
     CHECK_EQ(content, "hola");
 
     type(ed, "!");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     save(ed);
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.statusMessage_, "Guardado.");
@@ -786,7 +786,7 @@ TEST(save_as_on_new_buffer_updates_name_and_display) {
     newBuffer(ed);
     CHECK_EQ(ed.active().unnamedName, "SinNombre1");
     type(ed, "hello");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.active().filename.empty());
     CHECK_EQ(ed.active().displayName(), "SinNombre1");
 
@@ -794,7 +794,7 @@ TEST(save_as_on_new_buffer_updates_name_and_display) {
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
     clearPrompt(ed);
     typePrompt(ed, f.path);
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
 
     CHECK(!ed.active().filename.empty());
     CHECK_EQ(ed.active().filename, f.path);
@@ -803,7 +803,7 @@ TEST(save_as_on_new_buffer_updates_name_and_display) {
     CHECK(!ed.active().modified);
 
     type(ed, "!");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.active().modified);
     save(ed);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Navegacion));
@@ -823,7 +823,7 @@ TEST(save_as_cancel_keeps_new_buffer_untouched) {
     Editor ed;
     newBuffer(ed);
     type(ed, "hello");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(ed.active().document.lineAt(0), "hello");
     CHECK(ed.active().modified);
     const size_t undoSize = ed.active().undoStack.size();
@@ -832,7 +832,7 @@ TEST(save_as_cancel_keeps_new_buffer_untouched) {
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
     clearPrompt(ed);
     typePrompt(ed, f.path);
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
 
     CHECK_EQ(ed.active().filename, std::string());
     CHECK_EQ(ed.active().unnamedName, "SinNombre1");
@@ -847,11 +847,11 @@ TEST(save_as_cancel_with_escape) {
     TempFile f;
     Editor ed;
     type(ed, "hola");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     openSaveAs(ed);
     clearPrompt(ed);
     typePrompt(ed, f.path);
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Navegacion));
     CHECK(ed.active().filename.empty());
     CHECK(ed.active().modified);
@@ -867,7 +867,7 @@ TEST(save_as_cancel_returns_to_prior_mode) {
     type(ed, "hola");                       // Interaccion
     openSaveAs(ed);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Interaccion));
 }
 
@@ -875,7 +875,7 @@ TEST(save_as_enter_empty_path_stays_in_prompt) {
     Editor ed;
     openSaveAs(ed);
     clearPrompt(ed);
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
     CHECK(ed.active().filename.empty());
     CHECK_EQ(ed.statusMessage_, "Save file: ");
@@ -884,11 +884,11 @@ TEST(save_as_enter_empty_path_stays_in_prompt) {
 TEST(save_as_directory_rejected) {
     Editor ed;
     type(ed, "hola");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     openSaveAs(ed);
     clearPrompt(ed);
     typePrompt(ed, "/tmp");
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
     CHECK(ed.active().filename.empty());
     CHECK(ed.active().modified);
@@ -906,11 +906,11 @@ TEST(save_as_resolves_relative_path_against_cwd) {
 
     Editor ed;
     type(ed, "rel");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     openSaveAs(ed);
     clearPrompt(ed);
     typePrompt(ed, "notas.txt");
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().filename, std::string(dir) + "/notas.txt");
 
@@ -937,14 +937,14 @@ TEST(save_as_unnamed_editable_full_path) {
     TempFile f;
     Editor ed;
     type(ed, "hi");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     openSaveAs(ed);
     std::string cwd = FileBrowser::getCwd();
     std::string prefix = cwd.empty() ? "" : cwd + "/";
     CHECK_EQ(ed.saveAsPath_, prefix);
     clearPrompt(ed);
     typePrompt(ed, f.path);
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.active().filename, f.path);
     CHECK(!ed.active().modified);
 }
@@ -972,7 +972,7 @@ TEST(save_as_copy_allows_editing_directory) {
     clearPrompt(ed);
     std::string newPath = std::string(dir) + "/copia.txt";
     typePrompt(ed, newPath);
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.active().filename, newPath);
     CHECK(!ed.active().modified);
     std::remove(newPath.c_str());
@@ -990,13 +990,13 @@ TEST(save_as_unnamed_user_can_change_directory) {
 
     Editor ed;
     type(ed, "data");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     openSaveAs(ed);
     CHECK_EQ(ed.saveAsPath_, std::string(dir) + "/");
     clearPrompt(ed);
     std::string other = std::string(dir) + "/sub.txt";
     typePrompt(ed, other);
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.active().filename, other);
     std::ifstream in(other);
     std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
@@ -1012,9 +1012,9 @@ TEST(invariants_always_at_least_one_buffer) {
     newBuffer(ed);
     newBuffer(ed);
     closeBuffer(ed);
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     closeBuffer(ed);
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     closeBuffer(ed);
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     assertBuffersConsistent(ed);
@@ -1028,8 +1028,8 @@ TEST(invariants_switch_never_mixes_selection) {
     // seleccion no puede aparecer en B.
     Editor ed;
     type(ed, "aaaaaaaa");
-    press(ed, EventType::Escape);
-    press(ed, EventType::MoveHome);
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::MoveHome);
     pressEvent(ed, insert('s'));
     pressEvent(ed, insert('a'));            // seleccion total en B0
     CHECK(ed.hasSelection());
@@ -1047,7 +1047,7 @@ TEST(buffer_stress_mixed_operations) {
     type(ed, "mundo");
     newBuffer(ed);
     type(ed, "x");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     assertBuffersConsistent(ed);
 
     unsigned long seed = 4242;
@@ -1058,35 +1058,35 @@ TEST(buffer_stress_mixed_operations) {
 
     for (int step = 0; step < 1000; ++step) {
         const int k = rnd() % 10;
-        Event e;
+        InputEvent e;
         switch (k) {
             case 0:
             case 1:
             case 8:
-                e.type = EventType::InsertChar;
+                e.type = InputEventType::InsertChar;
                 e.text = std::string(1, static_cast<char>('a' + (rnd() % 26)));
                 break;
             case 2:
-                e.type = static_cast<EventType>(
-                    static_cast<int>(EventType::MoveLeft) + (rnd() % 6));
+                e.type = static_cast<InputEventType>(
+                    static_cast<int>(InputEventType::MoveLeft) + (rnd() % 6));
                 break;
             case 3:
-                e.type = EventType::Escape;
+                e.type = InputEventType::Escape;
                 break;
             case 4:
-                e.type = (rnd() % 2) ? EventType::Undo : EventType::Redo;
+                e.type = (rnd() % 2) ? InputEventType::Undo : InputEventType::Redo;
                 break;
             case 5:
-                e.type = EventType::Prefix;
+                e.type = InputEventType::Prefix;
                 break;
             case 6:
-                e.type = (rnd() % 2) ? EventType::MoveUp : EventType::MoveDown;
+                e.type = (rnd() % 2) ? InputEventType::MoveUp : InputEventType::MoveDown;
                 break;
             case 7:
-                e.type = EventType::InsertNewline;
+                e.type = InputEventType::InsertNewline;
                 break;
             default:
-                e.type = EventType::None;
+                e.type = InputEventType::None;
                 break;
         }
         ed.handleEvent(e);
@@ -1189,10 +1189,10 @@ TEST(ctrl_k_b_single_buffer_no_change) {
 TEST(ctrl_k_b_two_buffers_toggle) {
     Editor ed;
     type(ed, "A");                       // B0
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);                       // B1 activo
     type(ed, "B");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK_EQ(ed.active().document.lineAt(0), "B");
 
@@ -1208,13 +1208,13 @@ TEST(ctrl_k_b_two_buffers_toggle) {
 TEST(ctrl_k_b_three_buffers_last_activated) {
     Editor ed;
     type(ed, "A");                       // B0
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);                       // B1
     type(ed, "B");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);                       // B2 activo
     type(ed, "C");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
 
     previousBuffer(ed);                  // Ctrl+K b -> B1 (ultimo activado)
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
@@ -1224,18 +1224,18 @@ TEST(ctrl_k_b_three_buffers_last_activated) {
 TEST(ctrl_k_b_via_selector_updates_history) {
     Editor ed;
     type(ed, "A");                       // B0
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);                       // B1
     type(ed, "B");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);                       // B2 activo
     type(ed, "C");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
 
     // Via selector: ir a B1
     openSelector(ed);
-    press(ed, EventType::MoveUp);        // B1
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::MoveUp);        // B1
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
 
     // Ctrl+K b -> B2 (el buffer anterior era B2)
@@ -1252,10 +1252,10 @@ TEST(ctrl_k_b_via_selector_updates_history) {
 TEST(ctrl_k_b_previous_buffer_closed) {
     Editor ed;
     type(ed, "A");                       // B0
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);                       // B1 activo
     type(ed, "B");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
 
     // Cerrar B0 (el anterior) - necesita estar sin modificar
@@ -1276,18 +1276,18 @@ TEST(ctrl_k_b_previous_buffer_closed) {
 TEST(ctrl_k_b_previous_buffer_closed_via_selector) {
     Editor ed;
     type(ed, "A");                       // B0
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);                       // B1
     type(ed, "B");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);                       // B2 activo
     type(ed, "C");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
 
     // Ir a B1 via selector
     openSelector(ed);
-    press(ed, EventType::MoveUp);        // B1
-    press(ed, EventType::InsertNewline);
+    press(ed, InputEventType::MoveUp);        // B1
+    press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
 
     // Cerrar B2 (el "anterior") - necesita estar sin modificar
@@ -1309,13 +1309,13 @@ TEST(ctrl_k_b_previous_buffer_closed_via_selector) {
 TEST(ctrl_k_b_three_new_buffers_toggle_via_b) {
     Editor ed;
     type(ed, "A");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     type(ed, "B");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     type(ed, "C");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(ed.buffers.activeBuffer_, 2);
     CHECK_EQ(ed.active().document.lineAt(0), "C");
     previousBuffer(ed);
@@ -1332,19 +1332,19 @@ TEST(ctrl_k_b_three_new_buffers_toggle_via_b) {
 TEST(ctrl_k_b_selector_open_without_selection_preserves_history) {
     Editor ed;
     type(ed, "A");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     type(ed, "B");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     type(ed, "C");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(ed.buffers.activeBuffer_, 2);
     int prevIdBefore = ed.previousBuffer_.id;
     CHECK(prevIdBefore != -1);
     openSelector(ed);
     CHECK(ed.state_ == State::BufferSelector);
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.state_ == State::Navegacion);
     CHECK_EQ(ed.buffers.activeBuffer_, 2);
     CHECK_EQ(ed.previousBuffer_.id, prevIdBefore);
@@ -1356,13 +1356,13 @@ TEST(ctrl_k_b_selector_open_without_selection_preserves_history) {
 TEST(ctrl_k_b_close_active_with_previous_to_third_shows_closed) {
     Editor ed;
     type(ed, "A");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     type(ed, "B");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     type(ed, "C");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK_EQ(ed.buffers.activeBuffer_, 2);
     ed.active().modified = false;
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
@@ -1384,11 +1384,11 @@ TEST(ctrl_k_b_close_active_with_previous_to_third_shows_closed) {
 TEST(ctrl_k_b_reconciles_mode_selection) {
     Editor ed;
     type(ed, "hello world");             // B0
-    press(ed, EventType::Escape);
-    press(ed, EventType::MoveHome);
-    for (int i = 0; i < 6; ++i) press(ed, EventType::MoveRight); // col 6
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::MoveHome);
+    for (int i = 0; i < 6; ++i) press(ed, InputEventType::MoveRight); // col 6
     pressEvent(ed, insert('s'));         // modo seleccion en B0
-    for (int i = 0; i < 5; ++i) press(ed, EventType::MoveRight); // seleccion "world"
+    for (int i = 0; i < 5; ++i) press(ed, InputEventType::MoveRight); // seleccion "world"
     CHECK(ed.state_ == State::Seleccion);
     CHECK(ed.hasSelection());
 
@@ -1418,10 +1418,10 @@ TEST(ctrl_k_b_reconciles_mode_interaction) {
 
     newBuffer(ed);                       // B1
     type(ed, "xyz");                     // B1 con contenido
-    press(ed, EventType::Escape);        // -> Navegacion, cursor al final
-    press(ed, EventType::MoveLeft);      // cursor a 'z'
+    press(ed, InputEventType::Escape);        // -> Navegacion, cursor al final
+    press(ed, InputEventType::MoveLeft);      // cursor a 'z'
     pressEvent(ed, insert('s'));         // B1 en Seleccion, anchor en 'z'
-    press(ed, EventType::MoveRight);     // extiende seleccion
+    press(ed, InputEventType::MoveRight);     // extiende seleccion
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK(ed.state_ == State::Seleccion);
     CHECK(ed.hasSelection());

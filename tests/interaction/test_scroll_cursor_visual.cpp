@@ -53,7 +53,7 @@ TEST(scroll_wheel_up_bottom_cursor_stays_in_content) {
         CHECK_EQ(cursorScreenRow(before), 10);
     }
 
-    press(ed, EventType::ScrollUp);
+    press(ed, InputEventType::ScrollUp);
     CHECK_EQ(ed.active().viewport.top, 17);
     CHECK_EQ(ed.active().cursor.line, 29);
 
@@ -96,7 +96,7 @@ TEST(scroll_wheel_down_top_cursor_stays_in_content) {
         CHECK_EQ(cursorScreenRow(before), 1);
     }
 
-    press(ed, EventType::ScrollDown);
+    press(ed, InputEventType::ScrollDown);
     CHECK_EQ(ed.active().viewport.top, 23);
     CHECK_EQ(ed.active().cursor.line, 20);
 

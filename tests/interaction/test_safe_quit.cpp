@@ -10,7 +10,7 @@ TEST(safe_quit_single_saved_exits) {
 TEST(safe_quit_single_modified_blocks) {
     Editor ed(std::make_unique<FakeClipboard>());
     type(ed, "hola");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.active().modified);
     safeQuit(ed);
     CHECK(ed.running_);
@@ -21,7 +21,7 @@ TEST(safe_quit_one_saved_one_modified_from_A) {
     Editor ed(std::make_unique<FakeClipboard>());
     newBuffer(ed);
     type(ed, "modB");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     ed.buffers.activate(0);
     CHECK(!ed.buffers.at(0).modified);
     CHECK(ed.buffers.at(1).modified);
@@ -33,7 +33,7 @@ TEST(safe_quit_active_saved_inactive_modified) {
     Editor ed(std::make_unique<FakeClipboard>());
     newBuffer(ed);
     type(ed, "x");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     ed.buffers.activate(0);
     safeQuit(ed);
     CHECK(ed.running_);
@@ -44,7 +44,7 @@ TEST(safe_quit_active_modified_others_saved) {
     newBuffer(ed);
     newBuffer(ed);
     type(ed, "modActive");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(!ed.buffers.at(0).modified);
     CHECK(!ed.buffers.at(1).modified);
     CHECK(ed.buffers.at(2).modified);
@@ -78,7 +78,7 @@ TEST(safe_quit_todos_guardados_despues) {
 TEST(safe_quit_no_destruye_buffers) {
     Editor ed(std::make_unique<FakeClipboard>());
     type(ed, "abc");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     int cnt = ed.buffers.count();
     auto snap = ed.active().document.snapshot();
     safeQuit(ed);
@@ -90,7 +90,7 @@ TEST(safe_quit_no_destruye_buffers) {
 TEST(safe_quit_reintentar_despues_de_guardar) {
     Editor ed(std::make_unique<FakeClipboard>());
     type(ed, "xyz");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     safeQuit(ed);
     CHECK(ed.running_);
     ed.active().modified = false;
@@ -102,7 +102,7 @@ TEST(safe_quit_reintentar_despues_de_guardar) {
 TEST(safe_quit_bloquea_forzado_permite) {
     Editor ed(std::make_unique<FakeClipboard>());
     type(ed, "hola");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     safeQuit(ed);
     CHECK(ed.running_);
     forcedQuit(ed);
@@ -132,7 +132,7 @@ TEST(safe_quit_buffer_nuevo_con_contenido) {
     Editor ed(std::make_unique<FakeClipboard>());
     newBuffer(ed);
     type(ed, "contenido");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.active().modified);
     safeQuit(ed);
     CHECK(ed.running_);
@@ -142,7 +142,7 @@ TEST(safe_quit_buffer_nuevo_guardado_posterior) {
     Editor ed(std::make_unique<FakeClipboard>());
     newBuffer(ed);
     type(ed, "contenido");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     ed.active().modified = false;
     ed.active().originalSnapshot_ = ed.active().document.snapshot();
     safeQuit(ed);
@@ -153,11 +153,11 @@ TEST(safe_quit_mixto_integracion) {
     Editor ed(std::make_unique<FakeClipboard>());
     newBuffer(ed);
     type(ed, "modB");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     newBuffer(ed);
     newBuffer(ed);
     type(ed, "modD");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(!ed.buffers.at(0).modified);
     CHECK(ed.buffers.at(1).modified);
     CHECK(!ed.buffers.at(2).modified);
@@ -176,21 +176,21 @@ TEST(save_as_copy_prefill_editable_and_moves) {
     f.write("hola");
     CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "X");
-    press(ed, EventType::Escape);
-    press(ed, EventType::Prefix);
-    Event e; e.type = EventType::Save; ed.handleEvent(e);
+    press(ed, InputEventType::Escape);
+    press(ed, InputEventType::Prefix);
+    InputEvent e; e.type = InputEventType::Save; ed.handleEvent(e);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
     CHECK_EQ(ed.saveAsPath_, f.path);
-    Event esc; esc.type = EventType::Escape; ed.handleEvent(esc);
+    InputEvent esc; esc.type = InputEventType::Escape; ed.handleEvent(esc);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(ed.active().modified);
-    press(ed, EventType::Prefix);
-    e.type = EventType::Save; ed.handleEvent(e);
+    press(ed, InputEventType::Prefix);
+    e.type = InputEventType::Save; ed.handleEvent(e);
     testfw::TempFile g;
-    for (size_t i = 0; i < f.path.size(); ++i) { Event b; b.type = EventType::Backspace; ed.handleEvent(b); }
+    for (size_t i = 0; i < f.path.size(); ++i) { InputEvent b; b.type = InputEventType::Backspace; ed.handleEvent(b); }
     for (char c : g.path) ed.handleEvent(insert(c));
     CHECK_EQ(ed.saveAsPath_, g.path);
-    Event ent; ent.type = EventType::InsertNewline; ed.handleEvent(ent);
+    InputEvent ent; ent.type = InputEventType::InsertNewline; ed.handleEvent(ent);
     CHECK_EQ(ed.active().filename, g.path);
     CHECK(!ed.active().modified);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
@@ -218,7 +218,7 @@ TEST(principal_03_un_buffer_modificado_cancela) {
     testfw::TempFile f; f.write("a");
     CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "X");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.active().modified);
     auto snap = ed.active().document.snapshot();
     int stateBefore = static_cast<int>(ed.state_);
@@ -246,7 +246,7 @@ TEST(principal_05_varios_uno_sin_guardar) {
     CHECK(ed.loadIntoActiveBuffer(f.path));
     newBuffer(ed);
     type(ed, "modB");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(!ed.buffers.at(0).modified);
     CHECK(ed.buffers.at(1).modified);
     safeQuit(ed);
@@ -278,7 +278,7 @@ TEST(caso_08_buffer_nuevo_con_contenido) {
     Editor ed(std::make_unique<FakeClipboard>());
     newBuffer(ed);
     type(ed, "hola");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.active().modified);
     safeQuit(ed);
     CHECK(ed.running_);
@@ -289,7 +289,7 @@ TEST(caso_09_modificar_guardar_q) {
     testfw::TempFile f; f.write("a");
     CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "x");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.active().modified);
     save(ed);
     CHECK(!ed.active().modified);
@@ -302,11 +302,11 @@ TEST(caso_10_modificar_guardar_modificar_nuevamente) {
     testfw::TempFile f; f.write("a");
     CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "X");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     save(ed);
     CHECK(!ed.active().modified);
     type(ed, "Y");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.active().modified);
     safeQuit(ed);
     CHECK(ed.running_);
@@ -318,7 +318,7 @@ TEST(caso_11_q_no_guarda_automaticamente) {
     testfw::TempFile f; f.write("orig");
     CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "MOD");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     auto snap = ed.active().document.snapshot();
     std::string before = snap[0];
     safeQuit(ed);
@@ -335,7 +335,7 @@ TEST(caso_12_salir_despues_de_guardar_manualmente) {
     testfw::TempFile f; f.write("a");
     CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "X");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     safeQuit(ed);
     CHECK(ed.running_);
     save(ed);
@@ -350,7 +350,7 @@ TEST(caso_13_activo_guardado_inactivo_modificado) {
     CHECK(ed.loadIntoActiveBuffer(f.path));
     newBuffer(ed);
     type(ed, "Bmod");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     ed.buffers.activate(0);
     CHECK(!ed.buffers.at(0).modified);
     CHECK(ed.buffers.at(1).modified);
@@ -366,7 +366,7 @@ TEST(caso_14_activo_modificado_resto_guardado) {
     newBuffer(ed);
     ed.buffers.activate(2);
     type(ed, "X");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.buffers.at(2).modified);
     CHECK(!ed.buffers.at(0).modified);
     CHECK(!ed.buffers.at(1).modified);
@@ -377,7 +377,7 @@ TEST(caso_14_activo_modificado_resto_guardado) {
 TEST(caso_15_cambiar_buffer_despues_cancelada) {
     Editor ed(std::make_unique<FakeClipboard>());
     type(ed, "Amod");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.buffers.at(0).modified);
     safeQuit(ed);
     CHECK(ed.running_);
@@ -391,7 +391,7 @@ TEST(caso_15_cambiar_buffer_despues_cancelada) {
 TEST(caso_16_mensaje_aparece) {
     Editor ed(std::make_unique<FakeClipboard>());
     type(ed, "x");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     safeQuit(ed);
     CHECK(ed.statusMessage_.text.find("sin guardar") != std::string::npos);
     CHECK(ed.running_);
@@ -402,7 +402,7 @@ TEST(caso_17_mensaje_desaparece) {
     testfw::TempFile f; f.write("a");
     CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "x");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     safeQuit(ed);
     CHECK(ed.statusMessage_.text.find("sin guardar") != std::string::npos);
     save(ed);
@@ -416,7 +416,7 @@ TEST(caso_18_regresion_ctrl_k_s) {
     testfw::TempFile f; f.write("orig");
     CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "MOD");
-    press(ed, EventType::Escape);
+    press(ed, InputEventType::Escape);
     CHECK(ed.active().modified);
     save(ed);
     CHECK(!ed.active().modified);

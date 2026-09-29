@@ -5,7 +5,7 @@
 #include "layout/Layout.h"
 #include "base/utf8.h"
 #include "rendering/Renderer.h"
-#include "platform/Event.h"  // shim legacy: este test usa Event/EventType
+#include "platform/InputEvent.h"  // shim legacy: este test usa InputEvent/InputEventType
 #include "test_framework.h"
 #include <string>
 #include <vector>
@@ -488,8 +488,8 @@ TEST(viewport_resize_keeps_cursor_visible) {
 #include "app/Editor.h"
 #undef private
 namespace {
-static void pressE(Editor& ed, EventType t){ Event e; e.type=t; ed.handleEvent(e); }
-static Event insE(char c){ Event e; e.type=EventType::InsertChar; e.text=std::string(1,c); return e; }
+static void pressE(Editor& ed, InputEventType t){ InputEvent e; e.type=t; ed.handleEvent(e); }
+static InputEvent insE(char c){ InputEvent e; e.type=InputEventType::InsertChar; e.text=std::string(1,c); return e; }
 static void typeE(Editor& ed, const std::string& s){ for(char c: s) ed.handleEvent(insE(c)); }
 }
 TEST(new_file_empty_after_edit_not_modified){
@@ -498,11 +498,11 @@ TEST(new_file_empty_after_edit_not_modified){
     CHECK(ed.active().document.snapshot() == ed.active().originalSnapshot_);
     ed.handleEvent(insE('i'));
     typeE(ed, "contenido");
-    pressE(ed, EventType::Escape);
+    pressE(ed, InputEventType::Escape);
     CHECK(ed.active().modified);
     CHECK(ed.active().document.snapshot() != ed.active().originalSnapshot_);
     ed.handleEvent(insE('s'));
-    pressE(ed, EventType::Escape);
+    pressE(ed, InputEventType::Escape);
     // seleccionar todo y borrar
     // s -> seleccion, a -> todo
     ed.handleEvent(insE('s'));
@@ -510,7 +510,7 @@ TEST(new_file_empty_after_edit_not_modified){
     // usar select all: 'a'
     ed.handleEvent(insE('a'));
     CHECK(ed.active().selectAllActive);
-    pressE(ed, EventType::Backspace);
+    pressE(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineCount(), 1);
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK(ed.active().document.snapshot() == ed.active().originalSnapshot_);
@@ -522,9 +522,9 @@ TEST(new_file_empty_after_edit_not_modified){
     Editor ed2;
     ed2.handleEvent(insE('i'));
     typeE(ed2, "abc");
-    pressE(ed2, EventType::Escape);
+    pressE(ed2, InputEventType::Escape);
     CHECK(ed2.active().modified);
-    for(int i=0;i<3;i++) pressE(ed2, EventType::Backspace);
+    for(int i=0;i<3;i++) pressE(ed2, InputEventType::Backspace);
     // Nota: backspace en Navegacion es no-op, necesitamos estar en Interaccion
     // Entonces re-entrar en Interaccion y borrar
     // Simplificamos: usar Document directo

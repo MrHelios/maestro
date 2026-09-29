@@ -14,7 +14,7 @@ TEST(bracket_jump_toggle_preserves_after_render) {
     CHECK_EQ(ed.bracketPair_->open.col, 0);
     CHECK_EQ(ed.bracketPair_->close.col, 2);
     CHECK(ed.nextBracketJump_ == Editor::BracketJumpTarget::Open);
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     CHECK(ed.getStateForTesting() == State::Prefix);
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.col, 0);
@@ -26,7 +26,7 @@ TEST(bracket_jump_toggle_preserves_after_render) {
     CHECK(ed.bracketPair_.has_value());
     CHECK_EQ(ed.bracketPair_->open.col, 0);
     CHECK_EQ(ed.bracketPair_->close.col, 2);
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.col, 2);
     CHECK(ed.nextBracketJump_ == Editor::BracketJumpTarget::Open);
@@ -48,14 +48,14 @@ TEST(bracket_jump_second_render_preserves_close) {
     CHECK_EQ(ed.bracketPair_->open.col, 2);
     CHECK_EQ(ed.bracketPair_->close.col, 3);
     CHECK(ed.nextBracketJump_ == Editor::BracketJumpTarget::Open);
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.col, 2);
     CHECK(ed.nextBracketJump_ == Editor::BracketJumpTarget::Close);
     ed.refreshBracketAfterJump();
     ed.bracketJumpPendingPreserve_ = false;
     CHECK(ed.nextBracketJump_ == Editor::BracketJumpTarget::Close);
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.col, 3);
     CHECK(ed.nextBracketJump_ == Editor::BracketJumpTarget::Open);
@@ -72,12 +72,12 @@ TEST(bracket_jump_manual_move_resets) {
     ed.active().cursor.col = 1;
     ed.updateBracketHighlight();
     CHECK(ed.nextBracketJump_ == Editor::BracketJumpTarget::Open);
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK(ed.nextBracketJump_ == Editor::BracketJumpTarget::Close);
     ed.refreshBracketAfterJump();
     ed.bracketJumpPendingPreserve_ = false;
-    ed.handleEvent(ev(EventType::MoveRight));
+    ed.handleEvent(ev(InputEventType::MoveRight));
     ed.updateBracketHighlight();
     CHECK(ed.nextBracketJump_ == Editor::BracketJumpTarget::Open);
 }
@@ -125,10 +125,10 @@ TEST(bracket_viewport_open_visible_close_outside) {
     ed.updateBracketHighlight();
     // Nuevo diseño viewport-only: el close está fuera del viewport, no hay highlight.
     CHECK(!ed.bracketPair_.has_value());
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.line, 0);
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK(ed.active().cursor.line == 51);
     CHECK(ed.active().viewport.top <= 51 && 51 < ed.active().viewport.top + ed.active().viewport.height);
@@ -147,7 +147,7 @@ TEST(bracket_viewport_open_outside_close_visible) {
     ed.updateBracketHighlight();
     // Nuevo diseño viewport-only: el open está fuera del viewport, no hay highlight.
     CHECK(!ed.bracketPair_.has_value());
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK(ed.active().viewport.top <= 0);
@@ -166,7 +166,7 @@ TEST(bracket_viewport_both_outside_initially) {
     ed.updateBracketHighlight();
     // Envolvente real existe, pero el open está fuera del viewport: sin highlight.
     CHECK(!ed.bracketPair_.has_value());
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.line, 0);
 }
@@ -189,7 +189,7 @@ TEST(bracket_selection_highlight_hidden_but_jump_works) {
     std::string outNav = r.buildScreen(doc, cur, vp, "t.cpp", false, Message{}, State::Navegacion, std::nullopt, std::nullopt, ed.bracketPair_);
     CHECK(outSel.find("\x1b[48;5;221m") == std::string::npos);
     CHECK(outNav.find("\x1b[48;5;221m") != std::string::npos);
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.col, 0);
     ed.handleEvent(escapeEvent());
@@ -220,7 +220,7 @@ TEST(bracket_edit_delete) {
     CHECK(ed.bracketPair_.has_value());
     enterInteraccion(ed);
     ed.active().cursor.col=0;
-    ed.handleEvent(ev(EventType::Delete));
+    ed.handleEvent(ev(InputEventType::Delete));
     ed.updateBracketHighlight();
     CHECK(!ed.bracketPair_.has_value());
 }
@@ -231,7 +231,7 @@ TEST(bracket_edit_backspace) {
     ed.updateBracketHighlight();
     enterInteraccion(ed);
     ed.active().cursor.col=3;
-    ed.handleEvent(ev(EventType::Backspace));
+    ed.handleEvent(ev(InputEventType::Backspace));
     ed.updateBracketHighlight();
     CHECK(!ed.bracketPair_.has_value());
 }
@@ -242,7 +242,7 @@ TEST(bracket_edit_enter) {
     ed.updateBracketHighlight();
     CHECK(ed.bracketPair_.has_value());
     enterInteraccion(ed);
-    ed.handleEvent(ev(EventType::InsertNewline));
+    ed.handleEvent(ev(InputEventType::InsertNewline));
     ed.updateBracketHighlight();
     CHECK(ed.bracketPair_.has_value());
     CHECK(ed.bracketPair_->open.line==0 && ed.bracketPair_->close.line==1);
@@ -332,7 +332,7 @@ TEST(bracket_jump_no_bracket_message) {
     ed.updateBracketHighlight();
     CHECK(!ed.bracketPair_.has_value());
 
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
 
     CHECK_EQ(ed.active().cursor.col, 1);
@@ -386,14 +386,14 @@ TEST(bracket_jump_incremental_long_distance) {
     // Forzamos jump hacia close para ejercitar el scan forward incremental.
     ed.nextBracketJump_ = Editor::BracketJumpTarget::Close;
 
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.line, 101);
     CHECK(ed.active().viewport.top <= 101 &&
           101 < ed.active().viewport.top + ed.active().viewport.height);
 
     // El toggle quedó en Open; el segundo salto vuelve al open.
-    ed.handleEvent(ev(EventType::Prefix));
+    ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.line, 0);
 }

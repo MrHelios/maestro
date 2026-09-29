@@ -3,7 +3,7 @@
 #include "test_framework.h"
 
 #include "platform/CellPos.h"
-#include "platform/Event.h"
+#include "platform/InputEvent.h"
 #include "platform/IEventSource.h"
 #include "platform/MouseEvent.h"
 #include "platform/ResizeEvent.h"
@@ -18,42 +18,43 @@
 #include "rendering/tty/TtyScroll.h"
 #include "app/Editor.h"
 
-// 1: CellPos es el tipo común 1-based.
+// 1: CellPos es el tipo común 0-based.
 TEST(frontier_cellpos_valid) {
     CHECK((CellPos{10, 5}.valid()));
-    CHECK((!CellPos{0, 5}.valid()));
-    CHECK((!CellPos{10, 0}.valid()));
+    CHECK((CellPos{0, 5}.valid()));
+    CHECK((CellPos{10, 0}.valid()));
+    CHECK((!CellPos{-1, 5}.valid()));
+    CHECK((!CellPos{10, -1}.valid()));
     CHECK((CellPos{3, 4} == CellPos{3, 4}));
     CHECK((CellPos{3, 4} != CellPos{3, 5}));
 }
 
-// 1+3: Event expone CellPos y payload Resize.
+// 1+3: InputEvent expone CellPos y payload Resize.
 TEST(frontier_event_cellpos_roundtrip) {
-    Event e;
-    e.type = EventType::MousePress;
-    e.setCellPos(CellPos{12, 7});
-    CHECK_EQ(e.mouseCol, 12);
-    CHECK_EQ(e.mouseRow, 7);
-    CHECK((e.cellPos() == CellPos{12, 7}));
+    InputEvent e;
+    e.type = InputEventType::MousePress;
+    e.cell = CellPos{12, 7};
+    CHECK_EQ(e.cell.col, 12);
+    CHECK_EQ(e.cell.row, 7);
 
-    Event r;
-    r.type = EventType::Resize;
+    InputEvent r;
+    r.type = InputEventType::Resize;
     r.resizeRows = 40;
     r.resizeCols = 120;
     CHECK_EQ(r.resizeRows, 40);
     CHECK_EQ(r.resizeCols, 120);
 }
 
-// 2: fábricas MouseEvent -> Event.
+// 2: fábricas MouseEvent -> InputEvent.
 TEST(frontier_mouse_event_factories) {
-    Event p = makeMousePressEvent(CellPos{4, 2});
-    CHECK_EQ(static_cast<int>(p.type), static_cast<int>(EventType::MousePress));
-    CHECK_EQ(p.mouseCol, 4);
-    CHECK_EQ(p.mouseRow, 2);
-    Event d = makeMouseDragEvent(CellPos{6, 3});
-    CHECK_EQ(static_cast<int>(d.type), static_cast<int>(EventType::MouseDrag));
-    Event r = makeMouseReleaseEvent(CellPos{6, 3});
-    CHECK_EQ(static_cast<int>(r.type), static_cast<int>(EventType::MouseRelease));
+    InputEvent p = makeMousePressEvent(CellPos{4, 2});
+    CHECK_EQ(static_cast<int>(p.type), static_cast<int>(InputEventType::MousePress));
+    CHECK_EQ(p.cell.col, 4);
+    CHECK_EQ(p.cell.row, 2);
+    InputEvent d = makeMouseDragEvent(CellPos{6, 3});
+    CHECK_EQ(static_cast<int>(d.type), static_cast<int>(InputEventType::MouseDrag));
+    InputEvent r = makeMouseReleaseEvent(CellPos{6, 3});
+    CHECK_EQ(static_cast<int>(r.type), static_cast<int>(InputEventType::MouseRelease));
 }
 
 // 4: Terminal es un IEventSource.
@@ -76,7 +77,7 @@ TEST(frontier_theme_style_mapping) {
     CHECK(themeAnsiFor(light, StyleRole::StatusBase) == light.statusBar);
 }
 
-// 8: ScreenToCursor acepta CellPos y equivale a (row,col).
+// 8: ScreenToCursor acepta CellPos 0-based.
 TEST(frontier_screen_to_cursor_cellpos) {
     Document doc;
     doc.restore({"hello", "world"});
@@ -86,16 +87,15 @@ TEST(frontier_screen_to_cursor_cellpos) {
     vp.left = 0;
     vp.width = 80;
     vp.height = 22;
-    auto a = screenToCursor(1, 4, layout, vp, doc);
-    auto b = screenToCursor(CellPos{4, 1}, layout, vp, doc);
-    CHECK(a.has_value());
-    CHECK(b.has_value());
-    if (a && b) {
-        CHECK_EQ(a->line, b->line);
-        CHECK_EQ(a->col, b->col);
+    // CellPos 0-based: (col=3, row=0) = primera celda de texto
+    // (gutter=3, relCol=3 -> columna visual 0 -> byte 0 de la linea 0).
+    auto p = screenToCursor(CellPos{3, 0}, layout, vp, doc);
+    CHECK(p.has_value());
+    if (p) {
+        CHECK_EQ(p->line, 0);
+        CHECK_EQ(p->col, 0);
     }
-    // Fuera del contenido: nullopt en ambas formas.
-    CHECK(!screenToCursor(1000, 1000, layout, vp, doc).has_value());
+    // Fuera del contenido: nullopt.
     CHECK(!screenToCursor(CellPos{1000, 1000}, layout, vp, doc).has_value());
 }
 
@@ -118,11 +118,11 @@ TEST(frontier_factories_return_interfaces) {
 TEST(frontier_ikeymap_interface) {
     TtyKeymap km;
     ITtyKeymap& iface = km;
-    iface.bindControl(18, EventType::PageDown);
+    iface.bindControl(18, InputEventType::PageDown);
     auto t = iface.control(18);
     CHECK(t.has_value());
-    if (t) CHECK_EQ(static_cast<int>(*t), static_cast<int>(EventType::PageDown));
-    iface.bindSequence("[9~", EventType::PageUp);
+    if (t) CHECK_EQ(static_cast<int>(*t), static_cast<int>(InputEventType::PageDown));
+    iface.bindSequence("[9~", InputEventType::PageUp);
     auto s = iface.sequence("[9~");
     CHECK(s.has_value());
     Terminal term;
@@ -130,51 +130,51 @@ TEST(frontier_ikeymap_interface) {
     CHECK(ti.control(17).has_value());
 }
 
-// 11: decoder SGR -> CellPos + Event.
+// 11: decoder SGR -> CellPos + InputEvent.
 TEST(frontier_mouse_decoder_cellpos) {
     {
-        Event e;
+        InputEvent e;
         CellPos p;
         decodeMouseSgr("[<0;10;5M", e, p);
-        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MousePress));
-        CHECK((p == CellPos{10, 5}));
-        CHECK_EQ(e.mouseCol, 10);
-        CHECK_EQ(e.mouseRow, 5);
+        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MousePress));
+        CHECK((p == CellPos{9, 4}));
+        CHECK_EQ(e.cell.col, 9);
+        CHECK_EQ(e.cell.row, 4);
     }
     {
-        Event e;
+        InputEvent e;
         CellPos p;
         decodeMouseSgr("[<32;11;6M", e, p);
-        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MouseDrag));
-        CHECK((p == CellPos{11, 6}));
+        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MouseDrag));
+        CHECK((p == CellPos{10, 5}));
     }
     {
-        Event e;
+        InputEvent e;
         CellPos p;
         decodeMouseSgr("[<3;11;6m", e, p);
-        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MouseRelease));
-        CHECK((p == CellPos{11, 6}));
+        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MouseRelease));
+        CHECK((p == CellPos{10, 5}));
     }
     {
         // Rueda con Shift (68 = 64|4) sigue siendo ScrollUp.
-        Event e;
+        InputEvent e;
         CellPos p;
         decodeMouseSgr("[<68;10;5M", e, p);
-        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::ScrollUp));
+        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollUp));
     }
     {
-        Event e;
+        InputEvent e;
         CellPos p;
         decodeMouseSgr("[<64M", e, p);
-        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::None));
+        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
     }
     {
         // Terminal delega en el mismo decoder (sin duplicar tabla Cb).
-        Event e;
+        InputEvent e;
         Terminal::parseMouseSgr("[<0;10;5M", e);
-        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(EventType::MousePress));
-        CHECK_EQ(e.mouseCol, 10);
-        CHECK_EQ(e.mouseRow, 5);
+        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MousePress));
+        CHECK_EQ(e.cell.col, 9);
+        CHECK_EQ(e.cell.row, 4);
     }
 }
 
@@ -182,8 +182,8 @@ TEST(frontier_mouse_decoder_cellpos) {
 // sin provider ni backend. Una GUI puede inyectarlo directamente.
 TEST(frontier_editor_handles_resize_event) {
     Editor ed;
-    Event r;
-    r.type = EventType::Resize;
+    InputEvent r;
+    r.type = InputEventType::Resize;
     r.resizeRows = 30;
     r.resizeCols = 100;
     ed.processEventForTesting(r);
@@ -192,8 +192,8 @@ TEST(frontier_editor_handles_resize_event) {
     CHECK_EQ(ed.getActiveBufferForTesting().viewport.width, 100);
     CHECK_EQ(ed.getActiveBufferForTesting().viewport.height, 28);
     // Payload inválido se ignora (conserva el tamaño anterior).
-    Event bad;
-    bad.type = EventType::Resize;
+    InputEvent bad;
+    bad.type = InputEventType::Resize;
     bad.resizeRows = 0;
     bad.resizeCols = -5;
     ed.processEventForTesting(bad);

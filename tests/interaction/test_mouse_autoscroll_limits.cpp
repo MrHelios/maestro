@@ -14,8 +14,9 @@
 
 TEST(mouse_autoscroll_outside_top_at_limit) {
     // Limite superior: viewport ya en top==0, cursor fuera por arriba
-    // (mouseRow=0, relRow=-1, fuera del contenido) debe seguir marcando
-    // hacia la primera fila en vez de ignorarse.
+    // (celda row=-1, relRow=-1: coordenada sintética, SGR real no la
+    // reporta) debe seguir marcando hacia la primera fila en vez de
+    // ignorarse.
     Editor ed;
     std::vector<std::string> lines;
     for (int i = 0; i < 8; ++i) lines.push_back("l" + std::to_string(i));
@@ -27,17 +28,15 @@ TEST(mouse_autoscroll_outside_top_at_limit) {
     ed.active().cursor.line = 2;
     ed.active().cursor.col = 0;
 
-    Event press;
-    press.type = EventType::MousePress;
-    press.mouseCol = 4; // gutter=3: visual 0
-    press.mouseRow = 3; // relRow=2 -> linea doc 2
+    InputEvent press;
+    press.type = InputEventType::MousePress;
+    press.cell = CellPos{3, 2}; // gutter=3 visual 0; relRow=2 -> linea doc 2
     ed.handleEvent(press);
     CHECK_EQ(ed.active().cursor.line, 2);
 
-    Event drag;
-    drag.type = EventType::MouseDrag;
-    drag.mouseCol = 4;
-    drag.mouseRow = 0; // fuera del contenido, por arriba
+    InputEvent drag;
+    drag.type = InputEventType::MouseDrag;
+    drag.cell = CellPos{3, -1}; // fuera del contenido, por arriba
     ed.handleEvent(drag);
 
     // Auto-scroll hacia arriba: entra en Seleccion y marca hasta el borde.
@@ -54,7 +53,7 @@ TEST(mouse_autoscroll_outside_top_at_limit) {
 
 TEST(mouse_autoscroll_outside_bottom_at_limit) {
     // Limite inferior: viewport ya en top==maxTop, cursor fuera por abajo
-    // (mouseRow=h+1, primera fila de statusbar, fuera del contenido) debe
+    // (celda row=h, primera fila de statusbar, fuera del contenido) debe
     // seguir marcando hacia la ultima fila en vez de ignorarse.
     Editor ed;
     std::vector<std::string> lines;
@@ -67,17 +66,15 @@ TEST(mouse_autoscroll_outside_bottom_at_limit) {
     ed.active().cursor.line = 5;
     ed.active().cursor.col = 0;
 
-    Event press;
-    press.type = EventType::MousePress;
-    press.mouseCol = 4; // gutter=3: visual 0
-    press.mouseRow = 2; // relRow=1 -> linea doc 5
+    InputEvent press;
+    press.type = InputEventType::MousePress;
+    press.cell = CellPos{3, 1}; // gutter=3 visual 0; relRow=1 -> linea doc 5
     ed.handleEvent(press);
     CHECK_EQ(ed.active().cursor.line, 5);
 
-    Event drag;
-    drag.type = EventType::MouseDrag;
-    drag.mouseCol = 4;
-    drag.mouseRow = 5; // h=4 -> relRow=4: statusbar, fuera del contenido
+    InputEvent drag;
+    drag.type = InputEventType::MouseDrag;
+    drag.cell = CellPos{3, 4}; // h=4 -> relRow=4: statusbar, fuera del contenido
     ed.handleEvent(drag);
 
     // Auto-scroll hacia abajo: entra en Seleccion y marca hasta el borde.

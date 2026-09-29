@@ -4,7 +4,7 @@
 // contrato FUTURO que el src debe cumplir:
 //
 //  1. `Event`/`EventType` -> `InputEvent`/`InputEventType`
-//     (cabecera canónica `platform/InputEvent.h`; `Event.h` es alias).
+//     (cabecera canónica `platform/InputEvent.h`; `Event.h` eliminado).
 //  2. Interfaz TTY-only `platform/tty/ITtyKeymap.h`. `TtyKeymap` la
 //     implementa y `Terminal` la expone; la GUI futura tendrá su propio
 //     keymap sin reutilizarla. `platform/IKeymap.h` fue ELIMINADO:
@@ -33,7 +33,6 @@
 #include <vector>
 
 #include "platform/InputEvent.h"
-#include "platform/Event.h"  // alias Event/EventType (código en transición)
 #include "platform/tty/ITtyKeymap.h"
 
 #include "platform/MouseEvent.h"
@@ -88,7 +87,6 @@ static const std::vector<std::string> kRequiredNewCommands = {
 };
 
 // 1. Vocabulario canónico platform/InputEvent.h (decisión 1).
-// Event/EventType son alias transitorios del mismo tipo.
 TEST(inputcmd_inputevent_header) {
     // El vocabulario semántico se preserva bajo el nuevo nombre.
     InputEvent e;
@@ -96,9 +94,9 @@ TEST(inputcmd_inputevent_header) {
     CHECK(e.type == InputEventType::None);
     CHECK(e.text.empty());
     e.type = InputEventType::MousePress;
-    e.setCellPos(CellPos{12, 7});
-    CHECK_EQ(e.mouseCol, 12);
-    CHECK_EQ(e.mouseRow, 7);
+    e.cell = CellPos{12, 7};
+    CHECK_EQ(e.cell.col, 12);
+    CHECK_EQ(e.cell.row, 7);
     InputEvent r;
     r.type = InputEventType::Resize;
     r.resizeRows = 30;
@@ -130,31 +128,27 @@ TEST(inputcmd_inputevent_header) {
     (void)InputEventType::MouseDrag;
     (void)InputEventType::MouseRelease;
     (void)InputEventType::Resize;
-    // Alias transitorios: mismo tipo, no copia.
-    static_assert(std::is_same<Event, InputEvent>::value, "Event debe ser alias de InputEvent");
-    static_assert(std::is_same<EventType, InputEventType>::value, "EventType debe ser alias");
 }
 
 // 1b. Forma del vocabulario actual (pasa hoy; debe seguir pasando tras el
 // rename, solo cambia el nombre). Fija que el payload viaja en el evento.
 TEST(inputcmd_inputevent_shape) {
-    Event e;
-    CHECK(e.type == EventType::None);
+    InputEvent e;
+    CHECK(e.type == InputEventType::None);
     CHECK(e.text.empty());
     // Handler de CommandMap es void() sin args: el payload NO puede ir por
     // CommandMap; por diseño viaja en el InputEvent (texto/coords/resize).
     static_assert(std::is_same<CommandMap::Handler, std::function<void()>>::value,
                   "CommandMap::Handler debe seguir siendo void()");
-    Event t;
-    t.type = EventType::InsertChar;
+    InputEvent t;
+    t.type = InputEventType::InsertChar;
     t.text = "ñ";
     CHECK(t.text == "ñ");
-    Event m;
-    m.type = EventType::MousePress;
-    m.mouseCol = 4;
-    m.mouseRow = 2;
-    CHECK_EQ(m.mouseCol, 4);
-    CHECK_EQ(m.mouseRow, 2);
+    InputEvent m;
+    m.type = InputEventType::MousePress;
+    m.cell = CellPos{4, 2};
+    CHECK_EQ(m.cell.col, 4);
+    CHECK_EQ(m.cell.row, 2);
 }
 
 // 2. Interfaz TTY-only platform/tty/ITtyKeymap.h (decisión 2).
@@ -163,10 +157,10 @@ TEST(inputcmd_ittykeymap_header) {
     // TtyKeymap implementa la interfaz TTY y Terminal la expone.
     TtyKeymap km;
     ITtyKeymap& iface = km;
-    iface.bindControl(18, EventType::PageDown);
+    iface.bindControl(18, InputEventType::PageDown);
     auto t = iface.control(18);
     CHECK(t.has_value());
-    iface.bindSequence("[9~", EventType::PageUp);
+    iface.bindSequence("[9~", InputEventType::PageUp);
     CHECK(iface.sequence("[9~").has_value());
     Terminal term;
     ITtyKeymap& ti = term.keymapIface();
@@ -216,12 +210,12 @@ TEST(inputcmd_gui_bypass_parity) {
     // Vía teclado TTY clásico: Prefix + 'n'.
     Editor viaKeys;
     const int beforeK = viaKeys.buffers.count();
-    Event prefix;
-    prefix.type = EventType::Prefix;
+    InputEvent prefix;
+    prefix.type = InputEventType::Prefix;
     viaKeys.processEventForTesting(prefix);
     CHECK(viaKeys.getStateForTesting() == State::Prefix);
-    Event n;
-    n.type = EventType::InsertChar;
+    InputEvent n;
+    n.type = InputEventType::InsertChar;
     n.text = "n";
     viaKeys.processEventForTesting(n);
     CHECK_EQ(viaKeys.buffers.count(), beforeK + 1);
@@ -265,15 +259,15 @@ TEST(inputcmd_editor_public_command_api) {
     checkPublicCommandApi(ed);
 }
 
-static Event inputcmdChar(const std::string& text) {
-    Event e;
-    e.type = EventType::InsertChar;
+static InputEvent inputcmdChar(const std::string& text) {
+    InputEvent e;
+    e.type = InputEventType::InsertChar;
     e.text = text;
     return e;
 }
 
-static Event inputcmdKey(EventType type) {
-    Event e;
+static InputEvent inputcmdKey(InputEventType type) {
+    InputEvent e;
     e.type = type;
     return e;
 }
@@ -287,8 +281,8 @@ TEST(inputcmd_movement_parity_seleccion) {
     viaKeys.getActiveBufferForTesting().document.restore({"hello world"});
     viaKeys.processEventForTesting(inputcmdChar("s"));
     CHECK(viaKeys.getStateForTesting() == State::Seleccion);
-    viaKeys.processEventForTesting(inputcmdKey(EventType::MoveRight));
-    viaKeys.processEventForTesting(inputcmdKey(EventType::MoveDown));
+    viaKeys.processEventForTesting(inputcmdKey(InputEventType::MoveRight));
+    viaKeys.processEventForTesting(inputcmdKey(InputEventType::MoveDown));
 
     // Camino GUI: 's' vía evento + comandos directos (botón GUI).
     Editor viaCmd;
@@ -327,7 +321,7 @@ TEST(inputcmd_movement_parity_selectall) {
     viaKeys.processEventForTesting(inputcmdChar("s"));
     viaKeys.processEventForTesting(inputcmdChar("a"));
     CHECK(viaKeys.getActiveBufferForTesting().selectAllActive);
-    viaKeys.processEventForTesting(inputcmdKey(EventType::MoveRight));
+    viaKeys.processEventForTesting(inputcmdKey(InputEventType::MoveRight));
 
     // Camino GUI: 's' + 'a' vía eventos + comando directo.
     Editor viaCmd;
@@ -382,7 +376,7 @@ TEST(inputcmd_cmd_buffer_guardar_named_behavior) {
     ed.processEventForTesting(inputcmdChar("i"));
     ed.processEventForTesting(inputcmdChar("X"));
     CHECK(ed.getActiveBufferForTesting().modified);
-    ed.processEventForTesting(inputcmdKey(EventType::Escape));
+    ed.processEventForTesting(inputcmdKey(InputEventType::Escape));
     CHECK(ed.hasCommand("buffer.guardar"));
     ed.executeCommand("buffer.guardar");
     CHECK(!ed.getActiveBufferForTesting().modified);
@@ -430,7 +424,7 @@ TEST(inputcmd_cmd_app_salir_safe_and_forced) {
         Editor ed;
         ed.processEventForTesting(inputcmdChar("i"));
         ed.processEventForTesting(inputcmdChar("X"));
-        ed.processEventForTesting(inputcmdKey(EventType::Escape));
+        ed.processEventForTesting(inputcmdKey(InputEventType::Escape));
         CHECK(ed.getActiveBufferForTesting().modified);
         ed.executeCommand("app.salir");
         CHECK(ed.running_);
@@ -448,7 +442,7 @@ TEST(inputcmd_cmd_cursor_mover_gui_seleccion) {
     Editor viaKeys;
     viaKeys.getActiveBufferForTesting().document.restore({"hello world"});
     viaKeys.processEventForTesting(inputcmdChar("s"));
-    viaKeys.processEventForTesting(inputcmdKey(EventType::MoveRight));
+    viaKeys.processEventForTesting(inputcmdKey(InputEventType::MoveRight));
 
     // Camino GUI: 's' vía evento + API pública (botón GUI).
     Editor viaGui;
