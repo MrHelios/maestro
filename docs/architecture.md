@@ -49,9 +49,10 @@ formatos de transporte propios de TTY, GUI, SGR, keycodes, etc.
 - Bytes de control, contenidos de secuencias ESC, keycodes crudos,
   `pollfd`/`fd()` = transporte del backend (TTY). Nunca suben al
   vocabulario común. Las coordenadas viajan como `CellPos` 0-based: en
-  entrada el decoder TTY convierte SGR 1-based restando 1 (único lugar
-  que conoce el offset en entrada); en salida `FrameBuilder` resta 1 al
-  producir `CellPos` y `TtyEncoder` suma 1 al emitir CUP 1-based ANSI.
+  entrada el decoder TTY (`decodeMouseSgr` en `platform/tty/TtyMouse.h`)
+  convierte SGR 1-based restando 1 (único lugar que conoce el offset SGR
+  en entrada); en salida `FrameBuilder` resta 1 al producir `CellPos` y
+  `TtyEncoder` suma 1 al emitir CUP 1-based ANSI.
 
 ### Deuda conocida (no bloquea; parche futuro)
 

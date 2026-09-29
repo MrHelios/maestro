@@ -93,6 +93,8 @@ struct InputEvent {
     // Celda del evento, solo válida si type == MousePress, MouseDrag o
     // MouseRelease. Dominio neutro 0-based (CellPos): el decoder TTY
     // convierte SGR restando 1; el código común nunca ve 1-based.
+    // Para cualquier otro type conserva el default inválido CellPos{-1,-1}
+    // (valid() == false): no usar `cell` salvo en eventos de mouse.
     CellPos cell;
     // Tamaño nuevo, solo válido si type == Resize.
     int resizeCols = 0;

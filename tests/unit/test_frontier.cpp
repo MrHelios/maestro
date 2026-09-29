@@ -23,10 +23,16 @@ TEST(frontier_cellpos_valid) {
     CHECK((CellPos{10, 5}.valid()));
     CHECK((CellPos{0, 5}.valid()));
     CHECK((CellPos{10, 0}.valid()));
+    CHECK((CellPos{0, 0}.valid())); // origen: celda válida, no "vacía"
     CHECK((!CellPos{-1, 5}.valid()));
     CHECK((!CellPos{10, -1}.valid()));
     CHECK((CellPos{3, 4} == CellPos{3, 4}));
     CHECK((CellPos{3, 4} != CellPos{3, 5}));
+    // Contrato default inválido: un evento que no es de mouse no debe
+    // cargar una "celda válida" espuria en {0,0}.
+    CHECK((!CellPos{}.valid()));
+    CHECK((!InputEvent{}.cell.valid()));
+    CHECK((makeMousePressEvent(CellPos{0, 0}).cell.valid()));
 }
 
 // 1+3: InputEvent expone CellPos y payload Resize.

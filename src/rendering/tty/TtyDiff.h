@@ -29,7 +29,7 @@
 // cambios de comportamiento.
 //
 // EXCEPCION ARQUITECTONICA (documentada, no un bug): el contrato comun
-// FrameCursor { pos, visible, shape } solo lo materializa
+// FrameCursor { cell, visible, shape } solo lo materializa
 // FrameBuilder::buildFrame(). Los fast paths de este diff
 // (buildCursorMoveFrame / buildScrollFrame / rebuild / slow path) no
 // construyen un Frame: resuelven el cursor directamente con

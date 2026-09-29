@@ -1,5 +1,5 @@
 // Contrato visual explicito del cursor (suppressScrollToCursor_):
-// visible==true -> pos es la posicion visual real; visible==false -> pos no
+// visible==true -> cell es la posicion visual real; visible==false -> cell no
 // debe usarse (cursor fuera del viewport o Busqueda). El GUI no clampa.
 #include <string>
 
@@ -45,8 +45,8 @@ TEST(frame_cursor_visible_inside_viewport) {
     Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Navegacion,
                            std::nullopt);
     CHECK(f.cursor.visible);
-    CHECK(f.cursor.pos.valid());
-    CHECK_EQ(f.cursor.pos.row, 25 - 20); // 0-based
+    CHECK(f.cursor.cell.valid());
+    CHECK_EQ(f.cursor.cell.row, 25 - 20); // 0-based
     CHECK(f.cursor.shape == FrameCursorShape::Block);
 }
 
@@ -61,7 +61,7 @@ TEST(frame_cursor_hidden_below_viewport_wheel_case) {
     Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Navegacion,
                            std::nullopt);
     CHECK(!f.cursor.visible);
-    CHECK(!f.cursor.pos.valid());
+    CHECK(!f.cursor.cell.valid());
 }
 
 TEST(frame_cursor_hidden_above_viewport) {
@@ -105,7 +105,7 @@ TEST(frame_cursor_hidden_right_offscreen) {
     Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Navegacion,
                            std::nullopt);
     CHECK(!f.cursor.visible);
-    CHECK(!f.cursor.pos.valid());
+    CHECK(!f.cursor.cell.valid());
 }
 
 TEST(frame_cursor_busqueda_hidden_even_inside) {
@@ -118,7 +118,7 @@ TEST(frame_cursor_busqueda_hidden_even_inside) {
     Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Busqueda,
                            std::nullopt);
     CHECK(!f.cursor.visible);
-    CHECK(!f.cursor.pos.valid());
+    CHECK(!f.cursor.cell.valid());
 }
 
 TEST(frame_cursor_shape_follows_state) {

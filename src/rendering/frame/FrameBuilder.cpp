@@ -568,15 +568,15 @@ Frame FrameBuilder::buildFrame(    const Document& doc,
     // Contrato visual explicito: visible solo si el modo lo permite Y el
     // cursor logico esta dentro del viewport. Cuando la rueda mueve el
     // viewport con suppressScrollToCursor_ (cursor off-screen), visible=false
-    // y pos queda invalida a proposito para que ningun backend la pinte.
+    // y cell queda invalida a proposito para que ningun backend la pinte.
     int curRow = 0, curCol = 0;
     const bool inViewport =
         editorCursorPos(doc, cursor, viewport, g, curRow, curCol);
     const bool visible = state != State::Busqueda && inViewport;
     f.cursor.visible = visible;
     if (visible)
-        f.cursor.pos = CellPos(curCol - 1, curRow - 1); // editorCursorPos es 1-based
+        f.cursor.cell = CellPos(curCol - 1, curRow - 1); // editorCursorPos es 1-based
     else
-        f.cursor.pos = CellPos(-1, -1); // invalida: no usar (ver FrameCursor)
+        f.cursor.cell = CellPos(-1, -1); // invalida: no usar (ver FrameCursor)
     return f;
 }

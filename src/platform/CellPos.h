@@ -7,9 +7,15 @@
 // sin offsets). El render la produce igual (FrameBuilder resta 1) y el
 // encoder suma 1 al emitir CUP (1-based ANSI). Nada de `int` de
 // transporte (SGR) fuera del decoder.
+//
+// Default inválido (-1,-1): un CellPos recién construido NO es una celda
+// válida (valid() == false). Esto evita que un evento que no es de mouse
+// cargue una "celda válida" espuria en {0,0}. Solo los eventos de mouse
+// (MousePress/MouseDrag/MouseRelease) portan una celda válida; el resto
+// conserva el default inválido.
 struct CellPos {
-    int col = 0; // 0-based, eje X
-    int row = 0; // 0-based, eje Y
+    int col = -1; // 0-based, eje X; -1 = inválido
+    int row = -1; // 0-based, eje Y; -1 = inválido
 
     CellPos() = default;
     CellPos(int c, int r) : col(c), row(r) {}

@@ -343,8 +343,8 @@ static std::string simpleEscapeForm(const std::string& contents) {
 bool Terminal::parseMouseSgr(std::string_view seq, InputEvent& e) {
     // Frontier (11): el parseo vive en TtyMouse (produce CellPos);
     // acá solo se delega para no duplicar la tabla Cb.
-    CellPos pos;
-    return decodeMouseSgr(seq, e, pos);
+    CellPos cell;
+    return decodeMouseSgr(seq, e, cell);
 }
 
 InputEvent Terminal::readEvent() {

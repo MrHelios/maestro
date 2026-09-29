@@ -123,12 +123,12 @@ void TtyEncoder::appendFrame(std::string& out, const Frame& f) const {
         out += "\r\n";
     }
     appendStatus(out, f.layout.statusBar, f.status, f.statusAccent);
-    // Contrato visual: visible==false -> pos invalida, no pintar cursor.
+    // Contrato visual: visible==false -> cell invalida, no pintar cursor.
     // Cubre Busqueda y cursor fuera del viewport (rueda con
     // suppressScrollToCursor_): se deja oculto (beginFrame hizo hide).
     if (!f.cursor.visible) return;
-    // FrameCursor.pos es 0-based; CUP es 1-based ANSI: único +1 de salida.
-    moveCursorTo(out, f.cursor.pos.row + 1, f.cursor.pos.col + 1);
+    // FrameCursor.cell es 0-based; CUP es 1-based ANSI: único +1 de salida.
+    moveCursorTo(out, f.cursor.cell.row + 1, f.cursor.cell.col + 1);
     setCursorStyle(out, f.cursor.shape);
     endFrame(out);
 }

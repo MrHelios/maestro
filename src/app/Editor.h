@@ -451,6 +451,11 @@ private:
     // abajo (statusbar) o primera fila por sustitucion hacia arriba
     // (ver DECISION en el bloque de armado). El tick lo re-ejecuta
     // para dar un paso.
+    // Nota: NO gatear por cell.valid(). El tick solo lee esta celda bajo
+    // mouseAutoscrollActive() (direccion != None + gesto armado, y la
+    // direccion solo se arma junto a la escritura de la celda), asi que el
+    // default {-1,-1} nunca se lee. Además los tests inyectan fila -1
+    // sintética como "fuera por arriba" irrepresentable por SGR real.
     CellPos mouseAutoscrollCell_;
     // Oraculo del boton fisico (ver setter): por defecto "presionado".
     std::function<bool()> mouseButtonHeldOracle_ = [] { return true; };

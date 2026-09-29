@@ -27,12 +27,12 @@
 //
 // El ancho del gutter es layout/Gutter.h (unica fuente de verdad).
 
-inline std::optional<Position> screenToCursor(CellPos pos,
+inline std::optional<Position> screenToCursor(CellPos cell,
                                               const Layout& layout,
                                               const Viewport& viewport,
                                               const Document& doc) {
-    const int relRow = pos.row - layout.content.row;
-    const int relCol = pos.col - layout.content.col;
+    const int relRow = cell.row - layout.content.row;
+    const int relCol = cell.col - layout.content.col;
     if (relRow < 0 || relRow >= layout.content.height) return std::nullopt;
     if (relCol < 0) return std::nullopt;
 
