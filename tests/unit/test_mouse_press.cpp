@@ -235,7 +235,7 @@ TEST(mouse_map_with_scroll_offsets) {
     vp.left = 2;
     Layout lo = testLayout(vp);
     // fila visible 0 = docLine 10; visual 0 => byte 2 ("c")
-    // mouseRow=1, mouseCol=4 -> CellPos{3, 0}
+    // SGR (Cx=4, Cy=1) -> CellPos{3, 0}
     auto p = screenToCursor(CellPos{3, 0}, lo, vp, d);
     CHECK(p.has_value());
     CHECK_EQ(p->line, 10);

@@ -2,7 +2,7 @@
 #include <string>
 
 #include "test_framework.h"
-#include "platform/InputEvent.h"  // shim legacy: este test usa InputEvent/InputEventType
+#include "platform/InputEvent.h"  // usa InputEvent común
 #include "helpers/FakeClipboard.h"
 #include "platform/clipboard/SystemClipboard.h"
 #ifdef HAVE_X11

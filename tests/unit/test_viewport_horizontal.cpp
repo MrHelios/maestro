@@ -5,7 +5,7 @@
 #include "layout/Layout.h"
 #include "base/utf8.h"
 #include "rendering/Renderer.h"
-#include "platform/InputEvent.h"  // shim legacy: este test usa InputEvent/InputEventType
+#include "platform/InputEvent.h"  // usa InputEvent común
 #include "test_framework.h"
 #include <string>
 #include <vector>

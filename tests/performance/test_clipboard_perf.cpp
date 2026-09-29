@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "test_framework.h"
-#include "platform/InputEvent.h"  // shim legacy: este test usa InputEvent/InputEventType
+#include "platform/InputEvent.h"  // usa InputEvent común
 #include "helpers/perf_arch.h"
 #include "helpers/perf_limits.h"
 #include "helpers/perf_time_utils.h"

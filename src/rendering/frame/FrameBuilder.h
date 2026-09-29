@@ -58,7 +58,8 @@ public:
 
     EditorGeometry editorGeometry(const Document& doc,
                                    const Viewport& viewport) const;
-    // Resuelve el cursor logico a coordenadas 1-based de terminal.
+    // Resuelve el cursor logico a coordenadas 1-based de terminal (el llamador
+    // convierte a CellPos 0-based restando 1, ver FrameBuilder.cpp).
     // Contrato explicito (sin clamp silencioso):
     //   return true  -> (outRow,outCol) es la posicion visual real.
     //   return false -> cursor fuera del viewport; (outRow,outCol) lleva el

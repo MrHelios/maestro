@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "test_framework.h"
-#include "platform/InputEvent.h"  // shim legacy: este test usa InputEvent/InputEventType
+#include "platform/InputEvent.h"  // usa InputEvent común
 
 #define private public
 #include "app/Editor.h"

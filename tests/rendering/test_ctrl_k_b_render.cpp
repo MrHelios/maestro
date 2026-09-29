@@ -1,5 +1,5 @@
 #include "test_framework.h"
-#include "platform/InputEvent.h"  // shim legacy: este test usa InputEvent/InputEventType
+#include "platform/InputEvent.h"  // usa InputEvent común
 #include "helpers/test_render_utils.h"
 #include <algorithm>
 #define private public

@@ -59,7 +59,7 @@ formatos de transporte propios de TTY, GUI, SGR, keycodes, etc.
 POSIX transport leak — tolerated during migration: `FileWatcher::fd()`
 (`int`, `-1` si no hay nada que sondear) expone transporte POSIX en la
 interfaz común, igual que `SystemClipboard::fd()`. Es la misma clase de
-fuga que los `int` SGR de `InputEvent`, y contrasta con `IEventSource`,
+fuga que los antiguos `int` SGR de `InputEvent` (ya eliminados), y contrasta con `IEventSource`,
 que deliberadamente no expone `fd`. El camino neutral ya existe
 (`pollEvents()`); `fd()` lo consume solo el loop TTY
 (`TtyRunLoop`, vía `ppoll`). No bloquea FASE B; en un parche futuro el
