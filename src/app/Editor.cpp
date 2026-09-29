@@ -13,7 +13,6 @@
 #include "syntax/SyntaxHighlighter.h"
 #include "platform/clipboard/ClipboardFactory.h"
 #include "filesystem/FileWatcherFactory.h"
-#include "platform/tty/TtyRunLoop.h"
 
 namespace {
 
@@ -136,6 +135,12 @@ Editor::Editor(std::unique_ptr<SystemClipboard> clipboard, std::unique_ptr<FileW
     if (!watcher_) watcher_ = makeNullFileWatcher();
     setStatusMessage(kHelpEmpty);
     registerCommands();
+    // Garantía del fallback 24x80: el Buffer recién creado trae el default
+    // del struct Viewport, que no coincide con el contenido (filas - chrome).
+    // Sincronizar acá deja una geometría coherente aunque el dueño nunca
+    // llame a resize() (render sin resize previo no se rompe); resize()
+    // aplica después el tamaño real y mantiene el invariante.
+    for (int i = 0; i < buffers.count(); ++i) syncViewportSize(buffers.at(i));
 }
 
 Editor::~Editor() = default;
@@ -272,11 +277,12 @@ void Editor::setActionMessage(const std::string& msg, MessageKind kind) {
                              std::chrono::steady_clock::now() + kActionMessageTimeout};
 }
 
-void Editor::clearExpiredActionMessage() {
+void Editor::clearExpiredActionMessage(
+    std::chrono::steady_clock::time_point now) {
     // Un mensaje de accion expira por si solo pasados los 5 segundos. Los
     // mensajes persistentes NO se tocan (persistent() es true).
     if (statusMessage_.persistent()) return;
-    if (statusMessage_.expired()) {
+    if (statusMessage_.expired(now)) {
         statusMessage_ = Message{};
     }
 }
@@ -669,21 +675,14 @@ void Editor::registerCommands() {
         startSaveAs();
     });
     // Ctrl+K q / botón GUI "Salir": bloquea si hay modificados.
-    commands_.registerCommand("app.salir", [this] {
-        bool anyModified = false;
-        for (int i = 0; i < buffers.count(); ++i) {
-            if (buffers.at(i).modified) { anyModified = true; break; }
-        }
-        if (anyModified) {
-            if (state_ == State::Prefix) state_ = priorState_;
-            setActionMessage("Hay archivos sin guardar", MessageKind::Warning);
-        } else {
-            running_ = false;
-        }
-    });
     // Ctrl+K Ctrl+Q / botón GUI "Salir sin guardar": salida inmediata.
+    // Ambos delegan en requestQuit (fuente única del chequeo), que además
+    // reporta el resultado al loop GUI (ver Editor.h).
+    commands_.registerCommand("app.salir", [this] {
+        requestQuit(false);
+    });
     commands_.registerCommand("app.salir.forzado", [this] {
-        running_ = false;
+        requestQuit(true);
     });
 }
 
@@ -750,7 +749,7 @@ bool Editor::loadIntoActiveBuffer(const std::string& path) {
     return result == LoadResult::Success;
 }
 
-void Editor::handleResize(int rows, int cols) {
+void Editor::resize(int rows, int cols) {
     if (rows <= 0 || cols <= 0) return;
     currentRows_ = rows;
     currentCols_ = cols;
@@ -758,6 +757,9 @@ void Editor::handleResize(int rows, int cols) {
         syncViewportSize(buffers.at(i));
         buffers.at(i).cursor.clampToLine(buffers.at(i).document);
     }
+    // Sin invalidateCache: el diff TTY detecta el cambio de geometría
+    // solo (TtyDiff::buildDiffFrame) y rebuilda; un resize al mismo
+    // tamaño conserva el fast path. El dirty neutro pertenece a Fase D.
 }
 
 void Editor::syncViewportSize(Buffer& b) {
@@ -1031,12 +1033,87 @@ void Editor::openFileInBuffer(const std::string& path) {
     }
 }
 
-void Editor::run() {
-    // Frontier (12): el loop TTY vive en TtyRunLoop. Este método solo
-    // delega para preservar la API (main/tests). Ver
-    // platform/tty/TtyRunLoop.h.
-    TtyRunLoop loop(*this);
-    loop.run();
+void Editor::tick(std::chrono::steady_clock::time_point now) {
+    clearExpiredActionMessage(now);
+    tickMouseAutoscroll(now);
+}
+
+void Editor::clearExpiredMessages(
+    std::chrono::steady_clock::time_point now) {
+    clearExpiredActionMessage(now);
+}
+
+bool Editor::hasClipboardPending() const {
+    return clipboard_ && clipboard_->hasPending();
+}
+
+void Editor::processClipboardEvents() {
+    if (clipboard_) clipboard_->processEvents();
+}
+
+int Editor::clipboardFd() const {
+    return clipboard_ ? clipboard_->fd() : -1;
+}
+
+int Editor::watcherFd() const {
+    return watcher_ ? watcher_->fd() : -1;
+}
+
+void Editor::pollWatcherEvents() {
+    if (!watcher_) return;
+    watcher_->pollEvents([this](const FileChangeEvent& ev) {
+        handleFileChange(ev);
+    });
+}
+
+void Editor::pollExternalEvents() {
+    processClipboardEvents();
+    pollWatcherEvents();
+}
+
+bool Editor::requestQuit(bool force) {
+    if (!force) {
+        bool anyModified = false;
+        for (int i = 0; i < buffers.count(); ++i) {
+            if (buffers.at(i).modified) { anyModified = true; break; }
+        }
+        if (anyModified) {
+            if (state_ == State::Prefix) state_ = priorState_;
+            setActionMessage("Hay archivos sin guardar", MessageKind::Warning);
+            return false;
+        }
+    }
+    running_ = false;
+    return true;
+}
+
+static int msUntil(
+    std::chrono::steady_clock::time_point now,
+    std::chrono::steady_clock::time_point target) {
+    const auto remaining = target - now;
+    const long ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(remaining)
+            .count();
+    return ms <= 0 ? 0 : static_cast<int>(std::min<long>(ms, INT_MAX));
+}
+
+int Editor::nextTimeoutMs(
+    std::chrono::steady_clock::time_point now) const {
+    int waitMs = -1;
+    if (hasClipboardPending()) waitMs = 20;
+    if (statusMessage_.expiry) {
+        int msgMs = msUntil(now, *statusMessage_.expiry);
+        if (waitMs < 0) waitMs = msgMs;
+        else waitMs = std::min(waitMs, msgMs);
+    }
+    if (mouseAutoscrollActive()) {
+        const auto target =
+            mouseAutoscrollLastStep_ + kMouseAutoscrollInterval;
+        int tickMs = msUntil(now, target);
+        if (waitMs < 0) waitMs = tickMs;
+        else waitMs = std::min(waitMs, tickMs);
+    }
+    return waitMs;
 }
 
 void Editor::renderFrame() {
@@ -1395,7 +1472,7 @@ void Editor::handleMouseRelease(const InputEvent& event) {
 
 void Editor::handleEvent(const InputEvent& event) {
     if (event.type == InputEventType::Resize) {
-        handleResize(event.resizeRows, event.resizeCols);
+        resize(event.resizeRows, event.resizeCols);
         return;
     }
     if (event.type == InputEventType::MousePress) {

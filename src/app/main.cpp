@@ -1,12 +1,14 @@
 #include <cstdio>
 #include "app/Editor.h"
 #include "platform/MouseButton.h"
+#include "platform/tty/TtyRunLoop.h"
 #include "rendering/tty/TtySink.h"
 
 // main es el composition root: acá se cablean los backends concretos
-// (TtySink, X11MouseButtonQuery) con el engine (Editor), que solo conoce
-// interfaces puras (Sink, oracle). El futuro GUI construirá los suyos sin
-// tocar src/app/.
+// (TtySink, X11MouseButtonQuery, TtyRunLoop) con el engine (Editor), que
+// solo conoce interfaces puras (Sink, oracle) y la fachada
+// handleEvent/resize/renderFrame/tick. El futuro GUI construirá los suyos
+// sin tocar src/app/ (solo este archivo).
 int main(int argc, char* argv[]) {
     // Dueño explícito del recurso X11 (sin static de proceso). Vive lo que
     // vive el editor, que lo consulta vía oracle en el tick de autoscroll.
@@ -33,6 +35,9 @@ int main(int argc, char* argv[]) {
         editor.loadIntoActiveBuffer(argv[1]);
     }
 
-    editor.run();
+    // El loop TTY vive fuera del Editor: mide el tamaño inicial
+    // vía resize() y corre el ciclo. El Editor solo recibe eventos.
+    TtyRunLoop loop(editor);
+    loop.run();
     return 0;
 }

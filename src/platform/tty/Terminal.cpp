@@ -183,7 +183,7 @@ void Terminal::enableRawMode() {
         // detecte el resize via hasResized() sin latencia. No agregar
         // SA_RESTART aqui: haria que poll se reinicie automaticamente y el
         // resize quedaria bloqueado hasta la proxima tecla (ventana de carrera
-        // con waitMs=-1). Ver Editor::run() ppoll(..., &origMask).
+        // con waitMs=-1). Ver TtyRunLoop::run() ppoll(..., &origMask).
         sa.sa_flags = 0;
         sigaction(SIGWINCH, &sa, &signalState_->oldWinchAction);
         signalState_->winchInstalled = true;

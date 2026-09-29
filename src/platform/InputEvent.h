@@ -78,7 +78,7 @@ enum class InputEventType {
     MouseRelease,
     // Resize de ventana (SIGWINCH traducido por el loop TTY, o tamaño
     // enviado por la GUI). Payload AUTÓNOMO en resizeRows/resizeCols:
-    // el Editor lo aplica tal cual (handleResize(rows, cols)) sin
+    // el Editor lo aplica tal cual (resize(rows, cols)) sin
     // consultar ningún backend ni provider.
     Resize,
 };

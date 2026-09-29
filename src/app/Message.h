@@ -49,6 +49,9 @@ struct Message {
     bool expired() const {
         return expiry && std::chrono::steady_clock::now() >= *expiry;
     }
+    bool expired(std::chrono::steady_clock::time_point now) const {
+        return expiry && now >= *expiry;
+    }
 
     // Conveniencia "string-like": los tests (y el codigo que solo quiere el
     // texto) comparan/buscan el mensaje sin destillar .text.

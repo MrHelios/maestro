@@ -265,15 +265,13 @@ TEST(ctrl_k_n_edit_switch_back_preserves_content) {
 }
 
 // Un buffer creado a mitad de sesion debe tomar las dimensiones reales
-// de la terminal (no quedarse con el Viewport por defecto 24x80), o si
-// no el render solo redibuja esas filas y queda resto del buffer
-// anterior en pantalla (bug reportado en Ctrl+K n).
+// (vía resize(), dueño: composition root/loop) y no quedarse con el
+// Viewport por defecto 24x80.
 TEST(ctrl_k_n_new_buffer_viewport_matches_terminal) {
     Editor ed;
-    int rows, cols;
-    ed.getWindowSize(rows, cols);
-    int vpHeight = rows > 2 ? rows - 2 : 1;
-    int vpWidth = cols;
+    ed.resize(30, 100);
+    const int vpHeight = 28;  // 30 - 2 (status bar)
+    const int vpWidth = 100;
 
     newBuffer(ed);
     CHECK_EQ(ed.active().viewport.height, vpHeight);
@@ -281,14 +279,12 @@ TEST(ctrl_k_n_new_buffer_viewport_matches_terminal) {
 }
 
 // El mismo bug aplica al reinicio del ultimo buffer (Ctrl+K w): al
-// resetear se sustituye el viewport por uno por defecto que no cubria
-// toda la terminal. Debe conservar las dimensiones reales.
+// resetear debe conservar las dimensiones del último resize().
 TEST(ctrl_k_w_last_buffer_reset_keeps_terminal_viewport) {
     Editor ed;
-    int rows, cols;
-    ed.getWindowSize(rows, cols);
-    int vpHeight = rows > 2 ? rows - 2 : 1;
-    int vpWidth = cols;
+    ed.resize(30, 100);
+    const int vpHeight = 28;
+    const int vpWidth = 100;
 
     closeBuffer(ed);                         // unico buffer: se reinicia
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));

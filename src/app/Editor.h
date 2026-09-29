@@ -29,16 +29,22 @@ class Sink;
 // Editor es el "engine": maneja una coleccion de buffers (v0.6.3), un
 // buffer activo, el modo, los mensajes y el portapapeles global. Todo lo
 // que le pertenece a un documento (Document, Cursor, Viewport, seleccion,
-// undo/redo, filename, modified) vive en el Buffer. Traduce Eventos en
-// mutaciones sobre el buffer activo. No sabe nada de teclas crudas (eso
-// es responsabilidad de Terminal) ni de como se dibuja (eso es
-// responsabilidad de Renderer).
-// Frontier (12): Editor común — no incluye Terminal/Keymap, no conoce
-// pollfd/fd(), no construye X11/Inotify (eso lo hacen las factories y el
-// TtyRunLoop). El tamaño de ventana es estado propio (currentRows_/Cols_)
-// actualizado por cada InputEventType::Resize con su payload.
+// undo/redo, filename, modified) vive en el Buffer. Traduce eventos
+// semanticos en mutaciones sobre el buffer activo. No conoce bytes ni
+// secuencias crudas de teclado (las decodifica el backend de plataforma)
+// ni el backend de escritura (solo ve la interfaz Sink). El dibujado se
+// delega en el Renderer propio, alimentado por el Sink inyectado.
+// Editor desacoplado del loop de plataforma — no incluye terminal
+// ni tablas de teclas, no construye el clipboard del sistema ni el watcher
+// (eso lo hacen las factories). El tamaño de ventana es estado propio
+// (currentRows_/Cols_) actualizado por resize(rows, cols). El loop de
+// plataforma vive fuera y solo usa la fachada pública neutra:
+// handleEvent / resize / renderFrame / tick / isRunning / requestQuit /
+// pollExternalEvents / nextTimeoutMs.
+// Acceso a fd (clipboardFd/watcherFd): son TTY-only, deuda documentada en
+// architecture.md §2; la fachada neutra NO los expone. El futuro loop GUI
+// usará callbacks/polling, no estos fd.
 class Editor {
-    friend class TtyRunLoop;
 public:
     Editor();
     explicit Editor(std::unique_ptr<SystemClipboard> clipboard);
@@ -56,12 +62,57 @@ public:
     // false.
     bool loadIntoActiveBuffer(const std::string& path);
 
-    // Corre el ciclo principal:
-    //   mientras siga abierto:
-    //     leer evento
-    //     actualizar estado
-    //     renderizar
-    void run();
+    // Fachada pública para loops externos (TTY o futuro GUI).
+    // El Editor no posee ningún loop: el dueño (composition root / loop
+    // de plataforma) inyecta eventos y pide renders/ticks.
+    // resize() aplica un tamaño nuevo (payload autónomo, válido para
+    // TTY y GUI). Payload inválido (filas/cols <= 0) se ignora.
+    // Solo sincroniza viewports + clamp de cursor; el diff detecta el
+    // cambio de geometría solo en el próximo render (sin invalidate).
+    void resize(int rows, int cols);
+    // Entrada semántica ya decodificada (InputEvent -> handling -> CommandMap).
+    // Resize delega en resize(); el resto se despacha por modo.
+    void handleEvent(const InputEvent& event);
+    // Dibuja el frame actual según state_. Se comparte entre el flujo
+    // normal del ciclo y el despertar por timeout.
+    void renderFrame();
+    // Paso periódico agrupado (SOLO camino de timeout del loop):
+    // expiración de mensajes de acción + autoscroll temporal de selección
+    // por mouse. `now` inyectable.
+    void tick(std::chrono::steady_clock::time_point now);
+    // Expiración de mensajes sola, sin autoscroll ni consulta al oráculo:
+    // para el camino de eventos y los wakeups externos, donde el
+    // autoscroll solo avanzaba en el timeout. Evita un paso extra tras
+    // cada evento y movimientos sin render posterior.
+    // `now` inyectable para tests deterministas.
+    void clearExpiredMessages(std::chrono::steady_clock::time_point now);
+    bool isRunning() const { return running_; }
+    // Intento de cierre (botón GUI o comando): force=false bloquea si hay
+    // buffers modificados (aviso en status) y devuelve false; force=true
+    // sale siempre. Devuelve true si el loop debe terminar. Fuente única
+    // del chequeo de modificados (los comandos app.salir* delegan acá).
+    bool requestQuit(bool force);
+    // Bombeo agrupado de fuentes externas (clipboard + watcher):
+    // idempotente, no-op si no hay nada. El loop lo llama cuando hay
+    // readiness; no necesita saber qué fuente está lista. La recarga
+    // concreta (handleFileChange) es detalle privado invocado desde acá.
+    void pollExternalEvents();
+    // Bombeo solo-clipboard (sin watcher): para el pre-ppoll del loop.
+    // El clipboard no muta estado visible, así que bombearlo antes de
+    // bloquearse es seguro; el watcher en cambio puede recargar el
+    // documento y va SOLO por readiness (vía pollExternalEvents), para
+    // no dejar la pantalla desactualizada dentro del ppoll.
+    void processClipboardEvents();
+    // Timeout sugerido para el ppoll/wait del loop (-1 = indefinido).
+    // Agrupa: clipboard pendiente (20ms), expiración de mensaje de
+    // acción y paso de autoscroll. `now` inyectable para tests
+    // deterministas. No expone statusMessage_ ni timers.
+    int nextTimeoutMs(std::chrono::steady_clock::time_point now) const;
+    // Acceso TTY-only para armar el ppoll (deuda documentada en
+    // architecture.md §2): el futuro loop GUI usará callbacks/polling,
+    // no estos fd. No son parte de la fachada neutra.
+    int clipboardFd() const;
+    int watcherFd() const;
 
     // --- Consultas sobre la seleccion ---
     // true solo si hay un rango NO vacio seleccionado (anchor != position).
@@ -88,8 +139,8 @@ public:
 
     // Puerta GUI (regla InputEvent/CommandMap): ejecuta un comando nombrado
     // SIN sintetizar eventos de teclado ni pasar por el prefijo. Es el único
-    // punto de entrada para botones/acciones GUI; handleEvent queda para el
-    // teclado (keymap -> InputEvent -> handling -> CommandMap).
+    // punto de entrada para botones/acciones GUI; handleEvent queda para la
+    // entrada decodificada (InputEvent -> handling -> CommandMap).
     // Nombre desconocido -> no-op robusto (igual que CommandMap::execute).
     void executeCommand(const std::string& name);
     bool hasCommand(const std::string& name) const;
@@ -110,10 +161,10 @@ public:
     }
 
     // Sink de escritura para renderFrame. El Editor SOLO conoce la
-    // interfaz pura (Sink*): nunca construye ni incluye el backend TTY.
-    // Lo inyecta el dueño en el composition root (main: TtySink real;
-    // tests: NullSink/TtySink local). Precondición: setSink antes del
-    // primer renderFrame (assert en sink()).
+    // interfaz pura (Sink*): nunca construye ni incluye ningún backend.
+    // Lo inyecta el dueño en el composition root (backend real en
+    // producción; sink de captura/nulo en tests). Precondición: setSink
+    // antes del primer renderFrame (assert en sink()).
     void setSink(Sink& s) { sink_ = &s; }
     void clearSink() { sink_ = nullptr; }
     Sink& sink() {
@@ -135,7 +186,8 @@ private:
     void setActionMessage(const std::string& msg, MessageKind kind = MessageKind::Info);
     // En el ciclo principal, si hay un mensaje de accion expirado se limpia
     // (statusMessage_ pasa a vacio). Nunca toca los persistentes.
-    void clearExpiredActionMessage();
+    // `now` inyectable para tests deterministas.
+    void clearExpiredActionMessage(std::chrono::steady_clock::time_point now);
 
     // ---- Coleccion de buffers (v0.6.3) ----
     // La lista de buffers, el indice activo y el contador de nombres
@@ -150,16 +202,10 @@ private:
     // inmediatamente. El buffer nuevo arranca en Navegacion, vacio.
     void createBuffer();
     // Dimensiones del viewport de un buffer, tomadas del tamaño actual
-    // (currentRows_/Cols_, actualizado por el último Resize). run() las
-    // fija al arrancar para los buffers que ya existen, pero un buffer
-    // creado a mitad de sesion (Ctrl+K n) o reiniciado (Ctrl+K w sobre
-    // el ultimo) arranca con el Viewport por defecto (24x80) y no
-    // redibujaria toda la pantalla si la terminal es mas grande.
-    // Este helper le da sus dimensiones reales.
+    // (currentRows_/Cols_, actualizado por resize()). Un buffer recién
+    // creado arranca con el default del struct Viewport y este helper le
+    // da sus dimensiones reales.
     void syncViewportSize(Buffer& b);
-    // Resize autónomo: aplica el payload del evento (sin consultar
-    // ningún backend). Payload inválido (filas/cols <= 0) se ignora.
-    void handleResize(int rows, int cols);
     // v0.6.3: Ctrl+K w -> cierra el buffer activo.
     //   - modificado: NO cierra; muestra aviso (hay que guardar o restaurar).
     //   - ultimo buffer: no se elimina; se convierte en vacio sin nombre.
@@ -192,23 +238,18 @@ private:
 
     Renderer renderer_;
     // Sink inyectado (no poseído). El Editor no sabe qué backend es:
-    // main inyecta TtySink, los tests su NullSink/TtySink local.
+    // el composition root inyecta el real y los tests el suyo local.
     // Nulo hasta setSink(); el futuro GUI inyectará el suyo sin que el
-    // engine arrastre un TtySink inútil.
+    // engine construya ningún backend por su cuenta.
     Sink* sink_ = nullptr;
     // Tamaño actual de la ventana (estado del editor, no del backend).
-    // Default 24x80 (igual que el fallback de Terminal sin TTY).
-    // Lo actualiza cada InputEventType::Resize via handleResize(rows, cols):
-    // el evento es autónomo (trae su payload) y vale para TTY y GUI
-    // sin instalar ningún provider.
+    // Fallback 24x80 (igual que terminal sin TTY): el constructor ya deja
+    // los viewports sincronizados con este tamaño, así que renderizar sin
+    // resize() previo es seguro (geometría coherente, aunque no real).
+    // resize(rows, cols) aplica el tamaño real del dueño (composition
+    // root / loop de plataforma) antes del primer render en producción.
     int currentRows_ = 24;
     int currentCols_ = 80;
-    // Lectura del tamaño actual (tests: reemplaza al viejo
-    // `ed.terminal_.getWindowSize`). No consulta ningún backend.
-    void getWindowSize(int& rows, int& cols) const {
-        rows = currentRows_;
-        cols = currentCols_;
-    }
     // Despacho de comandos por nombre. El Editor registra los handlers en
     // el constructor (registerCommands) y los modos resuelven la tecla ->
     // nombre -> handler aqui, en vez de tener cada accion dispersa en
@@ -332,7 +373,6 @@ private:
     void updateSelectionPosition();
     void clearSelection();
 
-    void handleEvent(const InputEvent& event);
     // Click izquierdo en el viewport: si venia de Seleccion cancela el
     // highlight EN EL PRESS (valido o en ~/statusbar) y vuelve a
     // Navegacion; luego arma el gesto (mueve el cursor y guarda
@@ -374,10 +414,6 @@ private:
     // tests deterministas. Devuelve true si produjo posicion.
     bool tickMouseAutoscroll(std::chrono::steady_clock::time_point now);
     void save();
-    // Dibuja el frame actual segun state_ (pantalla normal, selector de
-    // buffers o explorador de archivos). Se comparte entre el flujo normal
-    // del ciclo y el despertar por timeout de un mensaje de accion.
-    void renderFrame();
     // Procesa el siguiente evento cuando el editor esta en modo Prefix
     // (tras Ctrl+K). Ctrl+S/Guardar persiste, Ctrl+Q sale, Ctrl+K n crea
     // buffer, Ctrl+K t abre el selector, Ctrl+K w cierra buffer; cualquier
@@ -494,5 +530,11 @@ private:
     std::unordered_set<std::string> watchedFiles_;
     void watchFile(const std::string& path);
     void unwatchFile(const std::string& path);
+    // Recarga de archivos cambiados en disco. Solo la invoca
+    // pollExternalEvents(); los tests la ejercitan vía
+    // `#define private public`.
     void handleFileChange(const FileChangeEvent& ev);
+    // Helpers internos del bombeo externo (ver pollExternalEvents).
+    bool hasClipboardPending() const;
+    void pollWatcherEvents();
 };
