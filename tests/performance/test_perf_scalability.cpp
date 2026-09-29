@@ -442,8 +442,10 @@ TEST(bench_perf_bracket_match_checked) {
         Document doc; doc.restore(lines);
         Position pos{0,0};
         // cold - jump lazy (findMatchingBracketFrom sobre SyntaxCache frío)
+        // NOTA perf 1-núcleo: rama solo informativa (sin gate); 20/5/3->10/2/1.
+        // Se conserva 1 iter en 25k para no perder el dato O(N) frío.
         {
-            int iters = n==1000 ? 20 : n==10000 ? 5 : 3;
+            int iters = n==1000 ? 10 : n==10000 ? 2 : 1;
             char label[64];
             std::snprintf(label, sizeof(label), "bracket jump lazy cold %5d", n);
 
@@ -485,7 +487,9 @@ TEST(bench_perf_bracket_match_checked) {
             SyntaxCache cache; cache.setLanguage(SyntaxLanguage::Cpp);
             cache.ensureValid(doc, n);
             const auto& spans = cache.allSpans();
-            int iters = n==1000?100 : n==10000?20 : 10;
+            // Gate kBracketCached 0/0 exacto: cualquier alloc falla con 5
+            // iters igual que con 100; se baja 100/20/10->50/10/5.
+            int iters = n==1000?50 : n==10000?10 : 5;
             char label[64]; std::snprintf(label,sizeof(label),"bracket cached %5d",n);
             auto t0 = std::chrono::steady_clock::now();
             alloc_stats::resetAll();
@@ -514,7 +518,9 @@ TEST(bench_perf_bracket_match_checked) {
             std::string origLine = doc2.lineAt(mid);
             std::string editLine = "int x = 1; // edit";
             editLine.resize(80,' ');
-            int iters = n==1000 ? 100 : 20;
+            // Gate kBracketCached 0/0: 20/10/5 bastan (cada iter paga un
+            // ensureValid(n) completo fuera de la medición de bracket).
+            int iters = n==1000 ? 20 : n==10000 ? 10 : 5;
             char label[64]; std::snprintf(label,sizeof(label),"bracket afterEdit %5d",n);
             long long total_ns=0, total_allocs=0, total_bytes=0;
             for (int i=0;i<iters;++i){

@@ -33,14 +33,15 @@ static void benchOneReturn(const char* label, SyntaxLanguage lang, std::string_v
 static void benchOneReuse(const char* label, SyntaxLanguage lang, std::string_view line, int iters) {
     SyntaxHighlighter hl;
     hl.setLanguage(lang);
-    std::vector<SyntaxSpan> buf;
+    std::vector<SyntaxSpan> spans;
     size_t sampleSpans = 0;
-    { SyntaxState s{}; SyntaxState o{}; hl.highlight(line, s, o, buf); sampleSpans = buf.size(); }
+    // Warm-up sobre el MISMO vector medido: lo deja en capacidad steady
+    // antes de resetAll(), para que el primer crecimiento no cuente en el gate.
+    { SyntaxState s{}; SyntaxState o{}; hl.highlight(line, s, o, spans); sampleSpans = spans.size(); }
     alloc_stats::resetAll();
     {
         alloc_stats::Scoped s(alloc_stats::kRenderFrame);
         volatile size_t sink = 0;
-        std::vector<SyntaxSpan> spans;
         for (int i = 0; i < iters; ++i) {
             SyntaxState st{}; SyntaxState out{};
             hl.highlight(line, st, out, spans);
@@ -72,10 +73,14 @@ static void benchFrameReturn(const char* label, SyntaxLanguage lang, const std::
 }
 static void benchFrameReuse(const char* label, SyntaxLanguage lang, const std::vector<std::string>& lines, int iters) {
     SyntaxHighlighter hl; hl.setLanguage(lang);
+    // Warm-up sobre el MISMO buf medido: lo deja en capacidad steady antes
+    // de resetAll(). El vector local anterior ('warm') se destruía y no
+    // servía: el primer crecimiento de 'buf' seguía contando en el gate.
+    std::vector<SyntaxSpan> buf;
+    { SyntaxState st{}; for(auto& l:lines){ SyntaxState out{}; hl.highlight(l,st,out,buf); st=out; } }
     alloc_stats::resetAll();
     { alloc_stats::Scoped s(alloc_stats::kRenderFrame);
         volatile size_t sink=0;
-        std::vector<SyntaxSpan> buf;
         for(int k=0;k<iters;++k){ SyntaxState st{}; for(auto& l:lines){ SyntaxState out{}; hl.highlight(l,st,out,buf); sink+=buf.size(); st=out; } } (void)sink; }
     const auto& st=alloc_stats::statsFor(alloc_stats::kRenderFrame);
     int total=iters*(int)lines.size();
@@ -85,7 +90,10 @@ static void benchFrameReuse(const char* label, SyntaxLanguage lang, const std::v
 
 TEST(bench_highlight_alloc_benchmark_checked) {
     perf_arch::reportVerbose("\n== highlight: return (1 alloc/línea) vs reuse (clear+reuse buffer) ==\n");
-    const int N=10000;
+    // NOTA perf 1-núcleo: N 10000->2000 (5x). Gates intactos: casos ==0
+    // fallan con cualquier alloc, casos <0.01/op toleran hasta 20 allocs
+    // totales con N=2000 (1 alloc/línea daría 1.0/op >> 0.01).
+    const int N=2000;
     benchOneReturn("vacia", SyntaxLanguage::Cpp, "", N);
     benchOneReuse("vacia", SyntaxLanguage::Cpp, "", N);
     benchOneReturn("normal", SyntaxLanguage::Cpp, "int x = 42;", N);
@@ -127,14 +135,14 @@ TEST(bench_highlight_alloc_benchmark_checked) {
     std::vector<std::string> viewport24; for(int i=0;i<24;++i) viewport24.push_back(cppFile[i%cppFile.size()]);
     std::vector<std::string> big1524(1524, "int x = 42; // comment");
 
-    benchFrameReturn("cpp 11 líneas", SyntaxLanguage::Cpp, cppFile, 2000);
-    benchFrameReuse("cpp 11 líneas", SyntaxLanguage::Cpp, cppFile, 2000);
-    benchFrameReturn("viewport 24", SyntaxLanguage::Cpp, viewport24, 1000);
-    benchFrameReuse("viewport 24", SyntaxLanguage::Cpp, viewport24, 1000);
-    benchFrameReturn("1524 líneas", SyntaxLanguage::Cpp, big1524, 200);
-    benchFrameReuse("1524 líneas", SyntaxLanguage::Cpp, big1524, 200);
-    benchFrameReturn("1524 líneas", SyntaxLanguage::None, big1524, 200);
-    benchFrameReuse("1524 líneas", SyntaxLanguage::None, big1524, 200);
+    benchFrameReturn("cpp 11 líneas", SyntaxLanguage::Cpp, cppFile, 400);
+    benchFrameReuse("cpp 11 líneas", SyntaxLanguage::Cpp, cppFile, 400);
+    benchFrameReturn("viewport 24", SyntaxLanguage::Cpp, viewport24, 200);
+    benchFrameReuse("viewport 24", SyntaxLanguage::Cpp, viewport24, 200);
+    benchFrameReturn("1524 líneas", SyntaxLanguage::Cpp, big1524, 60);
+    benchFrameReuse("1524 líneas", SyntaxLanguage::Cpp, big1524, 60);
+    benchFrameReturn("1524 líneas", SyntaxLanguage::None, big1524, 60);
+    benchFrameReuse("1524 líneas", SyntaxLanguage::None, big1524, 60);
 
     std::vector<std::string> rawFile = {
         "auto s = R\"(hello \"world\")\";",
@@ -143,8 +151,8 @@ TEST(bench_highlight_alloc_benchmark_checked) {
         "still raw)foo\";",
         "int x = 42;",
     };
-    benchFrameReturn("raw 5 líneas", SyntaxLanguage::Cpp, rawFile, 2000);
-    benchFrameReuse("raw 5 líneas", SyntaxLanguage::Cpp, rawFile, 2000);
+    benchFrameReturn("raw 5 líneas", SyntaxLanguage::Cpp, rawFile, 400);
+    benchFrameReuse("raw 5 líneas", SyntaxLanguage::Cpp, rawFile, 400);
 
     perf_arch::reportVerbose("\n== None vs Cpp (reuse) sanity ==\n");
     benchOneReuse("vacia None", SyntaxLanguage::None, "", N);

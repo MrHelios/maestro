@@ -126,18 +126,23 @@ TEST(bench_perf_utf8_columnOf_cache_vs_full_checked) {
         int b = startByte;
         for(int k=0;k<100 && b>0;++k){ int prev = utf8::cellStartBefore(line, b); if(prev==b) break; steps.push_back(prev); b=prev; }
         if(steps.empty()) return;
-        double tFull100 = bench_us((std::string(tag)+" full 100xLeft").c_str(), 500, [&]{
+        // NOTA perf 1-núcleo: full 100xLeft es solo informativo (ver abajo);
+        // se baja a 15 iters (~22x menos scans O(N)). El gate real es r1
+        // (full 1x vs hit) + allocs, que conservan muestras suficientes.
+        double tFull100 = bench_us((std::string(tag)+" full 100xLeft").c_str(), 15, [&]{
             long c=0; for(int v: steps) c += utf8::columnOf(line, v);
             g_sink += c;
         });
-        double tCached100 = bench_us((std::string(tag)+" cached 100xLeft").c_str(), 5000, [&]{
+        double tCached100 = bench_us((std::string(tag)+" cached 100xLeft").c_str(), 100, [&]{
             Cursor cur; cur.col = startByte; cur.visualColumn(line);
             long c=0; for(int v: steps) { cur.col = v; c += cur.visualColumn(line); }
             g_sink += c;
         });
-        double tFull1 = bench_us((std::string(tag)+" full 1x col").c_str(), 5000, [&]{ g_sink += utf8::columnOf(line, startByte); });
+        double tFull1 = bench_us((std::string(tag)+" full 1x col").c_str(), 1000, [&]{ g_sink += utf8::columnOf(line, startByte); });
         Cursor cur2; cur2.col = startByte; cur2.visualColumn(line);
-        double tHit1 = bench_us((std::string(tag)+" cached hit 1x col").c_str(), 50000, [&]{ g_sink += cur2.visualColumn(line); });
+        // Hit barato (ns/op): se mantiene alto (20000) para estabilizar el
+        // denominador del ratio r1 frente al ruido del timer en Celeron.
+        double tHit1 = bench_us((std::string(tag)+" cached hit 1x col").c_str(), 20000, [&]{ g_sink += cur2.visualColumn(line); });
         // Gates duros: hit no debe asignar (O(1) por diseño) + ratio
         // uncached/cached >= 50x (conservador; baseline 36-100x+).
         alloc_stats::resetAll();

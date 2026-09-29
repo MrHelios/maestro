@@ -51,9 +51,12 @@ TEST_SRC_ALL := $(TEST_DIR)/test_main.cpp \
             $(wildcard $(TEST_DIR)/e2e/*.cpp) \
             $(wildcard $(TEST_DIR)/integration/*.cpp) \
             $(wildcard $(TEST_DIR)/integration/x11_clipboard/*.cpp)
+# make test = todo menos performance (incluye rendering: ~2s, 175 tests).
+# Performance queda solo en test-all / test-performance.
 TEST_SRC := $(TEST_DIR)/test_main.cpp \
             $(wildcard $(TEST_DIR)/unit/*.cpp) \
             $(wildcard $(TEST_DIR)/interaction/*.cpp) \
+            $(wildcard $(TEST_DIR)/rendering/*.cpp) \
             $(wildcard $(TEST_DIR)/e2e/*.cpp) \
             $(wildcard $(TEST_DIR)/integration/*.cpp) \
             $(wildcard $(TEST_DIR)/integration/x11_clipboard/*.cpp)
