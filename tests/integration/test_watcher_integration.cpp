@@ -656,30 +656,36 @@ TEST(save_as_new_file_end_to_end_isNew_hadWatch) {
         CHECK_EQ(ed.active().savedIdentity.dev, stNew.st_dev);
         CHECK_EQ(ed.active().savedIdentity.ino, stNew.st_ino);
     }
-    // viejo archivo no debe estar watchado, nuevo sí
+    // Save a copy: ambos buffers existen y ambos archivos watchados.
+    CHECK_EQ(ed.buffers.count(), 2);
+    CHECK_EQ(ed.buffers.at(0).document.lineAt(0), "save_as_content");
+    CHECK(ed.buffers.at(0).modified);  // X conserva ediciones en memoria
     ed.statusMessage_ = Message{};
     auto* w = dynamic_cast<InotifyFileWatcher*>(ed.watcher_.get());
     CHECK(w != nullptr);
     {
         std::string oldAbs = std::filesystem::absolute(fOrig.path).lexically_normal().string();
         std::string newAbs = std::filesystem::absolute(fNew.path).lexically_normal().string();
-        CHECK(w->fileWatches_.find(oldAbs) == w->fileWatches_.end());
+        CHECK_EQ(ed.buffers.at(0).filename, oldAbs);
+        CHECK(w->fileWatches_.find(oldAbs) != w->fileWatches_.end());
         CHECK(w->fileWatches_.find(newAbs) != w->fileWatches_.end());
-        CHECK(w->trackedFiles_.find(oldAbs) == w->trackedFiles_.end());
+        CHECK(w->trackedFiles_.find(oldAbs) != w->trackedFiles_.end());
         CHECK(w->trackedFiles_.find(newAbs) != w->trackedFiles_.end());
     }
     drainEditor(ed);
     CHECK(ed.statusMessage_.text.find("ALERTA") == std::string::npos);
-    // modificar nuevo archivo externamente debe recargar
+    // modificar nuevo archivo externamente debe recargar el activo (Y)
     CHECK(writeFile(fNew.path, "new_external\n"));
     bool reloaded = pollEditorUntil(ed, [&]{ return ed.active().document.lineAt(0)=="new_external"; });
     CHECK(reloaded);
     CHECK_EQ(ed.active().document.lineAt(0), "new_external");
-    // modificar viejo archivo no debe afectar
+    // modificar viejo archivo no debe afectar al activo (Y); X esta sucio
+    // asi que genera ALERTA en lugar de recargar.
     CHECK(writeFile(fOrig.path, "old_external\n"));
     ed.statusMessage_ = Message{};
     drainEditor(ed);
     CHECK_EQ(ed.active().document.lineAt(0), "new_external");
+    CHECK_EQ(ed.buffers.at(0).document.lineAt(0), "save_as_content");
 }
 
 TEST(save_as_existing_file_overwrites_and_updates_watch) {
@@ -695,7 +701,15 @@ TEST(save_as_existing_file_overwrites_and_updates_watch) {
     std::string newAbs = std::filesystem::absolute(fExisting.path).lexically_normal().string();
     CHECK(oldAbs != newAbs);
     ed.saveAsPath_ = fExisting.path;
-    ed.commitSaveAs();
+    ed.commitSaveAs();  // 1er Enter: solo arma confirmación, no escribe
+    CHECK(ed.statusMessage_.text.find("ya existe") != std::string::npos);
+    {
+        std::ifstream in(fExisting.path, std::ios::binary);
+        std::string disk((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        CHECK_EQ(disk, "existing\n");
+    }
+    CHECK_EQ(ed.buffers.count(), 1);
+    ed.commitSaveAs();  // 2do Enter: confirma y sobrescribe
     CHECK_EQ(ed.active().filename, newAbs);
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().document.lineAt(0), "save_as_overwrite");
@@ -706,11 +720,16 @@ TEST(save_as_existing_file_overwrites_and_updates_watch) {
     CHECK_EQ(stExistingBefore.st_ino, stExistingAfter.st_ino);
     CHECK_EQ(ed.active().savedIdentity.dev, stExistingAfter.st_dev);
     CHECK_EQ(ed.active().savedIdentity.ino, stExistingAfter.st_ino);
+    // Save a copy: ambos buffers existen y ambos archivos watchados.
+    CHECK_EQ(ed.buffers.count(), 2);
+    CHECK_EQ(ed.buffers.at(0).filename, oldAbs);
+    CHECK_EQ(ed.buffers.at(0).document.lineAt(0), "save_as_overwrite");
+    CHECK(ed.buffers.at(0).modified);  // X conserva ediciones en memoria
     auto* w = dynamic_cast<InotifyFileWatcher*>(ed.watcher_.get());
     CHECK(w != nullptr);
-    CHECK(w->fileWatches_.find(oldAbs) == w->fileWatches_.end());
+    CHECK(w->fileWatches_.find(oldAbs) != w->fileWatches_.end());
     CHECK(w->fileWatches_.find(newAbs) != w->fileWatches_.end());
-    CHECK(w->trackedFiles_.find(oldAbs) == w->trackedFiles_.end());
+    CHECK(w->trackedFiles_.find(oldAbs) != w->trackedFiles_.end());
     CHECK(w->trackedFiles_.find(newAbs) != w->trackedFiles_.end());
     ed.statusMessage_ = Message{};
     drainEditor(ed);

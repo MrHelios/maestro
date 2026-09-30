@@ -133,7 +133,7 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 | `p`                       | Pegar
 | `Ctrl+U` / `Ctrl+Y`       | Deshacer / Rehacer
 | `Ctrl+K s`                | Guardar (abre SaveAs si sin nombre)
-| `Ctrl+K Ctrl+S`           | Guardar en otra ubicación (prompt con ruta editable; `Enter` crea y mueve, `Esc` cancela)
+| `Ctrl+K Ctrl+S`           | Guardar en otra ubicación (prompt con ruta editable; `Enter` crea una copia y conserva ambos buffers —si el destino existe pide un segundo `Enter` para sobrescribir—, `Esc` cancela)
 | `Ctrl+K q`                | Salir verificando guardado (bloquea si hay archivos sin guardar)
 | `Ctrl+K Ctrl+Q`           | Salir forzado (sin comprobar guardado)
 | `Ctrl+K n`                | Buffer nuevo sin nombre

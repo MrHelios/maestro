@@ -2170,6 +2170,7 @@ void Editor::startSaveAs() {
     } else {
         saveAsPath_ = active().filename;
     }
+    saveAsConfirmPath_.clear();
     state_ = State::SaveAs;
     setStatusMessage(kHelpSaveAsPrompt + saveAsPath_, MessageKind::Prompt);
 }
@@ -2194,6 +2195,7 @@ void Editor::handleSaveAsEvent(const InputEvent& event) {
             commitSaveAs();
             break;
         case InputEventType::Escape:
+            saveAsConfirmPath_.clear();
             state_ = priorState_;
             setActionMessage("Guardado cancelado.", MessageKind::Warning);
             break;
@@ -2216,19 +2218,74 @@ void Editor::commitSaveAs() {
         setActionMessage("Es una carpeta: " + path, MessageKind::Error);
         return;
     }
-    bool isNew = b.filename != path;
-    std::string oldPath = b.filename;
-    if (b.document.saveToFile(path)) {
-        b.filename = path;
-        b.syncSavedState();
-        b.savedIdentity = captureIdentity(path);
-        if (isNew) unwatchFile(oldPath);
-        watchFile(b.filename);
-        setActionMessage("Guardado: " + path, MessageKind::Success);
-        state_ = priorState_;
-    } else {
-        setActionMessage("Error al guardar: " + path, MessageKind::Error);
+    // Fase 1 (opcion b): destino ya abierto en otro buffer -> rechazar
+    // sin tocar disco ni buffers (evita pisar cambios de Z sin aviso).
+    // Va ANTES de la rama in-place para que un buffer sin nombre tampoco
+    // pueda tomar un path ya abierto (dos buffers con mismo filename).
+    // Se salta el propio buffer (cubre el caso mismo-path).
+    for (int i = 0; i < buffers.count(); ++i) {
+        if (&buffers.at(i) == &b) continue;
+        if (buffers.at(i).filename == path) {
+            setActionMessage("Destino ya abierto: " + path, MessageKind::Error);
+            return;
+        }
     }
+    const bool samePath = !b.filename.empty() && b.filename == path;
+    // Sobrescritura con confirmación: si el destino existe en disco y no es
+    // el propio archivo del buffer, el primer Enter solo arma el aviso y el
+    // segundo Enter (misma ruta) sobrescribe. Mismo-path guarda directo.
+    if (!samePath) {
+        if (saveAsConfirmPath_ == path) {
+            saveAsConfirmPath_.clear();  // confirmada: proceder
+        } else {
+            std::error_code ec;
+            if (std::filesystem::exists(path, ec)) {
+                saveAsConfirmPath_ = path;
+                setActionMessage("El archivo ya existe: " + path +
+                                     ". Enter para sobrescribir, Esc para cancelar.",
+                                 MessageKind::Warning);
+                return;  // sigue en SaveAs, disco y buffers intactos
+            }
+            saveAsConfirmPath_.clear();
+        }
+    }
+    // Sin nombre o mismo path: guardado in-place, sin duplicar.
+    if (b.filename.empty() || samePath) {
+        if (b.document.saveToFile(path)) {
+            b.filename = path;
+            b.syncSavedState();
+            b.savedIdentity = captureIdentity(path);
+            watchFile(b.filename);
+            setActionMessage("Guardado: " + path, MessageKind::Success);
+            state_ = priorState_;
+        } else {
+            setActionMessage("Error al guardar: " + path, MessageKind::Error);
+        }
+        return;
+    }
+    // Save a copy: el disco queda con X e Y, y el editor con ambos buffers.
+    // X conserva ediciones en memoria (sigue modified); Y nace limpio.
+    if (!b.document.saveToFile(path)) {
+        setActionMessage("Error al guardar: " + path, MessageKind::Error);
+        return;
+    }
+    // Capturar ANTES del push: push() puede realocar el vector e invalidar b.
+    const int oldId = b.id;
+    const std::string oldDisplay = b.displayName();
+    Buffer copy = b;
+    copy.filename = path;
+    copy.syncSavedState();
+    copy.savedIdentity = captureIdentity(path);
+    buffers.push(std::move(copy));
+    watchFile(path);
+    // push() ya deja activo el nuevo; previousBuffer_ se fija manual porque
+    // activateBuffer() lo omitiria (idx == activeIndex tras el push).
+    previousBuffer_.valid = true;
+    previousBuffer_.id = oldId;
+    previousBuffer_.displayName = oldDisplay;
+    renderer_.invalidateCache();
+    setActionMessage("Guardado: " + path, MessageKind::Success);
+    state_ = priorState_;
 }
 
 void Editor::startSearch() {

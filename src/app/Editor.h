@@ -357,6 +357,10 @@ private:
     // Ruta escrita por el usuario en el prompt "Guardar archivo:" (modo
     // SaveAs). Relativa o absoluta; se resuelve contra cwd() al confirmar.
     std::string saveAsPath_;
+    // Ruta armada para confirmación de sobrescritura: si commitSaveAs
+    // detecta que el destino existe y difiere del archivo del buffer, arma
+    // esta ruta y espera un segundo Enter (vacía = sin aviso pendiente).
+    std::string saveAsConfirmPath_;
 
     // ---- Busqueda (v0.8 / feature f) ----
     std::string searchQuery_;
@@ -470,7 +474,12 @@ private:
     // Maneja los eventos mientras state_ == State::SaveAs.
     void handleSaveAsEvent(const InputEvent& event);
     // Resuelve la ruta escrita (relativa -> absoluta contra cwd), rechaza
-    // carpetas y persiste el buffer con su nuevo nombre. Ante exito sale
+    // carpetas y guarda una copia: sin nombre o mismo path persiste
+    // in-place; con path nuevo conserva el buffer viejo y agrega uno nuevo
+    // con el contenido guardado (Save a copy). Destino ya abierto se
+    // rechaza sin tocar disco. Si el destino existe en disco y difiere del
+    // archivo del buffer, el primer Enter solo arma la confirmación
+    // (saveAsConfirmPath_) y el segundo Enter sobrescribe. Ante exito sale
     // del prompt; ante error se queda para corregir la ruta.
     void commitSaveAs();
 
