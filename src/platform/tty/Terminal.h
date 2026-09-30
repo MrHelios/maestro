@@ -8,6 +8,12 @@
 #include "platform/tty/ITtyKeymap.h"
 #include "platform/tty/TtyKeymap.h"
 
+// Secuencias DECSCUSR de forma del cursor, FUENTE ÚNICA (antes
+// hardcodeadas en Terminal.cpp y en el teardown de TtyRunLoop).
+// Aptas para write() en signal handlers (puntero + sizeof - 1, sin alloc).
+constexpr const char kCursorBlock[] = "\x1b[2 q";    // bloque fijo (raw activo)
+constexpr const char kCursorDefault[] = "\x1b[0 q";  // default del emulador
+
 // Estado mínimo compartido con los signal handlers C. Forward declarado
 // para no exponer <termios.h>/<signal.h> a los consumidores de este header
 // (misma opacidad que origTermios_); la definición vive en
@@ -62,6 +68,11 @@ public:
     void getWindowSize(int& rows, int& cols);
 
     bool hasResized();
+
+    // Vuelta de SIGCONT (consumo destructivo, como hasResized): true una
+    // sola vez por reanudación. El loop invalida el diff y repinta
+    // completo (la pantalla física se perdió aunque no haya resize).
+    bool hasResumed();
 
     // Tabla tecla -> Evento que readEvent() consulta. El usuario puede
     // rebindear las teclas en tiempo de ejecucion

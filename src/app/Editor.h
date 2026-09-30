@@ -37,13 +37,40 @@ class Sink;
 // Editor desacoplado del loop de plataforma — no incluye terminal
 // ni tablas de teclas, no construye el clipboard del sistema ni el watcher
 // (eso lo hacen las factories). El tamaño de ventana es estado propio
-// (currentRows_/Cols_) actualizado por resize(rows, cols). El loop de
+// (currentRows_/Cols_) actualizado por resize(). El loop de
 // plataforma vive fuera y solo usa la fachada pública neutra:
-// handleEvent / resize / renderFrame / tick / isRunning / requestQuit /
-// pollExternalEvents / nextTimeoutMs.
+//
+//   CICLO REAL (por giro del loop; el timeout lo sugiere nextTimeoutMs):
+//     0. processClipboardEvents()  // Pre-wait solo-clipboard (heartbeat
+//                                  // INCR, sin estado visible)
+//     - .ppoll sobre stdin/clipboard/watcher (readiness real)
+//     - Rama timeout:   tick(now) + renderFrame()
+//     - Rama readiness: pollExternalEvents() (+ clearExpiredMessages)
+//     - Rama entrada:   handleEvent(event) + clearExpiredMessages +
+//                       renderFrame()
+//
+// tick() completo vive SOLO en la rama timeout, a propósito: el
+// autoscroll temporal de selección avanza únicamente ahí. En la rama
+// de eventos se usa clearExpiredMessages() para no dar un paso extra
+// tras cada tecla ni consultar al oráculo del mouse sin necesidad.
+// "poll -> handle -> tick -> render" es el modelo mental, no el código.
+//
+// nextTimeoutMs(now) devuelve el timeout sugerido para wait (-1 = indefinido).
 // Acceso a fd (clipboardFd/watcherFd): son TTY-only, deuda documentada en
-// architecture.md §2; la fachada neutra NO los expone. El futuro loop GUI
-// usará callbacks/polling, no estos fd.
+// architecture.md §2; la fachada neutra NO los expone. El loop TTY los usa
+// para armar su ppoll (level-triggered, sin auto-disparo); el futuro loop
+// GUI usará callbacks/polling, no estos fd.
+// Tamaño de ventana con métricas para GUI (celdas + píxeles + cell size).
+// TTY usa solo rows/cols; GUI rellena pixelW/pixelH y cellW/cellH.
+struct Size {
+    int rows = 24;
+    int cols = 80;
+    int cellW = 0;   // ancho de celda en píxeles (0 = desconocido)
+    int cellH = 0;   // alto de celda en píxeles (0 = desconocido)
+    int pixelW = 0;  // ancho total en píxeles (0 = desconocido)
+    int pixelH = 0;  // alto total en píxeles (0 = desconocido)
+};
+
 class Editor {
 public:
     Editor();
@@ -69,6 +96,8 @@ public:
     // TTY y GUI). Payload inválido (filas/cols <= 0) se ignora.
     // Solo sincroniza viewports + clamp de cursor; el diff detecta el
     // cambio de geometría solo en el próximo render (sin invalidate).
+    void resize(const Size& size);
+    // Sobrecarga de compatibilidad (TTY-only): usa rows/cols, cell/pixel = 0.
     void resize(int rows, int cols);
     // Entrada semántica ya decodificada (InputEvent -> handling -> CommandMap).
     // Resize delega en resize(); el resto se despacha por modo.
@@ -76,17 +105,25 @@ public:
     // Dibuja el frame actual según state_. Se comparte entre el flujo
     // normal del ciclo y el despertar por timeout.
     void renderFrame();
+    // Invalidación total de pantalla: el próximo renderFrame emite el
+    // frame completo en vez del diff. La usa el loop TTY al volver de
+    // SIGCONT (la pantalla física se perdió aunque la geometría no haya
+    // cambiado: re-entrada a alt screen sobre buffer limpio). No es parte
+    // del ciclo canónico: el engine nunca se autoinvalida (el diff
+    // detecta cambios de contenido/geometría solo).
+    void invalidateScreen();
     // Paso periódico agrupado (SOLO camino de timeout del loop):
     // expiración de mensajes de acción + autoscroll temporal de selección
     // por mouse. `now` inyectable.
     void tick(std::chrono::steady_clock::time_point now);
-    // Expiración de mensajes sola, sin autoscroll ni consulta al oráculo:
-    // para el camino de eventos y los wakeups externos, donde el
-    // autoscroll solo avanzaba en el timeout. Evita un paso extra tras
-    // cada evento y movimientos sin render posterior.
-    // `now` inyectable para tests deterministas.
-    void clearExpiredMessages(std::chrono::steady_clock::time_point now);
     bool isRunning() const { return running_; }
+    // Petición de suspensión (Ctrl+Z en TTY): handleEvent la marca ante
+    // InputEventType::Suspend en cualquier modo (incluidos los modales) y
+    // el loop de plataforma la consume auto-enviándose SIGTSTP (los
+    // handlers ya restauran/recomponen la terminal). Neutra: sin señales
+    // ni fds acá; la GUI simplemente nunca produce Suspend. Consumo
+    // destructivo: cada petición se atiende una sola vez.
+    bool consumeSuspendRequest();
     // Intento de cierre (botón GUI o comando): force=false bloquea si hay
     // buffers modificados (aviso en status) y devuelve false; force=true
     // sale siempre. Devuelve true si el loop debe terminar. Fuente única
@@ -97,17 +134,22 @@ public:
     // readiness; no necesita saber qué fuente está lista. La recarga
     // concreta (handleFileChange) es detalle privado invocado desde acá.
     void pollExternalEvents();
-    // Bombeo solo-clipboard (sin watcher): para el pre-ppoll del loop.
-    // El clipboard no muta estado visible, así que bombearlo antes de
-    // bloquearse es seguro; el watcher en cambio puede recargar el
-    // documento y va SOLO por readiness (vía pollExternalEvents), para
-    // no dejar la pantalla desactualizada dentro del ppoll.
-    void processClipboardEvents();
-    // Timeout sugerido para el ppoll/wait del loop (-1 = indefinido).
+    // Timeout sugerido para el wait del loop (-1 = indefinido).
     // Agrupa: clipboard pendiente (20ms), expiración de mensaje de
     // acción y paso de autoscroll. `now` inyectable para tests
     // deterministas. No expone statusMessage_ ni timers.
     int nextTimeoutMs(std::chrono::steady_clock::time_point now) const;
+
+    // Bombeo solo-clipboard (sin watcher): para el pre-wait del loop TTY.
+    // El clipboard tiene heartbeat INCR que necesita bombeo periódico aunque
+    // no haya readiness. No muta estado visible. El loop GUI no lo necesita.
+    void processClipboardEvents();
+    // Expiración de mensajes sola, sin autoscroll ni consulta al oráculo:
+    // para el camino de eventos y wakeups externos, donde el autoscroll
+    // solo avanza en el timeout. Evita un paso extra tras cada evento y
+    // movimientos sin render posterior. `now` inyectable para tests.
+    void clearExpiredMessages(std::chrono::steady_clock::time_point now);
+
     // Acceso TTY-only para armar el ppoll (deuda documentada en
     // architecture.md §2): el futuro loop GUI usará callbacks/polling,
     // no estos fd. No son parte de la fachada neutra.
@@ -150,14 +192,14 @@ public:
     std::string getGoToLineQueryForTesting() const { return goToLineQuery_; }
     Buffer& getActiveBufferForTesting() { return active(); }
 
-    // Oraculo del boton fisico del mouse: responde si el boton izquierdo
-    // sigue presionado. Existe porque soltar FUERA de la ventana del
-    // terminal no entrega ningun evento (el release se pierde) y el tick no
-    // tiene forma de notarlo solo con eventos. Por defecto siempre dice
-    // "presionado" (tests y entornos sin X11); la app real instala el
-    // sondeo X11 en main. El tick lo consulta y desarma como un release.
-    void setMouseButtonHeldOracle(std::function<bool()> oracle) {
-        mouseButtonHeldOracle_ = std::move(oracle);
+    // Consulta del estado del botón físico del mouse: responde si el botón
+    // principal sigue presionado. Existe porque soltar FUERA de la ventana
+    // no entrega evento (el release se pierde) y el tick no tiene forma de
+    // notarlo solo con eventos. Por defecto siempre dice "presionado"
+    // (tests y entornos sin X11); la app real instala el sondeo específico
+    // de plataforma en main. El tick lo consulta y desarma como un release.
+    void setMouseButtonPressedQuery(std::function<bool()> query) {
+        mouseButtonPressedQuery_ = std::move(query);
     }
 
     // Sink de escritura para renderFrame. El Editor SOLO conoce la
@@ -278,6 +320,8 @@ private:
     // usa para saber a que modo volver al cancelar el selector con ESC.
     State priorState_ = State::Navegacion;
     bool running_ = true;
+    // Pedido de suspensión pendiente (ver consumeSuspendRequest).
+    bool suspendRequested_ = false;
     // Mensaje vigente (paso 8): texto + tipo + vencimiento en un solo valor.
     // En lugar de testear actionMessageActive_/actionMessageExpiry_, se
     // pregunta statusMessage_.persistent()/.expired().
@@ -494,7 +538,7 @@ private:
     // sintética como "fuera por arriba" irrepresentable por SGR real.
     CellPos mouseAutoscrollCell_;
     // Oraculo del boton fisico (ver setter): por defecto "presionado".
-    std::function<bool()> mouseButtonHeldOracle_ = [] { return true; };
+    std::function<bool()> mouseButtonPressedQuery_ = [] { return true; };
     // Instante del ultimo paso (o del armado): el primer tick mueve solo
     // tras el intervalo, sin salto inmediato al salir del viewport.
     std::chrono::steady_clock::time_point mouseAutoscrollLastStep_{};

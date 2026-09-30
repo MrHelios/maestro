@@ -749,10 +749,11 @@ bool Editor::loadIntoActiveBuffer(const std::string& path) {
     return result == LoadResult::Success;
 }
 
-void Editor::resize(int rows, int cols) {
-    if (rows <= 0 || cols <= 0) return;
-    currentRows_ = rows;
-    currentCols_ = cols;
+void Editor::resize(const Size& size) {
+    if (size.rows <= 0 || size.cols <= 0) return;
+    currentRows_ = size.rows;
+    currentCols_ = size.cols;
+    // TODO: almacenar size.cellW/size.cellH/size.pixelW/size.pixelH para GUI
     for (int i = 0; i < buffers.count(); ++i) {
         syncViewportSize(buffers.at(i));
         buffers.at(i).cursor.clampToLine(buffers.at(i).document);
@@ -760,6 +761,10 @@ void Editor::resize(int rows, int cols) {
     // Sin invalidateCache: el diff TTY detecta el cambio de geometría
     // solo (TtyDiff::buildDiffFrame) y rebuilda; un resize al mismo
     // tamaño conserva el fast path. El dirty neutro pertenece a Fase D.
+}
+
+void Editor::resize(int rows, int cols) {
+    resize(Size{rows, cols, 0, 0, 0, 0});
 }
 
 void Editor::syncViewportSize(Buffer& b) {
@@ -1087,6 +1092,12 @@ bool Editor::requestQuit(bool force) {
     return true;
 }
 
+bool Editor::consumeSuspendRequest() {
+    if (!suspendRequested_) return false;
+    suspendRequested_ = false;
+    return true;
+}
+
 static int msUntil(
     std::chrono::steady_clock::time_point now,
     std::chrono::steady_clock::time_point target) {
@@ -1114,6 +1125,10 @@ int Editor::nextTimeoutMs(
         else waitMs = std::min(waitMs, tickMs);
     }
     return waitMs;
+}
+
+void Editor::invalidateScreen() {
+    renderer_.invalidateCache();
 }
 
 void Editor::renderFrame() {
@@ -1408,7 +1423,7 @@ bool Editor::mouseAutoscrollActive() const {
 bool Editor::tickMouseAutoscroll(
     std::chrono::steady_clock::time_point now) {
     if (!mouseAutoscrollActive()) return false;
-    if (!mouseButtonHeldOracle_()) {
+    if (!mouseButtonPressedQuery_()) {
         // Suelta fuera de la ventana: el release nunca llega como evento y
         // solo el oraculo fisico lo detecta. Misma salida que un release
         // entregado (gesto cerrado, sin paso).
@@ -1471,6 +1486,12 @@ void Editor::handleMouseRelease(const InputEvent& event) {
 }
 
 void Editor::handleEvent(const InputEvent& event) {
+    // Suspensión (Ctrl+Z): global, en cualquier modo (incluidos los
+    // modales). Solo marca la petición; el loop decide y ejecuta.
+    if (event.type == InputEventType::Suspend) {
+        suspendRequested_ = true;
+        return;
+    }
     if (event.type == InputEventType::Resize) {
         resize(event.resizeRows, event.resizeCols);
         return;

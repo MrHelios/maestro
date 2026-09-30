@@ -20,7 +20,7 @@ int main(int argc, char* argv[]) {
     // Oraculo fisico para el autoscroll: si se suelta fuera de la ventana
     // no llega evento de release; el tick consulta X11 y frena igual.
     // Único cableado productivo: no hay fallback global oculto.
-    editor.setMouseButtonHeldOracle([&] { return mouseQuery.held(); });
+    editor.setMouseButtonPressedQuery([&] { return mouseQuery.held(); });
 
     // Sin argumentos: arranca con el buffer vacío "SinNombre" que ya
     // crea BufferManager en su constructor. Con un path: lo abre (o crea

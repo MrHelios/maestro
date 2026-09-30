@@ -25,6 +25,10 @@
 // original y relanza la senal con su accion por defecto (para conservar el
 // codigo de salida y el core dump).
 //
+// También maneja SIGTSTP/SIGCONT (suspender/reanudar con Ctrl+Z / fg):
+// al suspender, restaura terminal y envía SIGSTOP; al reanudar, reactiva
+// raw mode, mouse tracking, alternate screen y notifica resize.
+//
 // Nota: tcsetattr() no es async-signal-safe segun POSIX, pero es la practica
 // habitual en editores de terminal (el propio proceso es el unico que usa
 // stdin y el riesgo real es despreciable frente a dejar la terminal inutil).
@@ -43,6 +47,11 @@ const int kFatalSignals[] = { SIGINT, SIGTERM, SIGQUIT, SIGHUP,
 constexpr int kFatalSignalCount = static_cast<int>(sizeof(kFatalSignals) / sizeof(kFatalSignals[0]));
 static_assert(kFatalSignalCount == TtySignalState::kFatalCount,
               "TtySignalState::kFatalCount debe cubrir kFatalSignals");
+
+const int kSuspendSignals[] = { SIGTSTP, SIGCONT };
+constexpr int kSuspendSignalCount = static_cast<int>(sizeof(kSuspendSignals) / sizeof(kSuspendSignals[0]));
+static_assert(kSuspendSignalCount == TtySignalState::kSuspendCount,
+              "TtySignalState::kSuspendCount debe cubrir kSuspendSignals");
 
 // Único hook global: apunta al signalState_ miembro del Terminal vivo.
 // Se publica cuando ALGÚN modo está activo (raw/mouse/alt) y se retira
@@ -64,28 +73,88 @@ void sigwinchHandler(int) {
     if (g_activeSignalState) g_activeSignalState->resized = 1;
 }
 
-void fatalSignalHandler(int sig) {
-    // Restaurar la terminal antes de morir. Debe espejar el estado activo:
-    // mouse tracking y alt-screen son modos independientes de raw y deben
-    // limpiarse aunque el crash ocurra tras enableMouseTracking().
-    TtySignalState* st = g_activeSignalState;
-    if (st && st->mouseActive) {
-        write(STDOUT_FILENO, "\x1b[?1006l\x1b[?1002l\x1b[?1000l", sizeof("\x1b[?1006l\x1b[?1002l\x1b[?1000l") - 1);
+// Restaura la terminal al estado original (mouse off / alt off / cursor
+// default / termios orig), espejando los modos activos: mouse tracking y
+// alt-screen son independientes de raw y deben limpiarse aunque el evento
+// ocurra fuera de raw (p.ej. crash tras enableMouseTracking()).
+// FUENTE ÚNICA para los tres caminos que la necesitan (fatal, suspend,
+// atexit). Solo usa write() + tcsetattr(), así que es apta para signal
+// handlers (la salvedad de tcsetattr ya está asumida en este archivo).
+// Acepta nullptr (sin terminal publicada: no-op). Los (void) silencian
+// warn_unused_result en toolchains que lo emiten para write().
+void restoreTerminalNow(TtySignalState* st) {
+    if (!st) return;
+    if (st->mouseActive) {
+        (void)write(STDOUT_FILENO, "\x1b[?1006l\x1b[?1002l\x1b[?1000l", sizeof("\x1b[?1006l\x1b[?1002l\x1b[?1000l") - 1);
     }
-    if (st && st->altActive) {
-        write(STDOUT_FILENO, "\x1b[?1049l", sizeof("\x1b[?1049l") - 1);
+    if (st->altActive) {
+        (void)write(STDOUT_FILENO, "\x1b[?1049l", sizeof("\x1b[?1049l") - 1);
     }
-    if (st && st->rawActive) {
-        write(STDOUT_FILENO, "\x1b[0 q", sizeof("\x1b[0 q") - 1);
+    if (st->rawActive) {
+        (void)write(STDOUT_FILENO, kCursorDefault, sizeof(kCursorDefault) - 1);
     }
-    if (st && st->rawActive && st->orig) {
+    if (st->rawActive && st->orig) {
         tcsetattr(STDIN_FILENO, TCSAFLUSH, st->orig);
     }
+}
+
+void fatalSignalHandler(int sig) {
+    // Restaurar la terminal antes de morir (ver restoreTerminalNow).
+    restoreTerminalNow(g_activeSignalState);
     // Volver a la accion por defecto y relanzar la senal, para morir de
     // verdad con el codigo de salida adecuado. La senal actual esta bloqueda
     // durante este handler, asi que el relanzamiento se entrega al volver.
     signal(sig, SIG_DFL);
     raise(sig);
+}
+
+// Handler para SIGTSTP (Ctrl+Z / suspend): restaura terminal y envía SIGSTOP.
+void suspendSignalHandler(int sig) {
+    restoreTerminalNow(g_activeSignalState);
+    // Reenviar SIGSTOP para suspender de verdad.
+    signal(SIGTSTP, SIG_DFL);
+    raise(SIGSTOP);
+}
+
+// Handler para SIGCONT (fg / reanudar): reactiva modos y notifica resize.
+void continueSignalHandler(int) {
+    // El handler de SIGTSTP se resetea a SIG_DFL en suspendSignalHandler
+    // (necesario para suspender de verdad con raise). Reinstalarlo acá al
+    // reanudar: sin esto, el segundo Ctrl+Z externo caería en la acción
+    // por defecto y suspendería sin restaurar la terminal. sigaction() es
+    // async-signal-safe, igual que en installSuspendSignalHandlers.
+    // No toca st->suspendActions[0].old: ese guarda la disposición previa
+    // del proceso, que restoreSuspendSignalHandlers restaura al salir.
+    {
+        struct sigaction sa;
+        std::memset(&sa, 0, sizeof(sa));
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        sa.sa_handler = suspendSignalHandler;
+        sigaction(SIGTSTP, &sa, nullptr);
+    }
+    TtySignalState* st = g_activeSignalState;
+    if (st) {
+        if (st->rawActive) {
+            if (st->hasRawApplied) {
+                // Reaplicar el raw YA APLICADO (guardado en enableRawMode),
+                // no reconstruir la receta: fuente única.
+                tcsetattr(STDIN_FILENO, TCSAFLUSH, &st->rawApplied);
+            }
+            write(STDOUT_FILENO, kCursorBlock, sizeof(kCursorBlock) - 1);
+        }
+        if (st->mouseActive) {
+            write(STDOUT_FILENO, "\x1b[?1000h\x1b[?1002h\x1b[?1006h", sizeof("\x1b[?1000h\x1b[?1002h\x1b[?1006h") - 1);
+        }
+        if (st->altActive) {
+            write(STDOUT_FILENO, "\x1b[?1049h", sizeof("\x1b[?1049h") - 1);
+        }
+        // Notificar resize para que el loop principal lo detecte, y marcar
+        // re-entrada a alt screen: la pantalla física se perdió aunque el
+        // tamaño sea el mismo (ver altReentered en TtySignalState.h).
+        st->resized = 1;
+        st->altReentered = 1;
+    }
 }
 
 // Captura las senales fatales. Guarda como estaban antes, para restaurarlas
@@ -110,6 +179,49 @@ void restoreFatalSignalHandlers(TtySignalState* st) {
             st->savedActions[i].sig = 0;
         }
     }
+}
+
+// Instala handlers para suspend/reanudar (SIGTSTP/SIGCONT).
+void installSuspendSignalHandlers(TtySignalState* st) {
+    struct sigaction sa;
+    std::memset(&sa, 0, sizeof(sa));
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+
+    sa.sa_handler = suspendSignalHandler;
+    sigaction(SIGTSTP, &sa, &st->suspendActions[0].old);
+    st->suspendActions[0].sig = SIGTSTP;
+
+    sa.sa_handler = continueSignalHandler;
+    sigaction(SIGCONT, &sa, &st->suspendActions[1].old);
+    st->suspendActions[1].sig = SIGCONT;
+}
+
+// Restaura handlers de suspend/reanudar.
+void restoreSuspendSignalHandlers(TtySignalState* st) {
+    for (int i = 0; i < kSuspendSignalCount; ++i) {
+        if (st->suspendActions[i].sig != 0) {
+            sigaction(st->suspendActions[i].sig, &st->suspendActions[i].old, nullptr);
+            st->suspendActions[i].sig = 0;
+        }
+    }
+}
+
+// atexit: red de seguridad para salida por exit() SIN pasar por el
+// teardown normal (ni epílogo de TtyRunLoop ni ~Terminal).
+//
+// Estado verificado (no quitar por "parecer muerta"):
+// - Salida normal y por excepción: es un no-op probado. El epílogo del
+//   loop + ~Terminal ya apagaron los modos y retiraron
+//   g_activeSignalState, así que restoreTerminalNow(nullptr) no hace nada.
+// - _exit(): la salta por completo.
+// - Ningún código del repo llama a exit()/abort().
+// - ÚNICO camino vivo: exit() desde FUERA del repo, en particular el
+//   handler de error de I/O de Xlib (XCloseDisplay/conexión perdida),
+//   que por defecto termina con exit(1). Sin este atexit, ese caso deja
+//   la terminal en raw. Por eso se conserva aunque hoy casi nunca actúe.
+void atexitRestoreTerminal() {
+    restoreTerminalNow(g_activeSignalState);
 }
 
 } // namespace
@@ -159,7 +271,7 @@ void Terminal::enableRawMode() {
     // Cursor en bloque fijo (DECSCUSR). Se emite solo tras aplicar el raw
     // mode con exito: si tcsetattr fallo no estamos en raw mode y no tiene
     // sentido cambiar la forma del cursor.
-    write(STDOUT_FILENO, "\x1b[2 q", sizeof("\x1b[2 q") - 1);
+    write(STDOUT_FILENO, kCursorBlock, sizeof(kCursorBlock) - 1);
 
     // Raw mode activo: publicar el signalState_ miembro y luego instalar
     // los handlers. enable/disable deben llamarse en pares estrictos; guard
@@ -167,10 +279,26 @@ void Terminal::enableRawMode() {
     // (perderia el original del sistema y disable restauraria el propio
     // handler). Mismo patron que kFatalSignals — ver winchInstalled.
     signalState_->orig = orig;
+    signalState_->rawApplied = raw;
+    signalState_->hasRawApplied = 1;
     signalState_->rawActive = 1;
     publishIfActive(signalState_.get());
     if (!signalState_->winchInstalled) {
         installFatalSignalHandlers(signalState_.get());
+        installSuspendSignalHandlers(signalState_.get());
+        // Registrar atexit una sola vez (idempotente por flag). Ver el
+        // comentario en atexitRestoreTerminal: en el camino normal es un
+        // no-op (el teardown ya limpió); cubre exit() externo (Xlib).
+        // Nota de threads: el check-set no es atómico, pero todo este
+        // componente es single-thread por contrato (una sola Terminal
+        // viva, pares enable/disable estrictos). No poner call_once acá:
+        // el día que haya multithreading hay que rediseñar la capa de
+        // señales entera, no este flag.
+        static bool atexitRegistered = false;
+        if (!atexitRegistered) {
+            std::atexit(atexitRestoreTerminal);
+            atexitRegistered = true;
+        }
     }
 
     if (!signalState_->winchInstalled) {
@@ -200,10 +328,11 @@ void Terminal::disableRawMode() {
     // Apagar los handlers ANTES de restaurar: una senal que caiga sobre una
     // terminal que ya no esta en raw mode no debe intentar restaurarla.
     restoreFatalSignalHandlers(signalState_.get());
+    restoreSuspendSignalHandlers(signalState_.get());
 
     // Restaurar la forma por defecto del cursor antes de devolver la
     // terminal al shell (el raw mode la deja en bloque fijo).
-    write(STDOUT_FILENO, "\x1b[0 q", sizeof("\x1b[0 q") - 1);
+    write(STDOUT_FILENO, kCursorDefault, sizeof(kCursorDefault) - 1);
 
     termios* orig = static_cast<termios*>(origTermios_);
     // Restaurar el estado original. Aunque falle (poco probable), dejamos de
@@ -211,6 +340,7 @@ void Terminal::disableRawMode() {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, orig);
     rawModeEnabled_ = false;
     signalState_->rawActive = 0;
+    signalState_->hasRawApplied = 0;
     signalState_->orig = nullptr;
     publishIfActive(signalState_.get());
 }
@@ -260,6 +390,14 @@ bool Terminal::isRawActiveForTest() const { return signalState_->rawActive != 0;
 bool Terminal::hasResized() {
     if (signalState_->resized) {
         signalState_->resized = 0;
+        return true;
+    }
+    return false;
+}
+
+bool Terminal::hasResumed() {
+    if (signalState_->altReentered) {
+        signalState_->altReentered = 0;
         return true;
     }
     return false;
@@ -372,7 +510,7 @@ bool Terminal::readEvent(InputEvent& e, int timeoutMs) {
     };
 
     // Teclas de control de UN byte (Ctrl+Q, Ctrl+S, Ctrl+K, Ctrl+U,
-    // Ctrl+Y, Backspace, Enter). El significado vive en el TtyKeymap
+    // Ctrl+Y, Ctrl+Z, Backspace, Enter). El significado vive en el TtyKeymap
     // (remapeable); aqui solo se hace la busqueda.
     if (auto type = keymap_.control(static_cast<unsigned char>(c)); type) {
         e.type = *type;

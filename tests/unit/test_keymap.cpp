@@ -40,6 +40,7 @@ TEST(keymap_ctrl_s)   { checkControl(19, InputEventType::Save); }
 TEST(keymap_ctrl_k)   { checkControl(11, InputEventType::Prefix); }
 TEST(keymap_ctrl_u)   { checkControl(21, InputEventType::Undo); }
 TEST(keymap_ctrl_y)   { checkControl(25, InputEventType::Redo); }
+TEST(keymap_ctrl_z)   { checkControl(26, InputEventType::Suspend); }
 TEST(keymap_backspace){ checkControl(127, InputEventType::Backspace); }
 TEST(keymap_backspace_bs){ checkControl(8, InputEventType::Backspace); }
 TEST(keymap_enter)    { checkControl(13, InputEventType::InsertNewline); }

@@ -4,7 +4,7 @@
 // entrega ningun evento de release (los modos 1000+1002+1006 no garantizan
 // el release fuera de ventana). El release entregado DENTRO del terminal si
 // frena (ver mouse_tick_stops_on_release); para el perdido, el tick consulta
-// el oraculo fisico (setMouseButtonHeldOracle) y desarma en ambas
+// el oraculo fisico (setMouseButtonPressedQuery) y desarma en ambas
 // direcciones. El tercer test fija que con boton abajo el scroll continua
 // (el hold-quiet legitimo no debe cortarse).
 
@@ -49,7 +49,7 @@ TEST(mouse_tick_stops_when_released_outside_down) {
     CHECK(ed.mouseAutoscrollActive());
 
     // Suelta fisica fuera de la ventana: jamas llega un evento de release.
-    ed.setMouseButtonHeldOracle([] { return false; });
+    ed.setMouseButtonPressedQuery([] { return false; });
     const auto t0 = now();
     CHECK(!ed.tickMouseAutoscroll(t0 + kStep)); // sin paso
     CHECK(!ed.mouseAutoscrollActive());         // desarmado
@@ -74,7 +74,7 @@ TEST(mouse_tick_stops_when_released_outside_up) {
     CHECK(ed.mouseAutoscrollActive());
 
     // Suelta fisica fuera de la ventana: jamas llega un evento de release.
-    ed.setMouseButtonHeldOracle([] { return false; });
+    ed.setMouseButtonPressedQuery([] { return false; });
     const auto t0 = now();
     CHECK(!ed.tickMouseAutoscroll(t0 + kStep)); // sin paso
     CHECK(!ed.mouseAutoscrollActive());         // desarmado
@@ -99,7 +99,7 @@ TEST(mouse_tick_keeps_scrolling_while_held) {
     ed.handleEvent(dragAt(4, 5));  // statusbar: arma Down, top 10->11
     CHECK_EQ(ed.active().viewport.top, 11);
 
-    ed.setMouseButtonHeldOracle([] { return true; });
+    ed.setMouseButtonPressedQuery([] { return true; });
     const auto t0 = now();
     CHECK(ed.tickMouseAutoscroll(t0 + kStep));
     CHECK_EQ(ed.active().viewport.top, 12);

@@ -20,6 +20,7 @@ void TtyKeymap::resetDefaults() {
     bindControl(11, InputEventType::Prefix);              // Ctrl+K -> prefijo de comando
     bindControl(21, InputEventType::Undo);                // Ctrl+U -> deshacer
     bindControl(25, InputEventType::Redo);                // Ctrl+Y -> rehacer
+    bindControl(26, InputEventType::Suspend);             // Ctrl+Z -> suspender (el loop se auto-envía SIGTSTP)
     bindControl(127, InputEventType::Backspace);          // DEL
     bindControl(8, InputEventType::Backspace);            // BS (otra forma de Backspace)
     bindControl(13, InputEventType::InsertNewline);       // Enter (\r)

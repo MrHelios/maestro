@@ -52,6 +52,12 @@ enum class InputEventType {
     // de el se ignora. La entrada a seleccion ya NO es por Ctrl+S: desde
     // v0.5 se hace con la letra 's' dentro del modo Navegacion.
     Save,
+    // Ctrl+Z: pedir suspensión (job control, como vim). El Editor solo
+    // marca la petición (vale en cualquier modo, incluidos los modales);
+    // el loop de plataforma la consume y se auto-envía SIGTSTP, cuyos
+    // handlers ya restauran/recomponen la terminal. Evento solo-TTY: la
+    // GUI nunca lo produce (no hay job control que suspender).
+    Suspend,
     // ESC suelto (no seguido de una secuencia de flecha/Home/...).
     // Tipico uso: cancelar la seleccion activa o salir de Interaccion.
     Escape,

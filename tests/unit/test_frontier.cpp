@@ -444,7 +444,7 @@ TEST(fase_c_event_path_does_not_autoscroll) {
     CHECK(ed.hasSelection());
 
     int oracleCalls = 0;
-    ed.setMouseButtonHeldOracle([&] { ++oracleCalls; return true; });
+    ed.setMouseButtonPressedQuery([&] { ++oracleCalls; return true; });
     const int topBefore = ed.getActiveBufferForTesting().viewport.top;
     const int lineBefore = ed.getActiveBufferForTesting().cursor.line;
     const auto now = std::chrono::steady_clock::now();

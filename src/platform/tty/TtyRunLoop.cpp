@@ -36,6 +36,13 @@ void TtyRunLoop::run() {
     editor_.renderFrame();
 
     while (editor_.isRunning()) {
+        // Vuelta de SIGCONT: la pantalla física se perdió (re-entrada a
+        // alt screen sobre buffer limpio) aunque el tamaño sea el mismo.
+        // Invalidar el diff ANTES de cualquier render de este giro,
+        // incluido el camino EINTR de abajo (CONT interrumpe el ppoll).
+        const bool resumed = terminal.hasResumed();
+        if (resumed) editor_.invalidateScreen();
+
         if (terminal.hasResized()) {
             // SIGWINCH -> resize autónomo (mismo camino que un evento GUI).
             int rows, cols;
@@ -89,6 +96,12 @@ void TtyRunLoop::run() {
                 terminal.getWindowSize(rows, cols);
                 editor_.resize(rows, cols);
                 editor_.renderFrame();
+            } else if (resumed) {
+                // Reanudación sin resize pendiente: igual hay que repintar
+                // (el diff quedó invalidado arriba y el camino de resize
+                // no corrió). Hoy CONT siempre marca resized, así que es
+                // solo robustez ante un futuro desacople de flags.
+                editor_.renderFrame();
             }
             continue;
         }
@@ -110,6 +123,17 @@ void TtyRunLoop::run() {
                 const auto now = std::chrono::steady_clock::now();
                 editor_.handleEvent(event);
                 if (!editor_.isRunning()) break;
+                if (editor_.consumeSuspendRequest()) {
+                    // Ctrl+Z: suspender el proceso. El handler de SIGTSTP
+                    // ya instalado restaura la terminal y detiene con
+                    // SIGSTOP; al reanudar (fg), el handler de CONT
+                    // recompone los modos y marca resize, así que el
+                    // próximo giro re-renderiza (sin render intermedio).
+                    // Sin handlers instalados (raw fallido) equivale a un
+                    // kill -TSTP externo.
+                    raise(SIGTSTP);
+                    continue;
+                }
                 // Solo expiración: el autoscroll avanza únicamente en el
                 // timeout (evita un paso extra + consulta al oráculo tras
                 // cada evento).
@@ -128,5 +152,6 @@ void TtyRunLoop::run() {
     terminal.disableMouseTracking();
     terminal.leaveAlternateScreen();
     terminal.disableRawMode();
-    write(STDOUT_FILENO, "\x1b[0m\x1b[39m\x1b[49m\x1b[?25h\x1b[2J\x1b[H\x1b[0 q", sizeof("\x1b[0m\x1b[39m\x1b[49m\x1b[?25h\x1b[2J\x1b[H\x1b[0 q") - 1);
+    write(STDOUT_FILENO, "\x1b[0m\x1b[39m\x1b[49m\x1b[?25h\x1b[2J\x1b[H", sizeof("\x1b[0m\x1b[39m\x1b[49m\x1b[?25h\x1b[2J\x1b[H") - 1);
+    write(STDOUT_FILENO, kCursorDefault, sizeof(kCursorDefault) - 1);
 }
