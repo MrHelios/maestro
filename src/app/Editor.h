@@ -21,6 +21,7 @@
 #include "app/Message.h"
 #include "rendering/Renderer.h"
 #include "platform/InputEvent.h"
+#include "platform/WindowSize.h"
 
 // Sink de escritura (frontera de I/O del Renderer). Forward declarado para
 // no acoplar este header a rendering/tty/: el dueño real vive en el .cpp.
@@ -60,17 +61,6 @@ class Sink;
 // architecture.md §2; la fachada neutra NO los expone. El loop TTY los usa
 // para armar su ppoll (level-triggered, sin auto-disparo); el futuro loop
 // GUI usará callbacks/polling, no estos fd.
-// Tamaño de ventana con métricas para GUI (celdas + píxeles + cell size).
-// TTY usa solo rows/cols; GUI rellena pixelW/pixelH y cellW/cellH.
-struct Size {
-    int rows = 24;
-    int cols = 80;
-    int cellW = 0;   // ancho de celda en píxeles (0 = desconocido)
-    int cellH = 0;   // alto de celda en píxeles (0 = desconocido)
-    int pixelW = 0;  // ancho total en píxeles (0 = desconocido)
-    int pixelH = 0;  // alto total en píxeles (0 = desconocido)
-};
-
 class Editor {
 public:
     Editor();
@@ -96,7 +86,7 @@ public:
     // TTY y GUI). Payload inválido (filas/cols <= 0) se ignora.
     // Solo sincroniza viewports + clamp de cursor; el diff detecta el
     // cambio de geometría solo en el próximo render (sin invalidate).
-    void resize(const Size& size);
+    void resize(const platform::WindowSize& size);
     // Sobrecarga de compatibilidad (TTY-only): usa rows/cols, cell/pixel = 0.
     void resize(int rows, int cols);
     // Entrada semántica ya decodificada (InputEvent -> handling -> CommandMap).
@@ -292,6 +282,13 @@ private:
     // root / loop de plataforma) antes del primer render en producción.
     int currentRows_ = 24;
     int currentCols_ = 80;
+    // Métricas de ventana para la futura GUI (ver platform::WindowSize).
+    // TTY las deja en 0 (desconocido); resize(const WindowSize&) las
+    // conserva aunque hoy ningún lector las consuma.
+    int currentCellW_ = 0;
+    int currentCellH_ = 0;
+    int currentPixelW_ = 0;
+    int currentPixelH_ = 0;
     // Despacho de comandos por nombre. El Editor registra los handlers en
     // el constructor (registerCommands) y los modos resuelven la tecla ->
     // nombre -> handler aqui, en vez de tener cada accion dispersa en

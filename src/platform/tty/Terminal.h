@@ -66,6 +66,9 @@ public:
 
     // Tamano actual de la terminal.
     void getWindowSize(int& rows, int& cols);
+    // Variante con píxeles del ioctl (ws_xpixel/ws_ypixel; 0 = desconocido,
+    // caso habitual en pty sin píxeles). El overload simple delega en este.
+    void getWindowSize(int& rows, int& cols, int& pixelW, int& pixelH);
 
     bool hasResized();
 

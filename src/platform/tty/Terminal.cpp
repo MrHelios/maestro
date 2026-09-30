@@ -109,7 +109,7 @@ void fatalSignalHandler(int sig) {
 }
 
 // Handler para SIGTSTP (Ctrl+Z / suspend): restaura terminal y envía SIGSTOP.
-void suspendSignalHandler(int sig) {
+void suspendSignalHandler(int) {
     restoreTerminalNow(g_activeSignalState);
     // Reenviar SIGSTOP para suspender de verdad.
     signal(SIGTSTP, SIG_DFL);
@@ -404,14 +404,23 @@ bool Terminal::hasResumed() {
 }
 
 void Terminal::getWindowSize(int& rows, int& cols) {
+    int pixelW = 0, pixelH = 0;
+    getWindowSize(rows, cols, pixelW, pixelH);
+}
+
+void Terminal::getWindowSize(int& rows, int& cols, int& pixelW, int& pixelH) {
     struct winsize ws;
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
         rows = 24;
         cols = 80;
+        pixelW = 0;
+        pixelH = 0;
         return;
     }
     rows = ws.ws_row;
     cols = ws.ws_col;
+    pixelW = static_cast<int>(ws.ws_xpixel);
+    pixelH = static_cast<int>(ws.ws_ypixel);
 }
 
 static char readRawByte() {

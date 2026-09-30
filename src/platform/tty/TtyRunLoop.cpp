@@ -8,6 +8,18 @@
 
 #include "app/Editor.h"
 #include "platform/tty/Terminal.h"
+#include "platform/WindowSize.h"
+
+namespace {
+// Fuente única del camino medir -> aplicar: los 3 sitios de run() lo usan
+// (init, SIGWINCH, EINTR). Solo mide y aplica; cada llamada conserva su
+// renderFrame/continue propio (el init no repinta ahí, los otros dos sí).
+void syncWindowSize(Terminal& terminal, Editor& editor) {
+    int rows, cols, pixelW, pixelH;
+    terminal.getWindowSize(rows, cols, pixelW, pixelH);
+    editor.resize(platform::WindowSize{rows, cols, 0, 0, pixelW, pixelH});
+}
+}
 
 TtyRunLoop::TtyRunLoop(Editor& editor) : editor_(editor) {}
 
@@ -18,9 +30,7 @@ void TtyRunLoop::run() {
     // Terminal lo mide, Editor lo aplica vía resize() (autónomo, sin
     // consultar backends). Vale igual para un futuro GUI.
     {
-        int rows, cols;
-        terminal.getWindowSize(rows, cols);
-        editor_.resize(rows, cols);
+        syncWindowSize(terminal, editor_);
     }
 
     terminal.enableRawMode();
@@ -45,9 +55,7 @@ void TtyRunLoop::run() {
 
         if (terminal.hasResized()) {
             // SIGWINCH -> resize autónomo (mismo camino que un evento GUI).
-            int rows, cols;
-            terminal.getWindowSize(rows, cols);
-            editor_.resize(rows, cols);
+            syncWindowSize(terminal, editor_);
             editor_.renderFrame();
             continue;
         }
@@ -92,9 +100,7 @@ void TtyRunLoop::run() {
         int pr = ppoll(pfds, nfds, tsp, &origMask);
         if (pr < 0) {
             if (errno == EINTR && terminal.hasResized()) {
-                int rows, cols;
-                terminal.getWindowSize(rows, cols);
-                editor_.resize(rows, cols);
+                syncWindowSize(terminal, editor_);
                 editor_.renderFrame();
             } else if (resumed) {
                 // Reanudación sin resize pendiente: igual hay que repintar

@@ -749,11 +749,14 @@ bool Editor::loadIntoActiveBuffer(const std::string& path) {
     return result == LoadResult::Success;
 }
 
-void Editor::resize(const Size& size) {
+void Editor::resize(const platform::WindowSize& size) {
     if (size.rows <= 0 || size.cols <= 0) return;
     currentRows_ = size.rows;
     currentCols_ = size.cols;
-    // TODO: almacenar size.cellW/size.cellH/size.pixelW/size.pixelH para GUI
+    currentCellW_ = size.cellW;
+    currentCellH_ = size.cellH;
+    currentPixelW_ = size.pixelW;
+    currentPixelH_ = size.pixelH;
     for (int i = 0; i < buffers.count(); ++i) {
         syncViewportSize(buffers.at(i));
         buffers.at(i).cursor.clampToLine(buffers.at(i).document);
@@ -764,7 +767,7 @@ void Editor::resize(const Size& size) {
 }
 
 void Editor::resize(int rows, int cols) {
-    resize(Size{rows, cols, 0, 0, 0, 0});
+    resize(platform::WindowSize{rows, cols, 0, 0, 0, 0});
 }
 
 void Editor::syncViewportSize(Buffer& b) {
