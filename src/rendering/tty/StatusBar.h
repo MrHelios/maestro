@@ -3,6 +3,7 @@
 #include <string>
 #include "layout/Layout.h"
 #include "rendering/StatusBarData.h"
+#include "rendering/Style.h"
 #include "rendering/tty/Theme.h"
 
 // ---------------------------------------------------------------------------
@@ -39,7 +40,10 @@ public:
     // Construye la secuencia ANSI de la barra completa (fila fija + fila de
     // mensajes) dentro de `area` (espera area.height == 2). No toca la
     // terminal; devuelve el string. Usa el Theme de la instancia.
-    std::string render(const Rect& area, const StatusBarData& data);
+    // `accent` es el rol semántico de la etiqueta de estado (el backend lo
+    // mapea a ANSI vía themeAnsiFor; default = etiqueta por defecto).
+    std::string render(const Rect& area, const StatusBarData& data,
+                       StyleRole accent = StyleRole::StatusAccentDefault);
 
     // Tema de colores de la barra (default: defaultTheme()).
     void setTheme(const Theme& t) { theme_ = t; }

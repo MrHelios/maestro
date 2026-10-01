@@ -25,8 +25,8 @@ std::string collapseHome(const std::string& path) {
     return "~" + path.substr(h.size());
 }
 
-// Arma el StatusBarData del Editor. PURO: `estadoAccent` viaja vacío; el
-// accent vive en Frame::statusAccent como StyleRole y lo resuelve el backend.
+// Arma el StatusBarData del Editor. PURO: sin ANSI; el accent vive en
+// Frame::statusAccent como StyleRole y lo resuelve el backend.
 StatusBarData editorBarData(const std::string& filename, bool modified,
                             const std::string& estado,
                             const Message& message,
@@ -42,7 +42,6 @@ StatusBarData editorBarData(const std::string& filename, bool modified,
     data.cursorLine = cursor.line;
     data.cursorCol = cursor.col;
     data.totalLines = totalLines;
-    data.estadoAccent = ""; // el backend lo resuelve desde statusAccent + Theme
     return data;
 }
 

@@ -36,8 +36,8 @@ public:
     // caliente de buildScreen: un solo buffer con una sola reserva).
     void appendRow(std::string& out, const StyledRow& row) const;
 
-    // Barra de estado codificada (delega en StatusBar::render tras resolver
-    // el accent: respeta el camino legacy `estadoAccent` no vacío).
+    // Barra de estado codificada (delega en StatusBar::render con el rol;
+    // el DTO viaja sin ANSI).
     std::string encodeStatus(const Rect& area,
                              const StatusBarData& data,
                              StyleRole accent) const;

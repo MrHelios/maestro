@@ -94,12 +94,9 @@ std::string TtyEncoder::encodeStatus(const Rect& area,
 void TtyEncoder::appendStatus(std::string& out, const Rect& area,
                               const StatusBarData& data,
                               StyleRole accent) const {
-    StatusBarData resolved = data;
-    if (resolved.estadoAccent.empty())
-        resolved.estadoAccent = ansiFor(accent);
     StatusBar bar;
     bar.setTheme(theme_);
-    out += bar.render(area, resolved);
+    out += bar.render(area, data, accent);
 }
 
 std::string TtyEncoder::encodeFrame(const Frame& f) const {

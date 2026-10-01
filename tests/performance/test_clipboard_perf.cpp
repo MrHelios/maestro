@@ -201,7 +201,8 @@ TEST(bench_perf_statusbar_25k_perf) {
         alloc_stats::Scoped s(alloc_stats::kOther);
         for (int i = 0; i < iters; ++i) {
             std::string out;
-            r.renderStatusBar(out, layout.statusBar, d);
+            r.renderStatusBar(out, layout.statusBar, d,
+                              StyleRole::AccentNavegacion);
             perf_time::g_sink += out.size();
         }
     }

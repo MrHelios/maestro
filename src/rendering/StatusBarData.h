@@ -13,8 +13,6 @@ struct StatusBarData {
     std::string name;         // nombre del archivo (izquierda)
     std::string path;         // ruta (izquierda); vacia si no aplica
     std::string estado;       // etiqueta de estado (izquierda)
-    std::string estadoAccent; // accent de la etiqueta segun el estado activo
-                              // (v1.3); vacio => el backend resuelve el default
     Message message;          // fila de mensajes (fila propia, coloreada por tipo)
     std::string right;        // override del bloque derecho; vacio = calcular
     bool modified = false;    // indicador [*] junto al nombre
@@ -25,7 +23,7 @@ struct StatusBarData {
 
 inline bool operator==(const StatusBarData& a, const StatusBarData& b) {
     return a.name == b.name && a.path == b.path && a.estado == b.estado &&
-           a.estadoAccent == b.estadoAccent && a.message.text == b.message.text &&
+           a.message.text == b.message.text &&
            a.message.kind == b.message.kind && a.right == b.right && a.modified == b.modified &&
            a.cursorLine == b.cursorLine && a.cursorCol == b.cursorCol && a.totalLines == b.totalLines;
 }

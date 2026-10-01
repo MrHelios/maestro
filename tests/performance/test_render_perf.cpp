@@ -135,7 +135,8 @@ TEST(bench_perf_render_desglose_fases_checked) {
     bench("statusBar (data+render)", 20000, [&] {
         std::string out;
         StatusBarData data = barData();
-        r.renderStatusBar(out, layout.statusBar, data);
+        r.renderStatusBar(out, layout.statusBar, data,
+                          StyleRole::AccentNavegacion);
         perf_time::g_sink += out.size();
     });
     bench("moveCursorTo+columnOf", 20000, [&] {

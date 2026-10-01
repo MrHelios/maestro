@@ -96,7 +96,8 @@ BarLeft layoutLeftBlock(const std::string& rawName, const std::string& rawPath,
 
 } // namespace
 
-std::string StatusBar::render(const Rect& area, const StatusBarData& data) {
+std::string StatusBar::render(const Rect& area, const StatusBarData& data,
+                               StyleRole accentRole) {
     const int width = area.width;
     const Theme& T = theme_;
     std::ostringstream out;
@@ -155,8 +156,8 @@ std::string StatusBar::render(const Rect& area, const StatusBarData& data) {
 
     for (int i = 0; i < padL; ++i) out << ' ';
 
-    const std::string accent = data.estadoAccent.empty() ? T.statusBarAccent
-                                                           : data.estadoAccent;
+    // Rol -> ANSI vía el Theme propio (Theme conoce Style, nunca al revés).
+    const std::string& accent = themeAnsiFor(T, accentRole);
 
     if (left.statusOnly) {
         out << accent << left.status << T.reset << T.statusBar;

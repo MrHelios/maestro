@@ -103,8 +103,7 @@ struct Frame {
     int gutterW = 0;
 
     // Validador de la regla arquitectónica (para tests/debug): ningún string
-    // del Frame puede contener ESC. El campo legacy `status.estadoAccent`
-    // debe viajar vacío en el camino nuevo (el accent va en `statusAccent`).
+    // del Frame puede contener ESC.
     bool hasAnsi() const {
         auto hasEsc = [](const std::string& s) {
             return s.find('\x1b') != std::string::npos;
@@ -118,7 +117,7 @@ struct Frame {
                 if (hasEscView(s.text)) return true;
         }
         if (hasEsc(status.name) || hasEsc(status.path) ||
-            hasEsc(status.estado) || hasEsc(status.estadoAccent) ||
+            hasEsc(status.estado) ||
             hasEsc(status.right) || hasEsc(status.message.text))
             return true;
         return false;

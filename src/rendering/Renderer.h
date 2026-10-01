@@ -179,7 +179,8 @@ private:
 
     void renderStatusBar(std::string& out,
                            const Rect& area,
-                           const StatusBarData& data) const;
+                           const StatusBarData& data,
+                           StyleRole accent) const;
 
     // Compatibilidad con perf-tests (delegan en TtyEncoder/FrameBuilder).
     // Se definen out-of-line en Renderer.cpp para no exponer tty/* acá.

@@ -17,7 +17,7 @@ struct Theme {
     std::string statusBar;         // fondo/base de la barra de estado
     std::string statusBarName;     // nombre de archivo en la barra
     std::string statusBarPath;     // ruta en la barra
-    std::string statusBarAccent;   // etiqueta de estado por defecto (fallback de estadoAccent)
+    std::string statusBarAccent;   // etiqueta de estado por defecto
     std::string statusBarModified; // indicador "[*]" en la barra (v1.4: antes "[modificado]")
     std::string message;           // fila de mensajes (Info/ayuda, sin color)
     std::string prompt;            // prompts de entrada (p.ej. "Guardar archivo:")

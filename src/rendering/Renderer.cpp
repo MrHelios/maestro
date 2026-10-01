@@ -180,8 +180,9 @@ void Renderer::renderEditorContent(
 }
 
 void Renderer::renderStatusBar(std::string& out, const Rect& area,
-                               const StatusBarData& data) const {
-    out += encoder_->encodeStatus(area, data, StyleRole::StatusAccentDefault);
+                               const StatusBarData& data,
+                               StyleRole accent) const {
+    out += encoder_->encodeStatus(area, data, accent);
 }
 
 std::string Renderer::buildBufferListScreen(
@@ -196,11 +197,10 @@ std::string Renderer::buildBufferListScreen(
     StatusBarData data;
     data.name = "Buffers";
     data.estado = "SELECCIONAR";
-    data.estadoAccent = encoder_->theme().accentBuffers;
     const int total = static_cast<int>(names.size());
     data.right = std::to_string(std::min(selected + 1, total)) + "/" +
                  std::to_string(total);
-    renderStatusBar(out, layout.statusBar, data);
+    renderStatusBar(out, layout.statusBar, data, StyleRole::AccentBuffers);
 
     int rows = std::min(static_cast<int>(names.size()), height);
     if (rows > 0) {
@@ -252,13 +252,12 @@ std::string Renderer::buildFileListScreen(
     StatusBarData data;
     data.name = path.empty() ? "/" : collapseHome(path);
     data.estado = "ABRIR ARCHIVO";
-    data.estadoAccent = encoder_->theme().accentAbrir;
     const int total = static_cast<int>(items.size());
     data.right = total == 0 ? "0/0"
                             : std::to_string(selected - scroll + 1) + "/" +
                                   std::to_string(total);
     data.message = message;
-    renderStatusBar(out, layout.statusBar, data);
+    renderStatusBar(out, layout.statusBar, data, StyleRole::AccentAbrir);
 
     int rows = std::min(static_cast<int>(items.size()) - scroll, height);
     if (rows > 0) {

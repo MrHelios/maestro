@@ -22,6 +22,7 @@
 
 #include "layout/Layout.h"
 #include "app/Message.h"
+#include "rendering/Renderer.h"
 #include "rendering/tty/StatusBar.h"
 
 namespace {
@@ -245,12 +246,12 @@ TEST(statusbar_right_block_edge_layout) {
 }
 
 // ---------------------------------------------------------------------------
-// v1.3: el accent de la etiqueta de estado viene de EstadoData.estadoAccent
-// (color por estado activo); vacio usa el fallback statusBarAccent del Theme.
+// v1.3/evolución Fase E: el accent de la etiqueta de estado viaja como
+// StyleRole (parámetro, nunca en el DTO); el default usa statusBarAccent.
 // ---------------------------------------------------------------------------
-TEST(statusbar_estado_accent_from_data) {
+TEST(statusbar_estado_accent_from_role) {
     Theme t = defaultTheme();
-    t.statusBarAccent = "\x1b[34m";      // azul (fallback)
+    t.statusBarAccent = "\x1b[34m";      // azul (default)
     t.accentNavegacion = "\x1b[33m";     // amarillo (estado activo)
     StatusBar bar;
     bar.setTheme(t);
@@ -261,15 +262,39 @@ TEST(statusbar_estado_accent_from_data) {
     d.estado = "NAVEGACION";
     d.totalLines = 1;
 
-    d.estadoAccent = "";
     const std::string fallback = bar.render(area, d);
     CHECK(fallback.find(t.statusBarAccent) != std::string::npos);
 
-    d.estadoAccent = t.accentNavegacion;
-    const std::string withAccent = bar.render(area, d);
+    const std::string withAccent =
+        bar.render(area, d, StyleRole::AccentNavegacion);
     CHECK(withAccent.find(t.accentNavegacion) != std::string::npos);
     CHECK(withAccent.find(t.statusBarAccent) == std::string::npos);
     CHECK(withAccent != fallback);
+}
+
+// ---------------------------------------------------------------------------
+// Fase E paso 4: las pantallas de listas usan sus roles (no el default).
+// Antes lo garantizaba el campo estadoAccent del DTO; ahora el rol viaja
+// como parámetro. Tema custom con los tres ANSI distintos para que el
+// test distinga rol vs default.
+// ---------------------------------------------------------------------------
+TEST(statusbar_list_screens_use_their_roles) {
+    Theme t = defaultTheme();
+    t.statusBarAccent = "\x1b[34m";
+    t.accentBuffers = "\x1b[31m";
+    t.accentAbrir = "\x1b[32m";
+    Renderer r;
+    r.setTheme(t);
+
+    const std::string buf = r.buildBufferListScreen({"a.txt"}, 0, 80, 5);
+    CHECK(buf.find(t.accentBuffers) != std::string::npos);
+    CHECK(buf.find(t.statusBarAccent) == std::string::npos);
+
+    const std::string file = r.buildFileListScreen(
+        std::vector<FileListItem>{{"a.txt", false}}, 0, 0, "/ruta",
+        Message("ayuda"), 80, 5);
+    CHECK(file.find(t.accentAbrir) != std::string::npos);
+    CHECK(file.find(t.statusBarAccent) == std::string::npos);
 }
 
 // ---------------------------------------------------------------------------

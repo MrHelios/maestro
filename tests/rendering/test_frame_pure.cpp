@@ -2,7 +2,7 @@
 // comportamiento byte a byte respecto de los shims del Renderer.
 //
 //   - pureza: Frame::hasAnsi() == false aun con sintaxis/selección/brackets,
-//     y el accent viaja como StyleRole (estadoAccent vacío).
+//     y el accent viaja como StyleRole (el DTO no lleva ANSI).
 //   - roles: la fila del cursor lleva GutterCurrent, hay segmentos de
 //     Selection y de sintaxis (roles, no secuencias).
 //   - paridad: TtyEncoder(buildFrame) == Renderer::buildScreen, y el primer
@@ -88,8 +88,7 @@ TEST(frame_sin_ansi_y_con_roles) {
     // Regla arquitectónica: ni un solo ESC en el Frame.
     CHECK(!f.hasAnsi());
     CHECK(!segTextHasEsc(f));
-    // El accent legacy viaja vacío; el rol va aparte.
-    CHECK(f.status.estadoAccent.empty());
+    // El accent va como rol aparte, no como ANSI en el DTO.
     CHECK(f.statusAccent == StyleRole::AccentNavegacion);
     CHECK(f.cursor.visible);
 
