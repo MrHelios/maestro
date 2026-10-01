@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -15,9 +16,15 @@
 #include "rendering/Sink.h"
 #include "rendering/StatusBarData.h"
 #include "rendering/frame/FrameBuilder.h"
-#include "rendering/tty/TtyDiff.h"
-#include "rendering/tty/TtyEncoder.h"
 #include "syntax/SyntaxCache.h"
+
+// Forward declarations del backend TTY (Fase E paso 1): el header común no
+// incluye rendering/tty/* de forma directa ni transitiva. Los detalles viven
+// solo en Renderer.cpp. `Theme` también se forward-declara por el mismo
+// motivo (su definición ANSI vive en rendering/tty/Theme.h).
+class TtyDiff;
+class TtyEncoder;
+struct Theme;
 
 // Item estructurado de la lista de archivos (Alcance 1): `name` es el
 // nombre base sin sufijos; `isDirectory` dice si es carpeta. El sufijo
@@ -43,6 +50,12 @@ struct FileListItem {
 // ---------------------------------------------------------------------------
 class Renderer {
 public:
+    Renderer();
+    ~Renderer();
+    Renderer(const Renderer&) = delete;
+    Renderer& operator=(const Renderer&) = delete;
+    Renderer(Renderer&&) = delete;
+    Renderer& operator=(Renderer&&) = delete;
     // NOTA de alcance (honesta): acá no hay flag de test-mode ni estado
     // global, y build* es puro (FrameBuilder -> Frame -> string, sin I/O).
     // Pero la clase NO es backend-independent: posee TtyEncoder y TtyDiff
@@ -53,8 +66,8 @@ public:
     // La independencia total (Renderer puro + TtyRenderer en tty/) queda
     // pendiente y exigiría migrar la batería de tests.
     void setTheme(const Theme& t);
-    const Theme& theme() const { return encoder_.theme(); }
-    void invalidateCache() { diff_.invalidateCache(); }
+    const Theme& theme() const;
+    void invalidateCache();
 
     std::string buildScreen(const Document& doc,
                              const Cursor& cursor,
@@ -141,13 +154,16 @@ public:
     // Observabilidad para tests (solo lectura): estado del cache diferencial
     // (vive en TtyDiff). Reemplaza el acceso directo a los viejos campos
     // hasCache_/lastViewportH_ del Renderer monolítico.
-    bool hasCache() const { return diff_.hasCache(); }
-    int lastViewportH() const { return diff_.lastViewportH(); }
+    bool hasCache() const;
+    int lastViewportH() const;
 
 private:
+    // frameBuilder_ es común y va por valor; encoder_/diff_ son el backend
+    // TTY y van por puntero para no incluir tty/* en este header (paso 1).
+    // Se definen en Renderer.cpp.
     mutable FrameBuilder frameBuilder_;
-    mutable TtyEncoder encoder_;
-    mutable TtyDiff diff_;
+    std::unique_ptr<TtyEncoder> encoder_;
+    std::unique_ptr<TtyDiff> diff_;
 
     void renderBufferListContent(std::string& out,
                                    const std::vector<std::string>& names,
@@ -166,19 +182,14 @@ private:
                            const StatusBarData& data) const;
 
     // Compatibilidad con perf-tests (delegan en TtyEncoder/FrameBuilder).
-    void beginFrame(std::string& out) const { encoder_.beginFrame(out); }
-    void endFrame(std::string& out) const { encoder_.endFrame(out); }
-    void hideCursor(std::string& out) const { encoder_.hideCursor(out); }
-    void showCursor(std::string& out) const { encoder_.showCursor(out); }
-    void setCursorStyle(std::string& out, State state) const {
-        encoder_.setCursorStyle(out, state);
-    }
-    void setCursorStyle(std::string& out, FrameCursorShape shape) const {
-        encoder_.setCursorStyle(out, shape);
-    }
-    void moveCursorTo(std::string& out, int row, int col) const {
-        encoder_.moveCursorTo(out, row, col);
-    }
+    // Se definen out-of-line en Renderer.cpp para no exponer tty/* acá.
+    void beginFrame(std::string& out) const;
+    void endFrame(std::string& out) const;
+    void hideCursor(std::string& out) const;
+    void showCursor(std::string& out) const;
+    void setCursorStyle(std::string& out, State state) const;
+    void setCursorStyle(std::string& out, FrameCursorShape shape) const;
+    void moveCursorTo(std::string& out, int row, int col) const;
     void renderEditorContent(std::string& out,
                                const Document& doc,
                                const Cursor& cursor,

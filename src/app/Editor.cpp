@@ -13,6 +13,8 @@
 #include "syntax/SyntaxHighlighter.h"
 #include "platform/clipboard/ClipboardFactory.h"
 #include "filesystem/FileWatcherFactory.h"
+// Paso 1: Theme directo (antes por tránsito vía Renderer.h); ownership a ThemeProvider en paso 6.
+#include "rendering/tty/Theme.h"
 
 namespace {
 

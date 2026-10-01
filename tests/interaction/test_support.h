@@ -14,6 +14,8 @@
 #undef private
 #include "base/utf8.h"
 #include "helpers/test_render_utils.h"
+#include "rendering/tty/Theme.h"  // tests que leen r.theme() incluyen el tipo
+                                   // directo (ya no llega por Renderer.h)
 
 using testfw::TempFile;
 inline InputEvent insert(char c){ InputEvent e; e.type=InputEventType::InsertChar; e.text=std::string(1,c); return e; }
