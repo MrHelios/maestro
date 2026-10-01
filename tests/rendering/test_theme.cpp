@@ -18,6 +18,7 @@
 #include "layout/Viewport.h"
 #include "rendering/Renderer.h"
 #include "rendering/tty/StatusBar.h"
+#include "rendering/tty/TtyLists.h"
 
 namespace {
 
@@ -55,15 +56,15 @@ std::string editorFrameWithSelection(const Theme& theme, int width = 200) {
 // Monta el frame del selector de buffers con el primer elemento seleccionado
 // (ejercita theme_.selection en la lista).
 std::string bufferFrameWithSelection(const Theme& theme, int width = 200) {
-    Renderer r;
-    r.setTheme(theme);
-    return r.buildBufferListScreen({"aa.txt", "bb.txt"}, 0, width, 5);
+    TtyLists lists;
+    lists.setTheme(theme);
+    return lists.buildBufferListScreen({"aa.txt", "bb.txt"}, 0, width, 5);
 }
 
 std::string fileFrameWithSelection(const Theme& theme, int width = 200) {
-    Renderer r;
-    r.setTheme(theme);
-    return r.buildFileListScreen(
+    TtyLists lists;
+    lists.setTheme(theme);
+    return lists.buildFileListScreen(
         std::vector<FileListItem>{{"aa.txt", false}, {"bb.txt", false}}, 0, 0,
         "/tmp", Message{}, width, 5);
 }
@@ -205,12 +206,14 @@ TEST(theme_renderer_propagates_to_statusbar) {
                                    State::Navegacion, std::nullopt);
     CHECK(ed.find(t.statusBar) != std::string::npos);
 
-    // BufferSelector: mismo Theme, misma barra.
-    std::string buf = r.buildBufferListScreen({"a.txt"}, 0, 80, 5);
+    // BufferSelector: mismo Theme (inyectado en TtyLists), misma barra.
+    TtyLists lists;
+    lists.setTheme(t);
+    std::string buf = lists.buildBufferListScreen({"a.txt"}, 0, 80, 5);
     CHECK(buf.find(t.statusBar) != std::string::npos);
 
     // FileBrowser: idem.
-    std::string file = r.buildFileListScreen(
+    std::string file = lists.buildFileListScreen(
         std::vector<FileListItem>{{"a.txt", false}}, 0, 0, "/ruta",
         Message("ayuda"), 80, 5);
     CHECK(file.find(t.statusBar) != std::string::npos);

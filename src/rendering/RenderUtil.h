@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdlib>
 #include <string>
 #include <string_view>
 #include "base/utf8.h"
@@ -47,6 +48,20 @@ inline std::string dirName(const std::string& path) {
     if (pos == std::string::npos) return ".";
     if (pos == 0) return "/";
     return path.substr(0, pos);
+}
+
+// Solo para MOSTRAR en la barra de estado: reemplaza el home del usuario
+// por "~" al inicio de la ruta (estilo shell). NO toca filename real.
+// Fuente única (antes duplicado en FrameBuilder.cpp y Renderer.cpp).
+inline std::string collapseHome(const std::string& path) {
+    const char* home = std::getenv("HOME");
+    if (!home || !*home) return path;
+    std::string h(home);
+    if (path.size() < h.size() || path.compare(0, h.size(), h) != 0)
+        return path;
+    if (path.size() > h.size() && path[h.size()] != '/')
+        return path;
+    return "~" + path.substr(h.size());
 }
 
 } // namespace chrome

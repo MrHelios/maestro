@@ -23,6 +23,7 @@
 #include "layout/Viewport.h"
 #include "rendering/Renderer.h"
 #include "rendering/tty/Theme.h"
+#include "rendering/tty/TtyLists.h"
 
 namespace {
 
@@ -212,33 +213,33 @@ TEST(fase_e_golden_status_todos_los_message_kinds) {
 }
 
 TEST(fase_e_golden_listas_bordes) {
-    Renderer r;
+    TtyLists lists;
     const int content = 4;
     const int width = 80;
     const int total = content + 2;  // + kStatusBarRows
 
     // Buffer: vacía no crashea y llena el chrome.
-    std::string empty = r.buildBufferListScreen({}, 0, width, content);
+    std::string empty = lists.buildBufferListScreen({}, 0, width, content);
     CHECK_EQ((int)testutil::visibleRows(empty).size(), total);
 
     // Buffer: seleccionado inicio y fin visibles.
-    std::string first =
-        r.buildBufferListScreen({"a.txt", "b.txt", "c.txt"}, 0, width, content);
-    std::string last =
-        r.buildBufferListScreen({"a.txt", "b.txt", "c.txt"}, 2, width, content);
+    std::string first = lists.buildBufferListScreen({"a.txt", "b.txt", "c.txt"},
+                                                    0, width, content);
+    std::string last = lists.buildBufferListScreen({"a.txt", "b.txt", "c.txt"},
+                                                   2, width, content);
     CHECK(testutil::contains(testutil::stripAnsi(first), "a.txt"));
     CHECK(testutil::contains(testutil::stripAnsi(last), "c.txt"));
     CHECK(first != last);
     CHECK(first.find("\x1b[") != std::string::npos);  // CUP al item
 
     // File: vacía, y con scroll!=0 muestra la ventana correcta.
-    std::string fEmpty =
-        r.buildFileListScreen({}, 0, 0, "/datos/proyecto", Message(""), width, content);
+    std::string fEmpty = lists.buildFileListScreen({}, 0, 0, "/datos/proyecto",
+                                                   Message(""), width, content);
     CHECK_EQ((int)testutil::visibleRows(fEmpty).size(), total);
     std::vector<FileListItem> items = {
         {"a.txt", false}, {"b.txt", false}, {"c.txt", false}, {"d", true}};
-    std::string fScrolled = r.buildFileListScreen(items, 2, 1, "/datos/proyecto",
-                                                  Message(""), width, content);
+    std::string fScrolled = lists.buildFileListScreen(
+        items, 2, 1, "/datos/proyecto", Message(""), width, content);
     std::string plain = testutil::stripAnsi(fScrolled);
     CHECK(testutil::contains(plain, "b.txt"));
     CHECK(testutil::contains(plain, "c.txt"));

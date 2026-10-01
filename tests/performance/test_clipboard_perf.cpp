@@ -22,6 +22,7 @@
 #undef private
 
 #include "document/Document.h"
+#include "rendering/tty/TtyLists.h"
 
 namespace {
 
@@ -185,7 +186,7 @@ TEST(bench_perf_statusbar_25k_perf) {
     ed.active().viewport.height = 24;
     ed.active().viewport.width = 80;
     ed.active().cursor.line = n / 2;
-    Renderer& r = ed.renderer_;
+    TtyLists lists;  // barra TTY (antes shim de Renderer)
     Layout layout = computeLayout(ed.active().viewport.height + kStatusBarRows,
                                   ed.active().viewport.width);
     StatusBarData d;
@@ -201,8 +202,8 @@ TEST(bench_perf_statusbar_25k_perf) {
         alloc_stats::Scoped s(alloc_stats::kOther);
         for (int i = 0; i < iters; ++i) {
             std::string out;
-            r.renderStatusBar(out, layout.statusBar, d,
-                              StyleRole::AccentNavegacion);
+            lists.renderStatusBar(out, layout.statusBar, d,
+                                  StyleRole::AccentNavegacion);
             perf_time::g_sink += out.size();
         }
     }

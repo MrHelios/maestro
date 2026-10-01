@@ -1,6 +1,9 @@
 #include "test_support.h"
 #include <filesystem>
 
+#include "rendering/tty/Theme.h"
+#include "rendering/tty/TtyLists.h"
+
 // ---------------------------------------------------------------------------
 // 1. Inicio del programa / Abrir archivo
 // ---------------------------------------------------------------------------
@@ -861,4 +864,24 @@ TEST(editor_backspace_removes_whole_multibyte) {
     press(ed, InputEventType::Backspace);
     CHECK_EQ(ed.active().document.lineAt(0), "");
     CHECK_EQ(ed.active().cursor.col, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Fase E paso 5: renderer_ es la única fuente del tema; lists_ lo sigue.
+// Cubre la sincronización inicial (ctor) y el toggle (único fan-out).
+// ---------------------------------------------------------------------------
+TEST(editor_theme_syncs_renderer_and_lists) {
+    Editor ed;
+    // Estado inicial: lists_ nace del tema del renderer.
+    CHECK(ed.lists_->theme() == ed.renderer_.theme());
+
+    // Toggle por el camino público: ambas superficies cambian y coinciden.
+    ed.executeCommand("theme.toggle");
+    CHECK(ed.lists_->theme() == ed.renderer_.theme());
+
+    // Y la superficie de listas pinta con ese tema (bytes idénticos a un
+    // TtyLists de referencia con el mismo tema).
+    TtyLists ref(ed.renderer_.theme());
+    CHECK_EQ(ed.lists_->buildBufferListScreen({"a.txt"}, 0, 80, 5),
+             ref.buildBufferListScreen({"a.txt"}, 0, 80, 5));
 }

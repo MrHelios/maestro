@@ -1,4 +1,5 @@
 #include "test_support.h"
+#include "rendering/tty/TtyLists.h"
 #include <fstream>
 #include <iterator>
 
@@ -1091,8 +1092,8 @@ TEST(buffer_stress_mixed_operations) {
 }
 
 TEST(renderer_buffer_list_marks_selected) {
-    Renderer r;
-    std::string out = r.buildBufferListScreen({"a.txt", "b.txt", "SinNombre"}, 1, 80, 10);
+    TtyLists lists;
+    std::string out = lists.buildBufferListScreen({"a.txt", "b.txt", "SinNombre"}, 1, 80, 10);
     // El item activo de la lista lleva el mismo gris que la fila del cursor
     // (listSelected == currentLine: lenguaje ACTIVO unificado), no video
     // inverso. El fondo debe cubrir TODO el ancho de la fila, no solo el
@@ -1107,9 +1108,9 @@ TEST(renderer_buffer_list_marks_selected) {
     // El reset no debe estar pegado inmediatamente al texto: tiene que
     // haber padding (espacios) entre medio, prueba de que el fondo cubre
     // el resto de la fila.
-    CHECK(out.compare(textEnd, r.theme().reset.size(), r.theme().reset) != 0);
+    CHECK(out.compare(textEnd, lists.theme().reset.size(), lists.theme().reset) != 0);
 
-    size_t resetPos = out.find(r.theme().reset, textEnd);
+    size_t resetPos = out.find(lists.theme().reset, textEnd);
     CHECK(resetPos != std::string::npos);
     CHECK(resetPos > textEnd); // hay espacios de relleno entre medio
 
@@ -1125,15 +1126,15 @@ TEST(renderer_buffer_list_marks_selected) {
 }
 
 TEST(renderer_buffer_list_first_selected) {
-    Renderer r;
-    std::string out = r.buildBufferListScreen({"a.txt", "b.txt"}, 0, 80, 10);
+    TtyLists lists;
+    std::string out = lists.buildBufferListScreen({"a.txt", "b.txt"}, 0, 80, 10);
     std::string styledText = std::string(kListSelectedStyle) + "  a.txt";
     size_t stylePos = out.find(styledText);
     CHECK(stylePos != std::string::npos);
     size_t textEnd = stylePos + styledText.size();
     // Mismo criterio: reset no pegado, hay padding antes.
-    CHECK(out.compare(textEnd, r.theme().reset.size(), r.theme().reset) != 0);
-    size_t resetPos = out.find(r.theme().reset, textEnd);
+    CHECK(out.compare(textEnd, lists.theme().reset.size(), lists.theme().reset) != 0);
+    size_t resetPos = out.find(lists.theme().reset, textEnd);
     CHECK(resetPos != std::string::npos && resetPos > textEnd);
 
     CHECK(!contains(out, std::string(kListSelectedStyle) + "  b.txt"));
@@ -1143,11 +1144,11 @@ TEST(renderer_buffer_list_first_selected) {
 // dibuja su propia barra en video inverso (MULTIBUFFER): produce datos
 // (Buffers | SELECCIONAR | n/total) y se los entrega al StatusBar comun.
 TEST(renderer_buffer_list_only_unified_bar) {
-    Renderer r;
-    std::string out = r.buildBufferListScreen({"a.txt", "b.txt"}, 1, 80, 10);
+    TtyLists lists;
+    std::string out = lists.buildBufferListScreen({"a.txt", "b.txt"}, 1, 80, 10);
     // Filas vacias con el marcador del editor, alineado con las entradas
     // (misma indentacion de 2 espacios) y sin el texto "BUFFERS".
-    CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~" + std::string(r.theme().reset) + "\r\n"));
+    CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~" + std::string(lists.theme().reset) + "\r\n"));
     CHECK(!contains(out, "~ BUFFERS"));
     // Ya no hay barra en video inverso MULTIBUFFER: la barra es la del
     // StatusBar comun (fondo gris 60%) con Buffers/SELECCIONAR y el
@@ -1429,3 +1430,24 @@ TEST(ctrl_k_b_reconciles_mode_interaction) {
     CHECK_EQ(ed.active().document.lineAt(0), "hello");
     CHECK(!ed.hasSelection());
 }
+
+// ---------------------------------------------------------------------------
+// Fase E paso 5: la vuelta del modal al editor es rebuild total, por la
+// invalidación en la transición (no por invalidar en cada frame modal).
+// ---------------------------------------------------------------------------
+TEST(editor_modal_exit_rebuilds_full_frame) {
+    Editor ed;
+    newBuffer(ed);  // 2 buffers: el selector abre (con 1 es no-op)
+    StringSink sink;
+    ed.setSink(sink);
+    ed.renderFrame();  // editor: prima el diff
+    openSelector(ed);  // Ctrl+K t -> BufferSelector
+    CHECK(ed.state_ == State::BufferSelector);
+    ed.renderFrame();  // modal (transición de entrada: invalida)
+    ed.renderFrame();  // modal (sin invalidación extra)
+    press(ed, InputEventType::Escape);  // sale del modal
+    sink.buf.clear();
+    ed.renderFrame();  // editor: rebuild total por transición de salida
+    CHECK(sink.buf.find("\x1b[2J") != std::string::npos);
+}
+

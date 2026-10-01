@@ -22,8 +22,8 @@
 
 #include "layout/Layout.h"
 #include "app/Message.h"
-#include "rendering/Renderer.h"
 #include "rendering/tty/StatusBar.h"
+#include "rendering/tty/TtyLists.h"
 
 namespace {
 
@@ -283,14 +283,14 @@ TEST(statusbar_list_screens_use_their_roles) {
     t.statusBarAccent = "\x1b[34m";
     t.accentBuffers = "\x1b[31m";
     t.accentAbrir = "\x1b[32m";
-    Renderer r;
-    r.setTheme(t);
+    TtyLists lists;
+    lists.setTheme(t);
 
-    const std::string buf = r.buildBufferListScreen({"a.txt"}, 0, 80, 5);
+    const std::string buf = lists.buildBufferListScreen({"a.txt"}, 0, 80, 5);
     CHECK(buf.find(t.accentBuffers) != std::string::npos);
     CHECK(buf.find(t.statusBarAccent) == std::string::npos);
 
-    const std::string file = r.buildFileListScreen(
+    const std::string file = lists.buildFileListScreen(
         std::vector<FileListItem>{{"a.txt", false}}, 0, 0, "/ruta",
         Message("ayuda"), 80, 5);
     CHECK(file.find(t.accentAbrir) != std::string::npos);

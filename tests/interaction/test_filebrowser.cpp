@@ -1,4 +1,5 @@
 #include "test_support.h"
+#include "rendering/tty/TtyLists.h"
 TEST(ctrl_k_o_opens_browser_at_cwd) {
     TempDir t;
     CwdGuard g;
@@ -488,9 +489,9 @@ TEST(browser_folders_listed_before_files) {
     CHECK_EQ(ed.fileBrowser.entries_[3].name, "a.txt");
     CHECK(!ed.fileBrowser.entries_[3].isDirectory);
     CHECK_EQ(ed.fileBrowser.entries_[4].name, "b.txt");
-    // El Renderer marca las carpetas con "/" al pintar.
-    Renderer rTmp;
-    const std::string outTmp = rTmp.buildFileListScreen(
+    // El backend marca las carpetas con "/" al pintar.
+    TtyLists listsTmp;
+    const std::string outTmp = listsTmp.buildFileListScreen(
         std::vector<FileListItem>{{"alfa", true}, {"a.txt", false}}, 0, 0,
         "/", Message{}, 80, 5);
     CHECK(contains(outTmp, "  alfa/"));
@@ -1393,12 +1394,12 @@ TEST(browser_status_label_is_abrir_archivo) {
     CHECK(ed.state_ == State::FileBrowser);
     CHECK(!ed.statusMessage_.empty());           // ayuda al entrar
 
-    Renderer r;
+    TtyLists lists;
     std::vector<FileListItem> items;
     items.reserve(ed.fileBrowser.entries_.size());
     for (const auto& e : ed.fileBrowser.entries_)
         items.push_back({e.name, e.isDirectory});
-    const std::string out = r.buildFileListScreen(
+    const std::string out = lists.buildFileListScreen(
         items, ed.fileBrowser.index_, ed.fileBrowser.scroll_,
         ed.fileBrowser.path_, ed.statusMessage_, 80, 10);
     CHECK(contains(out, "ABRIR ARCHIVO"));
@@ -1416,12 +1417,12 @@ TEST(browser_status_path_matches_current_dir) {
     press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.fileBrowser.path_, t.path + "/x");
 
-    Renderer r;
+    TtyLists lists;
     std::vector<FileListItem> items;
     items.reserve(ed.fileBrowser.entries_.size());
     for (const auto& e : ed.fileBrowser.entries_)
         items.push_back({e.name, e.isDirectory});
-    const std::string out = r.buildFileListScreen(
+    const std::string out = lists.buildFileListScreen(
         items, ed.fileBrowser.index_, ed.fileBrowser.scroll_,
         ed.fileBrowser.path_, ed.statusMessage_, 80, 10);
     CHECK(contains(out, t.path + "/x"));
@@ -1444,11 +1445,11 @@ TEST(browser_exit_clears_status_message) {
 }
 
 // ---------------------------------------------------------------------------
-// Renderer del explorador
+// Listas del explorador (TtyLists)
 // ---------------------------------------------------------------------------
 TEST(renderer_file_list_layout) {
-    Renderer r;
-    std::string out = r.buildFileListScreen(
+    TtyLists lists;
+    std::string out = lists.buildFileListScreen(
         std::vector<FileListItem>{
             {"..", true}, {"sub", true}, {"a.txt", false}, {"b.txt", false}},
         1, 0, "/tmp/sandbox",
@@ -1462,8 +1463,8 @@ TEST(renderer_file_list_layout) {
     size_t stylePos = out.find(styledText);
     CHECK(stylePos != std::string::npos);
     size_t textEnd = stylePos + styledText.size();
-    CHECK(out.compare(textEnd, r.theme().reset.size(), r.theme().reset) != 0);
-    size_t resetPos = out.find(r.theme().reset, textEnd);
+    CHECK(out.compare(textEnd, lists.theme().reset.size(), lists.theme().reset) != 0);
+    size_t resetPos = out.find(lists.theme().reset, textEnd);
     CHECK(resetPos != std::string::npos);
     CHECK(resetPos > textEnd);
     std::string between = out.substr(textEnd, resetPos - textEnd);
@@ -1476,13 +1477,13 @@ TEST(renderer_file_list_layout) {
     // Fila de mensajes con la ayuda.
     CHECK(contains(out, "Enter abrir/entrar"));
     // Filas vacias bajo la lista con el marcador del editor, alineado.
-    CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~" + r.theme().reset + "\r\n"));
+    CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~" + lists.theme().reset + "\r\n"));
 }
 
 TEST(renderer_file_list_scroll_hides_off_window) {
-    Renderer r;
+    TtyLists lists;
     // scroll=2 sobre 4 entradas con altura 2: se ven b.txt y c.txt, no a.txt.
-    std::string out = r.buildFileListScreen(
+    std::string out = lists.buildFileListScreen(
         std::vector<FileListItem>{
             {"..", true},
             {"a.txt", false},
@@ -1495,8 +1496,8 @@ TEST(renderer_file_list_scroll_hides_off_window) {
     CHECK(stylePos != std::string::npos);
     size_t textEnd = stylePos + styledText.size();
     // Mismo criterio: reset no pegado, hay padding antes.
-    CHECK(out.compare(textEnd, r.theme().reset.size(), r.theme().reset) != 0);
-    size_t resetPos = out.find(r.theme().reset, textEnd);
+    CHECK(out.compare(textEnd, lists.theme().reset.size(), lists.theme().reset) != 0);
+    size_t resetPos = out.find(lists.theme().reset, textEnd);
     CHECK(resetPos != std::string::npos && resetPos > textEnd);
     CHECK(!contains(out, "  a.txt"));
     CHECK(!contains(out, "  .."));

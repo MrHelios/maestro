@@ -37,6 +37,7 @@
 
 #include "base/utf8.h"
 #include "layout/Gutter.h"
+#include "rendering/tty/TtyLists.h"
 
 namespace {
 
@@ -86,7 +87,7 @@ TEST(bench_perf_render_escalado_con_documento_checked) {
 // ---------------------------------------------------------------------------
 TEST(bench_perf_render_desglose_fases_checked) {
     RenderFixture fx(300);
-    Renderer& r = fx.ed.renderer_;
+    TtyLists lists;  // primitivas TTY (antes shims de Renderer)
     const Buffer& b = fx.ed.active();
     const Document& doc = b.document;
     const Cursor& cur = b.cursor;
@@ -122,28 +123,28 @@ TEST(bench_perf_render_desglose_fases_checked) {
 
     bench("beginFrame+endFrame", 20000, [&] {
         std::string out;
-        r.beginFrame(out);
-        r.endFrame(out);
+        lists.beginFrame(out);
+        lists.endFrame(out);
         perf_time::g_sink += out.size();
     });
     bench("renderEditorContent (22 filas visibles)", 2000, [&] {
         std::string out;
-        r.renderEditorContent(out, doc, cur, vp, std::nullopt, layout.content,
-                              gutterW);
+        lists.renderEditorContent(out, doc, cur, vp, std::nullopt, layout.content,
+                                  gutterW);
         perf_time::g_sink += out.size();
     });
     bench("statusBar (data+render)", 20000, [&] {
         std::string out;
         StatusBarData data = barData();
-        r.renderStatusBar(out, layout.statusBar, data,
-                          StyleRole::AccentNavegacion);
+        lists.renderStatusBar(out, layout.statusBar, data,
+                              StyleRole::AccentNavegacion);
         perf_time::g_sink += out.size();
     });
     bench("moveCursorTo+columnOf", 20000, [&] {
         std::string out;
         int visualCol = utf8::columnOf(doc.lineAt(cur.line), cur.col);
-        r.moveCursorToRaw(out, cur.line - vp.top + 1, gutterW + visualCol + 1 +
-                                                           layout.content.col);
+        lists.moveCursorToRaw(out, cur.line - vp.top + 1, gutterW + visualCol + 1 +
+                                                               layout.content.col);
         perf_time::g_sink += out.size();
     });
     CHECK(perf_time::g_sink > 0);

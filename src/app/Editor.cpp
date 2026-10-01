@@ -13,8 +13,8 @@
 #include "syntax/SyntaxHighlighter.h"
 #include "platform/clipboard/ClipboardFactory.h"
 #include "filesystem/FileWatcherFactory.h"
-// Paso 1: Theme directo (antes por tránsito vía Renderer.h); ownership a ThemeProvider en paso 6.
-#include "rendering/tty/Theme.h"
+#include "rendering/tty/Theme.h"  // Paso 1: Theme directo (antes por tránsito vía Renderer.h); ownership a ThemeProvider en paso 6.
+#include "rendering/tty/TtyLists.h"  // Paso 5: pantallas modales (el header solo forward-declara).
 
 namespace {
 
@@ -132,7 +132,8 @@ Editor::Editor(std::unique_ptr<SystemClipboard> clipboard)
     : Editor(std::move(clipboard), makeFileWatcher()) {}
 
 Editor::Editor(std::unique_ptr<SystemClipboard> clipboard, std::unique_ptr<FileWatcher> watcher)
-    : clipboard_(std::move(clipboard)), watcher_(std::move(watcher)) {
+    : lists_(std::make_unique<TtyLists>(renderer_.theme())),
+      clipboard_(std::move(clipboard)), watcher_(std::move(watcher)) {
     if (!clipboard_) clipboard_ = makeNullClipboard();
     if (!watcher_) watcher_ = makeNullFileWatcher();
     setStatusMessage(kHelpEmpty);
@@ -1138,11 +1139,21 @@ void Editor::invalidateScreen() {
 
 void Editor::renderFrame() {
     Buffer& b = active();
+    // Transición modal: invalida el diff al entrar Y al salir (una sola vez
+    // por transición, no por frame). Adentro del modal el cache ya está
+    // invalidado y ningún camino lo revalida; al salir, el primer frame del
+    // editor es rebuild total.
+    const bool isModal =
+        (state_ == State::BufferSelector || state_ == State::FileBrowser);
+    if (isModal != wasModal_) {
+        renderer_.invalidateCache();
+        wasModal_ = isModal;
+    }
     if (state_ == State::BufferSelector) {
         // Pantalla del selector: se dibuja la lista de buffers con la
         // barra MULTIBUFFER al final, manteniendo el aspecto del editor.
-        renderer_.renderBufferList(bufferNames(), bufferSelectorIndex_,
-                                   b.viewport.width, b.viewport.height, sink());
+        lists_->renderBufferList(bufferNames(), bufferSelectorIndex_,
+                                 b.viewport.width, b.viewport.height, sink());
     } else if (state_ == State::FileBrowser) {
         fileBrowser.clampScroll(b.viewport.height);
         // DEUDA (Alcance 1): el vector adaptado se reconstruye por frame
@@ -1154,10 +1165,10 @@ void Editor::renderFrame() {
         for (const FileBrowserEntry& e : fileBrowser.entries_) {
             items.push_back(FileListItem{e.name, e.isDirectory});
         }
-        renderer_.renderFileList(items,
-                                 fileBrowser.index_, fileBrowser.scroll_,
-                                 fileBrowser.path_, statusMessage_,
-                                 b.viewport.width, b.viewport.height, sink());
+        lists_->renderFileList(items,
+                               fileBrowser.index_, fileBrowser.scroll_,
+                               fileBrowser.path_, statusMessage_,
+                               b.viewport.width, b.viewport.height, sink());
     } else {
         // Sincroniza lenguaje del cache con el buffer activo antes de bracket/render
         {
@@ -2723,10 +2734,14 @@ void Editor::redo() {
     setActionMessage("Rehecho.", MessageKind::Success);
 }
 
+void Editor::applyTheme(const Theme& t) {
+    renderer_.setTheme(t);
+    lists_->setTheme(t);
+}
+
 void Editor::toggleTheme() {
     isDarkTheme_ = !isDarkTheme_;
-    Theme t = isDarkTheme_ ? darkTheme() : lightTheme();
-    renderer_.setTheme(t);
+    applyTheme(isDarkTheme_ ? darkTheme() : lightTheme());
     state_ = priorState_;
     setActionMessage(isDarkTheme_ ? "Tema oscuro" : "Tema claro", MessageKind::Info);
 }

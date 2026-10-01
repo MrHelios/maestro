@@ -27,6 +27,13 @@
 // no acoplar este header a rendering/tty/: el dueño real vive en el .cpp.
 class Sink;
 
+// Pantallas modales TTY (listas). Forward declarado por el mismo motivo:
+// el Editor las posee por puntero y los detalles viven en el .cpp.
+class TtyLists;
+
+// Tema ANSI del backend TTY. Forward declarado: solo el .cpp lo conoce.
+struct Theme;
+
 // Editor es el "engine": maneja una coleccion de buffers (v0.6.3), un
 // buffer activo, el modo, los mensajes y el portapapeles global. Todo lo
 // que le pertenece a un documento (Document, Cursor, Viewport, seleccion,
@@ -269,6 +276,16 @@ private:
     void openFileInBuffer(const std::string& path);
 
     Renderer renderer_;
+    // Pantallas modales (selector/explorador): backend TTY por puntero para
+    // no incluir tty/* en este header (paso 5). Se sincroniza el Theme en
+    // applyTheme; el cache diferencial se invalida en las transiciones
+    // hacia/desde el modal (ver wasModal_ en renderFrame: TtyLists::render*
+    // no invalida porque no posee el TtyDiff).
+    std::unique_ptr<TtyLists> lists_;
+    // Frontera modal del último renderFrame: true si se pintó modal. Sirve
+    // para invalidar el diff solo en la transición (entrada y salida),
+    // no en cada frame del modal.
+    bool wasModal_ = false;
     // Sink inyectado (no poseído). El Editor no sabe qué backend es:
     // el composition root inyecta el real y los tests el suyo local.
     // Nulo hasta setSink(); el futuro GUI inyectará el suyo sin que el
@@ -575,6 +592,11 @@ private:
     void redo();
 
     void toggleTheme();
+
+    // Único fan-out del tema en producción: renderer_ es la fuente y lists_
+    // lo sigue. Todo camino que cambie el tema pasa por acá (hoy solo
+    // toggleTheme); nadie setea backends por separado.
+    void applyTheme(const Theme& t);
 
     std::unique_ptr<FileWatcher> watcher_;
     std::unordered_set<std::string> watchedFiles_;

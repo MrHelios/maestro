@@ -40,6 +40,7 @@
 #include "layout/Viewport.h"
 #include "app/Message.h"
 #include "rendering/Renderer.h"
+#include "rendering/tty/TtyLists.h"
 
 namespace {
 
@@ -74,8 +75,8 @@ std::string frameBuffer(int n, int content, int width, int selected = 0) {
     std::vector<std::string> names;
     for (int i = 0; i < n; ++i)
         names.push_back("buffer_" + std::to_string(i) + ".txt");
-    Renderer r;
-    return r.buildBufferListScreen(names, selected, width, content);
+    TtyLists lists;
+    return lists.buildBufferListScreen(names, selected, width, content);
 }
 
 // FileBrowser: lista de `n` archivos con una ruta y un mensaje de ayuda.
@@ -83,9 +84,9 @@ std::string frameFile(int n, int content, int width) {
     std::vector<FileListItem> items;
     for (int i = 0; i < n; ++i)
         items.push_back({"archivo_" + std::to_string(i) + ".cpp", false});
-    Renderer r;
-    return r.buildFileListScreen(items, 0, 0, "/datos/proyecto",
-                                 Message("ayuda: direcc de naveg"), width, content);
+    TtyLists lists;
+    return lists.buildFileListScreen(items, 0, 0, "/datos/proyecto",
+                                     Message("ayuda: direcc de naveg"), width, content);
 }
 
 // ----- Invariante global de regresion ---------------------------------------

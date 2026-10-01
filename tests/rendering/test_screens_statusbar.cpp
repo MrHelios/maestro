@@ -25,6 +25,7 @@
 #include "app/Message.h"
 #include "rendering/Renderer.h"
 #include "rendering/tty/StatusBar.h"
+#include "rendering/tty/TtyLists.h"
 
 namespace {
 
@@ -63,14 +64,14 @@ std::string frameEditor(int content, int width) {
 }
 
 std::string frameBuffer(int content, int width, int selected = 1) {
-    Renderer r;
-    return r.buildBufferListScreen({"b0.txt", "b1.txt", "b2.txt", "b3.txt"},
-                                   selected, width, content);
+    TtyLists lists;
+    return lists.buildBufferListScreen({"b0.txt", "b1.txt", "b2.txt", "b3.txt"},
+                                       selected, width, content);
 }
 
 std::string frameFile(int content, int width) {
-    Renderer r;
-    return r.buildFileListScreen(
+    TtyLists lists;
+    return lists.buildFileListScreen(
         std::vector<FileListItem>{
             {"a.txt", false}, {"b.txt", false}, {"c.txt", false}},
         0, 0, "/datos/proyecto", Message("ayuda: direcc de naveg"),

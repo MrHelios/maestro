@@ -1,7 +1,6 @@
 #include "rendering/frame/FrameBuilder.h"
 
 #include <algorithm>
-#include <cstdlib>
 #include <vector>
 
 #include "base/utf8.h"
@@ -12,19 +11,6 @@
 
 namespace {
 
-// Solo para MOSTRAR en la barra de estado: reemplaza el home del usuario
-// por "~" al inicio de la ruta (estilo shell). NO toca filename real.
-std::string collapseHome(const std::string& path) {
-    const char* home = std::getenv("HOME");
-    if (!home || !*home) return path;
-    std::string h(home);
-    if (path.size() < h.size() || path.compare(0, h.size(), h) != 0)
-        return path;
-    if (path.size() > h.size() && path[h.size()] != '/')
-        return path;
-    return "~" + path.substr(h.size());
-}
-
 // Arma el StatusBarData del Editor. PURO: sin ANSI; el accent vive en
 // Frame::statusAccent como StyleRole y lo resuelve el backend.
 StatusBarData editorBarData(const std::string& filename, bool modified,
@@ -34,7 +20,7 @@ StatusBarData editorBarData(const std::string& filename, bool modified,
     StatusBarData data;
     data.name = chrome::baseName(filename);
     if (data.name.empty()) data.name = "[sin nombre]";
-    data.path = collapseHome(chrome::dirName(filename));
+    data.path = chrome::collapseHome(chrome::dirName(filename));
     if (data.path == ".") data.path = "";
     data.estado = estado;
     data.modified = modified;
