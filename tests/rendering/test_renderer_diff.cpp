@@ -57,7 +57,7 @@ struct TinyTerm {
                 ++j;
                 if (term == 'H') {
                     // Renderer emite \x1b[{fila};{col}H. Para rewrites de fila
-                    // completa col==1 (moveCursorTo(row,1)), para cursor es
+                    // completa col==1 (moveCursorToRaw(row,1)), para cursor es
                     // variable (editorCursorPos). Se acepta cualquier col>=1
                     // para no ocultar bugs de cursor; el comentario anterior
                     // que prometía "fallará a propósito" no se cumplía.

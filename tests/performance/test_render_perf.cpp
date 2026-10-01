@@ -141,8 +141,8 @@ TEST(bench_perf_render_desglose_fases_checked) {
     bench("moveCursorTo+columnOf", 20000, [&] {
         std::string out;
         int visualCol = utf8::columnOf(doc.lineAt(cur.line), cur.col);
-        r.moveCursorTo(out, cur.line - vp.top + 1, gutterW + visualCol + 1 +
-                                                     layout.content.col);
+        r.moveCursorToRaw(out, cur.line - vp.top + 1, gutterW + visualCol + 1 +
+                                                           layout.content.col);
         perf_time::g_sink += out.size();
     });
     CHECK(perf_time::g_sink > 0);

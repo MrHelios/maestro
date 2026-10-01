@@ -189,7 +189,7 @@ private:
     void showCursor(std::string& out) const;
     void setCursorStyle(std::string& out, State state) const;
     void setCursorStyle(std::string& out, FrameCursorShape shape) const;
-    void moveCursorTo(std::string& out, int row, int col) const;
+    void moveCursorToRaw(std::string& out, int row, int col) const;
     void renderEditorContent(std::string& out,
                                const Document& doc,
                                const Cursor& cursor,

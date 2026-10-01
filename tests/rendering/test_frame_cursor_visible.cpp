@@ -142,11 +142,11 @@ TEST(frame_cursor_editorCursorPos_no_silent_clamp) {
     cur.line = 29;
     cur.col = 0;
     FrameBuilder b;
-    int r = -1, c = -1;
-    const bool vis = b.editorCursorPos(doc, cur, vp, r, c);
+    CellPos pos;
+    const bool vis = b.editorCursorPos(doc, cur, vp, pos);
     CHECK(!vis);
-    // Sin clamp: el crudo queda fuera del contenido (1..10), no en el borde.
-    CHECK(r > vp.height);
+    // Sin clamp: celda inválida, no borde del contenido.
+    CHECK(!pos.valid());
 }
 
 TEST(frame_cursor_tty_hides_when_not_visible) {

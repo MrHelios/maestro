@@ -142,6 +142,21 @@ private:
                         bool modified, const Message& message, State state,
                         const Layout& layout, int contentH);
 
+    // Resuelve el cursor con el resolver común (sin clamp duplicado) y lo
+    // posiciona/muestra. Busqueda o fuera de viewport => lo deja oculto
+    // (contrato visible==false). endFrame=true cierra con endFrame en vez
+    // de showCursor (camino de frame completo). Única versión con el bloque
+    // resolve -> CUP -> style -> show/end (4 caminos lo usan).
+    void placeCursor(std::string& out, const Document& doc,
+                     const Cursor& cursor, const Viewport& viewport,
+                     State state, bool endFrame);
+    void placeCursor(std::string& out, const Document& doc,
+                     const Cursor& cursor, const Viewport& viewport,
+                     const FrameBuilder::EditorGeometry& g, State state,
+                     bool endFrame);
+    void emitCursor(std::string& out, CellPos pos, bool visible, State state,
+                    bool endFrame);
+
     void updateCacheState(const Viewport& viewport, const Cursor& cursor,
                           const Document& doc);
 };

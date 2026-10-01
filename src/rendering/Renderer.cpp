@@ -49,8 +49,8 @@ void Renderer::setCursorStyle(std::string& out, FrameCursorShape shape) const {
     encoder_->setCursorStyle(out, shape);
 }
 
-void Renderer::moveCursorTo(std::string& out, int row, int col) const {
-    encoder_->moveCursorTo(out, row, col);
+void Renderer::moveCursorToRaw(std::string& out, int row, int col) const {
+    encoder_->moveCursorToRaw(out, row, col);
 }
 
 namespace {
@@ -205,7 +205,7 @@ std::string Renderer::buildBufferListScreen(
     int rows = std::min(static_cast<int>(names.size()), height);
     if (rows > 0) {
         int cursorRow = std::max(1, std::min(selected + 1, rows));
-        encoder_->moveCursorTo(out, cursorRow, 1);
+        encoder_->moveCursorToRaw(out, cursorRow, 1);
     }
 
     encoder_->endFrame(out);
@@ -263,7 +263,7 @@ std::string Renderer::buildFileListScreen(
     int rows = std::min(static_cast<int>(items.size()) - scroll, height);
     if (rows > 0) {
         int cursorRow = selected - scroll + 1;
-        encoder_->moveCursorTo(out, cursorRow, 1);
+        encoder_->moveCursorToRaw(out, cursorRow, 1);
     }
 
     encoder_->endFrame(out);

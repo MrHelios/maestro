@@ -31,6 +31,35 @@ void TtyDiff::splitRows(const std::string& body,
     }
 }
 
+void TtyDiff::emitCursor(std::string& out, CellPos pos, bool visible,
+                         State state, bool endFrame) {
+    // Contrato visual: solo posicionar/mostrar si el cursor esta en
+    // viewport. Si esta fuera (rueda con suppressScrollToCursor_) o el modo
+    // lo oculta (Busqueda) se deja oculto (hide de beginFrame).
+    if (state == State::Busqueda || !visible) return;
+    encoder_.moveCursorTo(out, pos);
+    encoder_.setCursorStyle(out, state);
+    if (endFrame) encoder_.endFrame(out);
+    else encoder_.showCursor(out);
+}
+
+void TtyDiff::placeCursor(std::string& out, const Document& doc,
+                          const Cursor& cursor, const Viewport& viewport,
+                          State state, bool endFrame) {
+    CellPos pos;
+    const bool visible = builder_.editorCursorPos(doc, cursor, viewport, pos);
+    emitCursor(out, pos, visible, state, endFrame);
+}
+
+void TtyDiff::placeCursor(std::string& out, const Document& doc,
+                          const Cursor& cursor, const Viewport& viewport,
+                          const FrameBuilder::EditorGeometry& g, State state,
+                          bool endFrame) {
+    CellPos pos;
+    const bool visible = builder_.editorCursorPos(doc, cursor, viewport, g, pos);
+    emitCursor(out, pos, visible, state, endFrame);
+}
+
 bool TtyDiff::patchContentRow(
     std::string& out, const Document& doc, const Cursor& cursor,
     const Viewport& viewport, const std::optional<Normalized>& sel,
@@ -49,7 +78,7 @@ bool TtyDiff::patchContentRow(
     // incluido el CSI K inicial: la igualdad con `full` basta para saber
     // si la fila necesita repintado.
     if (rowCache_[static_cast<size_t>(row)] == full) return false;
-    encoder_.moveCursorTo(out, row + 1, 1);
+    encoder_.moveCursorToRaw(out, row + 1, 1);
     out += encoder_.theme().reset;
     out += full;
     rowCache_[static_cast<size_t>(row)] = std::move(full);
@@ -82,7 +111,7 @@ void TtyDiff::patchStatusBar(std::string& out, const Document& doc,
         std::string_view newRow =
             i < newRows.size() ? newRows[i] : std::string_view{};
         if (oldRow == newRow) continue;
-        encoder_.moveCursorTo(out, contentH + static_cast<int>(i) + 1, 1);
+        encoder_.moveCursorToRaw(out, contentH + static_cast<int>(i) + 1, 1);
         out += encoder_.theme().reset;
         out += "\x1b[K";
         out.append(newRow.data(), newRow.size());
@@ -203,14 +232,7 @@ std::string TtyDiff::buildCursorMoveFrame(
 
     // Contrato visual: solo posicionar/mostrar si el cursor esta en viewport.
     // Si esta fuera (rueda con suppressScrollToCursor_) se deja oculto.
-    if (state != State::Busqueda) {
-        int curRow = 0, curCol = 0;
-        if (builder_.editorCursorPos(doc, cursor, viewport, g, curRow, curCol)) {
-            encoder_.moveCursorTo(out, curRow, curCol);
-            encoder_.setCursorStyle(out, state);
-            encoder_.showCursor(out);
-        }
-    }
+    placeCursor(out, doc, cursor, viewport, g, state, /*endFrame=*/false);
     lastCursorLine_ = cursor.line;
     lastCursorCol_ = cursor.col;
     lastVersion_ = doc.version();
@@ -264,7 +286,7 @@ std::string TtyDiff::buildScrollFrame(
         }
         for (int i = 0; i < absDelta; ++i) {
             const int row = contentH - absDelta + i;
-            encoder_.moveCursorTo(out, row + 1, 1);
+            encoder_.moveCursorToRaw(out, row + 1, 1);
             out += encoder_.theme().reset;
             out += rowCache_[static_cast<size_t>(row)];
         }
@@ -275,7 +297,7 @@ std::string TtyDiff::buildScrollFrame(
             rowCache_.push_front(encodeEnteringRow(docLine));
         }
         for (int i = 0; i < absDelta; ++i) {
-            encoder_.moveCursorTo(out, i + 1, 1);
+            encoder_.moveCursorToRaw(out, i + 1, 1);
             out += encoder_.theme().reset;
             out += rowCache_[static_cast<size_t>(i)];
         }
@@ -294,14 +316,7 @@ std::string TtyDiff::buildScrollFrame(
     patchStatusBar(out, doc, cursor, filename, modified, message, state,
                    g.layout, contentH);
 
-    if (state != State::Busqueda) {
-        int curRow = 0, curCol = 0;
-        if (builder_.editorCursorPos(doc, cursor, viewport, g, curRow, curCol)) {
-            encoder_.moveCursorTo(out, curRow, curCol);
-            encoder_.setCursorStyle(out, state);
-            encoder_.showCursor(out);
-        }
-    }
+    placeCursor(out, doc, cursor, viewport, g, state, /*endFrame=*/false);
 
     updateCacheState(viewport, cursor, doc);
     return out;
@@ -338,12 +353,7 @@ std::string TtyDiff::buildDiffFrame(
         out += statusCache_;
         if (state == State::Busqueda) return out;
         {
-            int curRow = 0, curCol = 0;
-            if (builder_.editorCursorPos(doc, cursor, viewport, curRow, curCol)) {
-                encoder_.moveCursorTo(out, curRow, curCol);
-                encoder_.setCursorStyle(out, state);
-                encoder_.endFrame(out);
-            }
+            placeCursor(out, doc, cursor, viewport, state, /*endFrame=*/true);
             // Si esta fuera del viewport se deja oculto (sin show): respeta
             // el contrato visible==false sin clampar al borde.
         }
@@ -413,7 +423,7 @@ std::string TtyDiff::buildDiffFrame(
             oldRow = oldStatusRows[i - static_cast<size_t>(contentH)];
         }
         if (oldRow == newRows[i]) continue;
-        encoder_.moveCursorTo(out, static_cast<int>(i) + 1, 1);
+        encoder_.moveCursorToRaw(out, static_cast<int>(i) + 1, 1);
         out += encoder_.theme().reset;
         out += "\x1b[K";
         out += newRows[i];
@@ -437,12 +447,7 @@ std::string TtyDiff::buildDiffFrame(
         return out;
     }
     {
-        int curRow = 0, curCol = 0;
-        if (builder_.editorCursorPos(doc, cursor, viewport, curRow, curCol)) {
-            encoder_.moveCursorTo(out, curRow, curCol);
-            encoder_.setCursorStyle(out, state);
-            encoder_.showCursor(out);
-        }
+        placeCursor(out, doc, cursor, viewport, state, /*endFrame=*/false);
     }
 
     updateCacheState(viewport, cursor, doc);

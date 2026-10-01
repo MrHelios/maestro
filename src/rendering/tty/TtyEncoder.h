@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "platform/CellPos.h"
 #include "rendering/tty/Theme.h"
 #include "rendering/frame/Frame.h"
 
@@ -49,7 +50,14 @@ public:
     void appendFrame(std::string& out, const Frame& f) const;
 
     // Primitivas de terminal (único lugar que las emite, junto con TtyDiff).
-    void moveCursorTo(std::string& out, int row, int col) const;
+    // moveCursorToRaw es CUP crudo 1-based (row,col) para rewrites de fila.
+    // moveCursorTo(CellPos) es el borde del cursor: celda 0-based (col,row)
+    // -> CUP con +1 (simétrico al -1 de decodeMouseSgr en
+    // platform/tty/TtyMouse.h). Nombres distintos a propósito: el orden de
+    // los enteros (row,col) es el inverso al de CellPos (col,row) y un
+    // overload silencioso sería un error fácil.
+    void moveCursorToRaw(std::string& out, int row, int col) const;
+    void moveCursorTo(std::string& out, CellPos cell) const;
     void hideCursor(std::string& out) const;
     void showCursor(std::string& out) const;
     void setCursorStyle(std::string& out, State state) const;

@@ -11,6 +11,7 @@
 #include "layout/BracketMatcher.h"
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
+#include "platform/CellPos.h"
 #include "rendering/frame/Frame.h"
 #include "syntax/SyntaxCache.h"
 #include "syntax/SyntaxHighlighter.h"
@@ -58,25 +59,27 @@ public:
 
     EditorGeometry editorGeometry(const Document& doc,
                                    const Viewport& viewport) const;
-    // Resuelve el cursor logico a coordenadas 1-based de terminal (el llamador
-    // convierte a CellPos 0-based restando 1, ver FrameBuilder.cpp).
-    // Contrato explicito (sin clamp silencioso):
-    //   return true  -> (outRow,outCol) es la posicion visual real.
-    //   return false -> cursor fuera del viewport; (outRow,outCol) lleva el
-    //                   crudo sin clampar y NO debe usarse para pintar.
-    // El llamador (buildFrame / TtyDiff) traduce false a FrameCursor{visible=false}.
+    // Resuelve el cursor lógico a CellPos 0-based (col=X, row=Y).
+    // Contrato explícito (sin clamp silencioso):
+    //   return true  -> `out` es la posición visual real (válida).
+    //   return false -> cursor fuera del viewport; `out` queda inválida
+    //                   (-1,-1) y NO debe usarse para pintar.
+    // El llamador (buildFrame / TtyDiff) traduce false a
+    // FrameCursor{visible=false} u ocultar el cursor.
+    // El +1 a CUP 1-based vive solo en el borde TTY
+    // (TtyEncoder::moveCursorTo(CellPos)); el -1 simétrico, en decodeMouseSgr.
     // Nota: los fast paths de TtyDiff consumen este bool directamente sin
     // construir un Frame (bypass documentado en TtyDiff.h); buildFrame es el
     // unico que materializa el FrameCursor comun.
     bool editorCursorPos(const Document& doc,
                          const Cursor& cursor,
                          const Viewport& viewport,
-                         int& outRow, int& outCol) const;
+                         CellPos& out) const;
     bool editorCursorPos(const Document& doc,
                          const Cursor& cursor,
                          const Viewport& viewport,
                          const EditorGeometry& g,
-                         int& outRow, int& outCol) const;
+                         CellPos& out) const;
 
     Layout calculateLayout(int contentRows, int width) const;
 

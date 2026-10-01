@@ -59,8 +59,8 @@ struct StyledRow {
 // compilación cuando los headers de X11 ya fueron incluidos (p. ej. via
 // X11Clipboard.h antes que Frame.h).
 enum class FrameCursorShape {
-    Block, // Navegacion/Seleccion/etc: bloque "\x1b[2 q"
-    Bar,   // Interaccion: barra "\x1b[1 q"
+    Block, // Navegacion/Seleccion/etc: bloque (ANSI en TtyEncoder)
+    Bar,   // Interaccion: barra (ANSI en TtyEncoder)
 };
 
 inline FrameCursorShape cursorShapeFor(State state) {

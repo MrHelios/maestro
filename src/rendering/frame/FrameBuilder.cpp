@@ -174,28 +174,31 @@ FrameBuilder::EditorGeometry FrameBuilder::editorGeometry(
 bool FrameBuilder::editorCursorPos(const Document& doc,
                                    const Cursor& cursor,
                                    const Viewport& viewport,
-                                   int& outRow, int& outCol) const {
+                                   CellPos& out) const {
     const EditorGeometry g = editorGeometry(doc, viewport);
-    return editorCursorPos(doc, cursor, viewport, g, outRow, outCol);
+    return editorCursorPos(doc, cursor, viewport, g, out);
 }
 
 bool FrameBuilder::editorCursorPos(const Document& doc,
                                    const Cursor& cursor,
                                    const Viewport& viewport,
                                    const EditorGeometry& g,
-                                   int& outRow, int& outCol) const {
-    outRow = cursor.line - viewport.top + 1;
-    int absoluteCol = cursor.visualColumn(doc);
-    int visibleCol = absoluteCol - viewport.left;
-    outCol = g.gutterW + visibleCol + 1 + g.layout.content.col;
-    const int rowLo = g.layout.content.row + 1;
+                                   CellPos& out) const {
+    // Todo 0-based (celdas, no CUP): el +1 a terminal vive en el borde TTY.
+    const int row = cursor.line - viewport.top;
+    const int absoluteCol = cursor.visualColumn(doc);
+    const int col = g.gutterW + (absoluteCol - viewport.left) + g.layout.content.col;
+    const int rowLo = g.layout.content.row;
     const int rowHi = rowLo + g.layout.content.height - 1;
-    const int colLo = g.layout.content.col + 1;
+    const int colLo = g.layout.content.col;
     const int colHi = colLo + std::max(1, g.layout.content.width) - 1;
-    // Sin clamp silencioso: fuera del viewport => false y el crudo queda
-    // en outRow/outCol para diagnostico, pero el llamador NO debe pintarlo.
-    if (outRow < rowLo || outRow > rowHi || outCol < colLo || outCol > colHi)
+    // Sin clamp silencioso: fuera del viewport => false e inválida para
+    // diagnóstico, pero el llamador NO debe pintarla.
+    if (row < rowLo || row > rowHi || col < colLo || col > colHi) {
+        out = CellPos{};
         return false;
+    }
+    out = CellPos(col, row);
     return true;
 }
 
@@ -569,14 +572,13 @@ Frame FrameBuilder::buildFrame(    const Document& doc,
     // cursor logico esta dentro del viewport. Cuando la rueda mueve el
     // viewport con suppressScrollToCursor_ (cursor off-screen), visible=false
     // y cell queda invalida a proposito para que ningun backend la pinte.
-    int curRow = 0, curCol = 0;
-    const bool inViewport =
-        editorCursorPos(doc, cursor, viewport, g, curRow, curCol);
+    CellPos pos;
+    const bool inViewport = editorCursorPos(doc, cursor, viewport, g, pos);
     const bool visible = state != State::Busqueda && inViewport;
     f.cursor.visible = visible;
     if (visible)
-        f.cursor.cell = CellPos(curCol - 1, curRow - 1); // editorCursorPos es 1-based
+        f.cursor.cell = pos;  // ya 0-based, sin restar
     else
-        f.cursor.cell = CellPos(-1, -1); // invalida: no usar (ver FrameCursor)
+        f.cursor.cell = CellPos{};  // invalida: no usar (ver FrameCursor)
     return f;
 }
