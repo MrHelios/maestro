@@ -1,4 +1,5 @@
 #include "test_support.h"
+#include "rendering/tty/TtyRenderer.h"
 #include <cctype>
 
 // Extrae la ultima posicion de cursor "\x1b[{row};{col}H" del frame.
@@ -46,7 +47,7 @@ TEST(scroll_wheel_up_bottom_cursor_stays_in_content) {
 
     // Pre-condicion: cursor dentro del contenido (fila 10 de 1..10).
     {
-        Renderer r;
+        TtyRenderer r;
         std::string before = r.buildScreen(ed.active().document, ed.active().cursor,
                                            ed.active().viewport, "t", false, "",
                                            ed.state_, std::nullopt);
@@ -65,7 +66,7 @@ TEST(scroll_wheel_up_bottom_cursor_stays_in_content) {
                                 ed.state_, std::nullopt);
         CHECK(!f.cursor.visible);
     }
-    Renderer r;
+    TtyRenderer r;
     std::string screen = r.buildScreen(ed.active().document, ed.active().cursor,
                                        ed.active().viewport, "t", false, "",
                                        ed.state_, std::nullopt);
@@ -89,7 +90,7 @@ TEST(scroll_wheel_down_top_cursor_stays_in_content) {
     ed.active().cursor.col = 0;
 
     {
-        Renderer r;
+        TtyRenderer r;
         std::string before = r.buildScreen(ed.active().document, ed.active().cursor,
                                            ed.active().viewport, "t", false, "",
                                            ed.state_, std::nullopt);
@@ -108,7 +109,7 @@ TEST(scroll_wheel_down_top_cursor_stays_in_content) {
                                 ed.state_, std::nullopt);
         CHECK(!f.cursor.visible);
     }
-    Renderer r;
+    TtyRenderer r;
     std::string screen = r.buildScreen(ed.active().document, ed.active().cursor,
                                        ed.active().viewport, "t", false, "",
                                        ed.state_, std::nullopt);

@@ -43,22 +43,19 @@
 //   TtyDiff fast paths
 //       └─ bypass de Frame por performance,
 //          pero usan el mismo resolver de posicion/visibilidad
+//
+// No posee FrameBuilder ni TtyEncoder: los comparte por referencia con el
+// dueño (TtyRenderer los conecta al builder único del Renderer puro).
+// Un solo dueño del estado de sintaxis y del tema en todo el backend.
 // ---------------------------------------------------------------------------
 class TtyDiff {
 public:
-    void setTheme(const Theme& t) {
-        encoder_.setTheme(t);
-        hasCache_ = false;
-        hasLastStatusData_ = false;
-    }
+    TtyDiff(FrameBuilder& builder, TtyEncoder& encoder)
+        : builder_(builder), encoder_(encoder) {}
+
     void invalidateCache() {
         hasCache_ = false;
         hasLastStatusData_ = false;
-    }
-    const Theme& theme() const { return encoder_.theme(); }
-
-    void setExternalSyntaxCache(SyntaxCache* c) {
-        builder_.setExternalSyntaxCache(c);
     }
 
     // Observabilidad para tests (solo lectura): estado del cache diferencial.
@@ -94,8 +91,8 @@ public:
                           std::vector<std::string_view>* rows);
 
 private:
-    FrameBuilder builder_;
-    TtyEncoder encoder_;
+    FrameBuilder& builder_;
+    TtyEncoder& encoder_;
 
     std::deque<std::string> rowCache_; // una entrada por fila: "\x1b[K" + bytes
     std::string statusCache_;          // status bar codificada, filas con "\r\n"

@@ -1,5 +1,6 @@
 #include "test_support.h"
-#include "rendering/tty/TtyLists.h"
+#include "rendering/Sink.h"
+#include "rendering/tty/TtyRenderer.h"
 #include <fstream>
 #include <iterator>
 
@@ -1092,8 +1093,8 @@ TEST(buffer_stress_mixed_operations) {
 }
 
 TEST(renderer_buffer_list_marks_selected) {
-    TtyLists lists;
-    std::string out = lists.buildBufferListScreen({"a.txt", "b.txt", "SinNombre"}, 1, 80, 10);
+    TtyRenderer tr;
+    std::string out = tr.buildBufferListScreen({"a.txt", "b.txt", "SinNombre"}, 1, 80, 10);
     // El item activo de la lista lleva el mismo gris que la fila del cursor
     // (listSelected == currentLine: lenguaje ACTIVO unificado), no video
     // inverso. El fondo debe cubrir TODO el ancho de la fila, no solo el
@@ -1108,9 +1109,9 @@ TEST(renderer_buffer_list_marks_selected) {
     // El reset no debe estar pegado inmediatamente al texto: tiene que
     // haber padding (espacios) entre medio, prueba de que el fondo cubre
     // el resto de la fila.
-    CHECK(out.compare(textEnd, lists.theme().reset.size(), lists.theme().reset) != 0);
+    CHECK(out.compare(textEnd, tr.theme().reset.size(), tr.theme().reset) != 0);
 
-    size_t resetPos = out.find(lists.theme().reset, textEnd);
+    size_t resetPos = out.find(tr.theme().reset, textEnd);
     CHECK(resetPos != std::string::npos);
     CHECK(resetPos > textEnd); // hay espacios de relleno entre medio
 
@@ -1126,15 +1127,15 @@ TEST(renderer_buffer_list_marks_selected) {
 }
 
 TEST(renderer_buffer_list_first_selected) {
-    TtyLists lists;
-    std::string out = lists.buildBufferListScreen({"a.txt", "b.txt"}, 0, 80, 10);
+    TtyRenderer tr;
+    std::string out = tr.buildBufferListScreen({"a.txt", "b.txt"}, 0, 80, 10);
     std::string styledText = std::string(kListSelectedStyle) + "  a.txt";
     size_t stylePos = out.find(styledText);
     CHECK(stylePos != std::string::npos);
     size_t textEnd = stylePos + styledText.size();
     // Mismo criterio: reset no pegado, hay padding antes.
-    CHECK(out.compare(textEnd, lists.theme().reset.size(), lists.theme().reset) != 0);
-    size_t resetPos = out.find(lists.theme().reset, textEnd);
+    CHECK(out.compare(textEnd, tr.theme().reset.size(), tr.theme().reset) != 0);
+    size_t resetPos = out.find(tr.theme().reset, textEnd);
     CHECK(resetPos != std::string::npos && resetPos > textEnd);
 
     CHECK(!contains(out, std::string(kListSelectedStyle) + "  b.txt"));
@@ -1144,11 +1145,11 @@ TEST(renderer_buffer_list_first_selected) {
 // dibuja su propia barra en video inverso (MULTIBUFFER): produce datos
 // (Buffers | SELECCIONAR | n/total) y se los entrega al StatusBar comun.
 TEST(renderer_buffer_list_only_unified_bar) {
-    TtyLists lists;
-    std::string out = lists.buildBufferListScreen({"a.txt", "b.txt"}, 1, 80, 10);
+    TtyRenderer tr;
+    std::string out = tr.buildBufferListScreen({"a.txt", "b.txt"}, 1, 80, 10);
     // Filas vacias con el marcador del editor, alineado con las entradas
     // (misma indentacion de 2 espacios) y sin el texto "BUFFERS".
-    CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~" + std::string(lists.theme().reset) + "\r\n"));
+    CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~" + std::string(tr.theme().reset) + "\r\n"));
     CHECK(!contains(out, "~ BUFFERS"));
     // Ya no hay barra en video inverso MULTIBUFFER: la barra es la del
     // StatusBar comun (fondo gris 60%) con Buffers/SELECCIONAR y el

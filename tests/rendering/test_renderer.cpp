@@ -7,9 +7,9 @@
 // Probamos buildScreen(), que es la parte pura del renderer: construye
 // el frame ANSI completo sin tocar la terminal. Para montar un frame
 // usamos construimos un Document/Cursor/Viewport de nivel bajo.
-#include "rendering/Renderer.h"
+#include "rendering/tty/TtyRenderer.h"
 #include "app/Editor.h"
-#include "rendering/tty/Theme.h"
+#include "rendering/tty/TtyTheme.h"
 #include "base/utf8.h"
 #include "layout/Gutter.h"
 
@@ -45,7 +45,7 @@ std::string frame(const std::vector<std::string>& lines,
     cursor.line = 0;
     cursor.col = 0;
 
-    Renderer r;
+    TtyRenderer r;
     return r.buildScreen(doc, cursor, viewport, "test.txt", false, "",
                          State::Navegacion, sel);
 }
@@ -73,7 +73,7 @@ std::string curFrame(const std::string& line, int byteCol) {
     cursor.line = 0;
     cursor.col = byteCol;
 
-    Renderer r;
+    TtyRenderer r;
     return r.buildScreen(doc, cursor, viewport, "test.txt", false, "",
                          State::Navegacion, std::nullopt);
 }
@@ -291,7 +291,7 @@ std::string textRow(const std::string& line, int cols) {
     while (vp.width - gutterWidth(2, vp.width) != cols)
         vp.width = cols + gutterWidth(2, vp.width);
     Cursor cur; cur.line = 1; cur.col = 0;
-    Renderer r;
+    TtyRenderer r;
     std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
     return rowText(f, 2);
 }
@@ -571,7 +571,7 @@ std::string barFrame(const std::string& file, bool modified,
     c.line = 0;
     c.col = 0;
 
-    Renderer r;
+    TtyRenderer r;
     return r.buildScreen(doc, c, v, file, modified, msg, state, std::nullopt);
 }
 
@@ -709,7 +709,7 @@ TEST(statusbar_cursor_percentage_position) {
         Cursor c;
         c.line = cursorLine;
         c.col = 0;
-        Renderer r;
+        TtyRenderer r;
         int expected = (cursorLine * 100) / (lines - 1);
         std::string out = r.buildScreen(doc, c, v, "/a.txt", false, "",
                                         State::Navegacion, std::nullopt);
@@ -1059,7 +1059,7 @@ std::string selCurFrame(const std::string& line, int byteCol,
     cursor.line = 0;
     cursor.col = byteCol;
 
-    Renderer r;
+    TtyRenderer r;
     return r.buildScreen(doc, cursor, viewport, "test.txt", false, "",
                          State::Navegacion, sel);
 }
@@ -1152,7 +1152,7 @@ std::string curRowFrame(const std::string& line, int width, int cursorLine,
     Document doc; doc.restore({line});
     Viewport vp; vp.top = 0; vp.height = 1; vp.width = width;
     Cursor cur; cur.line = cursorLine; cur.col = 0;
-    Renderer r;
+    TtyRenderer r;
     return r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, sel);
 }
 
@@ -1202,7 +1202,7 @@ TEST(currentline_tilde_row_never_highlighted) {
     Document doc; doc.restore({"hello"});
     Viewport vp; vp.top = 0; vp.height = 3; vp.width = 20;
     Cursor cur; cur.line = 0; cur.col = 0;
-    Renderer r;
+    TtyRenderer r;
     std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion,
                                     std::nullopt);
     CHECK(contains(out, std::string(kCurrentLineStyle) + "hello"));
@@ -1253,7 +1253,7 @@ TEST(gutter_shows_correct_numbers_when_scrolled) {
     cur.line = 49; 
     cur.col = 0;
     
-    Renderer r;
+    TtyRenderer r;
     std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
     
     // Para 100 líneas, gutterWidth(100, 20) devuelve 4.
@@ -1277,7 +1277,7 @@ TEST(gutter_tilde_rows_blank) {
     Document doc; doc.restore({"aaa"});
     Viewport vp; vp.top = 0; vp.height = 3; vp.width = 20;
     Cursor cur; cur.line = 0; cur.col = 0;
-    Renderer r;
+    TtyRenderer r;
     std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion,
                                     std::nullopt);
     CHECK(plainRow(out, 1) == std::string(3, ' ') + "~");
@@ -1290,7 +1290,7 @@ TEST(gutter_cursor_col_starts_after_gutter) {
     Document doc; doc.restore({"hello"});
     Viewport vp; vp.top = 0; vp.height = 1; vp.width = 20;
     Cursor cur; cur.line = 0; cur.col = 0;
-    Renderer r;
+    TtyRenderer r;
     std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion,
                                     std::nullopt);
     size_t pos = out.rfind("\x1b[1;");
@@ -1304,7 +1304,7 @@ TEST(gutter_width_grows_at_digit_threshold) {
     // Hasta 99 (2 digitos) el gutter se mantiene en el minimo de 3.
     Viewport vp; vp.top = 0; vp.height = 100; vp.width = 40;
     Cursor cur; cur.line = 0; cur.col = 0;
-    Renderer r;
+    TtyRenderer r;
 
     Document doc99; doc99.restore(std::vector<std::string>(99, "x"));
     std::string out99 = r.buildScreen(doc99, cur, vp, "t", false, "", State::Navegacion,

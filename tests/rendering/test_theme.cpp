@@ -1,24 +1,23 @@
-// Tests del Theme (v1.2): verifican que el esquema de color es un valor
+// Tests del TtyTheme (v1.2): verifican que el esquema de color es un valor
 // inyectable y que los componentes realmente lo usan (no quedan colores
 // hardcodeados). Dos propiedades esenciales:
-//   1. El Theme por defecto reproduce EXACTAMENTE los colores que estaban
+//   1. El TtyTheme por defecto reproduce EXACTAMENTE los colores que estaban
 //      hardcodeados en v1.1 (constantes kStatusBar* / kCurrentLineStyle /
 //      kSelectionStyle / kMessage*).
-//   2. Cambiar el Theme cambia el output: cada componente (Renderer y
-//      StatusBar) lee sus colores del Theme, no de constantes globales.
+//   2. Cambiar el TtyTheme cambia el output: cada componente (Renderer y
+//      StatusBar) lee sus colores del TtyTheme, no de constantes globales.
 #include <string>
 
 #include "test_framework.h"
 #include "helpers/test_render_utils.h"
 
-#include "rendering/tty/Theme.h"
+#include "rendering/tty/TtyTheme.h"
 #include "document/Document.h"
 #include "document/Cursor.h"
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
-#include "rendering/Renderer.h"
+#include "rendering/tty/TtyRenderer.h"
 #include "rendering/tty/StatusBar.h"
-#include "rendering/tty/TtyLists.h"
 
 namespace {
 
@@ -34,7 +33,7 @@ constexpr const char* kTestFgBlack = "\x1b[30m";
 constexpr const char* kTestReset = "\x1b[0m";
 
 // Construye un frame minimo que ejercita currentLine y selection.
-std::string editorFrameWithSelection(const Theme& theme, int width = 200) {
+std::string editorFrameWithSelection(const TtyTheme& theme, int width = 200) {
     Document doc;
     doc.restore({"hello world"});
     Viewport vp;
@@ -44,7 +43,7 @@ std::string editorFrameWithSelection(const Theme& theme, int width = 200) {
     Cursor cur;
     cur.line = 0;
     cur.col = 0;
-    Renderer r;
+    TtyRenderer r;
     r.setTheme(theme);
     Selection sel;
     sel.anchor = Position{0, 0};
@@ -55,16 +54,16 @@ std::string editorFrameWithSelection(const Theme& theme, int width = 200) {
 
 // Monta el frame del selector de buffers con el primer elemento seleccionado
 // (ejercita theme_.selection en la lista).
-std::string bufferFrameWithSelection(const Theme& theme, int width = 200) {
-    TtyLists lists;
-    lists.setTheme(theme);
-    return lists.buildBufferListScreen({"aa.txt", "bb.txt"}, 0, width, 5);
+std::string bufferFrameWithSelection(const TtyTheme& theme, int width = 200) {
+    TtyRenderer tr;
+    tr.setTheme(theme);
+    return tr.buildBufferListScreen({"aa.txt", "bb.txt"}, 0, width, 5);
 }
 
-std::string fileFrameWithSelection(const Theme& theme, int width = 200) {
-    TtyLists lists;
-    lists.setTheme(theme);
-    return lists.buildFileListScreen(
+std::string fileFrameWithSelection(const TtyTheme& theme, int width = 200) {
+    TtyRenderer tr;
+    tr.setTheme(theme);
+    return tr.buildFileListScreen(
         std::vector<FileListItem>{{"aa.txt", false}, {"bb.txt", false}}, 0, 0,
         "/tmp", Message{}, width, 5);
 }
@@ -74,7 +73,7 @@ std::string fileFrameWithSelection(const Theme& theme, int width = 200) {
 // Garantiza que defaultTheme() conserve compatibilidad visual con el
 // esquema anterior.
 TEST(theme_default_matches_legacy_colors) {
-    const Theme t = defaultTheme();
+    const TtyTheme t = defaultTheme();
     CHECK_EQ(t.background, std::string(kDarkBackground));
     CHECK_EQ(t.currentLine, std::string(kCurrentLineStyle));
     CHECK_EQ(t.selection, std::string(kSelectionStyle));
@@ -90,13 +89,13 @@ TEST(theme_default_matches_legacy_colors) {
 }
 
 // ---------------------------------------------------------------------------
-// El Theme por defecto define los estilos del lenguaje visual v1.3:
+// El TtyTheme por defecto define los estilos del lenguaje visual v1.3:
 // gutter, marcador, item activo de listas, prompts, indicador [*]
 // (v1.4: antes [modificado])
 // y los accents por estado.
 // ---------------------------------------------------------------------------
 TEST(theme_defaults_new_visual_language) {
-    const Theme t = defaultTheme();
+    const TtyTheme t = defaultTheme();
     CHECK_EQ(t.lineNumber, std::string(kLineNumberStyle));
     CHECK_EQ(t.gutterCurrent, std::string(kGutterCurrentStyle));
     CHECK_EQ(t.marker, std::string(kMarkerStyle));
@@ -116,7 +115,7 @@ TEST(theme_defaults_new_visual_language) {
 }
 
 TEST(theme_renderer_uses_theme_for_selection_and_currentline) {
-    Theme t = defaultTheme();
+    TtyTheme t = defaultTheme();
     t.currentLine = kTestBgMagenta;
     t.selection = kTestBgRed;
     t.reset = kTestReset;
@@ -130,16 +129,16 @@ TEST(theme_renderer_uses_theme_for_selection_and_currentline) {
     // seleccion del tema, no el video inverso global de la maquina.
     CHECK(frame.find(t.selection + "hello") != std::string::npos);
     // El default theme SEGUIRIA usando video inverso: el output debe
-    // diferir con este tema, demostrando que el Theme se usa.
+    // diferir con este tema, demostrando que el TtyTheme se usa.
     CHECK(frame != editorFrameWithSelection(defaultTheme()));
 }
 
 TEST(theme_lists_use_listselected_not_selection) {
     const std::string base = bufferFrameWithSelection(defaultTheme());
-    Theme t1 = defaultTheme();
+    TtyTheme t1 = defaultTheme();
     t1.selection = kTestBgRed;
     CHECK_EQ(bufferFrameWithSelection(t1), base);
-    Theme t2 = defaultTheme();
+    TtyTheme t2 = defaultTheme();
     t2.listSelected = kTestBgRed;
     CHECK(bufferFrameWithSelection(t2) != base);
     CHECK(base.find(defaultTheme().listSelected) != std::string::npos);
@@ -147,17 +146,17 @@ TEST(theme_lists_use_listselected_not_selection) {
 
 TEST(theme_file_lists_use_listselected_not_selection) {
     const std::string base = fileFrameWithSelection(defaultTheme());
-    Theme t1 = defaultTheme();
+    TtyTheme t1 = defaultTheme();
     t1.selection = kTestBgRed;
     CHECK_EQ(fileFrameWithSelection(t1), base);
-    Theme t2 = defaultTheme();
+    TtyTheme t2 = defaultTheme();
     t2.listSelected = kTestBgRed;
     CHECK(fileFrameWithSelection(t2) != base);
     CHECK(base.find(defaultTheme().listSelected) != std::string::npos);
 }
 
 TEST(theme_statusbar_uses_theme_for_colors) {
-    Theme t = defaultTheme();
+    TtyTheme t = defaultTheme();
     t.statusBar = kTestBgBlue;
     t.statusBarName = kTestFgRed;
     t.statusBarAccent = kTestFgMagenta;
@@ -181,23 +180,23 @@ TEST(theme_statusbar_uses_theme_for_colors) {
     CHECK(out.find(t.statusBarName + "archivo.txt") != std::string::npos);
     CHECK(out.find(t.statusBarAccent) != std::string::npos); // - NAVEGACION
     CHECK(out.find(t.error + "error grave") != std::string::npos);
-    // Con default theme el output es distinto: se usa el Theme, no constantes.
+    // Con default theme el output es distinto: se usa el TtyTheme, no constantes.
     StatusBar plainBar;
     CHECK(out != plainBar.render(area, d));
 }
 
 // ---------------------------------------------------------------------------
-// El Renderer propaga SU Theme a la barra de estado compartida: cambiar el
-// Theme del Renderer altera la barra de todas las pantallas.
+// El backend propaga su TtyTheme a la barra de estado compartida: cambiar el
+// tema altera la barra de todas las pantallas (editor y listas).
 // ---------------------------------------------------------------------------
 TEST(theme_renderer_propagates_to_statusbar) {
-    Theme t = defaultTheme();
+    TtyTheme t = defaultTheme();
     t.statusBar = kTestBgGreen;
     t.statusBarAccent = kTestFgRed;
     t.reset = kTestReset;
 
-    // Editor: la barra del frame usa el Theme del Renderer.
-    Renderer r;
+    // Editor: la barra del frame usa el tema del backend.
+    TtyRenderer r;
     r.setTheme(t);
     Document doc; doc.restore({"x"});
     Viewport vp; vp.top = 0; vp.height = 2; vp.width = 80;
@@ -206,20 +205,20 @@ TEST(theme_renderer_propagates_to_statusbar) {
                                    State::Navegacion, std::nullopt);
     CHECK(ed.find(t.statusBar) != std::string::npos);
 
-    // BufferSelector: mismo Theme (inyectado en TtyLists), misma barra.
-    TtyLists lists;
-    lists.setTheme(t);
-    std::string buf = lists.buildBufferListScreen({"a.txt"}, 0, 80, 5);
+    // BufferSelector: mismo tema en el backend, misma barra.
+    TtyRenderer tr;
+    tr.setTheme(t);
+    std::string buf = tr.buildBufferListScreen({"a.txt"}, 0, 80, 5);
     CHECK(buf.find(t.statusBar) != std::string::npos);
 
     // FileBrowser: idem.
-    std::string file = lists.buildFileListScreen(
+    std::string file = tr.buildFileListScreen(
         std::vector<FileListItem>{{"a.txt", false}}, 0, 0, "/ruta",
         Message("ayuda"), 80, 5);
     CHECK(file.find(t.statusBar) != std::string::npos);
 
-    // Con el default theme la barra usaria otro color: el Theme se propaga.
-    Renderer r2;
+    // Con el default theme la barra usaria otro color: el TtyTheme se propaga.
+    TtyRenderer r2;
     // Con el tema custom (barra verde) el frame NO contiene el gris del
     // default theme; con un Renderer sin setTheme si.
     CHECK(ed.find(defaultTheme().statusBar) == std::string::npos);
@@ -231,9 +230,9 @@ TEST(theme_renderer_propagates_to_statusbar) {
 
 // Cada reset debe reestablecer el background de la status bar. Esto evita
 // que segmentos con estilos propios dejen zonas de la fila sin el background
-// del Theme.
+// del TtyTheme.
 TEST(theme_statusbar_background_covers_full_width) {
-    Theme t = defaultTheme();
+    TtyTheme t = defaultTheme();
     t.statusBar = kTestBgBlue;
     t.statusBarName = kTestFgWhite;
     t.statusBarPath = kTestFgBlack;

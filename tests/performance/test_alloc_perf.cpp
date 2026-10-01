@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "rendering/tty/TtyRenderer.h"
 #include "helpers/perf_helpers.h"
 #include "alloc_stats.h"
 
@@ -147,7 +148,7 @@ TEST(bench_alloc_render_frame_bordes_checked) {
     ed.active().document.restore(makeLines(300, 80));
     ed.state_ = State::Navegacion;
 
-    Renderer& r = ed.renderer_;
+    TtyRenderer& r = *ed.renderer_;
     Message msg;
 
     // Borde superior: viewport.top = 0.
@@ -383,7 +384,7 @@ TEST(bench_alloc_carga_y_resize_checked) {
     Editor ed;
     ed.active().document.restore(makeLines(300, 80));
     ed.state_ = State::Navegacion;
-    Renderer& r = ed.renderer_;
+    TtyRenderer& r = *ed.renderer_;
     Message msg;
     alloc_stats::resetAll();
     {

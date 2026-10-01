@@ -62,11 +62,11 @@ TEST(syntax_block_comment_multiline_incremental_update) {
     b.cursor.col = 0;
 
     b.syntaxCache.setLanguage(SyntaxLanguage::Cpp);
-    ed.renderer_.setExternalSyntaxCache(&b.syntaxCache);
+    ed.renderer_->setExternalSyntaxCache(&b.syntaxCache);
 
     Message msg;
     // Prime: full rebuild, deja rowCache_ caliente y lastVersion_/lastCursor.
-    ed.renderer_.buildDiffFrame(b.document, b.cursor, b.viewport,
+    ed.renderer_->buildDiffFrame(b.document, b.cursor, b.viewport,
                                 b.filename, false, msg, State::Navegacion,
                                 std::nullopt, std::nullopt, std::nullopt);
 
@@ -78,7 +78,7 @@ TEST(syntax_block_comment_multiline_incremental_update) {
     b.cursor.col = 3;
 
     // Render incremental como hace el editor al teclear (diff de una fila).
-    ed.renderer_.buildDiffFrame(b.document, b.cursor, b.viewport,
+    ed.renderer_->buildDiffFrame(b.document, b.cursor, b.viewport,
                                 b.filename, false, msg, State::Navegacion,
                                 std::nullopt, std::nullopt, std::nullopt);
 
@@ -113,7 +113,7 @@ TEST(syntax_block_comment_multiline_incremental_update) {
     b.cursor.line = 1;
     b.cursor.col = 0;
 
-    ed.renderer_.buildDiffFrame(b.document, b.cursor, b.viewport,
+    ed.renderer_->buildDiffFrame(b.document, b.cursor, b.viewport,
                                 b.filename, false, msg, State::Navegacion,
                                 std::nullopt, std::nullopt, std::nullopt);
 

@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-// Constantes legacy del Theme dark (antes en core/Theme.h).
+// Constantes legacy del TtyTheme dark (valores del esquema anterior).
 // Fuente unica para los tests que verifican colores ANSI: test_renderer,
 // test_theme y los tests de interaction via test_support.h (que incluye
 // este helper en vez de redefinirlas).

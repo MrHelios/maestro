@@ -20,7 +20,7 @@
 #include "document/Selection.h"
 #include "layout/BracketMatcher.h"
 #include "layout/Viewport.h"
-#include "rendering/Renderer.h"
+#include "rendering/tty/TtyRenderer.h"
 #include "rendering/Style.h"
 #include "rendering/frame/Frame.h"
 #include "rendering/frame/FrameBuilder.h"
@@ -135,7 +135,7 @@ TEST(frame_encode_parity_con_buildscreen) {
         {State::Navegacion, "a.txt", true, 2, 5},
         {State::Prefix, "a.cpp", false, 0, 0},
     };
-    for (const Theme& theme : {darkTheme(), lightTheme()}) {
+    for (const TtyTheme& theme : {darkTheme(), lightTheme()}) {
         for (const auto& c : cases) {
             Document doc = makeDoc();
             Viewport vp = makeVp(c.top, c.left);
@@ -152,10 +152,10 @@ TEST(frame_encode_parity_con_buildscreen) {
             BracketPair br{{4, 0}, {4, 11}};
             Message msg("nota", MessageKind::Info, std::nullopt);
 
-            Renderer r;
+            TtyRenderer r;
             r.setTheme(theme);
             FrameBuilder b;
-            Renderer r2;
+            TtyRenderer r2;
             r2.setTheme(theme);
             // Caches tibios como en flujo real (Editor): con el cache frío
             // el rebuild del diff parsea sintaxis y el buildScreen no

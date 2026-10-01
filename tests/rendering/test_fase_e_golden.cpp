@@ -21,9 +21,8 @@
 #include "document/Cursor.h"
 #include "document/Document.h"
 #include "layout/Viewport.h"
-#include "rendering/Renderer.h"
-#include "rendering/tty/Theme.h"
-#include "rendering/tty/TtyLists.h"
+#include "rendering/tty/TtyRenderer.h"
+#include "rendering/tty/TtyTheme.h"
 
 namespace {
 
@@ -51,7 +50,7 @@ int countOccurrences(const std::string& hay, const std::string& needle) {
     return n;
 }
 
-const std::string& accentForState(const Theme& t, State s) {
+const std::string& accentForState(const TtyTheme& t, State s) {
     switch (s) {
         case State::Navegacion: return t.accentNavegacion;
         case State::Interaccion: return t.accentInteraccion;
@@ -73,7 +72,7 @@ TEST(fase_e_golden_scroll_pm1_usa_region_sin_borrado) {
     Cursor cur;
     cur.line = 20;
     cur.col = 0;
-    Renderer r;
+    TtyRenderer r;
     const int h = 10;
 
     // Prime del cache diferencial.
@@ -100,7 +99,7 @@ TEST(fase_e_golden_scroll_pm3_y_grande_sin_region_ni_borrado) {
     Document doc = numberedDoc(100);
     Cursor cur;
     cur.line = 20;
-    Renderer r;
+    TtyRenderer r;
     const int h = 10;
 
     Viewport vp0 = contentVp(20, h);
@@ -136,7 +135,7 @@ TEST(fase_e_golden_cursor_move_solo_cup_y_show) {
     Cursor cur;
     cur.line = 20;
     cur.col = 0;
-    Renderer r;
+    TtyRenderer r;
     const int h = 10;
     Viewport vp = contentVp(20, h);
 
@@ -165,8 +164,8 @@ TEST(fase_e_golden_status_todos_los_estados_ambos_temas) {
     Document doc = numberedDoc(30);
     Cursor cur;
     Viewport vp = contentVp(0, 5);
-    for (const Theme& theme : {darkTheme(), lightTheme()}) {
-        Renderer r;
+    for (const TtyTheme& theme : {darkTheme(), lightTheme()}) {
+        TtyRenderer r;
         r.setTheme(theme);
         for (State s : states) {
             std::string f = r.buildScreen(doc, cur, vp, "a.txt", false,
@@ -177,9 +176,9 @@ TEST(fase_e_golden_status_todos_los_estados_ambos_temas) {
             CHECK(f.find(theme.statusBar) != std::string::npos);
         }
         // Los temas difieren byte-a-byte.
-        Renderer rd;
+        TtyRenderer rd;
         rd.setTheme(darkTheme());
-        Renderer rl;
+        TtyRenderer rl;
         rl.setTheme(lightTheme());
         CHECK(rd.buildScreen(doc, cur, vp, "a.txt", false, "", State::Navegacion) !=
               rl.buildScreen(doc, cur, vp, "a.txt", false, "", State::Navegacion));
@@ -194,7 +193,7 @@ TEST(fase_e_golden_status_todos_los_message_kinds) {
     Document doc = numberedDoc(30);
     Cursor cur;
     Viewport vp = contentVp(0, 5);
-    Renderer r;
+    TtyRenderer r;
     for (MessageKind k : kinds) {
         Message m("m-kind", k, std::nullopt);
         std::string f = r.buildScreen(doc, cur, vp, "a.txt", false, m,
@@ -213,19 +212,19 @@ TEST(fase_e_golden_status_todos_los_message_kinds) {
 }
 
 TEST(fase_e_golden_listas_bordes) {
-    TtyLists lists;
+    TtyRenderer tr;
     const int content = 4;
     const int width = 80;
     const int total = content + 2;  // + kStatusBarRows
 
     // Buffer: vacía no crashea y llena el chrome.
-    std::string empty = lists.buildBufferListScreen({}, 0, width, content);
+    std::string empty = tr.buildBufferListScreen({}, 0, width, content);
     CHECK_EQ((int)testutil::visibleRows(empty).size(), total);
 
     // Buffer: seleccionado inicio y fin visibles.
-    std::string first = lists.buildBufferListScreen({"a.txt", "b.txt", "c.txt"},
+    std::string first = tr.buildBufferListScreen({"a.txt", "b.txt", "c.txt"},
                                                     0, width, content);
-    std::string last = lists.buildBufferListScreen({"a.txt", "b.txt", "c.txt"},
+    std::string last = tr.buildBufferListScreen({"a.txt", "b.txt", "c.txt"},
                                                    2, width, content);
     CHECK(testutil::contains(testutil::stripAnsi(first), "a.txt"));
     CHECK(testutil::contains(testutil::stripAnsi(last), "c.txt"));
@@ -233,12 +232,12 @@ TEST(fase_e_golden_listas_bordes) {
     CHECK(first.find("\x1b[") != std::string::npos);  // CUP al item
 
     // File: vacía, y con scroll!=0 muestra la ventana correcta.
-    std::string fEmpty = lists.buildFileListScreen({}, 0, 0, "/datos/proyecto",
+    std::string fEmpty = tr.buildFileListScreen({}, 0, 0, "/datos/proyecto",
                                                    Message(""), width, content);
     CHECK_EQ((int)testutil::visibleRows(fEmpty).size(), total);
     std::vector<FileListItem> items = {
         {"a.txt", false}, {"b.txt", false}, {"c.txt", false}, {"d", true}};
-    std::string fScrolled = lists.buildFileListScreen(
+    std::string fScrolled = tr.buildFileListScreen(
         items, 2, 1, "/datos/proyecto", Message(""), width, content);
     std::string plain = testutil::stripAnsi(fScrolled);
     CHECK(testutil::contains(plain, "b.txt"));

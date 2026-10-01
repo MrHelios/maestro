@@ -22,7 +22,7 @@
 #undef private
 
 #include "document/Document.h"
-#include "rendering/tty/TtyLists.h"
+#include "rendering/tty/TtyRenderer.h"
 
 namespace {
 
@@ -116,7 +116,7 @@ TEST(bench_perf_render_diff_25k_checked) {
     Message msg;
     // primar cache con frame completo (fuera de medicion)
     {
-        std::string base = ed.renderer_.buildScreen(ed.active().document, ed.active().cursor,
+        std::string base = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor,
             ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
         perf_time::g_sink += base.size();
     }
@@ -132,14 +132,14 @@ TEST(bench_perf_render_diff_25k_checked) {
             e.type = InputEventType::InsertChar;
             e.text = "a";
             ed.handleEvent(e);
-            auto out = ed.renderer_.buildDiffFrame(ed.active().document, ed.active().cursor,
+            auto out = ed.renderer_->buildDiffFrame(ed.active().document, ed.active().cursor,
                 ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
             perf_time::g_sink += out.size();
             ++frames;
             InputEvent b;
             b.type = InputEventType::Backspace;
             ed.handleEvent(b);
-            auto out2 = ed.renderer_.buildDiffFrame(ed.active().document, ed.active().cursor,
+            auto out2 = ed.renderer_->buildDiffFrame(ed.active().document, ed.active().cursor,
                 ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
             perf_time::g_sink += out2.size();
             ++frames;
@@ -147,7 +147,7 @@ TEST(bench_perf_render_diff_25k_checked) {
             if (i % 10 == 9) {
                 ed.active().viewport.top += 1;
                 ed.active().cursor.line += 1;
-                auto outs = ed.renderer_.buildDiffFrame(ed.active().document, ed.active().cursor,
+                auto outs = ed.renderer_->buildDiffFrame(ed.active().document, ed.active().cursor,
                     ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
                 perf_time::g_sink += outs.size();
                 ++frames;
@@ -163,7 +163,7 @@ TEST(bench_perf_render_diff_25k_checked) {
     // viewport resize 80 -> 120 (fuera del gate principal, reportado)
     ed.active().viewport.width = 120;
     {
-        auto outr = ed.renderer_.buildDiffFrame(ed.active().document, ed.active().cursor,
+        auto outr = ed.renderer_->buildDiffFrame(ed.active().document, ed.active().cursor,
             ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
         perf_arch::reportVerbose("%-48s %6zu bytes tras resize 120\n", "diff resize", outr.size());
         perf_time::g_sink += outr.size();
@@ -186,7 +186,7 @@ TEST(bench_perf_statusbar_25k_perf) {
     ed.active().viewport.height = 24;
     ed.active().viewport.width = 80;
     ed.active().cursor.line = n / 2;
-    TtyLists lists;  // barra TTY (antes shim de Renderer)
+    TtyRenderer tr;  // barra del backend TTY para el bench
     Layout layout = computeLayout(ed.active().viewport.height + kStatusBarRows,
                                   ed.active().viewport.width);
     StatusBarData d;
@@ -202,7 +202,7 @@ TEST(bench_perf_statusbar_25k_perf) {
         alloc_stats::Scoped s(alloc_stats::kOther);
         for (int i = 0; i < iters; ++i) {
             std::string out;
-            lists.renderStatusBar(out, layout.statusBar, d,
+            tr.renderStatusBar(out, layout.statusBar, d,
                                   StyleRole::AccentNavegacion);
             perf_time::g_sink += out.size();
         }

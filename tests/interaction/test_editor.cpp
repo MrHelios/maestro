@@ -1,8 +1,8 @@
 #include "test_support.h"
 #include <filesystem>
 
-#include "rendering/tty/Theme.h"
-#include "rendering/tty/TtyLists.h"
+#include "rendering/tty/TtyTheme.h"
+#include "rendering/tty/TtyRenderer.h"
 
 // ---------------------------------------------------------------------------
 // 1. Inicio del programa / Abrir archivo
@@ -870,18 +870,22 @@ TEST(editor_backspace_removes_whole_multibyte) {
 // Fase E paso 5: renderer_ es la única fuente del tema; lists_ lo sigue.
 // Cubre la sincronización inicial (ctor) y el toggle (único fan-out).
 // ---------------------------------------------------------------------------
-TEST(editor_theme_syncs_renderer_and_lists) {
+TEST(editor_toggle_theme_changes_lists_bytes) {
     Editor ed;
-    // Estado inicial: lists_ nace del tema del renderer.
-    CHECK(ed.lists_->theme() == ed.renderer_.theme());
+    // Estado inicial: oscuro (id 0).
+    CHECK(ed.renderer_->isDarkTheme());
+    CHECK_EQ(ed.renderer_->theme().id, darkTheme().id);
+    const std::string before =
+        ed.renderer_->buildBufferListScreen({"a.txt"}, 0, 80, 5);
 
-    // Toggle por el camino público: ambas superficies cambian y coinciden.
+    // Toggle por el camino público: cambia a claro y las listas pintan
+    // con un color concreto del tema nuevo, no con el anterior.
     ed.executeCommand("theme.toggle");
-    CHECK(ed.lists_->theme() == ed.renderer_.theme());
-
-    // Y la superficie de listas pinta con ese tema (bytes idénticos a un
-    // TtyLists de referencia con el mismo tema).
-    TtyLists ref(ed.renderer_.theme());
-    CHECK_EQ(ed.lists_->buildBufferListScreen({"a.txt"}, 0, 80, 5),
-             ref.buildBufferListScreen({"a.txt"}, 0, 80, 5));
+    CHECK(!ed.renderer_->isDarkTheme());
+    const TtyTheme light = lightTheme();
+    CHECK_EQ(ed.renderer_->theme().id, light.id);
+    const std::string after =
+        ed.renderer_->buildBufferListScreen({"a.txt"}, 0, 80, 5);
+    CHECK(after.find(light.accentBuffers) != std::string::npos);
+    CHECK(after != before);
 }

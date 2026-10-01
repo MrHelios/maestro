@@ -14,8 +14,9 @@
 #undef private
 #include "base/utf8.h"
 #include "helpers/test_render_utils.h"
-#include "rendering/tty/Theme.h"  // tests que leen r.theme() incluyen el tipo
+#include "rendering/tty/TtyTheme.h"  // tests que leen r.theme() incluyen el tipo
                                    // directo (ya no llega por Renderer.h)
+#include "rendering/tty/TtyRenderer.h"  // cursorScreenCol usa buildScreen TTY
 
 using testfw::TempFile;
 inline InputEvent insert(char c){ InputEvent e; e.type=InputEventType::InsertChar; e.text=std::string(1,c); return e; }
@@ -86,7 +87,7 @@ struct CwdGuard{
 };
 // Columna VISUAL (1-based de "\x1b[1;<col>H") donde Renderer dibujaría el cursor.
 // buildScreen emite gutter+visual+1; para viewport de 1 línea el gutter mide 3, se resta.
-inline int cursorScreenCol(const std::string& line,int byteCol){ Document doc; doc.restore({line}); Viewport vp; vp.top=0; vp.height=1; vp.width=200; Cursor c; c.line=0; c.col=byteCol; Renderer r; std::string f=r.buildScreen(doc,c,vp,"t",false,"",State::Navegacion,std::nullopt); size_t pos=f.rfind("\x1b[1;"); if(pos==std::string::npos) return -1; size_t end=f.find('H',pos); return std::stoi(f.substr(pos+4,end-pos-4))-3; }
+inline int cursorScreenCol(const std::string& line,int byteCol){ Document doc; doc.restore({line}); Viewport vp; vp.top=0; vp.height=1; vp.width=200; Cursor c; c.line=0; c.col=byteCol; TtyRenderer r; std::string f=r.buildScreen(doc,c,vp,"t",false,"",State::Navegacion,std::nullopt); size_t pos=f.rfind("\x1b[1;"); if(pos==std::string::npos) return -1; size_t end=f.find('H',pos); return std::stoi(f.substr(pos+4,end-pos-4))-3; }
 // Verifica las invariantes globales del estado de Editor y del buffer activo.
 // Para todos los buffers, usar assertBuffersConsistent().
 // - documento no vacío;

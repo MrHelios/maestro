@@ -1,6 +1,7 @@
 // Frontier tests (pasos 1-15): verifican el nuevo orden sin tocar la
 // suite existente. Se corren con: make test-one FILTER='frontier*'
 #include "test_framework.h"
+#include "rendering/Sink.h"
 
 #include <chrono>
 #include <string>
@@ -19,7 +20,7 @@
 #include "filesystem/FileWatcherFactory.h"
 #include "layout/ScreenToCursor.h"
 #include "layout/Layout.h"
-#include "rendering/tty/Theme.h"
+#include "rendering/tty/TtyTheme.h"
 #include "rendering/tty/TtyScroll.h"
 #include "app/Editor.h"
 
@@ -87,16 +88,16 @@ TEST(frontier_terminal_is_event_source) {
     CHECK(src != nullptr);
 }
 
-// 7: Theme -> Style en un solo lugar.
+// 7: TtyTheme -> Style en un solo lugar.
 TEST(frontier_theme_style_mapping) {
-    Theme dark = darkTheme();
+    TtyTheme dark = darkTheme();
     CHECK(!themeAnsiFor(dark, StyleRole::Selection).empty());
     CHECK(themeAnsiFor(dark, StyleRole::Default).empty());
     CHECK(themeAnsiFor(dark, StyleRole::GutterBlank).empty());
     CHECK(themeAnsiFor(dark, StyleRole::Selection) == dark.selection);
     CHECK(themeAnsiFor(dark, StyleRole::AccentNavegacion) == dark.accentNavegacion);
     CHECK(themeAnsiFor(dark, StyleRole::SyntaxKeyword) == dark.syntaxKeyword);
-    Theme light = lightTheme();
+    TtyTheme light = lightTheme();
     CHECK(themeAnsiFor(light, StyleRole::StatusBase) == light.statusBar);
 }
 

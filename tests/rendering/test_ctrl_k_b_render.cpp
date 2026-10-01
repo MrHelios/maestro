@@ -1,4 +1,5 @@
 #include "test_framework.h"
+#include "rendering/tty/TtyRenderer.h"
 #include "platform/InputEvent.h"  // usa InputEvent común
 #include "helpers/test_render_utils.h"
 #include <algorithm>
@@ -32,7 +33,7 @@ TEST(ctrl_k_b_renders_new_buffer_immediately){
     type(ed, "BBB_CONTENT");
     press(ed, InputEventType::Escape);
 
-    Renderer& r = ed.renderer_;
+    TtyRenderer& r = *ed.renderer_;
     Buffer& curBBB = ed.active();
     std::string prime = r.buildDiffFrame(curBBB.document, curBBB.cursor, curBBB.viewport, curBBB.filename, curBBB.modified, Message{}, State::Navegacion, curBBB.selection);
     (void)prime;
@@ -63,7 +64,7 @@ TEST(ctrl_k_b_diff_equals_full_after_switch){
     type(ed, "WORLD");
     press(ed, InputEventType::Escape);
 
-    Renderer& r = ed.renderer_;
+    TtyRenderer& r = *ed.renderer_;
     r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
 
     previousBuffer(ed);
@@ -93,7 +94,7 @@ TEST(ctrl_k_b_toggle_twice_renders_correctly){
     type(ed, "BBB_TOGGLE");
     press(ed, InputEventType::Escape);
 
-    Renderer& r = ed.renderer_;
+    TtyRenderer& r = *ed.renderer_;
     r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
 
     previousBuffer(ed);
@@ -116,7 +117,7 @@ TEST(ctrl_k_b_no_previous_buffer_no_crash){
     ed.active().viewport.width=30;
     type(ed, "ONLY_ONE");
     press(ed, InputEventType::Escape);
-    Renderer& r = ed.renderer_;
+    TtyRenderer& r = *ed.renderer_;
     std::string prime = r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
     (void)prime;
     CHECK(!ed.previousBuffer_.valid);

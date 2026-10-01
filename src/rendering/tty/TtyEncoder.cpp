@@ -41,7 +41,7 @@ std::string TtyEncoder::encodeRow(const StyledRow& row) const {
 void TtyEncoder::appendClearLine(std::string& out) const { out += "\x1b[K"; }
 
 void TtyEncoder::appendRow(std::string& out, const StyledRow& row) const {
-    const Theme& T = theme_;
+    const TtyTheme& T = theme_;
     out += "\x1b[K";
     for (const auto& seg : row.segs) {
         const std::string& st = ansiFor(seg.role);

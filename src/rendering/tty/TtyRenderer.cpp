@@ -1,4 +1,4 @@
-#include "rendering/tty/TtyLists.h"
+#include "rendering/tty/TtyRenderer.h"
 
 #include <algorithm>
 
@@ -35,7 +35,7 @@ void renderFilledRow(std::string& out, std::string_view text, int width,
     out += reset;
 }
 
-void renderEmptyMarkerRow(std::string& out, const Theme& T, int width) {
+void renderEmptyMarkerRow(std::string& out, const TtyTheme& T, int width) {
     if (width <= 0) return;
     if (width <= 2) {
         out += utf8::truncate("  ", width);
@@ -49,7 +49,72 @@ void renderEmptyMarkerRow(std::string& out, const Theme& T, int width) {
 
 } // namespace
 
-void TtyLists::renderEditorContent(
+TtyRenderer::TtyRenderer() : diff_(renderer_.frameBuilder(), encoder_) {}
+
+void TtyRenderer::setTheme(const TtyTheme& t) {
+    provider_.setTheme(t);
+    encoder_.setTheme(t);
+    diff_.invalidateCache();
+}
+
+void TtyRenderer::toggleTheme() {
+    provider_.toggle();
+    encoder_.setTheme(provider_.theme());
+    diff_.invalidateCache();
+}
+
+std::string TtyRenderer::buildScreen(
+    const Document& doc, const Cursor& cursor, const Viewport& viewport,
+    const std::string& filename, bool modified, const Message& message,
+    State state, const std::optional<Selection>& selection,
+    const std::optional<Selection>& searchHighlight,
+    const std::optional<BracketPair>& bracketPair) {
+    Frame f = renderer_.frameBuilder().buildFrame(
+        doc, cursor, viewport, filename, modified, message, state, selection,
+        searchHighlight, bracketPair);
+    std::string out;
+    encoder_.appendFrame(out, f);
+    return out;
+}
+
+void TtyRenderer::renderScreen(
+    const Document& doc, const Cursor& cursor, const Viewport& viewport,
+    const std::string& filename, bool modified, const Message& message,
+    State state, Sink& sink,
+    const std::optional<Selection>& selection,
+    const std::optional<Selection>& searchHighlight,
+    const std::optional<BracketPair>& bracketPair) {
+    std::string buffer = buildScreen(doc, cursor, viewport, filename, modified,
+                                      message, state, selection,
+                                      searchHighlight, bracketPair);
+    sink.writeStdout(buffer);
+}
+
+void TtyRenderer::renderScreenDiff(
+    const Document& doc, const Cursor& cursor, const Viewport& viewport,
+    const std::string& filename, bool modified, const Message& message,
+    State state, Sink& sink,
+    const std::optional<Selection>& selection,
+    const std::optional<Selection>& searchHighlight,
+    const std::optional<BracketPair>& bracketPair) {
+    const std::string out =
+        buildDiffFrame(doc, cursor, viewport, filename, modified, message,
+                        state, selection, searchHighlight, bracketPair);
+    if (!sink.writeStdout(out)) diff_.invalidateCache();
+}
+
+std::string TtyRenderer::buildDiffFrame(
+    const Document& doc, const Cursor& cursor, const Viewport& viewport,
+    const std::string& filename, bool modified, const Message& message,
+    State state, const std::optional<Selection>& selection,
+    const std::optional<Selection>& searchHighlight,
+    const std::optional<BracketPair>& bracketPair) {
+    return diff_.buildDiffFrame(doc, cursor, viewport, filename, modified,
+                                 message, state, selection, searchHighlight,
+                                 bracketPair);
+}
+
+void TtyRenderer::renderEditorContent(
     std::string& out, const Document& doc, const Cursor& cursor,
     const Viewport& viewport, const std::optional<Normalized>& sel,
     const Rect& area, int gutterW) const {
@@ -58,26 +123,26 @@ void TtyLists::renderEditorContent(
     int textWidth = std::max(0, area.width - gutterW);
     for (int row = 0; row < area.height; ++row) {
         int docLine = viewport.top + row;
-        out += encoder_.encodeRow(frameBuilder_.buildContentRow(
+        out += encoder_.encodeRow(renderer_.frameBuilder().buildContentRow(
             doc, cursor, viewport, sel, std::nullopt, std::nullopt,
             std::nullopt, docLine, gutterW, textWidth));
         out += "\r\n";
     }
 }
 
-void TtyLists::renderStatusBar(std::string& out, const Rect& area,
-                               const StatusBarData& data,
-                               StyleRole accent) const {
+void TtyRenderer::renderStatusBar(std::string& out, const Rect& area,
+                                  const StatusBarData& data,
+                                  StyleRole accent) const {
     out += encoder_.encodeStatus(area, data, accent);
 }
 
-std::string TtyLists::buildBufferListScreen(
+std::string TtyRenderer::buildBufferListScreen(
     const std::vector<std::string>& names, int selected, int width,
     int height) {
     std::string out;
     encoder_.beginFrame(out);
 
-    Layout layout = frameBuilder_.calculateLayout(height, width);
+    Layout layout = renderer_.frameBuilder().calculateLayout(height, width);
     renderBufferListContent(out, names, selected, layout.content);
 
     StatusBarData data;
@@ -98,10 +163,10 @@ std::string TtyLists::buildBufferListScreen(
     return out;
 }
 
-void TtyLists::renderBufferListContent(
+void TtyRenderer::renderBufferListContent(
     std::string& out, const std::vector<std::string>& names, int selected,
-    const Rect& area) const {
-    const Theme& T = encoder_.theme();
+    const Rect& area) {
+    const TtyTheme& T = encoder_.theme();
     int rows = 0;
     for (size_t i = 0; i < names.size() && rows < area.height; ++i, ++rows) {
         encoder_.appendClearLine(out);
@@ -118,20 +183,20 @@ void TtyLists::renderBufferListContent(
     }
 }
 
-void TtyLists::renderBufferList(const std::vector<std::string>& names,
-                                int selected, int width, int height,
-                                Sink& sink) {
+void TtyRenderer::renderBufferList(const std::vector<std::string>& names,
+                                   int selected, int width, int height,
+                                   Sink& sink) {
     std::string buffer = buildBufferListScreen(names, selected, width, height);
     sink.writeStdout(buffer);
 }
 
-std::string TtyLists::buildFileListScreen(
+std::string TtyRenderer::buildFileListScreen(
     const std::vector<FileListItem>& items, int selected, int scroll,
     const std::string& path, const Message& message, int width, int height) {
     std::string out;
     encoder_.beginFrame(out);
 
-    Layout layout = frameBuilder_.calculateLayout(height, width);
+    Layout layout = renderer_.frameBuilder().calculateLayout(height, width);
     renderFileListContent(out, items, selected, scroll, layout.content);
 
     StatusBarData data;
@@ -154,10 +219,10 @@ std::string TtyLists::buildFileListScreen(
     return out;
 }
 
-void TtyLists::renderFileListContent(
+void TtyRenderer::renderFileListContent(
     std::string& out, const std::vector<FileListItem>& items, int selected,
-    int scroll, const Rect& area) const {
-    const Theme& T = encoder_.theme();
+    int scroll, const Rect& area) {
+    const TtyTheme& T = encoder_.theme();
     int rows = 0;
     for (int row = 0; row < area.height; ++row, ++rows) {
         int idx = scroll + row;
@@ -177,10 +242,11 @@ void TtyLists::renderFileListContent(
     }
 }
 
-void TtyLists::renderFileList(const std::vector<FileListItem>& items,
-                              int selected, int scroll, const std::string& path,
-                              const Message& message, int width, int height,
-                              Sink& sink) {
+void TtyRenderer::renderFileList(const std::vector<FileListItem>& items,
+                                 int selected, int scroll,
+                                 const std::string& path,
+                                 const Message& message, int width, int height,
+                                 Sink& sink) {
     std::string buffer =
         buildFileListScreen(items, selected, scroll, path, message, width, height);
     sink.writeStdout(buffer);

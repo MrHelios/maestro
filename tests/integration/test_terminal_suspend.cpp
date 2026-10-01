@@ -34,6 +34,7 @@
 #include <unistd.h>
 
 #include "test_framework.h"
+#include "rendering/Sink.h"
 #include "platform/tty/Terminal.h"
 #include "platform/tty/TtyRunLoop.h"
 #include "rendering/tty/TtySink.h"

@@ -4,7 +4,7 @@
 
 #include "rendering/Style.h"
 
-struct Theme {
+struct TtyTheme {
     int id;
     std::string background;        // fondo del area de texto y relleno de filas "~"
     std::string foreground;        // texto normal del documento
@@ -44,12 +44,12 @@ struct Theme {
     std::string bracketMatch;
 };
 
-inline Theme darkTheme() {
+inline TtyTheme darkTheme() {
     constexpr const char* kAccentDark = "\x1b[1m\x1b[38;5;81m"; // azul clarito
     constexpr const char* kMessage    = "\x1b[38;5;250m"; // mismo color para todos los mensajes
     constexpr const char* kStatusBar  = "\x1b[38;2;140;140;140m";
 
-    Theme t;
+    TtyTheme t;
     t.id = 0;
     t.background        = "\x1b[48;2;18;19;20m";   // #121314 alias
     t.foreground        = "";
@@ -88,11 +88,11 @@ inline Theme darkTheme() {
     return t;
 }
 
-inline Theme lightTheme() {
+inline TtyTheme lightTheme() {
     constexpr const char* kLightMessage  = "\x1b[38;5;240m";
     constexpr const char* kLightAccent   = "\x1b[1m\x1b[38;5;25m";
 
-    Theme t;
+    TtyTheme t;
     t.id = 1;
     t.background        = "\x1b[48;5;255m";
     t.foreground        = "\x1b[38;5;235m";
@@ -131,27 +131,27 @@ inline Theme lightTheme() {
     return t;
 }
 
-inline Theme defaultTheme() {
+inline TtyTheme defaultTheme() {
     return darkTheme();
 }
 
-inline bool operator==(const Theme& a, const Theme& b) {
+inline bool operator==(const TtyTheme& a, const TtyTheme& b) {
     return a.id == b.id;
 }
 
-inline bool operator!=(const Theme& a, const Theme& b) {
+inline bool operator!=(const TtyTheme& a, const TtyTheme& b) {
     return !(a == b); 
 }
 
 // ---------------------------------------------------------------------------
-// Frontier (7): Theme → Style.
+// Frontier (7): TtyTheme → Style.
 //
-// El Theme es la tabla ANSI del backend TTY; StyleRole es el vocabulario
+// El TtyTheme es la tabla ANSI del backend TTY; StyleRole es el vocabulario
 // común del Frame. Este mapeo es la ÚNICA dirección permitida
-// (Theme conoce Style, nunca al revés; Style.h sigue puro sin ANSI).
+// (TtyTheme conoce Style, nunca al revés; Style.h sigue puro sin ANSI).
 // TtyEncoder::ansiFor delega acá.
 // ---------------------------------------------------------------------------
-inline const std::string& themeAnsiFor(const Theme& t, StyleRole role) {
+inline const std::string& themeAnsiFor(const TtyTheme& t, StyleRole role) {
     static const std::string kEmpty;
     switch (role) {
         case StyleRole::Default:     return kEmpty;

@@ -1,4 +1,5 @@
 #include "test_support.h"
+#include "rendering/Sink.h"
 #include <chrono>
 #include <thread>
 #include "helpers/FakeClipboard.h"

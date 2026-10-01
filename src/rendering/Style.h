@@ -7,11 +7,11 @@
 //
 // REGLA ARQUITECTÓNICA: el Frame usa estos roles, nunca secuencias ANSI/CSI.
 // Cada backend decide cómo se representa un rol:
-//   - TtyEncoder  : rol -> secuencia ANSI (lee el Theme como tabla ANSI).
+//   - TtyEncoder  : rol -> secuencia ANSI (lee el TtyTheme como tabla ANSI).
 //   - GuiPainter  : rol -> color/fuente Qt (futuro).
 //
-// Este header es puro: no incluye el Theme ni emite secuencias de escape.
-// El Theme sigue siendo la tabla del backend TTY (ver rendering/tty/).
+// Este header es puro: no incluye el TtyTheme ni emite secuencias de escape.
+// El TtyTheme sigue siendo la tabla del backend TTY (ver rendering/tty/).
 // ---------------------------------------------------------------------------
 enum class StyleRole {
     Default,            // texto plano sin estilo

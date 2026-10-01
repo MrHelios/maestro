@@ -23,16 +23,13 @@
 #include "platform/InputEvent.h"
 #include "platform/WindowSize.h"
 
-// Sink de escritura (frontera de I/O del Renderer). Forward declarado para
-// no acoplar este header a rendering/tty/: el dueño real vive en el .cpp.
+// Sink de escritura (frontera de I/O del backend). Forward declarado para
+// no acoplar este header al backend: el dueño real vive en el .cpp.
 class Sink;
 
-// Pantallas modales TTY (listas). Forward declarado por el mismo motivo:
-// el Editor las posee por puntero y los detalles viven en el .cpp.
-class TtyLists;
-
-// Tema ANSI del backend TTY. Forward declarado: solo el .cpp lo conoce.
-struct Theme;
+// Backend TTY completo. Forward declarado para no acoplar este header al
+// backend: el Editor lo posee por puntero y los detalles viven en el .cpp.
+class TtyRenderer;
 
 // Editor es el "engine": maneja una coleccion de buffers (v0.6.3), un
 // buffer activo, el modo, los mensajes y el portapapeles global. Todo lo
@@ -275,13 +272,11 @@ private:
     // si ya hay uno con esa ruta. Sale del explorador a Navegacion.
     void openFileInBuffer(const std::string& path);
 
-    Renderer renderer_;
-    // Pantallas modales (selector/explorador): backend TTY por puntero para
-    // no incluir tty/* en este header (paso 5). Se sincroniza el Theme en
-    // applyTheme; el cache diferencial se invalida en las transiciones
-    // hacia/desde el modal (ver wasModal_ en renderFrame: TtyLists::render*
-    // no invalida porque no posee el TtyDiff).
-    std::unique_ptr<TtyLists> lists_;
+    // Backend TTY completo por puntero para no incluir sus headers en este
+    // header (paso 6: posee encoder, diff, theme y listas). El tema se cambia
+    // solo vía renderer_->toggleTheme()/setTheme; el cache diferencial se
+    // invalida en las transiciones hacia/desde el modal (ver wasModal_).
+    std::unique_ptr<TtyRenderer> renderer_;
     // Frontera modal del último renderFrame: true si se pintó modal. Sirve
     // para invalidar el diff solo en la transición (entrada y salida),
     // no en cada frame del modal.
@@ -318,7 +313,6 @@ private:
     void registerCommands();
 
     State state_ = State::Navegacion;
-    bool isDarkTheme_ = true;
     // P0 interaction: grupo de escritura sobre seleccion. Cuando se escribe
     // una letra sobre un rango marcado, el reemplazo se empuja UNA vez y la
     // escritura consecutiva posterior se absorbe en la MISMA entrada de undo,
@@ -592,11 +586,6 @@ private:
     void redo();
 
     void toggleTheme();
-
-    // Único fan-out del tema en producción: renderer_ es la fuente y lists_
-    // lo sigue. Todo camino que cambie el tema pasa por acá (hoy solo
-    // toggleTheme); nadie setea backends por separado.
-    void applyTheme(const Theme& t);
 
     std::unique_ptr<FileWatcher> watcher_;
     std::unordered_set<std::string> watchedFiles_;

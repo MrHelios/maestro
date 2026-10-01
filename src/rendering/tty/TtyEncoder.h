@@ -3,24 +3,24 @@
 #include <string>
 
 #include "platform/CellPos.h"
-#include "rendering/tty/Theme.h"
+#include "rendering/tty/TtyTheme.h"
 #include "rendering/frame/Frame.h"
 
 // ---------------------------------------------------------------------------
 // TtyEncoder: backend TTY. Traduce Frame (roles semánticos) a secuencias
-// ANSI usando el Theme como tabla de representación.
+// ANSI usando el TtyTheme como tabla de representación.
 //
 // Todo lo que contenga "\x1b"/CSI vive acá (o en TtyDiff/StatusBar::render).
-// Frame jamás contiene ANSI; el Theme es la tabla ANSI de ESTE backend
+// Frame jamás contiene ANSI; el TtyTheme es la tabla ANSI de ESTE backend
 // (GuiPainter usará sus propios colores Qt para los mismos roles).
 // ---------------------------------------------------------------------------
 class TtyEncoder {
 public:
     TtyEncoder() = default;
-    explicit TtyEncoder(const Theme& t) : theme_(t) {}
+    explicit TtyEncoder(const TtyTheme& t) : theme_(t) {}
 
-    void setTheme(const Theme& t) { theme_ = t; }
-    const Theme& theme() const { return theme_; }
+    void setTheme(const TtyTheme& t) { theme_ = t; }
+    const TtyTheme& theme() const { return theme_; }
 
     // Tabla rol -> secuencia ANSI (vacía = sin estilo).
     const std::string& ansiFor(StyleRole role) const;
@@ -66,5 +66,5 @@ public:
     void endFrame(std::string& out) const;
 
 private:
-    Theme theme_ = defaultTheme();
+    TtyTheme theme_ = defaultTheme();
 };

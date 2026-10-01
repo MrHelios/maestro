@@ -5,7 +5,7 @@
 #include "app/Message.h"
 
 // ---------------------------------------------------------------------------
-// StatusBarData: DTO puro de la barra común. No conoce Theme ni ANSI.
+// StatusBarData: DTO puro de la barra común. No conoce TtyTheme ni ANSI.
 // Vive en rendering/ (zona pura). La codificación ANSI vive en
 // rendering/tty/StatusBar (TtyStatusBar) que recibe este DTO.
 // ---------------------------------------------------------------------------

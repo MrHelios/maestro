@@ -37,7 +37,7 @@
 
 #include "base/utf8.h"
 #include "layout/Gutter.h"
-#include "rendering/tty/TtyLists.h"
+#include "rendering/tty/TtyRenderer.h"
 
 namespace {
 
@@ -57,7 +57,7 @@ struct RenderFixture {
     }
 
     std::string frame() {
-        return ed.renderer_.buildScreen(ed.active().document,
+        return ed.renderer_->buildScreen(ed.active().document,
                                         ed.active().cursor,
                                         ed.active().viewport, "perf.txt", false,
                                         msg, ed.state_, std::nullopt);
@@ -87,7 +87,7 @@ TEST(bench_perf_render_escalado_con_documento_checked) {
 // ---------------------------------------------------------------------------
 TEST(bench_perf_render_desglose_fases_checked) {
     RenderFixture fx(300);
-    TtyLists lists;  // primitivas TTY (antes shims de Renderer)
+    TtyRenderer tr;  // primitivas del backend TTY para benches
     const Buffer& b = fx.ed.active();
     const Document& doc = b.document;
     const Cursor& cur = b.cursor;
@@ -123,27 +123,27 @@ TEST(bench_perf_render_desglose_fases_checked) {
 
     bench("beginFrame+endFrame", 20000, [&] {
         std::string out;
-        lists.beginFrame(out);
-        lists.endFrame(out);
+        tr.beginFrame(out);
+        tr.endFrame(out);
         perf_time::g_sink += out.size();
     });
     bench("renderEditorContent (22 filas visibles)", 2000, [&] {
         std::string out;
-        lists.renderEditorContent(out, doc, cur, vp, std::nullopt, layout.content,
+        tr.renderEditorContent(out, doc, cur, vp, std::nullopt, layout.content,
                                   gutterW);
         perf_time::g_sink += out.size();
     });
     bench("statusBar (data+render)", 20000, [&] {
         std::string out;
         StatusBarData data = barData();
-        lists.renderStatusBar(out, layout.statusBar, data,
+        tr.renderStatusBar(out, layout.statusBar, data,
                               StyleRole::AccentNavegacion);
         perf_time::g_sink += out.size();
     });
     bench("moveCursorTo+columnOf", 20000, [&] {
         std::string out;
         int visualCol = utf8::columnOf(doc.lineAt(cur.line), cur.col);
-        lists.moveCursorToRaw(out, cur.line - vp.top + 1, gutterW + visualCol + 1 +
+        tr.moveCursorToRaw(out, cur.line - vp.top + 1, gutterW + visualCol + 1 +
                                                                layout.content.col);
         perf_time::g_sink += out.size();
     });
@@ -203,8 +203,8 @@ TEST(bench_perf_bytes_por_evento_hacia_terminal_checked) {
     // Caso A: una tecla que solo cambia UNA fila.
     fx.ed.handleEvent(e);
     const std::string trasTecla = fx.frame();
-    const std::size_t deltaTecla = fx.ed.renderer_
-        .buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor,
+    const std::size_t deltaTecla = fx.ed.renderer_->
+        buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor,
                         fx.ed.active().viewport, "perf.txt", false, fx.msg,
                         State::Interaccion, std::nullopt)
         .size();
@@ -214,8 +214,8 @@ TEST(bench_perf_bytes_por_evento_hacia_terminal_checked) {
     fx.ed.active().cursor.line += 100;
     fx.ed.active().viewport.top += 1;
     const std::string trasScroll = fx.frame();
-    const std::size_t deltaScroll = fx.ed.renderer_
-        .buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor,
+    const std::size_t deltaScroll = fx.ed.renderer_->
+        buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor,
                         fx.ed.active().viewport, "perf.txt", false, fx.msg,
                         State::Interaccion, std::nullopt)
         .size();
@@ -258,12 +258,12 @@ TEST(bench_perf_ciclo_diff_integrado_checked) {
     InputEvent e; e.type = InputEventType::InsertChar; e.text = "a";
     perf_time::bench_ns("handleEvent+buildDiffFrame", 2000, [&]{
         fx.ed.handleEvent(e);
-        auto out = fx.ed.renderer_.buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor, fx.ed.active().viewport, "perf.txt", false, fx.msg, fx.ed.state_, std::nullopt);
+        auto out = fx.ed.renderer_->buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor, fx.ed.active().viewport, "perf.txt", false, fx.msg, fx.ed.state_, std::nullopt);
         perf_time::g_sink += out.size();
         // volver atras para no crecer indefinidamente
         InputEvent back; back.type = InputEventType::Backspace;
         fx.ed.handleEvent(back);
-        auto out2 = fx.ed.renderer_.buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor, fx.ed.active().viewport, "perf.txt", false, fx.msg, fx.ed.state_, std::nullopt);
+        auto out2 = fx.ed.renderer_->buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor, fx.ed.active().viewport, "perf.txt", false, fx.msg, fx.ed.state_, std::nullopt);
         perf_time::g_sink += out2.size();
     });
     CHECK(perf_time::g_sink > 0);

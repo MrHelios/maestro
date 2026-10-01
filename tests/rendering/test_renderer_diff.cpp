@@ -16,11 +16,12 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "rendering/Sink.h"
 #include "platform/InputEvent.h"  // usa InputEvent común
 
 #define private public
 #include "app/Editor.h"
-#include "rendering/tty/TtyLists.h"
+#include "rendering/tty/TtyRenderer.h"
 #include "rendering/tty/TtySink.h"
 #undef private
 
@@ -181,10 +182,10 @@ InputEvent move(InputEventType t) {
 
 struct DiffHarness {
     Editor ed;
-    Renderer& r;
+    TtyRenderer& r;
     int kRows;
 
-    explicit DiffHarness(int lines) : r(ed.renderer_) {
+    explicit DiffHarness(int lines) : r(*ed.renderer_) {
         ed.active().document.restore(
             std::vector<std::string>(static_cast<size_t>(lines),
                                      std::string(80, 'x')));
@@ -370,11 +371,11 @@ TEST(render_diff_scroll_realista_reescribe_filas_sin_borrado_total) {
 TEST(render_diff_vuelta_de_filebrowser_es_completo) {
     DiffHarness h(300);
     NullSink null;
-    TtyLists lists;
+    TtyRenderer tr;
     h.getDiffOutput();
-    lists.renderFileList(std::vector<FileListItem>{{"a.txt", false}, {"b.txt", false}}, 0, 0, "/tmp", Message(""), 80, 24, null);
-    // TtyLists no posee el diff: el caller invalida al entrar/salir del
-    // modal (igual que Editor::renderFrame).
+    tr.renderFileList(std::vector<FileListItem>{{"a.txt", false}, {"b.txt", false}}, 0, 0, "/tmp", Message(""), 80, 24, null);
+    // El backend no se autoinvalida: el caller invalida al entrar/salir
+    // del modal (igual que Editor::renderFrame).
     h.r.invalidateCache();
     CHECK(!h.r.hasCache());
     const std::string trasFileList = h.getDiffOutput();
@@ -405,13 +406,13 @@ TEST(render_diff_mensaje_temporal) {
 TEST(render_diff_invalidacion_por_modal_y_resize) {
     DiffHarness h(300);
     NullSink null;
-    TtyLists lists;
+    TtyRenderer tr;
 
     h.getDiffOutput();
     CHECK(h.r.hasCache());
 
-    lists.renderBufferList({"uno", "dos"}, 0, 80, 24, null);
-    // Idem arriba: invalidación explícita del caller.
+    tr.renderBufferList({"uno", "dos"}, 0, 80, 24, null);
+    // Idem arriba: el backend no se autoinvalida.
     h.r.invalidateCache();
     CHECK(!h.r.hasCache());
     const std::string trasModal = h.getDiffOutput();

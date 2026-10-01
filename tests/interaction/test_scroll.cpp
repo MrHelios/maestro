@@ -1,4 +1,6 @@
 #include "test_support.h"
+#include "rendering/tty/TtyRenderer.h"
+#include "rendering/Sink.h"
 #include "platform/tty/Terminal.h"
 #include "rendering/tty/TtySink.h"
 #include <unistd.h>
@@ -127,7 +129,7 @@ TEST(scroll_renders_new_window) {
     ed.active().viewport.width = 80;
     ed.active().viewport.top = 10;
     ed.active().cursor.line = 12;
-    Renderer r;
+    TtyRenderer r;
     std::string before = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, "", ed.state_, std::nullopt);
     press(ed, InputEventType::ScrollDown);
     std::string after = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, "", ed.state_, std::nullopt);
@@ -301,7 +303,7 @@ TEST(scroll_terminal_event_to_viewport) {
     ed.active().viewport.width = 80;
     ed.active().viewport.top = 20;
     ed.active().cursor.line = 25;
-    Renderer r;
+    TtyRenderer r;
     std::string before = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, "", ed.state_, std::nullopt);
     ed.handleEvent(e);
     CHECK_EQ(ed.active().viewport.top, 17);
@@ -331,7 +333,7 @@ TEST(scroll_renderFrame_diff_visual) {
     ed.active().cursor.line = 12;
     ed.renderFrame();
     CHECK_EQ(ed.active().viewport.top, 10);
-    Renderer r;
+    TtyRenderer r;
     std::string screenBefore = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, "", ed.state_, std::nullopt);
     CHECK(contains(screenBefore, "line 10"));
     press(ed, InputEventType::ScrollDown);

@@ -13,8 +13,7 @@
 #include "syntax/SyntaxHighlighter.h"
 #include "platform/clipboard/ClipboardFactory.h"
 #include "filesystem/FileWatcherFactory.h"
-#include "rendering/tty/Theme.h"  // Paso 1: Theme directo (antes por tránsito vía Renderer.h); ownership a ThemeProvider en paso 6.
-#include "rendering/tty/TtyLists.h"  // Paso 5: pantallas modales (el header solo forward-declara).
+#include "rendering/tty/TtyRenderer.h"  // Backend TTY (el header solo forward-declara).
 
 namespace {
 
@@ -132,7 +131,7 @@ Editor::Editor(std::unique_ptr<SystemClipboard> clipboard)
     : Editor(std::move(clipboard), makeFileWatcher()) {}
 
 Editor::Editor(std::unique_ptr<SystemClipboard> clipboard, std::unique_ptr<FileWatcher> watcher)
-    : lists_(std::make_unique<TtyLists>(renderer_.theme())),
+    : renderer_(std::make_unique<TtyRenderer>()),
       clipboard_(std::move(clipboard)), watcher_(std::move(watcher)) {
     if (!clipboard_) clipboard_ = makeNullClipboard();
     if (!watcher_) watcher_ = makeNullFileWatcher();
@@ -788,7 +787,7 @@ void Editor::createBuffer() {
         previousBuffer_.displayName = cur.displayName();
     }
     const int idx = buffers.createBuffer(rows, cols);
-    renderer_.invalidateCache();
+    renderer_->invalidateCache();
     setActionMessage("Buffer nuevo: " + buffers.at(idx).unnamedName, MessageKind::Success);
 }
 
@@ -811,7 +810,7 @@ void Editor::closeActiveBuffer() {
             setActionMessage("Buffer reiniciado: " + active().unnamedName);
             state_ = State::Navegacion;
             previousBuffer_.valid = false;
-            renderer_.invalidateCache();
+            renderer_->invalidateCache();
             break;
         case CloseResult::Removed: {
             previousBuffer_.valid = true;
@@ -820,7 +819,7 @@ void Editor::closeActiveBuffer() {
 
             const bool hasSelection = buffers.activate(buffers.activeIndex());
             state_ = hasSelection ? State::Seleccion : State::Navegacion;
-            renderer_.invalidateCache();
+            renderer_->invalidateCache();
             setActionMessage("Buffer cerrado. Activo: " + active().displayName());
             break;
         }
@@ -837,7 +836,7 @@ void Editor::activateBuffer(int idx) {
     const bool hasSelection = buffers.activate(idx);
     state_ = hasSelection ? State::Seleccion : State::Navegacion;
     setStatusMessage("");
-    renderer_.invalidateCache();
+    renderer_->invalidateCache();
 }
 
 void Editor::switchToPreviousBuffer() {
@@ -1134,7 +1133,7 @@ int Editor::nextTimeoutMs(
 }
 
 void Editor::invalidateScreen() {
-    renderer_.invalidateCache();
+    renderer_->invalidateCache();
 }
 
 void Editor::renderFrame() {
@@ -1146,14 +1145,14 @@ void Editor::renderFrame() {
     const bool isModal =
         (state_ == State::BufferSelector || state_ == State::FileBrowser);
     if (isModal != wasModal_) {
-        renderer_.invalidateCache();
+        renderer_->invalidateCache();
         wasModal_ = isModal;
     }
     if (state_ == State::BufferSelector) {
         // Pantalla del selector: se dibuja la lista de buffers con la
         // barra MULTIBUFFER al final, manteniendo el aspecto del editor.
-        lists_->renderBufferList(bufferNames(), bufferSelectorIndex_,
-                                 b.viewport.width, b.viewport.height, sink());
+        renderer_->renderBufferList(bufferNames(), bufferSelectorIndex_,
+                                  b.viewport.width, b.viewport.height, sink());
     } else if (state_ == State::FileBrowser) {
         fileBrowser.clampScroll(b.viewport.height);
         // DEUDA (Alcance 1): el vector adaptado se reconstruye por frame
@@ -1165,10 +1164,10 @@ void Editor::renderFrame() {
         for (const FileBrowserEntry& e : fileBrowser.entries_) {
             items.push_back(FileListItem{e.name, e.isDirectory});
         }
-        lists_->renderFileList(items,
-                               fileBrowser.index_, fileBrowser.scroll_,
-                               fileBrowser.path_, statusMessage_,
-                               b.viewport.width, b.viewport.height, sink());
+        renderer_->renderFileList(items,
+                                fileBrowser.index_, fileBrowser.scroll_,
+                                fileBrowser.path_, statusMessage_,
+                                b.viewport.width, b.viewport.height, sink());
     } else {
         // Sincroniza lenguaje del cache con el buffer activo antes de bracket/render
         {
@@ -1180,7 +1179,7 @@ void Editor::renderFrame() {
 
             if (b.syntaxCache.language() != lang) b.syntaxCache.setLanguage(lang);
 
-            renderer_.setExternalSyntaxCache(&b.syntaxCache);
+            renderer_->setExternalSyntaxCache(&b.syntaxCache);
         }
 
         // IMPORTANTE: scroll antes que bracket highlight.
@@ -1206,7 +1205,7 @@ void Editor::renderFrame() {
         std::optional<BracketPair> toRender =
             (state_ == State::Seleccion) ? std::nullopt : bracketPair_;
 
-        renderer_.renderScreenDiff(
+        renderer_->renderScreenDiff(
             b.document,
             b.cursor,
             b.viewport,
@@ -1220,7 +1219,7 @@ void Editor::renderFrame() {
             toRender
         );
 
-        renderer_.setExternalSyntaxCache(nullptr);
+        renderer_->setExternalSyntaxCache(nullptr);
     }
 }
 
@@ -2296,7 +2295,7 @@ void Editor::commitSaveAs() {
     previousBuffer_.valid = true;
     previousBuffer_.id = oldId;
     previousBuffer_.displayName = oldDisplay;
-    renderer_.invalidateCache();
+    renderer_->invalidateCache();
     setActionMessage("Guardado: " + path, MessageKind::Success);
     state_ = priorState_;
 }
@@ -2734,16 +2733,10 @@ void Editor::redo() {
     setActionMessage("Rehecho.", MessageKind::Success);
 }
 
-void Editor::applyTheme(const Theme& t) {
-    renderer_.setTheme(t);
-    lists_->setTheme(t);
-}
-
 void Editor::toggleTheme() {
-    isDarkTheme_ = !isDarkTheme_;
-    applyTheme(isDarkTheme_ ? darkTheme() : lightTheme());
+    renderer_->toggleTheme();
     state_ = priorState_;
-    setActionMessage(isDarkTheme_ ? "Tema oscuro" : "Tema claro", MessageKind::Info);
+    setActionMessage(renderer_->isDarkTheme() ? "Tema oscuro" : "Tema claro", MessageKind::Info);
 }
 
 void Editor::startGoToLine() {

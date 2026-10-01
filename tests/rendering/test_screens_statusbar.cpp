@@ -23,9 +23,8 @@
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
 #include "app/Message.h"
-#include "rendering/Renderer.h"
+#include "rendering/tty/TtyRenderer.h"
 #include "rendering/tty/StatusBar.h"
-#include "rendering/tty/TtyLists.h"
 
 namespace {
 
@@ -58,20 +57,20 @@ std::string frameEditor(int content, int width) {
     Cursor cursor;
     cursor.line = 0;
     cursor.col = 0;
-    Renderer r;
+    TtyRenderer r;
     return r.buildScreen(doc, cursor, vp, "/ruta/proyecto/archivo.txt",
                          false, "", State::Navegacion, std::nullopt);
 }
 
 std::string frameBuffer(int content, int width, int selected = 1) {
-    TtyLists lists;
-    return lists.buildBufferListScreen({"b0.txt", "b1.txt", "b2.txt", "b3.txt"},
+    TtyRenderer tr;
+    return tr.buildBufferListScreen({"b0.txt", "b1.txt", "b2.txt", "b3.txt"},
                                        selected, width, content);
 }
 
 std::string frameFile(int content, int width) {
-    TtyLists lists;
-    return lists.buildFileListScreen(
+    TtyRenderer tr;
+    return tr.buildFileListScreen(
         std::vector<FileListItem>{
             {"a.txt", false}, {"b.txt", false}, {"c.txt", false}},
         0, 0, "/datos/proyecto", Message("ayuda: direcc de naveg"),

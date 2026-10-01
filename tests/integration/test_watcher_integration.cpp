@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "rendering/Sink.h"
 
 #define private public
 #include "app/Editor.h"

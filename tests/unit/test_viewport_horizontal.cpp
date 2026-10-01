@@ -4,7 +4,7 @@
 #include "layout/Gutter.h"
 #include "layout/Layout.h"
 #include "base/utf8.h"
-#include "rendering/Renderer.h"
+#include "rendering/tty/TtyRenderer.h"
 #include "platform/InputEvent.h"  // usa InputEvent común
 #include "test_framework.h"
 #include <string>
@@ -14,7 +14,7 @@ namespace {
 std::string frameWithViewport(const std::vector<std::string>& lines, int cursorLine, int cursorCol, Viewport vp) {
     Document doc; doc.restore(lines);
     Cursor cur; cur.line = cursorLine; cur.col = cursorCol;
-    Renderer r;
+    TtyRenderer r;
     return r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
 }
 int cursorTerminalCol(const std::string& frame, const Viewport& vp, int cursorLine) {

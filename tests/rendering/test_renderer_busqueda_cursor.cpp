@@ -4,7 +4,7 @@
 #include "layout/Gutter.h"
 #include "layout/Layout.h"
 #include "base/utf8.h"
-#include "rendering/Renderer.h"
+#include "rendering/tty/TtyRenderer.h"
 #include "test_framework.h"
 #include "helpers/test_render_utils.h"
 #include <string>
@@ -44,7 +44,7 @@ TEST(renderer_busqueda_no_posiciona_cursor){
     Document doc; doc.restore({"hola mundo hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
-    Renderer r;
+    TtyRenderer r;
     std::string frame = r.buildScreen(doc, cur, vp, "t", false, "", State::Busqueda, std::nullopt, std::nullopt);
     std::string seq = cursorMoveSeq(doc, cur, vp);
     CHECK(!contains(frame, seq));
@@ -56,7 +56,7 @@ TEST(renderer_navegacion_sigue_posicionando_cursor){
     Document doc; doc.restore({"hola mundo hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
-    Renderer r;
+    TtyRenderer r;
     std::string frame = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
     std::string seq = cursorMoveSeq(doc, cur, vp);
     CHECK(contains(frame, seq));
@@ -67,7 +67,7 @@ TEST(renderer_busqueda_highlight_sigue_apareciendo){
     Document doc; doc.restore({"hola mundo hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
-    Renderer r;
+    TtyRenderer r;
     Selection sel; sel.anchor={0,0}; sel.position={0,4};
     std::optional<Selection> hl = sel;
     std::string frame = r.buildScreen(doc, cur, vp, "t", false, "", State::Busqueda, std::nullopt, hl);
@@ -78,7 +78,7 @@ TEST(renderer_busqueda_diff_no_posiciona_cursor){
     Document doc; doc.restore({"hola mundo hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
-    Renderer r;
+    TtyRenderer r;
     Selection sel; sel.anchor={0,0}; sel.position={0,4};
     std::optional<Selection> hl = sel;
     // prime cache with Navegacion
@@ -91,7 +91,7 @@ TEST(renderer_busqueda_diff_no_posiciona_cursor){
     CHECK(!contains(f2, Ansi::CURSOR_SHOW));
     CHECK(contains(f2, std::string(Ansi::HIGHLIGHT_BG) + "hola" + Ansi::RESET));
     // also test fresh Busqueda diff (cache miss path)
-    Renderer r2;
+    TtyRenderer r2;
     std::string f3 = r2.buildDiffFrame(doc, cur, vp, "t", false, "", State::Busqueda, std::nullopt, hl);
     CHECK(!contains(f3, seq));
     CHECK(!contains(f3, Ansi::CURSOR_SHOW));
@@ -102,7 +102,7 @@ TEST(renderer_busqueda_transicion_oculto_y_visible){
     Document doc; doc.restore({"hola mundo hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
-    Renderer r;
+    TtyRenderer r;
     Selection sel; sel.anchor={0,0}; sel.position={0,4};
     std::optional<Selection> hl = sel;
     std::string fNav1 = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
@@ -115,7 +115,7 @@ TEST(renderer_busqueda_transicion_oculto_y_visible){
     std::string seq = cursorMoveSeq(doc, cur, vp);
     CHECK(contains(fNav2, seq));
     // diff version of transition
-    Renderer rd;
+    TtyRenderer rd;
     std::string d1 = rd.buildDiffFrame(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
     CHECK(contains(d1, Ansi::CURSOR_SHOW));
     std::string d2 = rd.buildDiffFrame(doc, cur, vp, "t", false, "", State::Busqueda, std::nullopt, hl);
@@ -131,7 +131,7 @@ TEST(renderer_busqueda_diff_cache_con_modificacion){
     Cursor cur; cur.line=0; cur.col=0;
     Selection sel; sel.anchor={0,0}; sel.position={0,4};
     std::optional<Selection> hl = sel;
-    Renderer rd;
+    TtyRenderer rd;
     std::string d1 = rd.buildDiffFrame(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
     CHECK(contains(d1, Ansi::CURSOR_SHOW));
     std::string d2 = rd.buildDiffFrame(doc, cur, vp, "t", false, "", State::Busqueda, std::nullopt, hl);
@@ -144,7 +144,7 @@ TEST(renderer_busqueda_diff_cache_con_modificacion){
     CHECK(!contains(d3, std::string(Ansi::HIGHLIGHT_BG) + "hola" + Ansi::RESET));
     std::string seq = cursorMoveSeq(doc, cur, vp);
     CHECK(contains(d3, seq));
-    Renderer ref;
+    TtyRenderer ref;
     std::string expected = ref.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
     CHECK(contains(d3, "hola mundo X"));
 }
@@ -153,7 +153,7 @@ TEST(renderer_navegacion_cursor_steady){
     Document doc; doc.restore({"hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
-    Renderer r;
+    TtyRenderer r;
     std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
     CHECK(contains(f, Ansi::CURSOR_STEADY));
     CHECK(!contains(f, Ansi::CURSOR_BLINK));
@@ -163,7 +163,7 @@ TEST(renderer_interaccion_cursor_blinking){
     Document doc; doc.restore({"hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
-    Renderer r;
+    TtyRenderer r;
     std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Interaccion, std::nullopt, std::nullopt);
     CHECK(contains(f, Ansi::CURSOR_BLINK));
     CHECK(!contains(f, Ansi::CURSOR_STEADY));
@@ -173,7 +173,7 @@ TEST(renderer_seleccion_cursor_steady){
     Document doc; doc.restore({"hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
-    Renderer r;
+    TtyRenderer r;
     Selection sel; sel.anchor={0,0}; sel.position={0,2};
     std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Seleccion, sel, std::nullopt);
     CHECK(contains(f, Ansi::CURSOR_STEADY));
@@ -184,7 +184,7 @@ TEST(renderer_interaccion_diff_blinking){
     Document doc; doc.restore({"hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
-    Renderer r;
+    TtyRenderer r;
     std::string f1 = r.buildDiffFrame(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
     CHECK(contains(f1, Ansi::CURSOR_STEADY));
     std::string f2 = r.buildDiffFrame(doc, cur, vp, "t", false, "", State::Interaccion, std::nullopt, std::nullopt);
@@ -196,7 +196,7 @@ TEST(renderer_navegacion_diff_steady_after_interaccion){
     Document doc; doc.restore({"hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
-    Renderer r;
+    TtyRenderer r;
     std::string f1 = r.buildDiffFrame(doc, cur, vp, "t", false, "", State::Interaccion, std::nullopt, std::nullopt);
     CHECK(contains(f1, Ansi::CURSOR_BLINK));
     std::string f2 = r.buildDiffFrame(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
@@ -208,7 +208,7 @@ TEST(renderer_documento_vacio_no_falla){
     Document doc; doc.restore({""});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
-    Renderer r;
+    TtyRenderer r;
     std::string fNav = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
     CHECK(!fNav.empty());
     CHECK(contains(fNav, Ansi::CURSOR_SHOW));
@@ -220,7 +220,7 @@ TEST(renderer_documento_vacio_no_falla){
     CHECK(!fBus.empty());
     CHECK(!contains(fBus, Ansi::CURSOR_SHOW));
     CHECK(contains(fBus, Ansi::CURSOR_HIDE));
-    Renderer rd;
+    TtyRenderer rd;
     std::string d1 = rd.buildDiffFrame(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt, std::nullopt);
     CHECK(!d1.empty());
     CHECK(contains(d1, Ansi::CURSOR_SHOW));
@@ -246,7 +246,7 @@ TEST(renderer_cursor_fuera_viewport_seguro) {
     cur.line = 10;
     cur.col = 0;
 
-    Renderer r;
+    TtyRenderer r;
 
     // Contrato visual explicito: cursor fuera del viewport => oculto,
     // no clampado al borde (vale tambien en Navegacion, no solo Busqueda).
@@ -268,7 +268,7 @@ TEST(renderer_cursor_fuera_viewport_seguro) {
     CHECK(!contains(fBus, Ansi::CURSOR_SHOW));
     CHECK(contains(fBus, Ansi::CURSOR_HIDE));
 
-    Renderer rd;
+    TtyRenderer rd;
 
     std::string d1 = rd.buildDiffFrame(
         doc, cur, vp, "t", false, "",
@@ -291,7 +291,7 @@ TEST(renderer_resaltado_multilinea){
     Document doc; doc.restore({"hola mundo","adios mundo","tercera linea"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
-    Renderer r;
+    TtyRenderer r;
     Selection sel; sel.anchor={0,2}; sel.position={1,3};
     std::optional<Selection> hl = sel;
     std::string fSel = r.buildScreen(doc, cur, vp, "t", false, "", State::Seleccion, hl, std::nullopt);
@@ -310,7 +310,7 @@ TEST(renderer_resaltado_multilinea){
     std::string fMulti3 = r.buildScreen(doc, cur, vp, "t", false, "", State::Busqueda, std::nullopt, hl2);
     CHECK(contains(fMulti3, Ansi::HIGHLIGHT_BG));
     CHECK(contains(fMulti3, std::string(Ansi::HIGHLIGHT_BG) + "adios mundo" + Ansi::RESET));
-    Renderer rd;
+    TtyRenderer rd;
     std::string d1 = rd.buildDiffFrame(doc, cur, vp, "t", false, "", State::Busqueda, std::nullopt, hl);
     CHECK(contains(d1, Ansi::HIGHLIGHT_BG));
     CHECK(contains(d1, std::string(Ansi::HIGHLIGHT_BG) + "adi" + Ansi::RESET));

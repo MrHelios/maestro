@@ -23,7 +23,7 @@
 #include "layout/Layout.h"
 #include "app/Message.h"
 #include "rendering/tty/StatusBar.h"
-#include "rendering/tty/TtyLists.h"
+#include "rendering/tty/TtyRenderer.h"
 
 namespace {
 
@@ -250,7 +250,7 @@ TEST(statusbar_right_block_edge_layout) {
 // StyleRole (parámetro, nunca en el DTO); el default usa statusBarAccent.
 // ---------------------------------------------------------------------------
 TEST(statusbar_estado_accent_from_role) {
-    Theme t = defaultTheme();
+    TtyTheme t = defaultTheme();
     t.statusBarAccent = "\x1b[34m";      // azul (default)
     t.accentNavegacion = "\x1b[33m";     // amarillo (estado activo)
     StatusBar bar;
@@ -279,18 +279,18 @@ TEST(statusbar_estado_accent_from_role) {
 // test distinga rol vs default.
 // ---------------------------------------------------------------------------
 TEST(statusbar_list_screens_use_their_roles) {
-    Theme t = defaultTheme();
+    TtyTheme t = defaultTheme();
     t.statusBarAccent = "\x1b[34m";
     t.accentBuffers = "\x1b[31m";
     t.accentAbrir = "\x1b[32m";
-    TtyLists lists;
-    lists.setTheme(t);
+    TtyRenderer tr;
+    tr.setTheme(t);
 
-    const std::string buf = lists.buildBufferListScreen({"a.txt"}, 0, 80, 5);
+    const std::string buf = tr.buildBufferListScreen({"a.txt"}, 0, 80, 5);
     CHECK(buf.find(t.accentBuffers) != std::string::npos);
     CHECK(buf.find(t.statusBarAccent) == std::string::npos);
 
-    const std::string file = lists.buildFileListScreen(
+    const std::string file = tr.buildFileListScreen(
         std::vector<FileListItem>{{"a.txt", false}}, 0, 0, "/ruta",
         Message("ayuda"), 80, 5);
     CHECK(file.find(t.accentAbrir) != std::string::npos);
@@ -302,7 +302,7 @@ TEST(statusbar_list_screens_use_their_roles) {
 // statusBarName), distinto del nombre y nunca presente si no hay cambios.
 // ---------------------------------------------------------------------------
 TEST(statusbar_modified_indicator_styled) {
-    Theme t = defaultTheme();
+    TtyTheme t = defaultTheme();
     t.statusBarModified = "\x1b[1;38;5;200m";
     StatusBar bar;
     bar.setTheme(t);
@@ -327,7 +327,7 @@ TEST(statusbar_modified_indicator_styled) {
 // los mensajes Info no llevan ese estilo.
 // ---------------------------------------------------------------------------
 TEST(statusbar_prompt_message_styled) {
-    Theme t = defaultTheme();
+    TtyTheme t = defaultTheme();
     // Italica: distintiva, no colisiona con el bold de la etiqueta de estado.
     t.prompt = "\x1b[3m";
     StatusBar bar;

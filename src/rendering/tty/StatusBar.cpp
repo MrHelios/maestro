@@ -10,9 +10,9 @@ namespace {
 
 // Estilo de la fila de mensajes segun el tipo (paso 8). El tipo lo decide
 // la pantalla/el Editor cuando produce el Message; aqui se traduce al color
-// del Theme. Info usa el estilo de mensaje base del Theme; Prompt resalta
+// del TtyTheme. Info usa el estilo de mensaje base del TtyTheme; Prompt resalta
 // la entrada del usuario en negrita (v1.3).
-const std::string& messageStyle(const Theme& theme, MessageKind kind) {
+const std::string& messageStyle(const TtyTheme& theme, MessageKind kind) {
     switch (kind) {
         case MessageKind::Info:    return theme.message;
         case MessageKind::Success: return theme.success;
@@ -33,7 +33,7 @@ constexpr std::string_view kModifiedMarker = " [*]";
 // Construye el bloque izquierdo respetando los límites de nombre/ruta y
 // el presupuesto disponible. La ruta se sacrifica antes que el nombre;
 // si tampoco cabe el nombre, solo conserva el estado.
-// Piezas `name`/`status` separadas para aplicar estilos del Theme
+// Piezas `name`/`status` separadas para aplicar estilos del TtyTheme
 // (T.statusBarName, T.statusBarPath, T.statusBarModified y accent).
 //
 // CONTRATO DE ANCHO:
@@ -99,11 +99,11 @@ BarLeft layoutLeftBlock(const std::string& rawName, const std::string& rawPath,
 std::string StatusBar::render(const Rect& area, const StatusBarData& data,
                                StyleRole accentRole) {
     const int width = area.width;
-    const Theme& T = theme_;
+    const TtyTheme& T = theme_;
     std::ostringstream out;
 
     // Fila fija de la barra de estado. El fondo y los estilos de cada segmento
-    // provienen del Theme. El contenido se compone de nombre, ruta, estado,
+    // provienen del TtyTheme. El contenido se compone de nombre, ruta, estado,
     // relleno y bloque derecho anclado al borde.
     out << "\x1b[K";
     out << T.statusBar;
@@ -156,7 +156,7 @@ std::string StatusBar::render(const Rect& area, const StatusBarData& data,
 
     for (int i = 0; i < padL; ++i) out << ' ';
 
-    // Rol -> ANSI vía el Theme propio (Theme conoce Style, nunca al revés).
+    // Rol -> ANSI vía el TtyTheme propio (TtyTheme conoce Style, nunca al revés).
     const std::string& accent = themeAnsiFor(T, accentRole);
 
     if (left.statusOnly) {
