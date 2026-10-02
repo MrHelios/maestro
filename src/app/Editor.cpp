@@ -125,7 +125,10 @@ static Buffer::FileIdentity captureIdentity(const std::string& path) {
 
 } // namespace
 
-Editor::Editor() : Editor(makeSystemClipboard()) {}
+Editor::Editor() : Editor(makeSystemClipboard(), makeFileWatcher()) {}
+
+Editor::Editor(std::unique_ptr<ScreenRenderer> renderer)
+    : Editor(std::move(renderer), makeSystemClipboard(), makeFileWatcher()) {}
 
 Editor::Editor(std::unique_ptr<SystemClipboard> clipboard)
     : Editor(std::move(clipboard), makeFileWatcher()) {}
@@ -136,10 +139,14 @@ Editor::Editor(std::unique_ptr<SystemClipboard> clipboard, std::unique_ptr<FileW
 Editor::Editor(std::unique_ptr<ScreenRenderer> renderer,
                std::unique_ptr<SystemClipboard> clipboard,
                std::unique_ptr<FileWatcher> watcher)
-    : renderer_(renderer ? std::move(renderer) : std::make_unique<NullScreenRenderer>()),
+    : renderer_(std::move(renderer)),
       clipboard_(std::move(clipboard)), watcher_(std::move(watcher)) {
-    if (!clipboard_) clipboard_ = makeNullClipboard();
-    if (!watcher_) watcher_ = makeNullFileWatcher();
+    // Sin fallback silencioso: el único Null intencional lo crea el ctor
+    // (clipboard, watcher) con un NullScreenRenderer explícito. Pasar
+    // nullptr acá degrada X11/inotify sin aviso, así que es assert.
+    assert(renderer_ != nullptr && "Editor: renderer nulo (usar NullScreenRenderer explícito si es intencional)");
+    assert(clipboard_ != nullptr && "Editor: clipboard nulo (usar makeNullClipboard() explícito si es intencional)");
+    assert(watcher_ != nullptr && "Editor: watcher nulo (usar makeNullFileWatcher() explícito si es intencional)");
     setStatusMessage(kHelpEmpty);
     registerCommands();
     // Garantía del fallback 24x80: el Buffer recién creado trae el default

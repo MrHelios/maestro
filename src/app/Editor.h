@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -63,22 +64,34 @@ public:
     // El renderer se inyecta (puerto neutro ScreenRenderer): el Editor nunca
     // nombra ni construye ningún backend. Los defaults traen un
     // NullScreenRenderer neutro (no pinta nada): sirven para tests de lógica
-    // y para builds sin backend. Producción inyecta el backend real en el
-    // composition root (main.cpp vía setRenderer); los tests
-    // que afirman bytes de pantalla inyectan el backend real
-    // (ver tests/interaction/test_support.h).
+    // y para builds sin backend. Producción construye en un paso con el
+    // ctor explícito de renderer (backend real + clipboard/watcher reales
+    // de las factories); los tests que afirman bytes de pantalla inyectan
+    // el backend real (ctor de renderer o setRenderer tardío, ver
+    // tests/interaction/test_support.h).
     //
-    // A REVISAR A FUTURO: el ctor "total" (renderer+clipboard+watcher) no
-    // sirve para producción tal como está: con clipboard/watcher nulos cae
-    // a los Null y se pierde X11 e inotify sin aviso. Falta un
-    // `explicit Editor(unique_ptr<ScreenRenderer>)` que delegue a los
-    // defaults reales, para construcción explícita en un paso en main.
+    // Cadena de delegación:
+    //   Editor() -> (clipboard, watcher) con makeSystemClipboard() +
+    //     makeFileWatcher() y renderer Null (solo tests de lógica).
+    //   Editor(renderer) -> total con makeSystemClipboard() +
+    //     makeFileWatcher() (producción, main.cpp).
+    //   Editor(clipboard) / Editor(clipboard, watcher) -> total con
+    //     NullScreenRenderer explícito (tests con FakeClipboard/Inotify).
+    // El ctor total exige los tres no-nulos (assert, sin fallback
+    // silencioso a Null): pasar nullptr es error de programación.
+    // El único Null intencional lo crea el ctor (clipboard, watcher).
     Editor();
+    explicit Editor(std::unique_ptr<ScreenRenderer> renderer);
     explicit Editor(std::unique_ptr<SystemClipboard> clipboard);
     Editor(std::unique_ptr<SystemClipboard> clipboard, std::unique_ptr<FileWatcher> watcher);
     Editor(std::unique_ptr<ScreenRenderer> renderer,
            std::unique_ptr<SystemClipboard> clipboard,
            std::unique_ptr<FileWatcher> watcher);
+    // nullptr suelto es ambiguo entre los dos ctors de un arg (renderer vs
+    // clipboard): se prohíbe explícito para que falle con mensaje claro en
+    // vez de resolución ambigua. Pasar null al total también es error
+    // (assert en el .cpp, sin degradación silenciosa a Null).
+    Editor(std::nullptr_t) = delete;
     ~Editor();
 
     // v0.6.2: true si `path` existe y es una carpeta (absoluta o relativa).
@@ -217,9 +230,12 @@ public:
         return *sink_;
     }
 
-    // Inyección tardía del backend de presentación (composition root o tests
-    // que afirman bytes). Nulo = no-op (se conserva el anterior).
+    // Inyección tardía del backend de presentación (tests que afirman
+    // bytes; main.cpp ya construye con el renderer en un paso).
+    // Precondición: r no-nulo (assert). Nulo en release = no-op (se
+    // conserva el anterior) para no dejar renderer_ colgado.
     void setRenderer(std::unique_ptr<ScreenRenderer> r) {
+        assert(r != nullptr && "Editor::setRenderer() con nullptr");
         if (r) renderer_ = std::move(r);
     }
 

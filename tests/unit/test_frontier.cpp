@@ -515,12 +515,13 @@ TEST(frontier_tty_scroll_op) {
     CHECK(prefix == "\x1b[1;20r\x1b[3S\x1b[r");
 }
 
-// Inyección tardía del renderer (camino de main.cpp: Editor() + setRenderer
-// con el backend real). El enganche del SyntaxCache externo ocurre en cada
-// renderFrame (set/unset alrededor del render), no en el ctor: el primer
-// frame tras setRenderer debe pintar highlight idéntico al de un Editor que
-// tuvo el backend desde el inicio. Sin esto, producción (main) podría
-// pintar sin highlight y ningún test lo cazaría.
+// Inyección tardía del renderer (Editor() + setRenderer con el backend
+// real, camino que usan los tests). El enganche del SyntaxCache externo
+// ocurre en cada renderFrame (set/unset alrededor del render), no en el
+// ctor: el primer frame tras setRenderer debe pintar highlight idéntico al
+// de un Editor que tuvo el backend desde el inicio (ctor de renderer, como
+// main.cpp). Sin esto, la inyección tardía podría pintar sin highlight y
+// ningún test lo cazaría.
 TEST(fase_c_late_setRenderer_matches_early_renderer_highlight) {
     auto makeDoc = [](Editor& ed) {
         ed.getActiveBufferForTesting().document.restore(
@@ -543,7 +544,7 @@ TEST(fase_c_late_setRenderer_matches_early_renderer_highlight) {
     late.setSink(nullCap);
     late.renderFrame();  // con Null: corre scroll/brackets pero no pinta
     CHECK(nullCap.data.empty());
-    late.setRenderer(makeTtyTestRenderer());  // tardío, como main
+    late.setRenderer(makeTtyTestRenderer());  // tardío (tests; main usa el ctor)
     CaptureSink got;
     late.setSink(got);
     late.renderFrame();

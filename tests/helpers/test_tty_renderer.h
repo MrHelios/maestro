@@ -12,7 +12,8 @@
 // (renderFrame con clear-screen, diff/invalidate, temas) inyectan el TTY
 // explícito. Los tests de lógica no lo necesitan.
 //
-// Uso: `Editor ed; ed.setRenderer(makeTtyTestRenderer());`
+// Uso en tests: `Editor ed(makeTtyTestRenderer());` o, si el Editor ya
+// existe, `ed.setRenderer(makeTtyTestRenderer());`.
 //
 // Vive acá (helpers/, sin Editor.h ni hack de private) para que cualquier
 // suite lo incluya: test_support.h lo reexpone, y los .cpp que no pueden

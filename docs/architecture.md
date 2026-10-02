@@ -76,7 +76,14 @@ wake-up neutral) y `fd()` debe salir de la interfaz común.
 - `platform/` no depende de `platform/tty/` (`platform/IKeymap.h` fue
   eliminada por introducir exactamente esa dependencia).
 
-## 4. Anti-patrones prohibidos
+## 4. `assert` como contrato: no compilar con NDEBUG
+
+La app no está prevista para compilar con `-DNDEBUG`: los `assert` son
+precondiciones necesarias (`Editor`, `BufferManager`, `sink()`, etc.) y
+NDEBUG los desactiva. A futuro se pueden reemplazar por una guarda
+activa; hoy simplemente no se usa NDEBUG.
+
+## 5. Anti-patrones prohibidos
 
 - Sintetizar `Prefix` + letra desde GUI para invocar comandos.
 - Exponer en `InputEvent` bytes crudos, keycodes, secuencias ESC, fds o

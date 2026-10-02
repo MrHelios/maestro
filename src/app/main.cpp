@@ -17,11 +17,10 @@ int main(int argc, char* argv[]) {
     platform::X11MouseButtonQuery mouseQuery;
     // Backend de escritura real. Vive lo que vive el editor.
     TtySink ttySink;
-    Editor editor;
-    // Backend de presentación real: el default del Editor es neutro (Null);
-    // producción siempre inyecta el suyo acá. Único sitio productivo que
-    // nombra rendering/tty/ para el renderer.
-    editor.setRenderer(std::make_unique<TtyRenderer>());
+    // Backend de presentación real + clipboard/watcher reales (vía el ctor
+    // explícito de renderer). Único sitio productivo que nombra
+    // rendering/tty/ para el renderer.
+    Editor editor(std::make_unique<TtyRenderer>());
     editor.setSink(ttySink);
     // Oraculo fisico para el autoscroll: si se suelta fuera de la ventana
     // no llega evento de release; el tick consulta X11 y frena igual.
