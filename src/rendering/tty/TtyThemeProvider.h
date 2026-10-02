@@ -3,15 +3,15 @@
 #include "rendering/tty/TtyTheme.h"
 
 // ---------------------------------------------------------------------------
-// ThemeProvider (Fase E paso 6): dueño único del tema activo del backend.
+// TtyThemeProvider (Fase E paso 6): dueño único del tema activo del backend.
 //
 // Fuente única: todo camino que cambie el tema pasa por acá (setTheme o
 // toggle); el resto consulta theme()/isDark(). Arranca en oscuro, igual que
 // el viejo isDarkTheme_=true del Editor.
 // ---------------------------------------------------------------------------
-class ThemeProvider {
+class TtyThemeProvider {
 public:
-    ThemeProvider() : theme_(darkTheme()) {}
+    TtyThemeProvider() : theme_(darkTheme()) {}
 
     void setTheme(const TtyTheme& t) {
         theme_ = t;

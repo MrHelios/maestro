@@ -6,7 +6,7 @@
 #include "base/utf8.h"
 
 // Helpers de texto/UTF-8 compartidos entre el Renderer (que arma el frame)
-// y el StatusBar (que arma la barra comun). Viven en un header para poder
+// y el TtyStatusBar (que arma la barra comun). Viven en un header para poder
 // usarse desde ambos .cpp sin duplicar codigo.
 namespace chrome {
 

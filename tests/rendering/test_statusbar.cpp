@@ -22,7 +22,7 @@
 
 #include "layout/Layout.h"
 #include "app/Message.h"
-#include "rendering/tty/StatusBar.h"
+#include "rendering/tty/TtyStatusBar.h"
 #include "rendering/tty/TtyRenderer.h"
 
 namespace {
@@ -49,7 +49,7 @@ Rows renderRows(const StatusBarData& data, int w) {
     Rect area;
     area.width = w;
     area.height = 2;
-    return rowsOf(StatusBar().render(area, data));
+    return rowsOf(TtyStatusBar().render(area, data));
 }
 
 std::string longStr(int n, char c = 'n') {
@@ -253,7 +253,7 @@ TEST(statusbar_estado_accent_from_role) {
     TtyTheme t = defaultTheme();
     t.statusBarAccent = "\x1b[34m";      // azul (default)
     t.accentNavegacion = "\x1b[33m";     // amarillo (estado activo)
-    StatusBar bar;
+    TtyStatusBar bar;
     bar.setTheme(t);
     Rect area; area.width = 40; area.height = 2;
 
@@ -304,7 +304,7 @@ TEST(statusbar_list_screens_use_their_roles) {
 TEST(statusbar_modified_indicator_styled) {
     TtyTheme t = defaultTheme();
     t.statusBarModified = "\x1b[1;38;5;200m";
-    StatusBar bar;
+    TtyStatusBar bar;
     bar.setTheme(t);
     Rect area; area.width = 60; area.height = 2;
 
@@ -323,14 +323,14 @@ TEST(statusbar_modified_indicator_styled) {
 }
 
 // ---------------------------------------------------------------------------
-// v1.3: un mensaje de tipo Prompt se pinta con theme.prompt (negrita);
+// v1.3: un mensaje de tipo Prompt se pinta con theme.prompt;
 // los mensajes Info no llevan ese estilo.
 // ---------------------------------------------------------------------------
 TEST(statusbar_prompt_message_styled) {
     TtyTheme t = defaultTheme();
     // Italica: distintiva, no colisiona con el bold de la etiqueta de estado.
     t.prompt = "\x1b[3m";
-    StatusBar bar;
+    TtyStatusBar bar;
     bar.setTheme(t);
     Rect area; area.width = 60; area.height = 2;
 

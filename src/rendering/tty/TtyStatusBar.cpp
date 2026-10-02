@@ -1,4 +1,4 @@
-#include "rendering/tty/StatusBar.h"
+#include "rendering/tty/TtyStatusBar.h"
 
 #include <sstream>
 #include <algorithm>
@@ -10,8 +10,8 @@ namespace {
 
 // Estilo de la fila de mensajes segun el tipo (paso 8). El tipo lo decide
 // la pantalla/el Editor cuando produce el Message; aqui se traduce al color
-// del TtyTheme. Info usa el estilo de mensaje base del TtyTheme; Prompt resalta
-// la entrada del usuario en negrita (v1.3).
+// del TtyTheme. Info usa el estilo de mensaje base del TtyTheme; Prompt usa
+// theme.prompt (negrita en los temas por defecto, personalizable).
 const std::string& messageStyle(const TtyTheme& theme, MessageKind kind) {
     switch (kind) {
         case MessageKind::Info:    return theme.message;
@@ -50,7 +50,7 @@ struct BarLeft {
 };
 
 BarLeft layoutLeftBlock(const std::string& rawName, const std::string& rawPath,
-                     const std::string& status, bool modified, int budget) {
+                        const std::string& status, bool modified, int budget) {
     if (budget <= 0) return {"", "", utf8::truncate(status, 0), false, false, true};
 
     std::string name = rawName;
@@ -96,8 +96,8 @@ BarLeft layoutLeftBlock(const std::string& rawName, const std::string& rawPath,
 
 } // namespace
 
-std::string StatusBar::render(const Rect& area, const StatusBarData& data,
-                               StyleRole accentRole) {
+std::string TtyStatusBar::render(const Rect& area, const StatusBarData& data,
+                                 StyleRole accentRole) {
     const int width = area.width;
     const TtyTheme& T = theme_;
     std::ostringstream out;

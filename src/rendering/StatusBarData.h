@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 // StatusBarData: DTO puro de la barra común. No conoce TtyTheme ni ANSI.
 // Vive en rendering/ (zona pura). La codificación ANSI vive en
-// rendering/tty/StatusBar (TtyStatusBar) que recibe este DTO.
+// rendering/tty/TtyStatusBar que recibe este DTO.
 // ---------------------------------------------------------------------------
 struct StatusBarData {
     std::string name;         // nombre del archivo (izquierda)

@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include "rendering/tty/StatusBar.h"
+#include "rendering/tty/TtyStatusBar.h"
 
 const std::string& TtyEncoder::ansiFor(StyleRole role) const {
     return themeAnsiFor(theme_, role);
@@ -94,7 +94,7 @@ std::string TtyEncoder::encodeStatus(const Rect& area,
 void TtyEncoder::appendStatus(std::string& out, const Rect& area,
                               const StatusBarData& data,
                               StyleRole accent) const {
-    StatusBar bar;
+    TtyStatusBar bar;
     bar.setTheme(theme_);
     out += bar.render(area, data, accent);
 }

@@ -7,26 +7,20 @@
 #include "rendering/tty/TtyTheme.h"
 
 // ---------------------------------------------------------------------------
-// StatusBar: codificador TTY de la barra común (vive en rendering/tty/).
+// TtyStatusBar: codificador TTY de la barra común (vive en rendering/tty/).
 // Recibe el DTO puro StatusBarData (rendering/) y lo traduce a ANSI con el
 // TtyTheme (tabla ANSI de ESTE backend). rendering/ nunca incluye este header;
 // opera con StatusBarData + StyleRole.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// La barra usa un TtyTheme para sus colores (v1.2): ya no tiene estilos
-// hardcodeados. La paleta por defecto vive en rendering/tty/TtyTheme.h
-// (kStatusBarStyle
-// = texto negro sobre fondo gris 60%, RGB(102,102,102); kStatusBarName
-// blanco; kStatusBarPath negro; kStatusBarCommand bold dorado).
-//
-// El TtyTheme tambien documenta el aspecto de v1.0/v1.1, que era:
-//  - kStatusBarStyle se aplica UNA sola vez al inicio; los fragmentos solo
-//    cambian el color/atributos del texto manteniendo ese fondo.
-//  - kStatusBarName:   nombre (y ruta) del archivo en blanco.
-//  - kStatusBarReset:  vuelve a la base (negro sobre gris 60%).
-//  - kStatusBarCommand: etiqueta de estado (comando) en negrita dorada.
-//  - kStatusBarPath:   ruta del archivo en negro.
+// La barra toma sus colores del TtyTheme (statusBar como base,
+// statusBarName/statusBarPath/statusBarModified para los fragmentos y el
+// acento de la etiqueta por rol via themeAnsiFor): ya no hay estilos
+// hardcodeados. La base se emite una sola vez al inicio; cada fragmento
+// solo cambia color/atributos del texto y restaura la base con
+// T.reset + T.statusBar, manteniendo el fondo.
+// ---------------------------------------------------------------------------
 
 // ---- Padding de la barra de estado ----
 inline constexpr int kStatusBarPadLeft  = 1;  // espacio inicial antes del nombre
@@ -36,7 +30,7 @@ inline constexpr int kStatusBarPadRight = 3;  // margen derecho: bloque (%, fila
 // fila de mensajes dentro del area que le da el Renderer. Es la ultima
 // fila del frame: Ninguna pantalla decide por si misma donde termina el
 // contenido; eso lo resuelve el Layout que calcula el Renderer.
-class StatusBar {
+class TtyStatusBar {
 public:
     // Construye la secuencia ANSI de la barra completa (fila fija + fila de
     // mensajes) dentro de `area` (espera area.height == 2). No toca la

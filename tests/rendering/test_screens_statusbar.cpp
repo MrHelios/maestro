@@ -24,7 +24,7 @@
 #include "layout/Viewport.h"
 #include "app/Message.h"
 #include "rendering/tty/TtyRenderer.h"
-#include "rendering/tty/StatusBar.h"
+#include "rendering/tty/TtyStatusBar.h"
 
 namespace {
 
@@ -130,7 +130,7 @@ StatusBarData fileData(int n = 3) {
 // pantallas la calculan igual.
 BarRows expectedBar(const StatusBarData& d, int content, int width) {
     Rect area = computeLayout(content + kStatusBarRows, width).statusBar;
-    return barOf(StatusBar().render(area, d));
+    return barOf(TtyStatusBar().render(area, d));
 }
 
 } // namespace

@@ -1,6 +1,7 @@
 #include "rendering/tty/TtyDiff.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 #include "rendering/Style.h"
@@ -256,6 +257,7 @@ std::string TtyDiff::buildScrollFrame(
     const TtyScrollOp scrollOp = scrollOpFor(contentH, deltaTop);
     const int absDelta = scrollOp.absDelta;
     if (!scrollOp.useRegion) return "";
+    assert(static_cast<int>(rowCache_.size()) == contentH);
     if (static_cast<int>(rowCache_.size()) != contentH) return "";
 
     const int gutterW = g.gutterW;

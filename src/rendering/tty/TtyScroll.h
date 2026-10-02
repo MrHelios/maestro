@@ -8,6 +8,15 @@
 // Política pura del scroll diferencial TTY: decide si el delta de
 // viewport admite región de scroll (CSI S/T) o exige rebuild total.
 // No emite nada por sí misma; TtyDiff la consulta y emite.
+//
+// PRECONDICIÓN: el caller (TtyDiff) debe garantizar que
+// rowCache.size() == contentH antes de invocar scrollOpFor /
+// scrollRegionPrefix. TtyScrollOp no existe en GUI; esta precondición
+// es específica del backend TTY.
+// TtyDiff::buildScrollFrame la comprueba en runtime con:
+//   assert(static_cast<int>(rowCache_.size()) == contentH);
+// más guarda `if (size != contentH) return "";` que declina el fast
+// path (vuelve al diff lento) en release.
 struct TtyScrollOp {
     bool useRegion = false; // false => rebuild total
     int absDelta = 0;       // filas a desplazar

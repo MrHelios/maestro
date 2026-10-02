@@ -16,7 +16,7 @@
 #include "rendering/Sink.h"
 #include "rendering/StatusBarData.h"
 #include "rendering/Style.h"
-#include "rendering/tty/ThemeProvider.h"
+#include "rendering/tty/TtyThemeProvider.h"
 #include "rendering/tty/TtyDiff.h"
 #include "rendering/tty/TtyEncoder.h"
 #include "syntax/SyntaxCache.h"
@@ -34,7 +34,7 @@ struct FileListItem {
 // con estado del backend:
 //
 //   Renderer (puro, con EL FrameBuilder) + TtyEncoder + TtyDiff +
-//   ThemeProvider. El diff comparte builder y encoder por referencia
+//   TtyThemeProvider. El diff comparte builder y encoder por referencia
 //   (un solo dueño del estado de sintaxis y del tema).
 //
 // El Frame puro vive en rendering/ (FrameBuilder::buildFrame vía el
@@ -169,7 +169,7 @@ public:
 private:
     Renderer renderer_;  // puro, con EL FrameBuilder
     TtyEncoder encoder_;
-    ThemeProvider provider_;
+    TtyThemeProvider provider_;
     TtyDiff diff_;
 
     void renderBufferListContent(std::string& out,

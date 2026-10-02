@@ -17,7 +17,7 @@
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
 #include "rendering/tty/TtyRenderer.h"
-#include "rendering/tty/StatusBar.h"
+#include "rendering/tty/TtyStatusBar.h"
 
 namespace {
 
@@ -163,7 +163,7 @@ TEST(theme_statusbar_uses_theme_for_colors) {
     t.error = kTestBgRed;
     t.reset = kTestReset;
 
-    StatusBar bar;
+    TtyStatusBar bar;
     bar.setTheme(t);
 
     Rect area; area.row = 0; area.col = 0; area.width = 60; area.height = 2;
@@ -181,7 +181,7 @@ TEST(theme_statusbar_uses_theme_for_colors) {
     CHECK(out.find(t.statusBarAccent) != std::string::npos); // - NAVEGACION
     CHECK(out.find(t.error + "error grave") != std::string::npos);
     // Con default theme el output es distinto: se usa el TtyTheme, no constantes.
-    StatusBar plainBar;
+    TtyStatusBar plainBar;
     CHECK(out != plainBar.render(area, d));
 }
 
@@ -240,7 +240,7 @@ TEST(theme_statusbar_background_covers_full_width) {
     t.statusBarModified = kTestFgYellow;
     t.reset = kTestReset;
 
-    StatusBar bar;
+    TtyStatusBar bar;
     bar.setTheme(t);
     Rect area;
     area.row = 0;
