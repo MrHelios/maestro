@@ -2,10 +2,28 @@
 #include "rendering/tty/TtyRenderer.h"
 #include "platform/InputEvent.h"  // usa InputEvent común
 #include "helpers/test_render_utils.h"
+#include "helpers/test_tty_renderer.h"
 #include <algorithm>
+#include <memory>
 #define private public
 #include "app/Editor.h"
 #undef private
+
+// El default del Editor es Null neutro; estos tests verifican el diff del
+// propio renderer del Editor (invalidación al cambiar de buffer), así que
+// inyectan el backend real vía makeTtyTestRenderer().
+// Igual que ttyOf() de test_support.h (no se incluye ese header acá por
+// choque de helpers locales): dynamic_cast con aborto si falta el backend,
+// nunca static_cast (sería UB silencioso contra el Null default).
+static TtyRenderer& ttyOf(Editor& ed) {
+    auto* t = dynamic_cast<TtyRenderer*>(ed.renderer_.get());
+    if (!t) {
+        std::cerr << "ttyOf: el Editor no tiene TtyRenderer (falta setRenderer)"
+                  << std::endl;
+        std::abort();
+    }
+    return *t;
+}
 
 static InputEvent insert(char c){ InputEvent e; e.type=InputEventType::InsertChar; e.text=std::string(1,c); return e;}
 static void press(Editor& ed, InputEventType t){ InputEvent e; e.type=t; ed.handleEvent(e);}
@@ -23,6 +41,7 @@ static void previousBuffer(Editor& ed){ press(ed, InputEventType::Prefix); press
 
 TEST(ctrl_k_b_renders_new_buffer_immediately){
     Editor ed;
+    ed.setRenderer(makeTtyTestRenderer());
     ed.active().viewport.height=5;
     ed.active().viewport.width=30;
     type(ed, "AAA_CONTENT");
@@ -33,7 +52,7 @@ TEST(ctrl_k_b_renders_new_buffer_immediately){
     type(ed, "BBB_CONTENT");
     press(ed, InputEventType::Escape);
 
-    TtyRenderer& r = *ed.renderer_;
+    TtyRenderer& r = ttyOf(ed);
     Buffer& curBBB = ed.active();
     std::string prime = r.buildDiffFrame(curBBB.document, curBBB.cursor, curBBB.viewport, curBBB.filename, curBBB.modified, Message{}, State::Navegacion, curBBB.selection);
     (void)prime;
@@ -54,6 +73,7 @@ TEST(ctrl_k_b_renders_new_buffer_immediately){
 
 TEST(ctrl_k_b_diff_equals_full_after_switch){
     Editor ed;
+    ed.setRenderer(makeTtyTestRenderer());
     ed.active().viewport.height=5;
     ed.active().viewport.width=30;
     type(ed, "HELLO");
@@ -64,7 +84,7 @@ TEST(ctrl_k_b_diff_equals_full_after_switch){
     type(ed, "WORLD");
     press(ed, InputEventType::Escape);
 
-    TtyRenderer& r = *ed.renderer_;
+    TtyRenderer& r = ttyOf(ed);
     r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
 
     previousBuffer(ed);
@@ -84,6 +104,7 @@ TEST(ctrl_k_b_diff_equals_full_after_switch){
 
 TEST(ctrl_k_b_toggle_twice_renders_correctly){
     Editor ed;
+    ed.setRenderer(makeTtyTestRenderer());
     ed.active().viewport.height=5;
     ed.active().viewport.width=30;
     type(ed, "AAA_TOGGLE");
@@ -94,7 +115,7 @@ TEST(ctrl_k_b_toggle_twice_renders_correctly){
     type(ed, "BBB_TOGGLE");
     press(ed, InputEventType::Escape);
 
-    TtyRenderer& r = *ed.renderer_;
+    TtyRenderer& r = ttyOf(ed);
     r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
 
     previousBuffer(ed);
@@ -113,11 +134,12 @@ TEST(ctrl_k_b_toggle_twice_renders_correctly){
 
 TEST(ctrl_k_b_no_previous_buffer_no_crash){
     Editor ed;
+    ed.setRenderer(makeTtyTestRenderer());
     ed.active().viewport.height=5;
     ed.active().viewport.width=30;
     type(ed, "ONLY_ONE");
     press(ed, InputEventType::Escape);
-    TtyRenderer& r = *ed.renderer_;
+    TtyRenderer& r = ttyOf(ed);
     std::string prime = r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
     (void)prime;
     CHECK(!ed.previousBuffer_.valid);

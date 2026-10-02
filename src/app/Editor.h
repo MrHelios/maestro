@@ -20,16 +20,9 @@
 #include "app/FileBrowser.h"
 #include "app/Message.h"
 #include "rendering/Renderer.h"
+#include "rendering/ScreenRenderer.h"
 #include "platform/InputEvent.h"
 #include "platform/WindowSize.h"
-
-// Sink de escritura (frontera de I/O del backend). Forward declarado para
-// no acoplar este header al backend: el dueño real vive en el .cpp.
-class Sink;
-
-// Backend TTY completo. Forward declarado para no acoplar este header al
-// backend: el Editor lo posee por puntero y los detalles viven en el .cpp.
-class TtyRenderer;
 
 // Editor es el "engine": maneja una coleccion de buffers (v0.6.3), un
 // buffer activo, el modo, los mensajes y el portapapeles global. Todo lo
@@ -67,9 +60,25 @@ class TtyRenderer;
 // GUI usará callbacks/polling, no estos fd.
 class Editor {
 public:
+    // El renderer se inyecta (puerto neutro ScreenRenderer): el Editor nunca
+    // nombra ni construye ningún backend. Los defaults traen un
+    // NullScreenRenderer neutro (no pinta nada): sirven para tests de lógica
+    // y para builds sin backend. Producción inyecta el backend real en el
+    // composition root (main.cpp vía setRenderer); los tests
+    // que afirman bytes de pantalla inyectan el backend real
+    // (ver tests/interaction/test_support.h).
+    //
+    // A REVISAR A FUTURO: el ctor "total" (renderer+clipboard+watcher) no
+    // sirve para producción tal como está: con clipboard/watcher nulos cae
+    // a los Null y se pierde X11 e inotify sin aviso. Falta un
+    // `explicit Editor(unique_ptr<ScreenRenderer>)` que delegue a los
+    // defaults reales, para construcción explícita en un paso en main.
     Editor();
     explicit Editor(std::unique_ptr<SystemClipboard> clipboard);
     Editor(std::unique_ptr<SystemClipboard> clipboard, std::unique_ptr<FileWatcher> watcher);
+    Editor(std::unique_ptr<ScreenRenderer> renderer,
+           std::unique_ptr<SystemClipboard> clipboard,
+           std::unique_ptr<FileWatcher> watcher);
     ~Editor();
 
     // v0.6.2: true si `path` existe y es una carpeta (absoluta o relativa).
@@ -208,6 +217,12 @@ public:
         return *sink_;
     }
 
+    // Inyección tardía del backend de presentación (composition root o tests
+    // que afirman bytes). Nulo = no-op (se conserva el anterior).
+    void setRenderer(std::unique_ptr<ScreenRenderer> r) {
+        if (r) renderer_ = std::move(r);
+    }
+
 private:
     // ---- Mensajes al usuario (paso 8) ----
     // Un unico valor `statusMessage_` (ui::Message) lleva el texto, el tipo
@@ -272,11 +287,11 @@ private:
     // si ya hay uno con esa ruta. Sale del explorador a Navegacion.
     void openFileInBuffer(const std::string& path);
 
-    // Backend TTY completo por puntero para no incluir sus headers en este
-    // header (paso 6: posee encoder, diff, theme y listas). El tema se cambia
-    // solo vía renderer_->toggleTheme()/setTheme; el cache diferencial se
-    // invalida en las transiciones hacia/desde el modal (ver wasModal_).
-    std::unique_ptr<TtyRenderer> renderer_;
+    // Backend de presentación por puntero (puerto neutro): los detalles de
+    // cada backend viven en su TU. El tema se cambia solo vía
+    // renderer_->toggleTheme(); el cache diferencial se invalida en las
+    // transiciones hacia/desde el modal (ver wasModal_).
+    std::unique_ptr<ScreenRenderer> renderer_;
     // Frontera modal del último renderFrame: true si se pintó modal. Sirve
     // para invalidar el diff solo en la transición (entrada y salida),
     // no en cada frame del modal.

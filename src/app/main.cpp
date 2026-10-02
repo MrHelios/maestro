@@ -1,14 +1,16 @@
 #include <cstdio>
+#include <memory>
 #include "app/Editor.h"
 #include "platform/MouseButton.h"
 #include "platform/tty/TtyRunLoop.h"
+#include "rendering/tty/TtyRenderer.h"
 #include "rendering/tty/TtySink.h"
 
 // main es el composition root: acá se cablean los backends concretos
-// (TtySink, X11MouseButtonQuery, TtyRunLoop) con el engine (Editor), que
-// solo conoce interfaces puras (Sink, oracle) y la fachada
-// handleEvent/resize/renderFrame/tick. El futuro GUI construirá los suyos
-// sin tocar src/app/ (solo este archivo).
+// (TtyRenderer, TtySink, X11MouseButtonQuery, TtyRunLoop) con el engine
+// (Editor), que solo conoce puertos neutros (ScreenRenderer, Sink, oracle)
+// y la fachada handleEvent/resize/renderFrame/tick. El futuro GUI construirá
+// los suyos sin tocar src/app/ (solo este archivo).
 int main(int argc, char* argv[]) {
     // Dueño explícito del recurso X11 (sin static de proceso). Vive lo que
     // vive el editor, que lo consulta vía oracle en el tick de autoscroll.
@@ -16,6 +18,10 @@ int main(int argc, char* argv[]) {
     // Backend de escritura real. Vive lo que vive el editor.
     TtySink ttySink;
     Editor editor;
+    // Backend de presentación real: el default del Editor es neutro (Null);
+    // producción siempre inyecta el suyo acá. Único sitio productivo que
+    // nombra rendering/tty/ para el renderer.
+    editor.setRenderer(std::make_unique<TtyRenderer>());
     editor.setSink(ttySink);
     // Oraculo fisico para el autoscroll: si se suelta fuera de la ventana
     // no llega evento de release; el tick consulta X11 y frena igual.

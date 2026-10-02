@@ -148,7 +148,7 @@ TEST(bench_alloc_render_frame_bordes_checked) {
     ed.active().document.restore(makeLines(300, 80));
     ed.state_ = State::Navegacion;
 
-    TtyRenderer& r = *ed.renderer_;
+    TtyRenderer r;  // driver de medición (el Editor ya no expone el backend)
     Message msg;
 
     // Borde superior: viewport.top = 0.
@@ -384,7 +384,7 @@ TEST(bench_alloc_carga_y_resize_checked) {
     Editor ed;
     ed.active().document.restore(makeLines(300, 80));
     ed.state_ = State::Navegacion;
-    TtyRenderer& r = *ed.renderer_;
+    TtyRenderer r;  // driver de medición (el Editor ya no expone el backend)
     Message msg;
     alloc_stats::resetAll();
     {

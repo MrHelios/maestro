@@ -352,6 +352,7 @@ TEST(scroll_renderFrame_diff_visual) {
 
 TEST(scroll_renderFrame_captures_diff) {
     Editor ed;
+    ed.setRenderer(makeTtyTestRenderer());
     NullSink null;
     TtySink real;
     ed.setSink(null);

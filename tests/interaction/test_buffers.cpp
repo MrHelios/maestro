@@ -1438,6 +1438,7 @@ TEST(ctrl_k_b_reconciles_mode_interaction) {
 // ---------------------------------------------------------------------------
 TEST(editor_modal_exit_rebuilds_full_frame) {
     Editor ed;
+    ed.setRenderer(makeTtyTestRenderer());
     newBuffer(ed);  // 2 buffers: el selector abre (con 1 es no-op)
     StringSink sink;
     ed.setSink(sink);

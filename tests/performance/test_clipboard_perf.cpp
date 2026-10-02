@@ -114,9 +114,10 @@ TEST(bench_perf_render_diff_25k_checked) {
     ed.active().cursor.line = n / 2;
     ed.state_ = State::Interaccion;
     Message msg;
+    TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
     // primar cache con frame completo (fuera de medicion)
     {
-        std::string base = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor,
+        std::string base = tr.buildScreen(ed.active().document, ed.active().cursor,
             ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
         perf_time::g_sink += base.size();
     }
@@ -132,14 +133,14 @@ TEST(bench_perf_render_diff_25k_checked) {
             e.type = InputEventType::InsertChar;
             e.text = "a";
             ed.handleEvent(e);
-            auto out = ed.renderer_->buildDiffFrame(ed.active().document, ed.active().cursor,
+            auto out = tr.buildDiffFrame(ed.active().document, ed.active().cursor,
                 ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
             perf_time::g_sink += out.size();
             ++frames;
             InputEvent b;
             b.type = InputEventType::Backspace;
             ed.handleEvent(b);
-            auto out2 = ed.renderer_->buildDiffFrame(ed.active().document, ed.active().cursor,
+            auto out2 = tr.buildDiffFrame(ed.active().document, ed.active().cursor,
                 ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
             perf_time::g_sink += out2.size();
             ++frames;
@@ -147,7 +148,7 @@ TEST(bench_perf_render_diff_25k_checked) {
             if (i % 10 == 9) {
                 ed.active().viewport.top += 1;
                 ed.active().cursor.line += 1;
-                auto outs = ed.renderer_->buildDiffFrame(ed.active().document, ed.active().cursor,
+                auto outs = tr.buildDiffFrame(ed.active().document, ed.active().cursor,
                     ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
                 perf_time::g_sink += outs.size();
                 ++frames;
@@ -163,7 +164,7 @@ TEST(bench_perf_render_diff_25k_checked) {
     // viewport resize 80 -> 120 (fuera del gate principal, reportado)
     ed.active().viewport.width = 120;
     {
-        auto outr = ed.renderer_->buildDiffFrame(ed.active().document, ed.active().cursor,
+        auto outr = tr.buildDiffFrame(ed.active().document, ed.active().cursor,
             ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
         perf_arch::reportVerbose("%-48s %6zu bytes tras resize 120\n", "diff resize", outr.size());
         perf_time::g_sink += outr.size();

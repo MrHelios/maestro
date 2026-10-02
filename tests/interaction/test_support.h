@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 #include <unistd.h>
@@ -14,11 +15,26 @@
 #undef private
 #include "base/utf8.h"
 #include "helpers/test_render_utils.h"
+#include "helpers/test_tty_renderer.h"
 #include "rendering/tty/TtyTheme.h"  // tests que leen r.theme() incluyen el tipo
                                    // directo (ya no llega por Renderer.h)
 #include "rendering/tty/TtyRenderer.h"  // cursorScreenCol usa buildScreen TTY
 
 using testfw::TempFile;
+// makeTtyTestRenderer() viene de helpers/test_tty_renderer.h (helper canónico,
+// compartido con las suites que no incluyen este header).
+// Acceso al backend real del Editor en tests. Con dynamic_cast (no
+// static_cast): si se olvidó el setRenderer el objeto es un Null y el
+// static_cast sería UB silencioso; acá se aborta con mensaje.
+inline TtyRenderer& ttyOf(Editor& ed) {
+    auto* t = dynamic_cast<TtyRenderer*>(ed.renderer_.get());
+    if (!t) {
+        std::cerr << "ttyOf: el Editor no tiene TtyRenderer (falta setRenderer)"
+                  << std::endl;
+        std::abort();
+    }
+    return *t;
+}
 inline InputEvent insert(char c){ InputEvent e; e.type=InputEventType::InsertChar; e.text=std::string(1,c); return e; }
 inline InputEvent ev(InputEventType t){ InputEvent e; e.type=t; return e; }
 inline InputEvent escapeEvent(){ InputEvent e; e.type=InputEventType::Escape; return e; }

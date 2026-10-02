@@ -9,6 +9,8 @@
 #include "test_framework.h"
 
 #include "rendering/Sink.h"
+#include "rendering/tty/TtyRenderer.h"
+#include "helpers/test_tty_renderer.h"
 #include "app/Editor.h"
 
 namespace {
@@ -26,6 +28,8 @@ public:
 
 TEST(editor_invalidate_screen_repaints_full_frame) {
     Editor ed;
+    // Bytes ANSI: el default del Editor es Null neutro, se inyecta el real.
+    ed.setRenderer(makeTtyTestRenderer());
     CaptureSink sink;
     ed.setSink(sink);
 

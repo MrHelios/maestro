@@ -47,6 +47,7 @@ using perf_helpers::moveEvent;
 struct RenderFixture {
     Editor ed;
     Message msg;
+    TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
 
     explicit RenderFixture(int lines, int width = 80) {
         ed.active().document.restore(perf_helpers::makeLines(lines, width));
@@ -57,10 +58,16 @@ struct RenderFixture {
     }
 
     std::string frame() {
-        return ed.renderer_->buildScreen(ed.active().document,
-                                        ed.active().cursor,
-                                        ed.active().viewport, "perf.txt", false,
-                                        msg, ed.state_, std::nullopt);
+        return tr.buildScreen(ed.active().document,
+                              ed.active().cursor,
+                              ed.active().viewport, "perf.txt", false,
+                              msg, ed.state_, std::nullopt);
+    }
+
+    std::string diffFrame(State st) {
+        return tr.buildDiffFrame(ed.active().document, ed.active().cursor,
+                                 ed.active().viewport, "perf.txt", false,
+                                 msg, st, std::nullopt);
     }
 };
 
@@ -203,22 +210,14 @@ TEST(bench_perf_bytes_por_evento_hacia_terminal_checked) {
     // Caso A: una tecla que solo cambia UNA fila.
     fx.ed.handleEvent(e);
     const std::string trasTecla = fx.frame();
-    const std::size_t deltaTecla = fx.ed.renderer_->
-        buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor,
-                        fx.ed.active().viewport, "perf.txt", false, fx.msg,
-                        State::Interaccion, std::nullopt)
-        .size();
+    const std::size_t deltaTecla = fx.diffFrame(State::Interaccion).size();
 
     // Caso B: scroll de una linea (cursor al borde inferior -> viewport.top++),
     // cambian TODAS las filas visibles aunque el texto es el mismo desplazado.
     fx.ed.active().cursor.line += 100;
     fx.ed.active().viewport.top += 1;
     const std::string trasScroll = fx.frame();
-    const std::size_t deltaScroll = fx.ed.renderer_->
-        buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor,
-                        fx.ed.active().viewport, "perf.txt", false, fx.msg,
-                        State::Interaccion, std::nullopt)
-        .size();
+    const std::size_t deltaScroll = fx.diffFrame(State::Interaccion).size();
 
     auto changedRows = [](const std::string& a, const std::string& b) {
         int rows = 0, rowStart = 0;
@@ -258,12 +257,12 @@ TEST(bench_perf_ciclo_diff_integrado_checked) {
     InputEvent e; e.type = InputEventType::InsertChar; e.text = "a";
     perf_time::bench_ns("handleEvent+buildDiffFrame", 2000, [&]{
         fx.ed.handleEvent(e);
-        auto out = fx.ed.renderer_->buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor, fx.ed.active().viewport, "perf.txt", false, fx.msg, fx.ed.state_, std::nullopt);
+        auto out = fx.diffFrame(fx.ed.state_);
         perf_time::g_sink += out.size();
         // volver atras para no crecer indefinidamente
         InputEvent back; back.type = InputEventType::Backspace;
         fx.ed.handleEvent(back);
-        auto out2 = fx.ed.renderer_->buildDiffFrame(fx.ed.active().document, fx.ed.active().cursor, fx.ed.active().viewport, "perf.txt", false, fx.msg, fx.ed.state_, std::nullopt);
+        auto out2 = fx.diffFrame(fx.ed.state_);
         perf_time::g_sink += out2.size();
     });
     CHECK(perf_time::g_sink > 0);

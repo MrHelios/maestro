@@ -4,6 +4,7 @@
 #include "rendering/Sink.h"
 
 #include <chrono>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -22,11 +23,15 @@
 #include "layout/Layout.h"
 #include "rendering/tty/TtyTheme.h"
 #include "rendering/tty/TtyScroll.h"
+#include "rendering/tty/TtyRenderer.h"
+#include "helpers/test_tty_renderer.h"
 #include "app/Editor.h"
 
 namespace {
 // Sink capturador: retiene lo escrito para assertar el primer frame
 // (secuencia de arranque del TtyRunLoop: resize + renderFrame).
+// Los tests que afirman bytes ANSI inyectan el backend real explícito vía
+// makeTtyTestRenderer() (el default del Editor es Null neutro).
 struct CaptureSink : public Sink {
     std::string data;
     bool writeStdout(const std::string& s) override {
@@ -241,6 +246,7 @@ TEST(fase_c_initial_viewport_matches_fallback) {
 // cursor en origen y loop sigue vivo.
 TEST(fase_c_render_without_resize_does_not_break) {
     Editor ed;
+    ed.setRenderer(makeTtyTestRenderer());
     CaptureSink cap;
     ed.setSink(cap);
     ed.renderFrame();
@@ -259,6 +265,7 @@ TEST(fase_c_render_without_resize_does_not_break) {
 // fallback): el dueño aplica el tamaño y el editor lo refleja + renderiza.
 TEST(fase_c_resize_viewport_matches_real_size) {
     Editor ed;
+    ed.setRenderer(makeTtyTestRenderer());
     CaptureSink cap;
     ed.setSink(cap);
     ed.resize(30, 100);
@@ -314,6 +321,7 @@ TEST(fase_c_resize_event_delegates) {
 // clear-screen), con la geometría aplicada y el cursor en origen.
 TEST(fase_c_first_render_after_resize) {
     Editor ed;
+    ed.setRenderer(makeTtyTestRenderer());
     CaptureSink cap;
     ed.setSink(cap);
     ed.resize(30, 100);
@@ -334,6 +342,7 @@ TEST(fase_c_first_render_after_resize) {
 // código viejo: scrollToCursor con ancho de gutter).
 TEST(fase_c_first_render_scrolls_cursor_into_view) {
     Editor ed;
+    ed.setRenderer(makeTtyTestRenderer());
     CaptureSink cap;
     ed.setSink(cap);
     ed.resize(30, 100); // contenido: 28 filas
@@ -357,6 +366,7 @@ TEST(fase_c_first_render_scrolls_cursor_into_view) {
 // camino nuevo — inexistente en el código viejo — no regresa el render).
 TEST(fase_c_first_render_with_bracket_highlight) {
     Editor ed;
+    ed.setRenderer(makeTtyTestRenderer());
     CaptureSink cap;
     ed.setSink(cap);
     ed.resize(30, 100);
@@ -377,6 +387,7 @@ TEST(fase_c_first_render_with_bracket_highlight) {
 // conserva el fast path (sin "\x1b[2J").
 TEST(fase_c_resize_rebuild_only_on_geometry_change) {
     Editor ed;
+    ed.setRenderer(makeTtyTestRenderer());
     CaptureSink cap;
     ed.setSink(cap);
     ed.renderFrame(); // fallback 24x80, caché frío
@@ -502,4 +513,39 @@ TEST(frontier_tty_scroll_op) {
     CHECK(!scrollOpFor(0, 3).useRegion);
     std::string prefix = scrollRegionPrefix(20, op);
     CHECK(prefix == "\x1b[1;20r\x1b[3S\x1b[r");
+}
+
+// Inyección tardía del renderer (camino de main.cpp: Editor() + setRenderer
+// con el backend real). El enganche del SyntaxCache externo ocurre en cada
+// renderFrame (set/unset alrededor del render), no en el ctor: el primer
+// frame tras setRenderer debe pintar highlight idéntico al de un Editor que
+// tuvo el backend desde el inicio. Sin esto, producción (main) podría
+// pintar sin highlight y ningún test lo cazaría.
+TEST(fase_c_late_setRenderer_matches_early_renderer_highlight) {
+    auto makeDoc = [](Editor& ed) {
+        ed.getActiveBufferForTesting().document.restore(
+            {"int main() {", "  int x = 1;", "  return x;", "}"});
+        ed.getActiveBufferForTesting().filename = "t.cpp";
+        ed.resize(24, 80);
+    };
+
+    Editor early;
+    early.setRenderer(makeTtyTestRenderer());
+    makeDoc(early);
+    CaptureSink ref;
+    early.setSink(ref);
+    early.renderFrame();
+    CHECK(!ref.data.empty());
+
+    Editor late;
+    makeDoc(late);
+    CaptureSink nullCap;
+    late.setSink(nullCap);
+    late.renderFrame();  // con Null: corre scroll/brackets pero no pinta
+    CHECK(nullCap.data.empty());
+    late.setRenderer(makeTtyTestRenderer());  // tardío, como main
+    CaptureSink got;
+    late.setSink(got);
+    late.renderFrame();
+    CHECK_EQ(got.data, ref.data);
 }

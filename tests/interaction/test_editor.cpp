@@ -872,20 +872,25 @@ TEST(editor_backspace_removes_whole_multibyte) {
 // ---------------------------------------------------------------------------
 TEST(editor_toggle_theme_changes_lists_bytes) {
     Editor ed;
+    // El default del Editor es Null neutro: se inyecta el backend real y se
+    // observa su API propia (theme()/build*) vía downcast. El camino bajo
+    // test (executeCommand -> renderer_->toggleTheme()) es neutro.
+    ed.setRenderer(makeTtyTestRenderer());
+    auto& tty = ttyOf(ed);
     // Estado inicial: oscuro (id 0).
-    CHECK(ed.renderer_->isDarkTheme());
-    CHECK_EQ(ed.renderer_->theme().id, darkTheme().id);
+    CHECK(tty.isDarkTheme());
+    CHECK_EQ(tty.theme().id, darkTheme().id);
     const std::string before =
-        ed.renderer_->buildBufferListScreen({"a.txt"}, 0, 80, 5);
+        tty.buildBufferListScreen({"a.txt"}, 0, 80, 5);
 
     // Toggle por el camino público: cambia a claro y las listas pintan
     // con un color concreto del tema nuevo, no con el anterior.
     ed.executeCommand("theme.toggle");
-    CHECK(!ed.renderer_->isDarkTheme());
+    CHECK(!tty.isDarkTheme());
     const TtyTheme light = lightTheme();
-    CHECK_EQ(ed.renderer_->theme().id, light.id);
+    CHECK_EQ(tty.theme().id, light.id);
     const std::string after =
-        ed.renderer_->buildBufferListScreen({"a.txt"}, 0, 80, 5);
+        tty.buildBufferListScreen({"a.txt"}, 0, 80, 5);
     CHECK(after.find(light.accentBuffers) != std::string::npos);
     CHECK(after != before);
 }

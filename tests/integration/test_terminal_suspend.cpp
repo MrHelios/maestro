@@ -22,6 +22,7 @@
 #include <csignal>
 #include <cstring>
 #include <fcntl.h>
+#include <memory>
 #include <poll.h>
 #include <stdlib.h>
 #include <string>
@@ -35,8 +36,10 @@
 
 #include "test_framework.h"
 #include "rendering/Sink.h"
+#include "helpers/test_tty_renderer.h"
 #include "platform/tty/Terminal.h"
 #include "platform/tty/TtyRunLoop.h"
+#include "rendering/tty/TtyRenderer.h"
 #include "rendering/tty/TtySink.h"
 #include "app/Editor.h"
 
@@ -284,6 +287,9 @@ TEST(terminal_suspend_handler_survives_resume) {
 [[noreturn]] void runLoopOnSlave() {
     TtySink sink;
     Editor editor;
+    // Composition root del test (igual que main.cpp): el default del Editor
+    // es Null neutro, acá se inyecta el backend real.
+    editor.setRenderer(makeTtyTestRenderer());
     editor.setSink(sink);
     TtyRunLoop loop(editor);
     loop.run();

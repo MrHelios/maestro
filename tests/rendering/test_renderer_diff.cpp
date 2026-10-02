@@ -182,10 +182,10 @@ InputEvent move(InputEventType t) {
 
 struct DiffHarness {
     Editor ed;
-    TtyRenderer& r;
+    TtyRenderer r;  // driver del diff (el Editor ya no expone el backend)
     int kRows;
 
-    explicit DiffHarness(int lines) : r(*ed.renderer_) {
+    explicit DiffHarness(int lines) {
         ed.active().document.restore(
             std::vector<std::string>(static_cast<size_t>(lines),
                                      std::string(80, 'x')));

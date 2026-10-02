@@ -300,12 +300,13 @@ TEST(bench_perf_render_static_checked) {
         // For benchmark we force SyntaxCache via Renderer activeCache
         // Instead use Editor to prime cache
         Editor ed;
+        TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
         ed.active().document.restore(lines);
         ed.active().viewport = vp;
         ed.active().cursor = cur;
         // ensure cache convergido
-        ed.renderer_->activeCache().setLanguage(SyntaxLanguage::Cpp);
-        ed.renderer_->activeCache().ensureValid(ed.active().document, n==0?1:n);
+        tr.activeCache().setLanguage(SyntaxLanguage::Cpp);
+        tr.activeCache().ensureValid(ed.active().document, n==0?1:n);
         int iters = n==0?2000 : n==1000?1000 : n==10000?200:100;
         char label[64]; std::snprintf(label,sizeof(label),"render static %5d",n);
         auto t0 = std::chrono::steady_clock::now();
@@ -313,7 +314,7 @@ TEST(bench_perf_render_static_checked) {
         {
             alloc_stats::Scoped s(alloc_stats::kRenderFrame);
             for (int i=0;i<iters;++i){
-                std::string out = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, State::Navegacion, std::nullopt);
+                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, State::Navegacion, std::nullopt);
                 perf_time::g_sink += out.size();
             }
         }
@@ -332,10 +333,11 @@ TEST(bench_perf_render_cursor_positions_checked) {
     for (int n : sizes) {
         auto lines = makeCppLines(n);
         Editor ed;
+        TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
         ed.active().document.restore(lines);
         ed.active().viewport.height=24; ed.active().viewport.width=80;
-        ed.renderer_->activeCache().setLanguage(SyntaxLanguage::Cpp);
-        ed.renderer_->activeCache().ensureValid(ed.active().document, n);
+        tr.activeCache().setLanguage(SyntaxLanguage::Cpp);
+        tr.activeCache().ensureValid(ed.active().document, n);
         struct Pos{const char* name; int line;};
         Pos poses[] = {{"top",0},{"middle",n/2},{"end",n-1}};
         for (auto p: poses) {
@@ -349,7 +351,7 @@ TEST(bench_perf_render_cursor_positions_checked) {
             {
                 alloc_stats::Scoped s(alloc_stats::kRenderFrame);
                 for (int i=0;i<iters;++i){
-                    std::string out = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, State::Navegacion, std::nullopt);
+                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, State::Navegacion, std::nullopt);
                     perf_time::g_sink += out.size();
                 }
             }
@@ -371,10 +373,11 @@ TEST(bench_perf_render_syntax_cpp_checked) {
         // With syntax
         {
             Editor ed;
+            TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
             ed.active().document.restore(lines);
             ed.active().viewport.height=24; ed.active().viewport.width=80;
-            ed.renderer_->activeCache().setLanguage(SyntaxLanguage::Cpp);
-            ed.renderer_->activeCache().ensureValid(ed.active().document, n==0?1:n);
+            tr.activeCache().setLanguage(SyntaxLanguage::Cpp);
+            tr.activeCache().ensureValid(ed.active().document, n==0?1:n);
             int iters = n==0?1000 : n==1000?500 : 100;
             char label[64]; std::snprintf(label,sizeof(label),"render Cpp %5d",n);
             auto t0 = std::chrono::steady_clock::now();
@@ -382,7 +385,7 @@ TEST(bench_perf_render_syntax_cpp_checked) {
             {
                 alloc_stats::Scoped s(alloc_stats::kRenderFrame);
                 for (int i=0;i<iters;++i){
-                    std::string out = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, State::Navegacion, std::nullopt);
+                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, State::Navegacion, std::nullopt);
                     perf_time::g_sink += out.size();
                 }
             }
@@ -395,9 +398,10 @@ TEST(bench_perf_render_syntax_cpp_checked) {
         // Without syntax
         {
             Editor ed;
+            TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
             ed.active().document.restore(lines);
             ed.active().viewport.height=24; ed.active().viewport.width=80;
-            ed.renderer_->activeCache().setLanguage(SyntaxLanguage::None);
+            tr.activeCache().setLanguage(SyntaxLanguage::None);
             int iters = n==0?1000 : n==1000?500 : 100;
             char label[64]; std::snprintf(label,sizeof(label),"render None %5d",n);
             auto t0 = std::chrono::steady_clock::now();
@@ -405,7 +409,7 @@ TEST(bench_perf_render_syntax_cpp_checked) {
             {
                 alloc_stats::Scoped s(alloc_stats::kRenderFrame);
                 for (int i=0;i<iters;++i){
-                    std::string out = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.txt", false, Message{}, State::Navegacion, std::nullopt);
+                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.txt", false, Message{}, State::Navegacion, std::nullopt);
                     perf_time::g_sink += out.size();
                 }
             }
@@ -568,12 +572,13 @@ TEST(bench_perf_typing_render_cycle_checked) {
     for (int n : sizes) {
         auto lines = makeCppLines(n);
         Editor ed;
+        TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
         ed.active().document.restore(lines);
         ed.active().viewport.height=24; ed.active().viewport.width=80;
         ed.active().cursor.line = n/2; ed.active().cursor.col = 5;
         ed.state_ = State::Interaccion;
-        ed.renderer_->activeCache().setLanguage(SyntaxLanguage::Cpp);
-        ed.renderer_->activeCache().ensureValid(ed.active().document, n);
+        tr.activeCache().setLanguage(SyntaxLanguage::Cpp);
+        tr.activeCache().ensureValid(ed.active().document, n);
         InputEvent e; e.type=InputEventType::InsertChar; e.text="a";
         int iters = n==1000?500 : n==10000?200 : 100;
         char label[64]; std::snprintf(label,sizeof(label),"typing cycle %5d",n);
@@ -583,12 +588,12 @@ TEST(bench_perf_typing_render_cycle_checked) {
             alloc_stats::Scoped s(alloc_stats::kTyping);
             for (int i=0;i<iters;++i){
                 ed.handleEvent(e);
-                std::string out = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out.size();
                 // undo char to keep doc size stable
                 InputEvent b; b.type=InputEventType::Backspace;
                 ed.handleEvent(b);
-                std::string out2 = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out2 = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out2.size();
             }
         }
@@ -606,12 +611,13 @@ TEST(bench_perf_backspace_render_cycle_checked) {
     for (int n : sizes) {
         auto lines = makeCppLines(n);
         Editor ed;
+        TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
         ed.active().document.restore(lines);
         ed.active().viewport.height=24; ed.active().viewport.width=80;
         ed.active().cursor.line = n/2; ed.active().cursor.col = 10;
         ed.state_ = State::Interaccion;
-        ed.renderer_->activeCache().setLanguage(SyntaxLanguage::Cpp);
-        ed.renderer_->activeCache().ensureValid(ed.active().document, n);
+        tr.activeCache().setLanguage(SyntaxLanguage::Cpp);
+        tr.activeCache().ensureValid(ed.active().document, n);
         int iters = n==1000?500:200;
         char label[64]; std::snprintf(label,sizeof(label),"backspace cycle %5d",n);
         auto t0 = std::chrono::steady_clock::now();
@@ -621,11 +627,11 @@ TEST(bench_perf_backspace_render_cycle_checked) {
             for (int i=0;i<iters;++i){
                 InputEvent b; b.type=InputEventType::Backspace;
                 ed.handleEvent(b);
-                std::string out = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out.size();
                 InputEvent e; e.type=InputEventType::InsertChar; e.text="x";
                 ed.handleEvent(e);
-                std::string out2 = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out2 = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out2.size();
             }
         }
@@ -643,12 +649,13 @@ TEST(bench_perf_handleEvent_insertChar_checked) {
     for (int n : sizes) {
         auto lines = makeCppLines(n);
         Editor ed;
+        TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
         ed.active().document.restore(lines);
         ed.active().viewport.height=24; ed.active().viewport.width=80;
         ed.active().cursor.line = n/2; ed.active().cursor.col = 5;
         ed.state_ = State::Interaccion;
-        ed.renderer_->activeCache().setLanguage(SyntaxLanguage::Cpp);
-        ed.renderer_->activeCache().ensureValid(ed.active().document, n);
+        tr.activeCache().setLanguage(SyntaxLanguage::Cpp);
+        tr.activeCache().ensureValid(ed.active().document, n);
         InputEvent e; e.type=InputEventType::InsertChar; e.text="a";
         int iters = n==1000?1000 : n==10000?500 : 200;
         char label[64]; std::snprintf(label,sizeof(label),"handleEvent insert %5d",n);
@@ -678,12 +685,13 @@ TEST(bench_perf_handleEvent_backspace_checked) {
     for (int n : sizes) {
         auto lines = makeCppLines(n);
         Editor ed;
+        TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
         ed.active().document.restore(lines);
         ed.active().viewport.height=24; ed.active().viewport.width=80;
         ed.active().cursor.line = n/2; ed.active().cursor.col = 10;
         ed.state_ = State::Interaccion;
-        ed.renderer_->activeCache().setLanguage(SyntaxLanguage::Cpp);
-        ed.renderer_->activeCache().ensureValid(ed.active().document, n);
+        tr.activeCache().setLanguage(SyntaxLanguage::Cpp);
+        tr.activeCache().ensureValid(ed.active().document, n);
         // preparar un char extra para poder borrar
         InputEvent ins; ins.type=InputEventType::InsertChar; ins.text="x";
         ed.handleEvent(ins);
@@ -718,6 +726,7 @@ TEST(bench_perf_move_left_right_checked) {
         // hacer una línea larga 4000 cols en el medio
         if (n>0) lines[n/2] = std::string(4000,'x');
         Editor ed;
+        TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
         ed.active().document.restore(lines);
         ed.active().viewport.height=24; ed.active().viewport.width=80;
         ed.active().cursor.line = n/2; ed.active().cursor.col = 2000;
@@ -730,10 +739,10 @@ TEST(bench_perf_move_left_right_checked) {
             alloc_stats::Scoped s(alloc_stats::kOther);
             for (int i=0;i<iters;++i){
                 ed.handleEvent(moveEvent(InputEventType::MoveLeft));
-                std::string out = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out.size();
                 ed.handleEvent(moveEvent(InputEventType::MoveRight));
-                std::string out2 = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out2 = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out2.size();
             }
         }
@@ -751,13 +760,14 @@ TEST(bench_perf_page_up_down_render_cycle_checked) {
     for (int n : sizes) {
         auto lines = makeCppLines(n);
         Editor ed;
+        TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
         ed.active().document.restore(lines);
         ed.active().viewport.height=24; ed.active().viewport.width=80;
         ed.active().viewport.top = n/2;
         ed.active().cursor.line = n/2;
         ed.state_ = State::Navegacion;
-        ed.renderer_->activeCache().setLanguage(SyntaxLanguage::Cpp);
-        ed.renderer_->activeCache().ensureValid(ed.active().document, n);
+        tr.activeCache().setLanguage(SyntaxLanguage::Cpp);
+        tr.activeCache().ensureValid(ed.active().document, n);
         int iters = 200;
         char label[64]; std::snprintf(label,sizeof(label),"pageUp/Down cycle %5d",n);
         auto t0 = std::chrono::steady_clock::now();
@@ -766,10 +776,10 @@ TEST(bench_perf_page_up_down_render_cycle_checked) {
             alloc_stats::Scoped s(alloc_stats::kOther);
             for (int i=0;i<iters;++i){
                 ed.handleEvent(moveEvent(InputEventType::PageUp));
-                std::string out = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out.size();
                 ed.handleEvent(moveEvent(InputEventType::PageDown));
-                std::string out2 = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out2 = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out2.size();
             }
         }
@@ -790,6 +800,7 @@ TEST(bench_perf_scroll_checked) {
     for (int n : sizes) {
         auto lines = makeCppLines(n);
         Editor ed;
+        TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
         ed.active().document.restore(lines);
         ed.active().viewport.height=24; ed.active().viewport.width=80;
         ed.active().viewport.top = n/2;
@@ -803,7 +814,7 @@ TEST(bench_perf_scroll_checked) {
             alloc_stats::Scoped s(alloc_stats::kOther);
             for (int i=0;i<iters;++i){
                 ed.handleEvent(moveEvent(InputEventType::MoveDown));
-                std::string out = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += out.size();
             }
         }
@@ -866,6 +877,7 @@ TEST(bench_perf_insert_line_render_cycle_checked) {
             else if (std::string(posName)=="end") line = n-1;
             auto lines = makeCppLines(n);
             Editor ed;
+            TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
             ed.active().document.restore(lines);
             ed.active().viewport.height=24; ed.active().viewport.width=80;
             ed.state_ = State::Interaccion;
@@ -880,7 +892,7 @@ TEST(bench_perf_insert_line_render_cycle_checked) {
                 {
                     alloc_stats::Scoped sc(alloc_stats::kOther);
                     ed.handleEvent(moveEvent(InputEventType::InsertNewline));
-                    std::string out = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                     perf_time::g_sink += out.size();
                 }
                 auto e = std::chrono::steady_clock::now();
@@ -950,6 +962,7 @@ TEST(bench_perf_delete_line_checked) {
             long long total_ns=0, total_allocs=0, total_bytes=0;
             for (int i=0;i<iters;++i){
                 Editor ed;
+                TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
                 ed.active().document.restore(lines);
                 ed.active().viewport.height=24; ed.active().viewport.width=80;
                 ed.active().cursor.line = line;
@@ -959,7 +972,7 @@ TEST(bench_perf_delete_line_checked) {
                 {
                     alloc_stats::Scoped sc(alloc_stats::kOther);
                     ed.active().document.deleteRange(line,0,line+1<ed.active().document.lineCount()?line+1:line,0);
-                    std::string out = ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                     perf_time::g_sink += out.size();
                 }
                 auto e = std::chrono::steady_clock::now();
@@ -983,13 +996,14 @@ TEST(bench_perf_editor_large_cpp_checked) {
     for (int n : sizes) {
         auto lines = makeCppLines(n);
         Editor ed;
+        TtyRenderer tr;  // driver de medición (el Editor ya no expone el backend)
         ed.active().document.restore(lines);
         ed.active().viewport.height=24; ed.active().viewport.width=80;
         ed.active().viewport.top = n/2;
         ed.active().cursor.line = n/2; ed.active().cursor.col=5;
         ed.state_ = State::Interaccion;
-        ed.renderer_->activeCache().setLanguage(SyntaxLanguage::Cpp);
-        ed.renderer_->activeCache().ensureValid(ed.active().document, n);
+        tr.activeCache().setLanguage(SyntaxLanguage::Cpp);
+        tr.activeCache().ensureValid(ed.active().document, n);
         int cycles = 50;
         char label[64]; std::snprintf(label,sizeof(label),"full scenario %5d",n);
         auto t0 = std::chrono::steady_clock::now();
@@ -1000,20 +1014,20 @@ TEST(bench_perf_editor_large_cpp_checked) {
                 // load already done
                 // move
                 ed.handleEvent(moveEvent(InputEventType::MoveLeft));
-                ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 // insert char
                 InputEvent e; e.type=InputEventType::InsertChar; e.text="a";
                 ed.handleEvent(e);
-                ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 // left/right
                 ed.handleEvent(moveEvent(InputEventType::MoveRight));
-                ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 // page down
                 ed.handleEvent(moveEvent(InputEventType::PageDown));
-                ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 // bracket match
                 Position bpos{ed.active().cursor.line, ed.active().cursor.col};
-                const auto& spans = ed.renderer_->activeCache().allSpans();
+                const auto& spans = tr.activeCache().allSpans();
                 auto p = findMatchingBracket(ed.active().document, bpos, SyntaxLanguage::Cpp, spans);
                 perf_time::g_sink += p ? 1 : 0;
                 // edit inside comment - edición línea real O(line), no snapshot/restore O(N)
@@ -1024,10 +1038,10 @@ TEST(bench_perf_editor_large_cpp_checked) {
                     int len = ed.active().document.lineLength(cl);
                     ed.active().document.deleteRange(cl,0,cl,len);
                     ed.active().document.insertText(cl,0,newLine);
-                    ed.renderer_->activeCache().markDirty(cl);
-                    ed.renderer_->activeCache().ensureValid(ed.active().document, n);
+                    tr.activeCache().markDirty(cl);
+                    tr.activeCache().ensureValid(ed.active().document, n);
                 }
-                ed.renderer_->buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
                 perf_time::g_sink += 1;
             }
         }

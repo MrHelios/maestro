@@ -2,6 +2,7 @@
 #include "syntax/SyntaxLanguage.h"
 #include "syntax/SyntaxToken.h"
 #include "syntax/SyntaxCache.h"
+#include "rendering/tty/TtyRenderer.h"
 
 // Regresión: al escribir /* ... */ en filas separadas (sin cambiar
 // lineCount), el render incremental debe repintar al instante todas las
@@ -62,13 +63,17 @@ TEST(syntax_block_comment_multiline_incremental_update) {
     b.cursor.col = 0;
 
     b.syntaxCache.setLanguage(SyntaxLanguage::Cpp);
-    ed.renderer_->setExternalSyntaxCache(&b.syntaxCache);
+    // El driver incremental es un backend local sobre el cache del buffer
+    // (lo mismo que el Editor usa por dentro vía su renderer inyectado):
+    // el objeto bajo test es el cache incremental, no el dueño.
+    TtyRenderer tty;
+    tty.setExternalSyntaxCache(&b.syntaxCache);
 
     Message msg;
     // Prime: full rebuild, deja rowCache_ caliente y lastVersion_/lastCursor.
-    ed.renderer_->buildDiffFrame(b.document, b.cursor, b.viewport,
-                                b.filename, false, msg, State::Navegacion,
-                                std::nullopt, std::nullopt, std::nullopt);
+    tty.buildDiffFrame(b.document, b.cursor, b.viewport,
+                       b.filename, false, msg, State::Navegacion,
+                       std::nullopt, std::nullopt, std::nullopt);
 
     // --- Fase 1: abrir /* en fila 1 y cerrar */ en fila 4 (sin tocar lineCount)
     b.document.insertText(1, 0, "/* ");
@@ -78,9 +83,9 @@ TEST(syntax_block_comment_multiline_incremental_update) {
     b.cursor.col = 3;
 
     // Render incremental como hace el editor al teclear (diff de una fila).
-    ed.renderer_->buildDiffFrame(b.document, b.cursor, b.viewport,
-                                b.filename, false, msg, State::Navegacion,
-                                std::nullopt, std::nullopt, std::nullopt);
+    tty.buildDiffFrame(b.document, b.cursor, b.viewport,
+                       b.filename, false, msg, State::Navegacion,
+                       std::nullopt, std::nullopt, std::nullopt);
 
     // Oraculo: reparse completo (lo que se ve al entrar/salir del archivo).
     SyntaxCache fresh;
@@ -113,9 +118,9 @@ TEST(syntax_block_comment_multiline_incremental_update) {
     b.cursor.line = 1;
     b.cursor.col = 0;
 
-    ed.renderer_->buildDiffFrame(b.document, b.cursor, b.viewport,
-                                b.filename, false, msg, State::Navegacion,
-                                std::nullopt, std::nullopt, std::nullopt);
+    tty.buildDiffFrame(b.document, b.cursor, b.viewport,
+                       b.filename, false, msg, State::Navegacion,
+                       std::nullopt, std::nullopt, std::nullopt);
 
     SyntaxCache fresh2;
     fresh2.setLanguage(SyntaxLanguage::Cpp);

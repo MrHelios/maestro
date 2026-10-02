@@ -13,7 +13,7 @@
 #include "syntax/SyntaxHighlighter.h"
 #include "platform/clipboard/ClipboardFactory.h"
 #include "filesystem/FileWatcherFactory.h"
-#include "rendering/tty/TtyRenderer.h"  // Backend TTY (el header solo forward-declara).
+#include "rendering/NullScreenRenderer.h"
 
 namespace {
 
@@ -131,7 +131,12 @@ Editor::Editor(std::unique_ptr<SystemClipboard> clipboard)
     : Editor(std::move(clipboard), makeFileWatcher()) {}
 
 Editor::Editor(std::unique_ptr<SystemClipboard> clipboard, std::unique_ptr<FileWatcher> watcher)
-    : renderer_(std::make_unique<TtyRenderer>()),
+    : Editor(std::make_unique<NullScreenRenderer>(), std::move(clipboard), std::move(watcher)) {}
+
+Editor::Editor(std::unique_ptr<ScreenRenderer> renderer,
+               std::unique_ptr<SystemClipboard> clipboard,
+               std::unique_ptr<FileWatcher> watcher)
+    : renderer_(renderer ? std::move(renderer) : std::make_unique<NullScreenRenderer>()),
       clipboard_(std::move(clipboard)), watcher_(std::move(watcher)) {
     if (!clipboard_) clipboard_ = makeNullClipboard();
     if (!watcher_) watcher_ = makeNullFileWatcher();
@@ -763,9 +768,9 @@ void Editor::resize(const platform::WindowSize& size) {
         syncViewportSize(buffers.at(i));
         buffers.at(i).cursor.clampToLine(buffers.at(i).document);
     }
-    // Sin invalidateCache: el diff TTY detecta el cambio de geometría
-    // solo (TtyDiff::buildDiffFrame) y rebuilda; un resize al mismo
-    // tamaño conserva el fast path. El dirty neutro pertenece a Fase D.
+    // Sin invalidateCache: el diff del backend detecta el cambio de
+    // geometría solo y rebuilda; un resize al mismo tamaño conserva el
+    // fast path.
 }
 
 void Editor::resize(int rows, int cols) {
