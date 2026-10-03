@@ -57,7 +57,7 @@ const std::string& accentForState(const TtyTheme& t, State s) {
         case State::Seleccion: return t.accentSeleccion;
         case State::Prefix: return t.accentComando;
         case State::BufferSelector: return t.accentBuffers;
-        case State::SaveAs: return t.accentGuardar;
+        case State::SaveAsFileBrowser: return t.accentGuardar;
         case State::FileBrowser: return t.accentAbrir;
         case State::Busqueda: return t.accentGuardar;
         case State::IrAFila: return t.accentNavegacion;
@@ -158,7 +158,7 @@ TEST(fase_e_golden_cursor_move_solo_cup_y_show) {
 TEST(fase_e_golden_status_todos_los_estados_ambos_temas) {
     const State states[] = {
         State::Navegacion, State::Interaccion,  State::Seleccion,
-        State::Prefix,     State::BufferSelector, State::SaveAs,
+        State::Prefix,     State::BufferSelector, State::SaveAsFileBrowser,
         State::FileBrowser, State::Busqueda,     State::IrAFila,
     };
     Document doc = numberedDoc(30);

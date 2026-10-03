@@ -99,10 +99,10 @@ std::string FrameBuilder::stateLabelFor(State state) {
         case State::Seleccion:      return "SELECCION";
         case State::Prefix:         return "COMANDO";
         case State::BufferSelector: return "BUFFERS";
-        case State::SaveAs:         return "GUARDAR";
         case State::FileBrowser:    return "ABRIR";
         case State::Busqueda:       return "BUSQUEDA";
         case State::IrAFila:        return "IR A FILA";
+        case State::SaveAsFileBrowser: return "GUARDAR COMO";
     }
     return "";
 }

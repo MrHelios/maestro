@@ -642,10 +642,18 @@ TEST(save_as_new_file_end_to_end_isNew_hadWatch) {
     ed.active().document.restore({"save_as_content"});
     ed.active().modified = true;
     auto oldIdentity = ed.active().savedIdentity;
-    // simular SaveAs a nuevo path (isNew=true)
-    ed.saveAsPath_ = fNew.path;
-    // commitSaveAs es privado pero accesible via private hack
-    ed.commitSaveAs();
+    // Nuevo flujo SaveAsFileBrowser (el browser arranca en /tmp, mismo dir
+    // de los TempFile): limpiar el prefill y escribir el nombre destino.
+    { InputEvent e; e.type = InputEventType::Prefix; ed.handleEvent(e); }
+    { InputEvent e; e.type = InputEventType::Save; ed.handleEvent(e); }
+    while (!ed.saveAsFileName_.empty()) {
+        InputEvent b; b.type = InputEventType::Backspace; ed.handleEvent(b);
+    }
+    for (char c : std::filesystem::path(fNew.path).filename().string()) {
+        InputEvent ch; ch.type = InputEventType::InsertChar; ch.text = std::string(1, c);
+        ed.handleEvent(ch);
+    }
+    { InputEvent s; s.type = InputEventType::Save; ed.handleEvent(s); }  // Ctrl+S confirma
     CHECK_EQ(ed.active().filename, std::filesystem::absolute(fNew.path).lexically_normal().string());
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().document.lineAt(0), "save_as_content");
@@ -701,8 +709,17 @@ TEST(save_as_existing_file_overwrites_and_updates_watch) {
     std::string oldAbs = std::filesystem::absolute(fOrig.path).lexically_normal().string();
     std::string newAbs = std::filesystem::absolute(fExisting.path).lexically_normal().string();
     CHECK(oldAbs != newAbs);
-    ed.saveAsPath_ = fExisting.path;
-    ed.commitSaveAs();  // 1er Enter: solo arma confirmación, no escribe
+    // Nuevo flujo SaveAsFileBrowser (browser en /tmp): prefill + nombre destino.
+    { InputEvent e; e.type = InputEventType::Prefix; ed.handleEvent(e); }
+    { InputEvent e; e.type = InputEventType::Save; ed.handleEvent(e); }
+    while (!ed.saveAsFileName_.empty()) {
+        InputEvent b; b.type = InputEventType::Backspace; ed.handleEvent(b);
+    }
+    for (char c : std::filesystem::path(fExisting.path).filename().string()) {
+        InputEvent ch; ch.type = InputEventType::InsertChar; ch.text = std::string(1, c);
+        ed.handleEvent(ch);
+    }
+    { InputEvent s; s.type = InputEventType::Save; ed.handleEvent(s); }  // 1er Ctrl+S: arma confirmación
     CHECK(ed.statusMessage_.text.find("ya existe") != std::string::npos);
     {
         std::ifstream in(fExisting.path, std::ios::binary);
@@ -710,7 +727,7 @@ TEST(save_as_existing_file_overwrites_and_updates_watch) {
         CHECK_EQ(disk, "existing\n");
     }
     CHECK_EQ(ed.buffers.count(), 1);
-    ed.commitSaveAs();  // 2do Enter: confirma y sobrescribe
+    { InputEvent s; s.type = InputEventType::Save; ed.handleEvent(s); }  // 2do Ctrl+S: confirma y sobrescribe
     CHECK_EQ(ed.active().filename, newAbs);
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().document.lineAt(0), "save_as_overwrite");
@@ -754,19 +771,29 @@ TEST(save_as_failure_keeps_buffer_and_watch) {
     auto oldFilename = ed.active().filename;
     auto oldIdentity = ed.active().savedIdentity;
     std::string oldAbs = std::filesystem::absolute(fOrig.path).lexically_normal().string();
-    std::string badPath = "/tmp/maestro_saveas_failure_" + std::to_string(::getpid()) + "/file.txt";
-    std::filesystem::remove_all(badPath);
     auto* w = dynamic_cast<InotifyFileWatcher*>(ed.watcher_.get());
     CHECK(w != nullptr);
     CHECK(w->fileWatches_.find(oldAbs) != w->fileWatches_.end());
-    ed.saveAsPath_ = badPath;
-    ed.commitSaveAs();
+    // Nuevo flujo (contrato basename): nombre imposible de crear
+    // (componente > NAME_MAX -> ENAMETOOLONG) para forzar error de guardado.
+    { InputEvent e; e.type = InputEventType::Prefix; ed.handleEvent(e); }
+    { InputEvent e; e.type = InputEventType::Save; ed.handleEvent(e); }
+    while (!ed.saveAsFileName_.empty()) {
+        InputEvent b; b.type = InputEventType::Backspace; ed.handleEvent(b);
+    }
+    std::string failName = std::string(300, 'a') + ".txt";
+    for (char c : failName) {
+        InputEvent ch; ch.type = InputEventType::InsertChar; ch.text = std::string(1, c);
+        ed.handleEvent(ch);
+    }
+    { InputEvent s; s.type = InputEventType::Save; ed.handleEvent(s); }
     CHECK_EQ(ed.active().filename, oldFilename);
     CHECK(ed.active().modified);
     CHECK(ed.active().savedIdentity == oldIdentity);
     CHECK_EQ(ed.active().document.lineAt(0), "new_content");
     CHECK(ed.statusMessage_.text.find("Error") != std::string::npos || ed.statusMessage_.text.find("error") != std::string::npos || ed.statusMessage_.text.find("No se pudo") != std::string::npos);
-    std::string badAbs = std::filesystem::absolute(badPath).lexically_normal().string();
+    std::string badAbs =
+        (std::filesystem::path(ed.fileBrowser.path_) / failName).lexically_normal().string();
     CHECK(w->fileWatches_.find(badAbs) == w->fileWatches_.end());
     CHECK(w->trackedFiles_.find(badAbs) == w->trackedFiles_.end());
     CHECK(w->fileWatches_.find(oldAbs) != w->fileWatches_.end());

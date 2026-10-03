@@ -63,10 +63,10 @@ inline StyleRole accentRoleFor(State state) {
         case State::Seleccion:      return StyleRole::AccentSeleccion;
         case State::Prefix:         return StyleRole::AccentComando;
         case State::BufferSelector: return StyleRole::AccentBuffers;
-        case State::SaveAs:         return StyleRole::AccentGuardar;
         case State::FileBrowser:    return StyleRole::AccentAbrir;
         case State::Busqueda:       return StyleRole::AccentGuardar;
         case State::IrAFila:        return StyleRole::AccentNavegacion;
+        case State::SaveAsFileBrowser: return StyleRole::AccentGuardar;
     }
     return StyleRole::StatusAccentDefault;
 }

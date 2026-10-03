@@ -299,6 +299,9 @@ private:
     void startFileBrowser();
     void handleFileBrowserEvent(const InputEvent& event);
     void fileBrowserEnterSelected();
+    // Variante para "Guardar como": solo entra a carpetas, nunca abre
+    // archivos (Enter sobre un archivo es no-op).
+    void fileBrowserEnterDirectoryOnly();
     // Abre `path` (absoluta) en un buffer NUEVO, o activa el existente
     // si ya hay uno con esa ruta. Sale del explorador a Navegacion.
     void openFileInBuffer(const std::string& path);
@@ -396,13 +399,15 @@ private:
     // consecuencias de las acciones del explorador.
     FileBrowser fileBrowser;
 
-    // Ruta escrita por el usuario en el prompt "Guardar archivo:" (modo
-    // SaveAs). Relativa o absoluta; se resuelve contra cwd() al confirmar.
-    std::string saveAsPath_;
-    // Ruta armada para confirmación de sobrescritura: si commitSaveAs
+    // Ruta armada para confirmación de sobrescritura: si commitSaveAsFileBrowser
     // detecta que el destino existe y difiere del archivo del buffer, arma
-    // esta ruta y espera un segundo Enter (vacía = sin aviso pendiente).
+    // esta ruta y espera un segundo Ctrl+S (vacía = sin aviso pendiente).
     std::string saveAsConfirmPath_;
+    // Nombre de archivo escrito por el usuario en el explorador "Guardar como"
+    // (modo SaveAsFileBrowser). CONTRATO basename: solo el nombre, sin path
+    // (sin '/', '\\', '.' ni '..'); se combina con fileBrowser.path_ al
+    // confirmar con Ctrl+S. El directorio solo cambia navegando carpetas.
+    std::string saveAsFileName_;
 
     // ---- Busqueda (v0.8 / feature f) ----
     std::string searchQuery_;
@@ -507,23 +512,17 @@ private:
     // otra tecla descarta el evento y cancela el prefijo.
     void handlePrefixKey(const InputEvent& event);
 
-    // ---- Guardar como (v0.7) ----
-    // Ctrl+K Ctrl+S sobre un buffer sin nombre (p.ej. creado con Ctrl+K n)
-    // ya no falla con "Archivo sin nombre": en su lugar se abre el prompt
-    // "Guardar archivo:" en la fila de mensajes, donde se escribe la ruta
-    // destino. Enter confirma (commitSaveAs), ESC cancela.
+    // ---- Guardar como con explorador (v0.9) ----
+    // Ctrl+K Ctrl+S (o buffer sin nombre al guardar): abre el explorador
+    // de archivos para elegir directorio + input de nombre. Enter solo
+    // entra a carpetas (nunca abre archivos); Ctrl+S confirma
+    // (commitSaveAsFileBrowser combina fileBrowser.path_ + saveAsFileName_),
+    // ESC cancela.
     void startSaveAs();
-    // Maneja los eventos mientras state_ == State::SaveAs.
-    void handleSaveAsEvent(const InputEvent& event);
-    // Resuelve la ruta escrita (relativa -> absoluta contra cwd), rechaza
-    // carpetas y guarda una copia: sin nombre o mismo path persiste
-    // in-place; con path nuevo conserva el buffer viejo y agrega uno nuevo
-    // con el contenido guardado (Save a copy). Destino ya abierto se
-    // rechaza sin tocar disco. Si el destino existe en disco y difiere del
-    // archivo del buffer, el primer Enter solo arma la confirmación
-    // (saveAsConfirmPath_) y el segundo Enter sobrescribe. Ante exito sale
-    // del prompt; ante error se queda para corregir la ruta.
-    void commitSaveAs();
+    // Maneja eventos en State::SaveAsFileBrowser: navegacion + input nombre + Ctrl+S.
+    void handleSaveAsFileBrowserEvent(const InputEvent& event);
+    // Confirma guardado: combina fileBrowser.path_ + saveAsFileName_.
+    void commitSaveAsFileBrowser();
 
     // --- Despacho por modo ---
     void handleNavegacionEvent(const InputEvent& event);

@@ -190,9 +190,10 @@ void TtyRenderer::renderBufferList(const std::vector<std::string>& names,
     sink.writeStdout(buffer);
 }
 
-std::string TtyRenderer::buildFileListScreen(
+std::string TtyRenderer::buildFileListFrame(
     const std::vector<FileListItem>& items, int selected, int scroll,
-    const std::string& path, const Message& message, int width, int height) {
+    const std::string& path, const Message& message, int width, int height,
+    const char* estado, StyleRole accent) {
     std::string out;
     encoder_.beginFrame(out);
 
@@ -201,13 +202,13 @@ std::string TtyRenderer::buildFileListScreen(
 
     StatusBarData data;
     data.name = path.empty() ? "/" : chrome::collapseHome(path);
-    data.estado = "ABRIR ARCHIVO";
+    data.estado = estado;
     const int total = static_cast<int>(items.size());
     data.right = total == 0 ? "0/0"
                             : std::to_string(selected - scroll + 1) + "/" +
                                   std::to_string(total);
     data.message = message;
-    renderStatusBar(out, layout.statusBar, data, StyleRole::AccentAbrir);
+    renderStatusBar(out, layout.statusBar, data, accent);
 
     int rows = std::min(static_cast<int>(items.size()) - scroll, height);
     if (rows > 0) {
@@ -217,6 +218,13 @@ std::string TtyRenderer::buildFileListScreen(
 
     encoder_.endFrame(out);
     return out;
+}
+
+std::string TtyRenderer::buildFileListScreen(
+    const std::vector<FileListItem>& items, int selected, int scroll,
+    const std::string& path, const Message& message, int width, int height) {
+    return buildFileListFrame(items, selected, scroll, path, message, width,
+                              height, "ABRIR ARCHIVO", StyleRole::AccentAbrir);
 }
 
 void TtyRenderer::renderFileListContent(
@@ -249,5 +257,25 @@ void TtyRenderer::renderFileList(const std::vector<FileListItem>& items,
                                  Sink& sink) {
     std::string buffer =
         buildFileListScreen(items, selected, scroll, path, message, width, height);
+    sink.writeStdout(buffer);
+}
+
+std::string TtyRenderer::buildSaveAsFileListScreen(
+    const std::vector<FileListItem>& items, int selected, int scroll,
+    const std::string& path, const Message& message, int width, int height) {
+    // El input del nombre llega ya compuesto en `message` (lo arma el
+    // Editor en la fila de mensajes, debajo del statusbar). Solo cambian
+    // etiqueta y accent respecto de abrir.
+    return buildFileListFrame(items, selected, scroll, path, message, width,
+                              height, "GUARDAR COMO", StyleRole::AccentGuardar);
+}
+
+void TtyRenderer::renderSaveAsFileList(const std::vector<FileListItem>& items,
+                                       int selected, int scroll,
+                                       const std::string& path,
+                                       const Message& message, int width, int height,
+                                       Sink& sink) {
+    std::string buffer =
+        buildSaveAsFileListScreen(items, selected, scroll, path, message, width, height);
     sink.writeStdout(buffer);
 }

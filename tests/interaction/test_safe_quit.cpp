@@ -177,20 +177,17 @@ TEST(save_as_copy_prefill_editable_and_moves) {
     CHECK(ed.loadIntoActiveBuffer(f.path));
     type(ed, "X");
     press(ed, InputEventType::Escape);
-    press(ed, InputEventType::Prefix);
-    InputEvent e; e.type = InputEventType::Save; ed.handleEvent(e);
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
-    CHECK_EQ(ed.saveAsPath_, f.path);
-    InputEvent esc; esc.type = InputEventType::Escape; ed.handleEvent(esc);
+    openSaveAs(ed);  // Ctrl+K Ctrl+S
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAsFileBrowser));
+    CHECK_EQ(ed.saveAsFileName_, std::filesystem::path(f.path).filename().string());
+    press(ed, InputEventType::Escape);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(ed.active().modified);
-    press(ed, InputEventType::Prefix);
-    e.type = InputEventType::Save; ed.handleEvent(e);
+    openSaveAs(ed);
     testfw::TempFile g;
-    for (size_t i = 0; i < f.path.size(); ++i) { InputEvent b; b.type = InputEventType::Backspace; ed.handleEvent(b); }
-    for (char c : g.path) ed.handleEvent(insert(c));
-    CHECK_EQ(ed.saveAsPath_, g.path);
-    InputEvent ent; ent.type = InputEventType::InsertNewline; ed.handleEvent(ent);
+    clearPrompt(ed);
+    typePrompt(ed, std::filesystem::path(g.path).filename().string());
+    saveAsConfirm(ed);  // Ctrl+S
     CHECK_EQ(ed.active().filename, g.path);
     CHECK(!ed.active().modified);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));

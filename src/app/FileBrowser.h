@@ -58,6 +58,12 @@ public:
     };
     EnterResult enter();
 
+    // Enter solo para carpetas (modo "Guardar como"): si la entrada
+    // seleccionada es una carpeta (".." incluida) entra como enter();
+    // si es un archivo o no hay entradas devuelve None sin tocar nada
+    // (nunca abre archivos: pendingPath() queda intacto).
+    EnterResult enterDirectoryOnly();
+
     // Tras OpenedFile, la ruta absoluta del archivo a abrir.
     const std::string& pendingPath() const { return pendingPath_; }
 

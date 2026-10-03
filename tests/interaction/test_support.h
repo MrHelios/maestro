@@ -49,9 +49,9 @@ inline int utf8Len(unsigned char b){
 }
 inline void press(Editor& ed, InputEventType type){ InputEvent e; e.type=type; ed.handleEvent(e); }
 inline void pressEvent(Editor& ed, const InputEvent& e){ ed.handleEvent(e); }
-// Precondición: estado Navegacion o Interaccion/Seleccion. No maneja modales (Prefix/SaveAs/Busqueda/etc.).
+// Precondición: estado Navegacion o Interaccion/Seleccion. No maneja modales (Prefix/SaveAsFileBrowser/Busqueda/etc.).
 inline void enterInteraccion(Editor& ed){ if(ed.state_!=State::Interaccion){ if(ed.state_==State::Seleccion){ InputEvent esc; esc.type=InputEventType::Escape; ed.handleEvent(esc); } ed.handleEvent(insert('i')); } }
-// Precondición: estado Navegacion o Interaccion. No maneja modales (Prefix/SaveAs/Busqueda/etc.).
+// Precondición: estado Navegacion o Interaccion. No maneja modales (Prefix/SaveAsFileBrowser/Busqueda/etc.).
 inline void enterSeleccion(Editor& ed){ if(ed.state_!=State::Seleccion){ if(ed.state_==State::Interaccion){ ed.handleEvent(escapeEvent()); } ed.handleEvent(insert('s')); } }
 inline void type(Editor& ed, const std::string& s){
     if(s.empty()) return;
@@ -66,10 +66,12 @@ inline void type(Editor& ed, const std::string& s){
 }
 // typeBytes(): escribe byte por byte; usado por tests de búsqueda, que modelan entrada byte-oriented del prompt.
 inline void typeBytes(Editor& ed, const std::string& s){ for(unsigned char c: s) ed.handleEvent(insert(c)); }
-// typePrompt(): alias semántico de typeBytes para prompt modal SaveAs.
+// typePrompt(): escribe en el input del modal SaveAsFileBrowser (saveAsFileName_).
 inline void typePrompt(Editor& ed, const std::string& s){ typeBytes(ed, s); }
-inline void clearPrompt(Editor& ed){ while(!ed.saveAsPath_.empty()) press(ed, InputEventType::Backspace); }
-// save(): Ctrl+K s (InsertChar 's') → guarda directo si tiene nombre, si no abre SaveAs.
+inline void clearPrompt(Editor& ed){ while(!ed.saveAsFileName_.empty()) press(ed, InputEventType::Backspace); }
+// saveAsConfirm(): Ctrl+S en SaveAsFileBrowser para confirmar guardado.
+inline void saveAsConfirm(Editor& ed){ press(ed, InputEventType::Save); }
+// save(): Ctrl+K s (InsertChar 's') → guarda directo si tiene nombre, si no abre SaveAsFileBrowser.
 inline void save(Editor& ed){ press(ed, InputEventType::Prefix); InputEvent e; e.type=InputEventType::InsertChar; e.text="s"; ed.handleEvent(e); }
 inline void newBuffer(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('n')); }
 inline void openSelector(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('t')); }
@@ -78,7 +80,7 @@ inline void openFileBrowser(Editor& ed){ press(ed, InputEventType::Prefix); pres
 inline void previousBuffer(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('b')); }
 inline void safeQuit(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('q')); }
 inline void forcedQuit(Editor& ed){ press(ed, InputEventType::Prefix); press(ed, InputEventType::Quit); }
-// openSaveAs(): Ctrl+K Ctrl+S (InputEventType::Save) → siempre abre prompt SaveAs, incluso con nombre.
+// openSaveAs(): Ctrl+K Ctrl+S (InputEventType::Save) → siempre abre el explorador SaveAsFileBrowser, incluso con nombre.
 inline void openSaveAs(Editor& ed){ press(ed, InputEventType::Prefix); press(ed, InputEventType::Save); }
 inline void prefix(Editor& ed, InputEventType a, InputEventType b){ press(ed,a); press(ed,b); }
 inline void selectFirstChars(Editor& ed, int n){ press(ed, InputEventType::MoveHome); enterSeleccion(ed); for(int i=0;i<n;++i) press(ed, InputEventType::MoveRight); }
@@ -134,8 +136,8 @@ inline void assertStateConsistent(Editor& ed){
     }
     if(ed.active().selection.has_value() && ed.active().selection->anchor==ed.active().selection->position) CHECK(!ed.hasSelection());
     if(auto norm=ed.selection()) CHECK(norm->start.line<norm->end.line || (norm->start.line==norm->end.line && norm->start.col<=norm->end.col));
-    CHECK(ed.state_==State::Navegacion||ed.state_==State::Interaccion||ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAs||ed.state_==State::FileBrowser||ed.state_==State::Busqueda||ed.state_==State::IrAFila);
-    if(ed.hasSelection()) CHECK(ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAs||ed.state_==State::FileBrowser||ed.state_==State::Busqueda||ed.state_==State::IrAFila);
+    CHECK(ed.state_==State::Navegacion||ed.state_==State::Interaccion||ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAsFileBrowser||ed.state_==State::FileBrowser||ed.state_==State::Busqueda||ed.state_==State::IrAFila);
+    if(ed.hasSelection()) CHECK(ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAsFileBrowser||ed.state_==State::FileBrowser||ed.state_==State::Busqueda||ed.state_==State::IrAFila);
     if(ed.state_==State::Seleccion) CHECK(ed.active().selection.has_value());
     for(const std::string& l: ed.getClipboardBlock()) CHECK(utf8::isValid(l));
 }

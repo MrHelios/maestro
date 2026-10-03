@@ -88,4 +88,18 @@ public:
                                 int width,
                                 int height,
                                 Sink& sink) = 0;
+
+    // Igual que renderFileList pero para "Guardar como": misma lista y
+    // mismo chrome; solo cambian etiqueta ("GUARDAR COMO") y accent.
+    // El input del nombre viaja compuesto en `message` (lo arma el caller:
+    // linea de input si no hay mensaje activo), en la fila de mensajes
+    // debajo del statusbar, como el resto de los prompts modales.
+    virtual void renderSaveAsFileList(const std::vector<FileListItem>& items,
+                                      int selected,
+                                      int scroll,
+                                      const std::string& path,
+                                      const Message& message,
+                                      int width,
+                                      int height,
+                                      Sink& sink) = 0;
 };

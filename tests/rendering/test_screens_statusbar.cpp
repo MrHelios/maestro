@@ -23,6 +23,7 @@
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
 #include "app/Message.h"
+#include "rendering/Style.h"
 #include "rendering/tty/TtyRenderer.h"
 #include "rendering/tty/TtyStatusBar.h"
 
@@ -267,4 +268,66 @@ TEST(integration_frame_lifecycle_shared) {
         CHECK(frame.compare(frame.size() - epilogue.size(), epilogue.size(),
                             epilogue) == 0);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Pantalla "Guardar como" (v0.9): mismo chrome compartido que abrir, con
+// estado GUARDAR COMO. El input del nombre vive en la fila de mensajes
+// (DEBAJO del statusbar), compuesto por el Editor en el Message: se trunca
+// al ancho (nunca desborda) y el accent semantico es el de guardar.
+// ---------------------------------------------------------------------------
+std::string frameSaveAs(int content, int width, const Message& message) {
+    TtyRenderer tr;
+    return tr.buildSaveAsFileListScreen(
+        std::vector<FileListItem>{
+            {"sub", true}, {"a.txt", false}, {"b.txt", false}},
+        0, 0, "/datos/proyecto", message, width, content);
+}
+
+Message saveAsInput(const std::string& fileName) {
+    return Message{"Nombre del Archivo: " + fileName + " (Control+S para Guardar)",
+                   MessageKind::Prompt, std::nullopt};
+}
+
+TEST(saveas_screen_shows_input_line_and_estado) {
+    const std::string frame = frameSaveAs(8, 80, saveAsInput("notas.txt"));
+    const std::string plain = stripAnsi(frame);
+    CHECK(plain.find("Nombre del Archivo: notas.txt") != std::string::npos);
+    CHECK(plain.find("Control+S para Guardar") != std::string::npos);
+    CHECK(plain.find("GUARDAR COMO") != std::string::npos);
+    // Los items del listado se siguen viendo igual que en abrir.
+    CHECK(plain.find("a.txt") != std::string::npos);
+    CHECK(plain.find("sub/") != std::string::npos);
+}
+
+TEST(saveas_screen_input_lives_in_message_row_below_statusbar) {
+    const std::string frame = frameSaveAs(8, 80, saveAsInput("notas.txt"));
+    BarRows bar = barOf(frame);
+    // La barra fija conserva el estado; la fila de mensajes lleva el input.
+    CHECK(bar.fixed.find("GUARDAR COMO") != std::string::npos);
+    CHECK(bar.message.find("Nombre del Archivo: notas.txt") != std::string::npos);
+    // Posición: el input es la ÚLTIMA fila (debajo del statusbar) y no
+    // aparece en ninguna fila de contenido por encima de la barra.
+    const auto rows = visibleRows(frame);
+    CHECK(rows.size() >= 3);
+    CHECK_EQ(rows.back(), bar.message);
+    for (size_t i = 0; i + 2 < rows.size(); ++i)
+        CHECK(rows[i].find("Nombre del Archivo:") == std::string::npos);
+}
+
+TEST(saveas_screen_truncates_long_input_to_width) {
+    const int width = 40;
+    const std::string frame =
+        frameSaveAs(8, width, saveAsInput(std::string(200, 'x')));
+    const std::string plain = stripAnsi(frame);
+    // El nombre completo NO viaja en los bytes: la fila de mensajes se
+    // trunco al ancho, pero el prefijo del input sigue visible.
+    CHECK(plain.find(std::string(200, 'x')) == std::string::npos);
+    CHECK(plain.find("Nombre del Archivo: ") != std::string::npos);
+    for (const std::string& row : visibleRows(frame))
+        CHECK(colWidth(row) <= width);
+}
+
+TEST(saveas_screen_accent_role_is_guardar) {
+    CHECK(accentRoleFor(State::SaveAsFileBrowser) == StyleRole::AccentGuardar);
 }

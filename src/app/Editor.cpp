@@ -23,7 +23,6 @@ namespace {
 // fileBrowserEnterSelected(); con esto solo hay una fuente de verdad.
 constexpr const char* kHelpBufferSelector =
     "ENTER: open | ESC: cancel | \u2191/\u2193: move";
-constexpr const char* kHelpSaveAsPrompt = "Save file: ";
 constexpr const char* kHelpBusqueda = "Find: ";
 constexpr const char* kHelpNavegacion =
     "NAVEGACION: i escribir | s seleccionar | c/x copiar/cortar | p pegar | "
@@ -670,11 +669,11 @@ void Editor::registerCommands() {
         redo();
     });
     // Ctrl+K s / botón GUI "Guardar": con nombre guarda directo (y sale
-    // del prefijo si venía de él); sin nombre abre el prompt SaveAs
+    // del prefijo si venía de él); sin nombre abre el explorador SaveAs
     // (fijando priorState_ si no venía del prefijo, para poder volver).
     commands_.registerCommand("buffer.guardar", [this] {
         if (active().filename.empty()) {
-            if (state_ != State::Prefix && state_ != State::SaveAs)
+            if (state_ != State::Prefix && state_ != State::SaveAsFileBrowser)
                 priorState_ = state_;
             startSaveAs();
             return;
@@ -682,9 +681,9 @@ void Editor::registerCommands() {
         save();
         if (state_ == State::Prefix) state_ = priorState_;
     });
-    // Ctrl+K Ctrl+S / botón GUI "Guardar como": siempre abre el prompt.
+    // Ctrl+K Ctrl+S / botón GUI "Guardar como": siempre abre el explorador.
     commands_.registerCommand("buffer.guardar.como", [this] {
-        if (state_ != State::Prefix && state_ != State::SaveAs)
+        if (state_ != State::Prefix && state_ != State::SaveAsFileBrowser)
             priorState_ = state_;
         startSaveAs();
     });
@@ -1002,6 +1001,22 @@ void Editor::fileBrowserEnterSelected() {
     }
 }
 
+void Editor::fileBrowserEnterDirectoryOnly() {
+    switch (fileBrowser.enterDirectoryOnly()) {
+        case FileBrowser::EnterResult::None:
+            break;  // archivo o lista vacia: no-op, se sigue en SaveAsFileBrowser
+        case FileBrowser::EnterResult::EnteredDirectory: {
+            const std::string err = fileBrowser.reload();
+            if (!err.empty()) {
+                setActionMessage(err, MessageKind::Error);
+            }
+            break;
+        }
+        case FileBrowser::EnterResult::OpenedFile:
+            break;  // inalcanzable: enterDirectoryOnly() nunca lo devuelve
+    }
+}
+
 void Editor::openFileInBuffer(const std::string& path) {
     // Normalizar la ruta ANTES de comparar y guardar, para que el chequeo
     // de duplicados funcione aunque dos rutas escriban el mismo archivo de
@@ -1155,7 +1170,7 @@ void Editor::renderFrame() {
     // invalidado y ningún camino lo revalida; al salir, el primer frame del
     // editor es rebuild total.
     const bool isModal =
-        (state_ == State::BufferSelector || state_ == State::FileBrowser);
+        (state_ == State::BufferSelector || state_ == State::FileBrowser || state_ == State::SaveAsFileBrowser);
     if (isModal != wasModal_) {
         renderer_->invalidateCache();
         wasModal_ = isModal;
@@ -1180,6 +1195,26 @@ void Editor::renderFrame() {
                                 fileBrowser.index_, fileBrowser.scroll_,
                                 fileBrowser.path_, statusMessage_,
                                 b.viewport.width, b.viewport.height, sink());
+    } else if (state_ == State::SaveAsFileBrowser) {
+        fileBrowser.clampScroll(b.viewport.height);
+        std::vector<FileListItem> items;
+        items.reserve(fileBrowser.entries_.size());
+        for (const FileBrowserEntry& e : fileBrowser.entries_) {
+            items.push_back(FileListItem{e.name, e.isDirectory});
+        }
+        // El input vive en la fila de mensajes (debajo del statusbar), como
+        // el resto de los prompts modales ("Find: ..."): si hay un mensaje
+        // activo se muestra el; si no, la linea de input con el nombre.
+        Message shown = statusMessage_;
+        if (shown.text.empty()) {
+            shown = Message{"Nombre del Archivo: " + saveAsFileName_ +
+                            " (Control+S para Guardar)",
+                            MessageKind::Prompt, std::nullopt};
+        }
+        renderer_->renderSaveAsFileList(items,
+                                        fileBrowser.index_, fileBrowser.scroll_,
+                                        fileBrowser.path_, shown,
+                                        b.viewport.width, b.viewport.height, sink());
     } else {
         // Sincroniza lenguaje del cache con el buffer activo antes de bracket/render
         {
@@ -1556,15 +1591,14 @@ void Editor::handleEvent(const InputEvent& event) {
         return;
     }
 
-    // v0.7: en el prompt "Guardar archivo:" solo se aceptan caracteres,
-    // Backspace, Enter y ESC; nada se filtra a la edicion ni a otros modos.
-    if (state_ == State::SaveAs) {
-        handleSaveAsEvent(event);
+    if (state_ == State::Busqueda) {
+        handleBusquedaEvent(event);
         return;
     }
 
-    if (state_ == State::Busqueda) {
-        handleBusquedaEvent(event);
+    // v0.9: explorador para "Guardar como" - navegacion + input nombre + Ctrl+S
+    if (state_ == State::SaveAsFileBrowser) {
+        handleSaveAsFileBrowserEvent(event);
         return;
     }
 
@@ -2182,71 +2216,129 @@ void Editor::handlePrefixKey(const InputEvent& event) {
     }
 }
 
+// ---- Guardar como con explorador (v0.9) ----
+
 void Editor::startSaveAs() {
-    if (active().filename.empty()) {
-        std::string cwd = FileBrowser::getCwd();
-        if (!cwd.empty()) {
-            saveAsPath_ = cwd;
-            if (saveAsPath_.back() != '/') saveAsPath_ += '/';
+    const std::string& fn = active().filename;
+    if (!fn.empty()) {
+        const std::filesystem::path dir =
+            std::filesystem::path(fn).parent_path();
+        if (!dir.empty() && FileBrowser::isDirectory(dir.string())) {
+            fileBrowser.startAt(dir.string());
         } else {
-            saveAsPath_.clear();
+            fileBrowser.start();
         }
     } else {
-        saveAsPath_ = active().filename;
+        fileBrowser.start();
+    }
+    const std::string err = fileBrowser.reload();
+    if (!err.empty()) {
+        setActionMessage(err, MessageKind::Error);
+    }
+
+    // Inicializar el nombre del archivo: si el buffer tiene nombre, usarlo;
+    // si no, dejar vacío para que el usuario lo escriba.
+    if (!fn.empty()) {
+        saveAsFileName_ = std::filesystem::path(fn).filename().string();
+    } else {
+        saveAsFileName_.clear();
     }
     saveAsConfirmPath_.clear();
-    state_ = State::SaveAs;
-    setStatusMessage(kHelpSaveAsPrompt + saveAsPath_, MessageKind::Prompt);
+    state_ = State::SaveAsFileBrowser;
+    // El mensaje de ayuda se muestra en la barra inferior via renderer
+    setStatusMessage("", MessageKind::Info);
 }
 
-void Editor::handleSaveAsEvent(const InputEvent& event) {
+void Editor::handleSaveAsFileBrowserEvent(const InputEvent& event) {
     switch (event.type) {
+        case InputEventType::MoveUp:
+            fileBrowser.moveUp();
+            fileBrowser.clampScroll(active().viewport.height);
+            break;
+        case InputEventType::MoveDown:
+            fileBrowser.moveDown();
+            fileBrowser.clampScroll(active().viewport.height);
+            break;
+        case InputEventType::ScrollUp:
+            fileBrowser.moveUp();
+            fileBrowser.clampScroll(active().viewport.height);
+            break;
+        case InputEventType::ScrollDown:
+            fileBrowser.moveDown();
+            fileBrowser.clampScroll(active().viewport.height);
+            break;
+        case InputEventType::InsertNewline: // Enter: solo entra a carpetas
+            fileBrowserEnterDirectoryOnly();
+            break;
         case InputEventType::InsertChar:
-            saveAsPath_ += event.text;
-            setStatusMessage(kHelpSaveAsPrompt + saveAsPath_,
-                             MessageKind::Prompt);
+            // Contrato SaveAs: saveAsFileName_ es SOLO basename, sin path.
+            // Se filtran '/' y '\' para que el input nunca se convierta en
+            // ruta: el directorio solo cambia navegando carpetas con Enter.
+            // El filtrado es a nivel byte y seguro para UTF-8: 0x2F y 0x5C
+            // nunca aparecen como bytes de continuacion multibyte.
+            for (char ch : event.text) {
+                if (ch != '/' && ch != '\\') saveAsFileName_ += ch;
+            }
+            if (event.text.find('/') != std::string::npos ||
+                event.text.find('\\') != std::string::npos) {
+                setActionMessage("El nombre no puede contener rutas: "
+                                 "cambie de carpeta con Enter.",
+                                 MessageKind::Warning);
+            }
             break;
         case InputEventType::Backspace:
-            if (!saveAsPath_.empty()) {
-                int cols = utf8::columnOf(saveAsPath_,
-                                          static_cast<int>(saveAsPath_.size()));
-                saveAsPath_ = utf8::truncate(saveAsPath_, cols - 1);
+            if (!saveAsFileName_.empty()) {
+                int cols = utf8::columnOf(saveAsFileName_,
+                                          static_cast<int>(saveAsFileName_.size()));
+                saveAsFileName_ = utf8::truncate(saveAsFileName_, cols - 1);
             }
-            setStatusMessage(kHelpSaveAsPrompt + saveAsPath_,
-                             MessageKind::Prompt);
             break;
-        case InputEventType::InsertNewline: // Enter: guardar en la ruta escrita
-            commitSaveAs();
+        case InputEventType::Save: // Ctrl+S: guardar
+            commitSaveAsFileBrowser();
             break;
         case InputEventType::Escape:
+        case InputEventType::Prefix: // Ctrl+K dentro tambien cancela
             saveAsConfirmPath_.clear();
+            saveAsFileName_.clear();
             state_ = priorState_;
             setActionMessage("Guardado cancelado.", MessageKind::Warning);
             break;
         default:
-            // Cualquier otra tecla es no-op: el prompt es una pantalla
-            // modal y no deja filtrar nada (ni Ctrl+K, ni flechas, ...).
             break;
     }
 }
 
-void Editor::commitSaveAs() {
+void Editor::commitSaveAsFileBrowser() {
     Buffer& b = active();
-    const std::string path = resolveAbsolutePath(saveAsPath_);
+    if (saveAsFileName_.empty()) {
+        setActionMessage("Nombre de archivo vacio.", MessageKind::Warning);
+        return;
+    }
+    // Defensa del contrato basename (el input ya filtra '/' y '\', pero el
+    // commit no confia en ello): rechaza rutas residuales y los nombres
+    // "." / ".." que escaparian del directorio seleccionado.
+    if (saveAsFileName_ == "." || saveAsFileName_ == ".." ||
+        saveAsFileName_.find('/') != std::string::npos ||
+        saveAsFileName_.find('\\') != std::string::npos) {
+        setActionMessage("Nombre de archivo invalido: use solo el nombre, "
+                         "sin rutas.", MessageKind::Warning);
+        return;
+    }
+    // Armar path completo: directorio del browser + nombre escrito
+    std::string dirPath = fileBrowser.path_;
+    if (!dirPath.empty() && dirPath.back() != '/') dirPath += '/';
+    std::string fullPath = dirPath + saveAsFileName_;
+    const std::string path = resolveAbsolutePath(fullPath);
+
     if (path.empty()) {
-        // Sin ruta escrita: se sigue en el prompt, esperando un nombre.
-        setStatusMessage(kHelpSaveAsPrompt, MessageKind::Prompt);
+        setActionMessage("Ruta invalida.", MessageKind::Error);
         return;
     }
     if (isDirectory(path)) {
         setActionMessage("Es una carpeta: " + path, MessageKind::Error);
         return;
     }
-    // Fase 1 (opcion b): destino ya abierto en otro buffer -> rechazar
-    // sin tocar disco ni buffers (evita pisar cambios de Z sin aviso).
-    // Va ANTES de la rama in-place para que un buffer sin nombre tampoco
-    // pueda tomar un path ya abierto (dos buffers con mismo filename).
-    // Se salta el propio buffer (cubre el caso mismo-path).
+    // Fase 1: destino ya abierto en otro buffer -> rechazar
     for (int i = 0; i < buffers.count(); ++i) {
         if (&buffers.at(i) == &b) continue;
         if (buffers.at(i).filename == path) {
@@ -2255,25 +2347,23 @@ void Editor::commitSaveAs() {
         }
     }
     const bool samePath = !b.filename.empty() && b.filename == path;
-    // Sobrescritura con confirmación: si el destino existe en disco y no es
-    // el propio archivo del buffer, el primer Enter solo arma el aviso y el
-    // segundo Enter (misma ruta) sobrescribe. Mismo-path guarda directo.
+    // Sobrescritura con confirmación
     if (!samePath) {
         if (saveAsConfirmPath_ == path) {
-            saveAsConfirmPath_.clear();  // confirmada: proceder
+            saveAsConfirmPath_.clear();
         } else {
             std::error_code ec;
             if (std::filesystem::exists(path, ec)) {
                 saveAsConfirmPath_ = path;
                 setActionMessage("El archivo ya existe: " + path +
-                                     ". Enter para sobrescribir, Esc para cancelar.",
-                                 MessageKind::Warning);
-                return;  // sigue en SaveAs, disco y buffers intactos
+                                     ". Ctrl+S para sobrescribir, Esc para cancelar.",
+                             MessageKind::Warning);
+                return;
             }
             saveAsConfirmPath_.clear();
         }
     }
-    // Sin nombre o mismo path: guardado in-place, sin duplicar.
+    // Sin nombre o mismo path: guardado in-place
     if (b.filename.empty() || samePath) {
         if (b.document.saveToFile(path)) {
             b.filename = path;
@@ -2287,13 +2377,11 @@ void Editor::commitSaveAs() {
         }
         return;
     }
-    // Save a copy: el disco queda con X e Y, y el editor con ambos buffers.
-    // X conserva ediciones en memoria (sigue modified); Y nace limpio.
+    // Save a copy
     if (!b.document.saveToFile(path)) {
         setActionMessage("Error al guardar: " + path, MessageKind::Error);
         return;
     }
-    // Capturar ANTES del push: push() puede realocar el vector e invalidar b.
     const int oldId = b.id;
     const std::string oldDisplay = b.displayName();
     Buffer copy = b;
@@ -2302,8 +2390,6 @@ void Editor::commitSaveAs() {
     copy.savedIdentity = captureIdentity(path);
     buffers.push(std::move(copy));
     watchFile(path);
-    // push() ya deja activo el nuevo; previousBuffer_ se fija manual porque
-    // activateBuffer() lo omitiria (idx == activeIndex tras el push).
     previousBuffer_.valid = true;
     previousBuffer_.id = oldId;
     previousBuffer_.displayName = oldDisplay;
@@ -2597,8 +2683,8 @@ void Editor::clearSelection() {
 
 void Editor::save() {
     Buffer& b = active();
-    // v0.7: save() solo se invoca para buffers CON nombre (handlePrefixKey
-    // desvia los sin nombre al prompt SaveAs). El guard sigue aqui como
+    // v0.9: save() solo se invoca para buffers CON nombre (handlePrefixKey
+    // desvia los sin nombre al explorador SaveAs). El guard sigue aqui como
     // invariante defensivo: un buffer sin nombre no tiene a donde guardar.
     if (b.filename.empty()) {
         setActionMessage("Archivo sin nombre: usa Ctrl+K Ctrl+S para elegir ruta.", MessageKind::Warning);

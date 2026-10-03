@@ -53,6 +53,10 @@ public:
                         const std::string&, const Message&, int, int,
                         Sink&) override {}
 
+    void renderSaveAsFileList(const std::vector<FileListItem>&, int, int,
+                              const std::string&, const Message&, int, int,
+                              Sink&) override {}
+
 private:
     bool dark_ = true;
 };

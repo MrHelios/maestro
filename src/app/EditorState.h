@@ -18,11 +18,11 @@
 //                cerrar un buffer (Ctrl+K w) ya NO abre este modal: el
 //                buffer vecino que hereda la ranura queda activo. El
 //                selector es el verbo EXPLICITO para elegir (Ctrl+K t).
-//   SaveAs (v0.7): prompt "Guardar archivo:" tras Ctrl+K Ctrl+S sobre un
-//                buffer SIN NOMBRE (p.ej. creado con Ctrl+K n). El usuario
-//                escribe una ruta en la fila de mensajes; Enter guarda,
-//                ESC cancela. Modal: solo se aceptan caracteres, Backspace,
-//                Enter y ESC.
+//   SaveAsFileBrowser (v0.9): explorador de archivos modal para "Guardar
+//                como" tras Ctrl+K Ctrl+S. Se navega el directorio destino
+//                con ↑/↓ (Enter solo entra a carpetas, nunca abre archivos)
+//                y se escribe el nombre en el input inferior; Ctrl+S guarda,
+//                ESC cancela. Modal puro.
 //   FileBrowser (v0.6.4): explorador de archivos modal tras Ctrl+K o. Se
 //                navega desde el directorio de trabajo (cwd()). Solo se
 //                aceptan ↑/↓, Enter y ESC (Ctrl+K tambien cancela). Enter
@@ -47,8 +47,8 @@ enum class State {
     Seleccion,
     Prefix,
     BufferSelector,
-    SaveAs,
     FileBrowser,
     Busqueda,
     IrAFila,
+    SaveAsFileBrowser,
 };

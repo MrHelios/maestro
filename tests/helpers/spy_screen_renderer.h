@@ -24,10 +24,12 @@ struct SpyScreenRenderer : public ScreenRenderer {
     // idempotente (dos invalidaciones seguidas equivalen a una).
     bool pendingInvalidation = false;
 
-    // Contadores de render por tipo
+    // Contadores de render por tipo (Abrir y Guardar como separados: un
+    // render de SaveAs no debe contaminar la métrica del FileBrowser).
     int renderScreenDiffCount = 0;
     int renderBufferListCount = 0;
     int renderFileListCount = 0;
+    int renderSaveAsFileListCount = 0;
 
     // Theme
     int toggleCount = 0;
@@ -147,6 +149,35 @@ struct SpyScreenRenderer : public ScreenRenderer {
         lastFilename.clear();
         lastModified = false;
         lastMessage = Message{};
+        lastSelection.reset();
+        lastSearchHighlight.reset();
+        lastBracketPair.reset();
+        lastBufferListSelected = -1;
+        lastBufferNames.clear();
+    }
+
+    void renderSaveAsFileList(const std::vector<FileListItem>& items,
+                              int selected,
+                              int scroll,
+                              const std::string& path,
+                              const Message& message,
+                              int,
+                              int,
+                              Sink&) override {
+        ++renderSaveAsFileListCount;
+        pendingInvalidation = false;
+        lastFileItems = items;
+        lastFileListSelected = selected;
+        lastFileListScroll = scroll;
+        lastFilePath = path;
+        // El input llega ya compuesto en `message` (fila de mensajes):
+        // se conserva para observarlo (input o mensaje activo).
+        lastMessage = message;
+        // Limpieza cruzada: el snapshot describe solo el último frame
+        // (lastMessage queda: ES el contenido de este frame).
+        lastState = {};
+        lastFilename.clear();
+        lastModified = false;
         lastSelection.reset();
         lastSearchHighlight.reset();
         lastBracketPair.reset();

@@ -686,87 +686,133 @@ TEST(ctrl_k_w_modified_multi_buffer_blocked) {
     CHECK(ed.state_ == State::Navegacion);
 }
 
-TEST(save_unnamed_buffer_opens_save_as_prompt) {
+TEST(save_unnamed_buffer_opens_save_as_filebrowser) {
     Editor ed;
     type(ed, "hola");
     press(ed, InputEventType::Escape);
     openSaveAs(ed);
-    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
-    std::string cwd = FileBrowser::getCwd();
-    std::string expected = cwd.empty() ? "" : cwd + "/";
-    CHECK_EQ(ed.saveAsPath_, expected);
-    CHECK_EQ(ed.statusMessage_, "Save file: " + expected);
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
+    // saveAsFileName_ se prefill con "" para buffer sin nombre
+    CHECK_EQ(ed.saveAsFileName_, "");
     CHECK(ed.active().modified);
     CHECK(ed.active().filename.empty());
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
 }
 
-TEST(save_as_prompt_collects_typed_path) {
+TEST(save_as_filebrowser_collects_typed_filename) {
     Editor ed;
     type(ed, "hola");
     press(ed, InputEventType::Escape);
     openSaveAs(ed);
     clearPrompt(ed);
-    typePrompt(ed, "/tmp/nuevo.txt");
-    CHECK_EQ(ed.saveAsPath_, "/tmp/nuevo.txt");
-    CHECK_EQ(ed.statusMessage_, "Save file: /tmp/nuevo.txt");
-    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
+    typePrompt(ed, "nuevo.txt");
+    CHECK_EQ(ed.saveAsFileName_, "nuevo.txt");
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
     CHECK(ed.active().filename.empty());
     CHECK(ed.active().modified);
 }
 
-TEST(save_as_prompt_backspace_removes_characters) {
+TEST(save_as_filebrowser_backspace_removes_characters) {
     Editor ed;
     openSaveAs(ed);
     clearPrompt(ed);
     typePrompt(ed, "abc");
     press(ed, InputEventType::Backspace);
-    CHECK_EQ(ed.saveAsPath_, "ab");
-    CHECK_EQ(ed.statusMessage_, "Save file: ab");
+    CHECK_EQ(ed.saveAsFileName_, "ab");
     press(ed, InputEventType::Backspace);
     press(ed, InputEventType::Backspace);
-    CHECK_EQ(ed.saveAsPath_, "");
-    CHECK_EQ(ed.statusMessage_, "Save file: ");
+    CHECK_EQ(ed.saveAsFileName_, "");
 }
 
-TEST(save_as_prompt_backspace_on_empty_is_noop) {
+TEST(save_as_filebrowser_backspace_on_empty_is_noop) {
     Editor ed;
     openSaveAs(ed);
     clearPrompt(ed);
     press(ed, InputEventType::Backspace);
-    CHECK_EQ(ed.saveAsPath_, "");
-    CHECK_EQ(ed.statusMessage_, "Save file: ");
+    CHECK_EQ(ed.saveAsFileName_, "");
 }
 
-TEST(save_as_prompt_ignores_other_keys) {
+TEST(save_as_filebrowser_ignores_other_keys) {
     Editor ed;
     openSaveAs(ed);
     clearPrompt(ed);
     typePrompt(ed, "abc");
-    press(ed, InputEventType::MoveRight);
+    press(ed, InputEventType::MoveRight);  // no-op en SaveAsFileBrowser
+    CHECK_EQ(ed.saveAsFileName_, "abc");
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
+    // Prefix (Ctrl+K) cancela el modal
     press(ed, InputEventType::Prefix);
-    CHECK_EQ(ed.saveAsPath_, "abc");
-    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
+    CHECK(static_cast<int>(ed.state_) != static_cast<int>(State::SaveAsFileBrowser));
 }
 
-TEST(save_as_enter_saves_file) {
-    TempFile f;
+// Contrato basename: '/' y '\' se filtran del input (el directorio solo
+// cambia navegando carpetas con Enter, nunca editando el nombre).
+TEST(save_as_filebrowser_rejects_slashes_in_filename) {
+    Editor ed;
+    openSaveAs(ed);
+    clearPrompt(ed);
+    typePrompt(ed, "a/b\\c");
+    CHECK_EQ(ed.saveAsFileName_, "abc");
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
+    // Hay pista visible de por que no entro el caracter.
+    CHECK(ed.statusMessage_.text.find("carpeta") != std::string::npos);
+}
+
+// Contrato basename: "." y ".." no se confirman (escaparian del directorio
+// seleccionado). El modal se queda, no se escribe nada y el input se
+// conserva para corregir.
+TEST(save_as_filebrowser_dot_names_rejected_on_commit) {
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+
+    Editor ed;
+    type(ed, "x");
+    press(ed, InputEventType::Escape);
+    openSaveAs(ed);
+    const int countBefore = ed.buffers.count();
+    const std::string pathBefore = ed.fileBrowser.path_;
+
+    clearPrompt(ed);
+    typePrompt(ed, "..");
+    saveAsConfirm(ed);  // Ctrl+S: debe rechazar
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
+    CHECK_EQ(ed.saveAsFileName_, "..");
+    CHECK(ed.active().filename.empty());
+    CHECK_EQ(ed.buffers.count(), countBefore);
+    CHECK_EQ(ed.fileBrowser.path_, pathBefore);  // no escapo del directorio
+    CHECK(ed.statusMessage_.text.find("invalido") != std::string::npos);
+
+    clearPrompt(ed);
+    typePrompt(ed, ".");
+    saveAsConfirm(ed);  // Ctrl+S: debe rechazar
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
+    CHECK(ed.active().filename.empty());
+    CHECK_EQ(ed.buffers.count(), countBefore);
+    CHECK_EQ(ed.fileBrowser.path_, pathBefore);
+}
+
+TEST(save_as_ctrl_s_saves_file) {
+    // Directorio aislado: el browser arranca en cwd y el nombre se resuelve
+    // contra el (sin rutas fijas en /tmp que colisionen entre corridas).
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+
     Editor ed;
     type(ed, "hola");
     press(ed, InputEventType::Escape);
     openSaveAs(ed);
     clearPrompt(ed);
-    typePrompt(ed, f.path);
-    press(ed, InputEventType::InsertNewline);
+    typePrompt(ed, "nuevo.txt");
+    saveAsConfirm(ed);  // Ctrl+S
     CHECK(!ed.active().modified);
-    CHECK_EQ(ed.active().filename, f.path);
+    const std::string expected = t.path + "/nuevo.txt";
+    CHECK_EQ(ed.active().filename, expected);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Navegacion));
-    CHECK_EQ(ed.statusMessage_, "Guardado: " + f.path);
+    CHECK(ed.statusMessage_.text.find("Guardado") != std::string::npos);
 
-    std::ifstream in(f.path);
-    std::string content((std::istreambuf_iterator<char>(in)),
-                        std::istreambuf_iterator<char>());
-    CHECK_EQ(content, "hola");
+    CHECK_EQ(fileContent(expected), "hola");
 
     type(ed, "!");
     press(ed, InputEventType::Escape);
@@ -780,6 +826,11 @@ TEST(save_as_enter_saves_file) {
 // Luego Ctrl+K Ctrl+S guarda de nuevo en el mismo path (sin prompt).
 TEST(save_as_on_new_buffer_updates_name_and_display) {
     TempFile f;
+    // El browser arranca en cwd para buffers sin nombre: entrar al
+    // directorio padre del destino (RAII restaura cwd aunque falle un CHECK).
+    CwdGuard g;
+    g.enter(std::filesystem::path(f.path).parent_path().string());
+
     Editor ed;
     newBuffer(ed);
     CHECK_EQ(ed.active().unnamedName, "SinNombre1");
@@ -789,10 +840,10 @@ TEST(save_as_on_new_buffer_updates_name_and_display) {
     CHECK_EQ(ed.active().displayName(), "SinNombre1");
 
     openSaveAs(ed);
-    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
     clearPrompt(ed);
-    typePrompt(ed, f.path);
-    press(ed, InputEventType::InsertNewline);
+    typePrompt(ed, std::filesystem::path(f.path).filename().string());
+    saveAsConfirm(ed);  // Ctrl+S
 
     CHECK(!ed.active().filename.empty());
     CHECK_EQ(ed.active().filename, f.path);
@@ -827,9 +878,9 @@ TEST(save_as_cancel_keeps_new_buffer_untouched) {
     const size_t undoSize = ed.active().undoStack.size();
 
     openSaveAs(ed);
-    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
     clearPrompt(ed);
-    typePrompt(ed, f.path);
+    typePrompt(ed, std::filesystem::path(f.path).filename().string());
     press(ed, InputEventType::Escape);
 
     CHECK_EQ(ed.active().filename, std::string());
@@ -848,7 +899,7 @@ TEST(save_as_cancel_with_escape) {
     press(ed, InputEventType::Escape);
     openSaveAs(ed);
     clearPrompt(ed);
-    typePrompt(ed, f.path);
+    typePrompt(ed, std::filesystem::path(f.path).filename().string());
     press(ed, InputEventType::Escape);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Navegacion));
     CHECK(ed.active().filename.empty());
@@ -864,43 +915,50 @@ TEST(save_as_cancel_returns_to_prior_mode) {
     Editor ed;
     type(ed, "hola");                       // Interaccion
     openSaveAs(ed);
-    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
     press(ed, InputEventType::Escape);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Interaccion));
 }
 
-TEST(save_as_enter_empty_path_stays_in_prompt) {
+TEST(save_as_empty_filename_stays_in_filebrowser) {
     Editor ed;
     openSaveAs(ed);
     clearPrompt(ed);
-    press(ed, InputEventType::InsertNewline);
-    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
+    saveAsConfirm(ed);  // Ctrl+S con nombre vacío
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
     CHECK(ed.active().filename.empty());
-    CHECK_EQ(ed.statusMessage_, "Save file: ");
+    CHECK(ed.statusMessage_.text.find("vacio") != std::string::npos);
 }
 
 TEST(save_as_directory_rejected) {
+    // Una carpeta existente no puede convertirse en destino de archivo:
+    // el nombre se trata como basename y el commit rechaza lo que resuelve
+    // a un directorio (rama isDirectory de commitSaveAsFileBrowser).
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    std::filesystem::create_directories(t.path + "/sub");
+
     Editor ed;
     type(ed, "hola");
     press(ed, InputEventType::Escape);
     openSaveAs(ed);
     clearPrompt(ed);
-    typePrompt(ed, "/tmp");
-    press(ed, InputEventType::InsertNewline);
-    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAs));
+    typePrompt(ed, "sub");
+    saveAsConfirm(ed);  // Ctrl+S: debe rechazar, no guardar
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
+    CHECK(ed.statusMessage_.text.find("Es una carpeta") != std::string::npos);
+    CHECK_EQ(ed.saveAsFileName_, "sub");  // input conservado para corregir
     CHECK(ed.active().filename.empty());
     CHECK(ed.active().modified);
-    CHECK_EQ(ed.statusMessage_, "Es una carpeta: /tmp");
+    CHECK_EQ(ed.buffers.count(), 1);
+    CHECK(std::filesystem::is_directory(t.path + "/sub"));  // sigue siendo dir
 }
 
 TEST(save_as_resolves_relative_path_against_cwd) {
-    char dirTemplate[] = "/tmp/edit_saveas_XXXXXX";
-    char* dir = mkdtemp(dirTemplate);
-    CHECK(dir != nullptr);
-    char cwdBuf[4096];
-    CHECK(getcwd(cwdBuf, sizeof cwdBuf) != nullptr);
-    std::string cwdOld = cwdBuf;
-    CHECK_EQ(chdir(dir), 0);
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
 
     Editor ed;
     type(ed, "rel");
@@ -908,101 +966,121 @@ TEST(save_as_resolves_relative_path_against_cwd) {
     openSaveAs(ed);
     clearPrompt(ed);
     typePrompt(ed, "notas.txt");
-    press(ed, InputEventType::InsertNewline);
+    saveAsConfirm(ed);  // Ctrl+S
     CHECK(!ed.active().modified);
-    CHECK_EQ(ed.active().filename, std::string(dir) + "/notas.txt");
-
-    std::ifstream in(std::string(dir) + "/notas.txt");
-    std::string content((std::istreambuf_iterator<char>(in)),
-                        std::istreambuf_iterator<char>());
-    CHECK_EQ(content, "rel");
-
-    chdir(cwdOld.c_str());
-    std::remove((std::string(dir) + "/notas.txt").c_str());
-    rmdir(dir);
+    CHECK_EQ(ed.active().filename, t.path + "/notas.txt");
+    CHECK_EQ(fileContent(t.path + "/notas.txt"), "rel");
 }
 
-TEST(save_as_unnamed_prefills_cwd_slash) {
+TEST(save_as_unnamed_prefills_empty_filename) {
     Editor ed;
     openSaveAs(ed);
-    std::string cwd = FileBrowser::getCwd();
-    std::string expected = cwd.empty() ? "" : cwd + "/";
-    CHECK_EQ(ed.saveAsPath_, expected);
-    CHECK_EQ(ed.statusMessage_, "Save file: " + expected);
+    // saveAsFileName_ está vacío para buffer sin nombre
+    CHECK_EQ(ed.saveAsFileName_, "");
 }
 
-TEST(save_as_unnamed_editable_full_path) {
+TEST(save_as_unnamed_editable_filename) {
     TempFile f;
+    // El browser arranca en cwd: entrar al directorio del destino.
+    CwdGuard g;
+    g.enter(std::filesystem::path(f.path).parent_path().string());
+
     Editor ed;
     type(ed, "hi");
     press(ed, InputEventType::Escape);
     openSaveAs(ed);
-    std::string cwd = FileBrowser::getCwd();
-    std::string prefix = cwd.empty() ? "" : cwd + "/";
-    CHECK_EQ(ed.saveAsPath_, prefix);
+    // saveAsFileName_ está vacío inicialmente
+    CHECK_EQ(ed.saveAsFileName_, "");
     clearPrompt(ed);
-    typePrompt(ed, f.path);
-    press(ed, InputEventType::InsertNewline);
+    typePrompt(ed, std::filesystem::path(f.path).filename().string());
+    saveAsConfirm(ed);  // Ctrl+S
     CHECK_EQ(ed.active().filename, f.path);
     CHECK(!ed.active().modified);
 }
 
-TEST(save_as_copy_prefills_current_file) {
+TEST(save_as_copy_prefills_current_filename) {
     TempFile f;
     f.write("x");
     Editor ed;
     CHECK(ed.loadIntoActiveBuffer(f.path));
     openSaveAs(ed);
-    CHECK_EQ(ed.saveAsPath_, f.path);
-    CHECK_EQ(ed.statusMessage_, "Save file: " + f.path);
+    // saveAsFileName_ se prefill con el nombre del archivo actual
+    CHECK_EQ(ed.saveAsFileName_, std::filesystem::path(f.path).filename().string());
 }
 
-TEST(save_as_copy_allows_editing_directory) {
-    TempFile f;
-    f.write("x");
-    char dirTemplate[] = "/tmp/edit_saveascopy_XXXXXX";
-    char* dir = mkdtemp(dirTemplate);
-    CHECK(dir != nullptr);
+// Núcleo del UX SaveAs, verificado a la vez: buffer con nombre en
+// <dir>/foo/bar.txt -> el browser arranca en <dir>/foo (directorio del
+// archivo, no cwd) Y el input se prellena con "bar.txt".
+TEST(save_as_starts_in_file_directory_with_prefilled_name) {
+    TempDir t;
+    std::filesystem::create_directories(t.path + "/foo");
+    const std::string orig = t.path + "/foo/bar.txt";
+    { std::ofstream f(orig, std::ios::binary); f << "x"; }
+
     Editor ed;
-    CHECK(ed.loadIntoActiveBuffer(f.path));
+    CHECK(ed.loadIntoActiveBuffer(orig));
     openSaveAs(ed);
-    CHECK_EQ(ed.saveAsPath_, f.path);
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/foo");
+    CHECK_EQ(ed.saveAsFileName_, "bar.txt");
+}
+
+TEST(save_as_copy_allows_editing_filename) {
+    // Fuente dentro del dir aislado: el browser arranca en el dir del
+    // archivo abierto, asi el nombre editado cae tambien ahi.
+    TempDir t;
+    const std::string orig = t.path + "/orig.txt";
+    { std::ofstream f(orig, std::ios::binary); f << "x"; }
+    CwdGuard g;
+    g.enter(t.path);
+
+    Editor ed;
+    CHECK(ed.loadIntoActiveBuffer(orig));
+    openSaveAs(ed);
+    // saveAsFileName_ tiene el nombre del archivo original
+    CHECK_EQ(ed.saveAsFileName_, "orig.txt");
     clearPrompt(ed);
-    std::string newPath = std::string(dir) + "/copia.txt";
-    typePrompt(ed, newPath);
-    press(ed, InputEventType::InsertNewline);
-    CHECK_EQ(ed.active().filename, newPath);
+    typePrompt(ed, "copia.txt");
+    saveAsConfirm(ed);  // Ctrl+S
+    CHECK_EQ(ed.active().filename, t.path + "/copia.txt");
     CHECK(!ed.active().modified);
-    std::remove(newPath.c_str());
-    rmdir(dir);
+    CHECK_EQ(fileContent(t.path + "/copia.txt"), "x");
+    CHECK_EQ(fileContent(orig), "x");  // el original intacto
 }
 
 TEST(save_as_unnamed_user_can_change_directory) {
-    char dirTemplate[] = "/tmp/edit_saveas_chdir_XXXXXX";
-    char* dir = mkdtemp(dirTemplate);
-    CHECK(dir != nullptr);
-    char cwdBuf[4096];
-    CHECK(getcwd(cwdBuf, sizeof cwdBuf) != nullptr);
-    std::string cwdOld = cwdBuf;
-    CHECK_EQ(chdir(dir), 0);
+    // Flujo real de cambio de directorio por navegacion: crear temp/sub/,
+    // abrir Save As en temp, seleccionar sub/, Enter, escribir copia.txt,
+    // Ctrl+S => temp/sub/copia.txt.
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    std::filesystem::create_directories(t.path + "/sub");
 
     Editor ed;
     type(ed, "data");
     press(ed, InputEventType::Escape);
     openSaveAs(ed);
-    CHECK_EQ(ed.saveAsPath_, std::string(dir) + "/");
-    clearPrompt(ed);
-    std::string other = std::string(dir) + "/sub.txt";
-    typePrompt(ed, other);
-    press(ed, InputEventType::InsertNewline);
-    CHECK_EQ(ed.active().filename, other);
-    std::ifstream in(other);
-    std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    CHECK_EQ(content, "data");
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
+    int dirIdx = -1;
+    for (int i = 0; i < static_cast<int>(ed.fileBrowser.entries_.size()); ++i) {
+        const auto& e = ed.fileBrowser.entries_[static_cast<size_t>(i)];
+        if (e.isDirectory && e.name == "sub") { dirIdx = i; break; }
+    }
+    CHECK(dirIdx >= 0);
+    while (ed.fileBrowser.index_ < dirIdx) press(ed, InputEventType::MoveDown);
+    while (ed.fileBrowser.index_ > dirIdx) press(ed, InputEventType::MoveUp);
+    press(ed, InputEventType::InsertNewline);  // Enter: entra a sub
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/sub");
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
 
-    chdir(cwdOld.c_str());
-    std::remove(other.c_str());
-    rmdir(dir);
+    clearPrompt(ed);
+    typePrompt(ed, "copia.txt");
+    saveAsConfirm(ed);  // Ctrl+S
+    CHECK_EQ(ed.active().filename, t.path + "/sub/copia.txt");
+    CHECK(!ed.active().modified);
+    CHECK_EQ(fileContent(t.path + "/sub/copia.txt"), "data");
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Navegacion));
 }
 
 TEST(invariants_always_at_least_one_buffer) {

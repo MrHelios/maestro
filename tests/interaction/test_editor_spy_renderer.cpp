@@ -162,6 +162,59 @@ TEST(spy_modal_filebrowser_invalidates_entry_and_exit) {
 }
 
 // ---------------------------------------------------------------------------
+// 4b. Modal Guardar como: métricas propias, separadas de las de Abrir
+// ---------------------------------------------------------------------------
+TEST(spy_modal_saveas_has_own_metrics) {
+    Editor ed;
+    SpyScreenRenderer& spy = injectSpy(ed);
+    NullSink sink;
+    ed.setSink(sink);
+
+    TempDir tmp;
+    CwdGuard cwd;
+    cwd.enter(tmp.path);
+    tmp.file("a.txt"); // al menos una entrada para afirmar contenido
+
+    openSaveAs(ed);
+    CHECK(ed.getStateForTesting() == State::SaveAsFileBrowser);
+    clearPrompt(ed);
+    typePrompt(ed, "nota.txt");
+
+    const int fileBase = spy.renderFileListCount;
+    const int saveAsBase = spy.renderSaveAsFileListCount;
+    ed.renderFrame();
+    // Guardar como suma en su contador y NO contamina el de Abrir.
+    CHECK(spy.renderSaveAsFileListCount == saveAsBase + 1);
+    CHECK(spy.renderFileListCount == fileBase);
+    CHECK(!spy.pendingInvalidation);
+    // Snapshot: items del browser + input en el mensaje (fila de mensajes).
+    CHECK(spy.lastFilePath == ed.fileBrowser.path_);
+    CHECK(spy.lastFileItems.size() == ed.fileBrowser.entries_.size());
+    CHECK(!spy.lastFileItems.empty());
+    CHECK(spy.lastMessage.text.find("Nombre del Archivo: nota.txt") != std::string::npos);
+
+    // Con mensaje activo (confirmación de overwrite) manda el mensaje:
+    // el input cede la fila hasta que el aviso se resuelva.
+    clearPrompt(ed);
+    typePrompt(ed, "a.txt");  // existe en tmp -> arma aviso
+    saveAsConfirm(ed);
+    CHECK(ed.statusMessage_.text.find("ya existe") != std::string::npos);
+    ed.renderFrame();
+    CHECK(spy.lastMessage.text.find("ya existe") != std::string::npos);
+    CHECK(spy.lastMessage.text.find("Nombre del Archivo:") == std::string::npos);
+
+    // Y al revés: Abrir no toca la métrica de Guardar como.
+    press(ed, InputEventType::Escape);
+    openFileBrowser(ed);
+    CHECK(ed.getStateForTesting() == State::FileBrowser);
+    const int fileBase2 = spy.renderFileListCount;
+    const int saveAsBase2 = spy.renderSaveAsFileListCount;
+    ed.renderFrame();
+    CHECK(spy.renderFileListCount == fileBase2 + 1);
+    CHECK(spy.renderSaveAsFileListCount == saveAsBase2);
+}
+
+// ---------------------------------------------------------------------------
 // 5. Cambio de buffer invalida (deltas, no conteo exacto global)
 // ---------------------------------------------------------------------------
 TEST(spy_activate_buffer_invalidates) {

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "interaction/test_support.h"
 
 #include <string>
 #include <vector>
@@ -24,7 +25,7 @@ using testfw::TempFile;
 // E2E aqui conduce el editor mediante handleEvent(), como en produccion,
 // mientras que algunas verificaciones de estado interno usan acceso
 // white-box (#define private public) para comprobar invariantes que no
-// forman parte de la API publica (state_, running_, saveAsPath_,
+// forman parte de la API publica (state_, running_, saveAsFileName_,
 // statusMessage_, fileBrowser._, buffers, etc.). El documento proviene y
 // se persiste en una ruta real del sistema de archivos: al final se lee
 // el archivo FUERA del editor y se comparan los BYTES.
@@ -33,40 +34,6 @@ using testfw::TempFile;
 // + guardar + releer en disco byte a byte), no solo de la logica interna.
 // ---------------------------------------------------------------------------
 namespace {
-
-InputEvent insert(char c) {
-    InputEvent e;
-    e.type = InputEventType::InsertChar;
-    e.text = std::string(1, c);
-    return e;
-}
-
-void press(Editor& ed, InputEventType type) {
-    InputEvent e;
-    e.type = type;
-    ed.handleEvent(e);
-}
-
-// Escribe `typed` como flujo de InsertChar, entrando a Interaccion si hace
-// falta (mismo contrato que el modo de edicion real: la letra 'i' desde
-// Navegacion entra a Interaccion; despues cada letra es texto).
-void type(Editor& ed, const std::string& typed) {
-    if (ed.state_ != State::Interaccion) {
-        if (ed.state_ == State::Seleccion) {
-            InputEvent e;
-            e.type = InputEventType::Escape;
-            ed.handleEvent(e);
-        }
-        ed.handleEvent(insert('i'));
-    }
-    for (char c : typed)
-        ed.handleEvent(insert(c));
-}
-
-void prefix(Editor& ed, InputEventType first, InputEventType second) {
-    press(ed, first);
-    press(ed, second);
-}
 
 static void saveViaS(Editor& ed) {
     press(ed, InputEventType::Prefix);
@@ -650,18 +617,26 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     saveViaS(ed);
     CHECK(!ed.active().modified);               // A guardado
 
-    // save B: volver a B y Ctrl+K Ctrl+S -> prompt Guardar archivo.
+    // save B: volver a B y Ctrl+K Ctrl+S -> file browser Guardar como.
     press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
     press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "BBBB2");
+
+    // El browser arranca en cwd (buffer sin nombre): entrar al dir de fileB.
+    CwdGuard g6;
+    g6.enter(std::filesystem::path(fileB.path).parent_path().string());
+
     prefix(ed, InputEventType::Prefix, InputEventType::Save);
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
-    ed.saveAsPath_.clear();
-    for (char c : fileB.path)
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAsFileBrowser));
+    // file browser está en el dir de fileB
+    // saveAsFileName_ está vacío para buffer sin nombre -> escribir el nombre
+    clearPrompt(ed);
+    for (char c : std::filesystem::path(fileB.path).filename().string())
         ed.handleEvent(insert(c));
-    ed.handleEvent(enter);
+    // Confirmar con Ctrl+S
+    InputEvent saveEvt; saveEvt.type = InputEventType::Save; ed.handleEvent(saveEvt);
     CHECK_EQ(ed.active().filename, fileB.path);
     CHECK(!ed.active().modified);
 
@@ -920,15 +895,15 @@ TEST(e2e_08_filebrowser_open_edit_save_switch) {
 //   -> verificar filesystem
 //
 // Un buffer nuevo (Ctrl+K n) no tiene nombre, asi que Ctrl+K Ctrl+S no
-// guarda directo: abre el prompt "Guardar archivo:" (SaveAs). Se escribe la
-// ruta destino y Enter guarda y ancla el nombre al buffer. Luego quit y se
-// relee el archivo FUERA del editor para verificar los BYTES escritos.
+// guarda directo: abre el explorador "Guardar como" (SaveAsFileBrowser).
+// Se escribe el nombre destino y Ctrl+S guarda y ancla el nombre al buffer.
+// Luego quit y se relee el archivo FUERA del editor para verificar los BYTES.
 //
 // Workflow determinista:
 //   Ctrl+K n   : buffer nuevo sin nombre, vacio, activo, Navegacion
 //   escribir   : "Hola" + Enter + "mundo"      -> [ "Hola", "mundo" ]
-//   Save As    : Ctrl+K Ctrl+S                 -> state = SaveAs
-//   path       : escribir la ruta destino      -> Enter (commit)
+//   Save As    : Ctrl+K Ctrl+S                 -> state = SaveAsFileBrowser
+//   nombre     : escribir el nombre destino    -> Ctrl+S (commit)
 //                 -> filename = ruta, modified=false
 //   quit       : Ctrl+K Ctrl+Q                 -> running_=false
 //   filesystem : readBytes(ruta) == "Hola\nmundo" (sin '\n' final: el buffer
@@ -956,15 +931,19 @@ TEST(e2e_09_new_buffer_save_as_byte_exact) {
           (std::vector<std::string>{"Hola", "mundo"}));
     CHECK(ed.active().modified);
 
-    // Save As: Ctrl+K Ctrl+S -> prompt (buffer sin nombre).
-    prefix(ed, InputEventType::Prefix, InputEventType::Save);
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
-    ed.saveAsPath_.clear();
+    // Save As: Ctrl+K Ctrl+S -> file browser (buffer sin nombre).
+    // El browser arranca en cwd: entrar al dir del destino ANTES de abrirlo.
+    CwdGuard g9;
+    g9.enter(std::filesystem::path(f.path).parent_path().string());
 
-    // elegir path: escribir la ruta destino y Enter.
-    for (char c : f.path)
+    prefix(ed, InputEventType::Prefix, InputEventType::Save);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAsFileBrowser));
+
+    clearPrompt(ed);
+    for (char c : std::filesystem::path(f.path).filename().string())
         ed.handleEvent(insert(c));
-    ed.handleEvent(nl);                         // Enter: commitSaveAs
+    InputEvent saveEvt; saveEvt.type = InputEventType::Save; ed.handleEvent(saveEvt);  // Ctrl+S
+
     CHECK(ed.active().filename == f.path);
     CHECK(!ed.active().modified);
     CHECK(ed.active().document.snapshot() ==
@@ -990,8 +969,8 @@ TEST(e2e_09_new_buffer_save_as_byte_exact) {
 // Workflow determinista:
 //   Ctrl+K n   : buffer nuevo sin nombre, activo
 //   escribir   : "Hola" + Enter + "mundo"      -> [ "Hola", "mundo" ]
-//   Save As    : Ctrl+K Ctrl+S                 -> state = SaveAs
-//   Esc        : cancela el prompt             -> vuelve a Interaccion
+//   Save As    : Ctrl+K Ctrl+S                 -> state = SaveAsFileBrowser
+//   Esc        : cancela el explorador          -> vuelve a Interaccion
 //                 -> filename vacio, texto intacto, modified, sin guardar
 //   editar     : MoveEnd + '!'                 -> [ "Hola", "mundo!" ]
 //   quit       : Ctrl+K Ctrl+Q                 -> running_=false
@@ -1017,14 +996,14 @@ TEST(e2e_10_new_buffer_save_as_cancel_keeps_state) {
     CHECK(ed.active().modified);
     CHECK_EQ(ed.active().cursor.col, 5);        // fin de "mundo" (1,5)
 
-    // Save As: Ctrl+K Ctrl+S -> prompt.
+    // Save As: Ctrl+K Ctrl+S -> file browser.
     prefix(ed, InputEventType::Prefix, InputEventType::Save);
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAsFileBrowser));
 
-    // elegir algo de ruta y luego cancelar con Esc (no llega a confirmarse).
-    for (char c : f.path)
-        ed.handleEvent(insert(c));
-    press(ed, InputEventType::Escape);               // cancela el prompt
+    // elegir algo de nombre y luego cancelar con Esc (no llega a confirmarse).
+    clearPrompt(ed);
+    typePrompt(ed, "test.txt");
+    press(ed, InputEventType::Escape);               // cancela el file browser
 
     // El estado se CONSERVA: volvio al modo previo (Interaccion), el buffer
     // sigue sin nombre, con su texto intacto y sigue modificado.
@@ -1262,11 +1241,11 @@ TEST(e2e_12_binary_bytes_00_to_ff_roundtrip) {
 // ===========================================================================
 // E2E-13 — Error al guardar (P0)
 //
-// buffer nuevo -> editar -> intentar guardar (Save As) en un path invalido
-// (directorio inexistente -> ofstream no puede abrir el archivo ->
-// saveToFile()==false). La ruta se elige en el prompt de "Guardar archivo:",
-// que es donde se escribe un path; en un buffer con nombre Ctrl+K Ctrl+S
-// guarda directo (sin prompt), asi que el error de path solo se dispara aqui.
+// buffer nuevo -> editar -> intentar guardar (Save As) con un nombre
+// imposible (componente > NAME_MAX -> saveToFile()==false). El nombre
+// se escribe en el input del explorador "Guardar como"; en un buffer con
+// nombre Ctrl+K Ctrl+S guarda directo (sin explorador), asi que el error
+// de escritura solo se dispara aqui.
 //
 // Verificar:
 //   - error visible     (statusMessage_ = "Error al guardar: <path>")
@@ -1276,11 +1255,12 @@ TEST(e2e_12_binary_bytes_00_to_ff_roundtrip) {
 //     ruta valida termina correctamente en disco)
 // ---------------------------------------------------------------------------
 TEST(e2e_13_save_error_invalid_path) {
-    const std::string badParent = "/tmp/maestro_e2e13_missing_dir";
-    const std::string badPath = badParent + "/out.txt";
-    std::filesystem::remove_all(badParent);      // garantizar que NO existe
-
     TempFile f;                                 // ruta valida de recuperacion
+    // Nombre imposible de crear (componente > NAME_MAX -> ENAMETOOLONG):
+    // error real de escritura respetando el contrato basename (sin slashes).
+    const std::string tooLongName = std::string(300, 'a') + ".txt";
+    CwdGuard g13;
+    g13.enter(std::filesystem::path(f.path).parent_path().string());
 
     Editor ed;
     InputEvent nl;
@@ -1294,45 +1274,44 @@ TEST(e2e_13_save_error_invalid_path) {
     CHECK_EQ(ed.active().document.lineAt(0), "AAA_world");
     CHECK(ed.active().modified);
 
-    // Save As a una ruta invalida: Ctrl+K Ctrl+S -> escribir path -> Enter.
+    // Save As a un nombre imposible: Ctrl+K Ctrl+S -> escribir -> Ctrl+S.
     prefix(ed, InputEventType::Prefix, InputEventType::Save);
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
-    ed.saveAsPath_.clear();
-    for (char c : badPath)
-        ed.handleEvent(insert(c));
-    ed.handleEvent(nl);                          // Enter: intenta guardar
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAsFileBrowser));
+    clearPrompt(ed);
+    typePrompt(ed, tooLongName);  // ENAMETOOLONG -> error de guardado
+    InputEvent saveEvt; saveEvt.type = InputEventType::Save; ed.handleEvent(saveEvt);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAsFileBrowser));
 
     // error visible
-    CHECK_EQ(ed.statusMessage_, "Error al guardar: " + badPath);
-    CHECK(!std::filesystem::exists(badPath));    // nada se escribio en disco
+    CHECK(ed.statusMessage_.text.find("Error al guardar") != std::string::npos);
+    {  // exists() sin error_code lanzaria con ENAMETOOLONG: usar overload.
+        std::error_code ec;
+        CHECK(!std::filesystem::exists(tooLongName, ec));
+    }
 
     // contenido del buffer INTACTO y seguimos modificados
     CHECK_EQ(ed.active().document.lineAt(0), "AAA_world");
     CHECK(ed.active().modified);
     CHECK(ed.active().filename.empty());         // no se caso a la ruta mala
 
-    // editor sigue funcionando: ESC sale del prompt (vuelve a priorState_,
+    // editor sigue funcionando: ESC sale del file browser (vuelve a priorState_,
     // que aqui es Interaccion, porque la edicion se hizo con type)...
     press(ed, InputEventType::Escape);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
     CHECK_EQ(ed.active().document.lineAt(0), "AAA_world");   // intacto
 
     // ...y un Save As a una ruta VALIDA termina en disco ya sin error.
+    // (El browser sigue en el mismo dir: no hace falta cambiar cwd.)
     prefix(ed, InputEventType::Prefix, InputEventType::Save);
-    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAs));
-    ed.saveAsPath_.clear();
-    for (char c : f.path)
-        ed.handleEvent(insert(c));
-    ed.handleEvent(nl);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAsFileBrowser));
+    clearPrompt(ed);
+    typePrompt(ed, std::filesystem::path(f.path).filename().string());
+    saveEvt.type = InputEventType::Save; ed.handleEvent(saveEvt);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
     CHECK_EQ(ed.active().filename, f.path);
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().document.lineAt(0), "AAA_world");   // intacto
     CHECK_EQ(readBytes(f.path), "AAA_world");
-
-    // limpieza
-    std::filesystem::remove_all(badParent);
 }
 
 // ===========================================================================

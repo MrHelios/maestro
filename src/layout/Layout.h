@@ -25,8 +25,8 @@ struct Layout {
 };
 
 // Filas del chrome (barra comun). El editor usa DOS: la fila fija de barra y
-// la fila de mensajes/prompt (esa fila es la linea de entrada de SaveAs y de
-// los comandos, asi que se conserva; NO se colapsa a una sola fila).
+// la fila de mensajes/prompt (esa fila es la linea de mensajes y avisos,
+// asi que se conserva; NO se colapsa a una sola fila).
 inline constexpr int kStatusBarRows = 2;
 
 inline Layout computeLayout(int rows, int cols) {

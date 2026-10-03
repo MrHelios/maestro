@@ -129,6 +129,26 @@ public:
                         int height,
                         Sink& sink) override;
 
+    // SaveAs file list: mismo layout que file list; el input del nombre
+    // llega ya compuesto en `message` (fila de mensajes, debajo del
+    // statusbar). Solo cambian etiqueta y accent.
+    std::string buildSaveAsFileListScreen(const std::vector<FileListItem>& items,
+                                          int selected,
+                                          int scroll,
+                                          const std::string& path,
+                                          const Message& message,
+                                          int width,
+                                          int height);
+
+    void renderSaveAsFileList(const std::vector<FileListItem>& items,
+                              int selected,
+                              int scroll,
+                              const std::string& path,
+                              const Message& message,
+                              int width,
+                              int height,
+                              Sink& sink) override;
+
     void setExternalSyntaxCache(SyntaxCache* c) override {
         renderer_.setExternalSyntaxCache(c);
     }
@@ -183,4 +203,16 @@ private:
                                int selected,
                                int scroll,
                                const Rect& area);
+    // Frame compartido de los listados de archivos (abrir y guardar como):
+    // lista a full del area de contenido + barra de estado + cursor.
+    // Solo varian etiqueta y accent.
+    std::string buildFileListFrame(const std::vector<FileListItem>& items,
+                                   int selected,
+                                   int scroll,
+                                   const std::string& path,
+                                   const Message& message,
+                                   int width,
+                                   int height,
+                                   const char* estado,
+                                   StyleRole accent);
 };

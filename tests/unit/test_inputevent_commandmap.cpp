@@ -383,19 +383,19 @@ TEST(inputcmd_cmd_buffer_guardar_named_behavior) {
     CHECK_EQ(inputcmdFileContent(tf.path), "Xhola");
     CHECK(ed.getStateForTesting() == State::Navegacion);
     CHECK(ed.getStateForTesting() != State::Prefix);
-    CHECK(ed.getStateForTesting() != State::SaveAs);
+    CHECK(ed.getStateForTesting() != State::SaveAsFileBrowser);
 }
 
-// buffer.guardar sin nombre por API pública: abre el prompt SaveAs en vez
+// buffer.guardar sin nombre por API pública: abre el prompt SaveAsFileBrowser en vez
 // de fallar con "Archivo sin nombre".
 TEST(inputcmd_cmd_buffer_guardar_unnamed_prompt) {
     Editor ed;  // SinNombre, sin ruta
     CHECK(ed.getActiveBufferForTesting().filename.empty());
     ed.executeCommand("buffer.guardar");
-    CHECK(ed.getStateForTesting() == State::SaveAs);
+    CHECK(ed.getStateForTesting() == State::SaveAsFileBrowser);
 }
 
-// buffer.guardar.como por API pública: siempre abre el prompt, incluso con
+// buffer.guardar.como por API pública: siempre abre el prompt SaveAsFileBrowser, incluso con
 // nombre (equivale a Ctrl+K Ctrl+S del teclado).
 TEST(inputcmd_cmd_buffer_guardar_como_prompt) {
     testfw::TempFile tf;
@@ -403,7 +403,7 @@ TEST(inputcmd_cmd_buffer_guardar_como_prompt) {
     Editor ed;
     CHECK(ed.loadIntoActiveBuffer(tf.path));
     ed.executeCommand("buffer.guardar.como");
-    CHECK(ed.getStateForTesting() == State::SaveAs);
+    CHECK(ed.getStateForTesting() == State::SaveAsFileBrowser);
     // No guardó nada de más: el archivo sigue intacto.
     CHECK_EQ(inputcmdFileContent(tf.path), "hola");
 }

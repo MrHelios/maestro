@@ -133,3 +133,10 @@ FileBrowser::EnterResult FileBrowser::enter() {
     pendingPath_ = e.fullPath;
     return EnterResult::OpenedFile;
 }
+
+FileBrowser::EnterResult FileBrowser::enterDirectoryOnly() {
+    if (entries_.empty()) return EnterResult::None;
+    const FileBrowserEntry& e = entries_[static_cast<size_t>(index_)];
+    if (!e.isDirectory) return EnterResult::None;  // traba: archivos no se abren
+    return enter();
+}
