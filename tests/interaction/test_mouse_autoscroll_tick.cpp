@@ -57,7 +57,7 @@ TEST(mouse_tick_scrolls_down_periodically) {
 
     ed.handleEvent(mousePressAt(4, 2)); // linea 11, arma gesto
     CHECK_EQ(ed.active().cursor.line, 11);
-    ed.handleEvent(mouseDragAt(4, 5)); // statusbar, fuera por abajo
+    ed.handleEvent(mouseDragAt(4, 5)); // chrome, fuera por abajo
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
     CHECK_EQ(ed.active().viewport.top, 11); // paso del evento
     CHECK(ed.mouseAutoscrollActive());
@@ -173,7 +173,7 @@ TEST(mouse_tick_holds_edge_at_limit) {
     ed.active().cursor.col = 0;
 
     ed.handleEvent(mousePressAt(4, 2)); // linea 5
-    ed.handleEvent(mouseDragAt(4, 5));  // statusbar: clamp a linea 7
+    ed.handleEvent(mouseDragAt(4, 5));  // chrome: clamp a linea 7
     CHECK_EQ(ed.active().viewport.top, 4);
     CHECK_EQ(ed.active().cursor.line, 7);
     CHECK(ed.mouseAutoscrollActive());
@@ -264,7 +264,7 @@ TEST(mouse_tick_scrolls_up_from_top_edge_row) {
 
 TEST(mouse_tick_last_row_does_not_arm) {
     // Asimetria: la ultima fila visible es seleccion exacta hacia abajo
-    // (el fuera real es la statusbar). El drag no arma el autoscroll y el
+    // (el fuera real es el chrome). El drag no arma el autoscroll y el
     // tick no mueve aunque pase el intervalo.
     Editor ed;
     std::vector<std::string> lines;

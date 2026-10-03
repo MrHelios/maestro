@@ -15,7 +15,7 @@
 #include "rendering/Renderer.h"
 #include "rendering/ScreenRenderer.h"
 #include "rendering/Sink.h"
-#include "rendering/StatusBarData.h"
+#include "rendering/ChromeData.h"
 #include "rendering/Style.h"
 #include "rendering/tty/TtyThemeProvider.h"
 #include "rendering/tty/TtyDiff.h"
@@ -130,8 +130,8 @@ public:
                         Sink& sink) override;
 
     // SaveAs file list: mismo layout que file list; el input del nombre
-    // llega ya compuesto en `message` (fila de mensajes, debajo del
-    // statusbar). Solo cambian etiqueta y accent.
+    // llega ya compuesto en `message` (MessageBar, debajo del StatusBar).
+    // Solo cambian etiqueta y accent.
     std::string buildSaveAsFileListScreen(const std::vector<FileListItem>& items,
                                           int selected,
                                           int scroll,
@@ -169,10 +169,10 @@ public:
                              const std::optional<Normalized>& sel,
                              const Rect& area,
                              int gutterW) const;
-    void renderStatusBar(std::string& out,
-                         const Rect& area,
-                         const StatusBarData& data,
-                         StyleRole accent) const;
+    void renderChrome(std::string& out,
+                        const Rect& area,
+                        const ChromeData& data,
+                        StyleRole accent) const;
     void beginFrame(std::string& out) { encoder_.beginFrame(out); }
     void endFrame(std::string& out) { encoder_.endFrame(out); }
     void hideCursor(std::string& out) { encoder_.hideCursor(out); }

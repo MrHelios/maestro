@@ -177,9 +177,9 @@ TEST(bench_perf_render_diff_25k_checked) {
     CHECK(perf_time::g_sink > 0);
 }
 
-// StatusBar a 25k: informativo (PT: baseline primero, gate despues).
-TEST(bench_perf_statusbar_25k_perf) {
-    perf_arch::reportVerbose("\n== perf_statusbar_25k (informativo) ==\n");
+// Chrome a 25k: informativo (PT: baseline primero, gate despues).
+TEST(bench_perf_chrome_25k_perf) {
+    perf_arch::reportVerbose("\n== perf_chrome_25k (informativo) ==\n");
     const int n = 25000;
     auto lines = makeLines80(n);
     Editor ed;
@@ -187,15 +187,15 @@ TEST(bench_perf_statusbar_25k_perf) {
     ed.active().viewport.height = 24;
     ed.active().viewport.width = 80;
     ed.active().cursor.line = n / 2;
-    TtyRenderer tr;  // barra del backend TTY para el bench
-    Layout layout = computeLayout(ed.active().viewport.height + kStatusBarRows,
+    TtyRenderer tr;  // chrome del backend TTY para el bench
+    Layout layout = computeLayout(ed.active().viewport.height + kChromeRows,
                                   ed.active().viewport.width);
-    StatusBarData d;
-    d.name = "bench.cpp";
-    d.estado = "NAVEGACION";
-    d.cursorLine = ed.active().cursor.line;
-    d.cursorCol = 0;
-    d.totalLines = n;
+    ChromeData d;
+    d.status.name = "bench.cpp";
+    d.status.estado = "NAVEGACION";
+    d.status.cursorLine = ed.active().cursor.line;
+    d.status.cursorCol = 0;
+    d.status.totalLines = n;
     const int iters = 2000;
     auto t0 = std::chrono::steady_clock::now();
     alloc_stats::resetAll();
@@ -203,7 +203,7 @@ TEST(bench_perf_statusbar_25k_perf) {
         alloc_stats::Scoped s(alloc_stats::kOther);
         for (int i = 0; i < iters; ++i) {
             std::string out;
-            tr.renderStatusBar(out, layout.statusBar, d,
+            tr.renderChrome(out, layout.chrome, d,
                                   StyleRole::AccentNavegacion);
             perf_time::g_sink += out.size();
         }

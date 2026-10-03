@@ -170,7 +170,7 @@ struct SpyScreenRenderer : public ScreenRenderer {
         lastFileListSelected = selected;
         lastFileListScroll = scroll;
         lastFilePath = path;
-        // El input llega ya compuesto en `message` (fila de mensajes):
+        // El input llega ya compuesto en `message` (MessageBar):
         // se conserva para observarlo (input o mensaje activo).
         lastMessage = message;
         // Limpieza cruzada: el snapshot describe solo el último frame

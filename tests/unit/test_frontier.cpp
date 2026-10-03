@@ -449,7 +449,7 @@ TEST(fase_c_event_path_does_not_autoscroll) {
     ed.handleEvent(press);
     InputEvent drag;
     drag.type = InputEventType::MouseDrag;
-    drag.cell = CellPos{3, 4}; // statusbar: fuera por abajo
+    drag.cell = CellPos{3, 4}; // chrome: fuera por abajo
     ed.handleEvent(drag);
     CHECK(ed.getStateForTesting() == State::Seleccion);
     CHECK_EQ(ed.getActiveBufferForTesting().viewport.top, 11); // paso del evento

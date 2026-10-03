@@ -1,7 +1,7 @@
-// Tests de la barra de estado (paso 11). Probamos StatusBar y StatusBarData
+// Tests del chrome inferior (paso 11). Probamos TtyChrome y ChromeData
 // DIRECTAMENTE (render(area, data)), sin pasar por el Editor ni el Renderer:
-// la barra es un componente propio que solo recibe texto/numeros y devuelve
-// la secuencia ANSI.
+// el chrome (StatusBar + MessageBar) es un componente propio que solo recibe
+// texto/numeros y devuelve la secuencia ANSI.
 //
 // Casos del plan:
 //   - left corto / center corto / right corto        -> cada bloque cabe
@@ -22,7 +22,7 @@
 
 #include "layout/Layout.h"
 #include "app/Message.h"
-#include "rendering/tty/TtyStatusBar.h"
+#include "rendering/tty/TtyChrome.h"
 #include "rendering/tty/TtyRenderer.h"
 
 namespace {
@@ -34,7 +34,7 @@ using testutil::contains;
 // Fila 1 y fila 2 (mensajes) del texto ya sin ANSI, separadas por \r\n.
 struct Rows {
     std::string fixed;   // barra de estado superior
-    std::string message; // fila de mensajes
+    std::string message; // MessageBar (fila 2)
 };
 
 Rows rowsOf(const std::string& out) {
@@ -45,11 +45,11 @@ Rows rowsOf(const std::string& out) {
 }
 
 // Renderiza con un area 2 filas x `w` columnas y devuelve el par de filas.
-Rows renderRows(const StatusBarData& data, int w) {
+Rows renderRows(const ChromeData& data, int w) {
     Rect area;
     area.width = w;
     area.height = 2;
-    return rowsOf(TtyStatusBar().render(area, data));
+    return rowsOf(TtyChrome().render(area, data));
 }
 
 std::string longStr(int n, char c = 'n') {
@@ -62,12 +62,12 @@ std::string longStr(int n, char c = 'n') {
 // left corto: nombre, ruta y estado cortos en una terminal generosa. El
 // bloque izquierdo cabe entero y el derecho queda anclado a la derecha.
 // ---------------------------------------------------------------------------
-TEST(statusbar_left_corto) {
-    StatusBarData d;
-    d.name = "archivo.txt";
-    d.path = "/home/usuario";
-    d.estado = "NAVEGACION";
-    d.totalLines = 1;
+TEST(chrome_left_corto) {
+    ChromeData d;
+    d.status.name = "archivo.txt";
+    d.status.path = "/home/usuario";
+    d.status.estado = "NAVEGACION";
+    d.status.totalLines = 1;
 
     Rows r = renderRows(d, 80);
     // La fila fija ocupa exactamente el ancho del area (anclado a la
@@ -86,11 +86,11 @@ TEST(statusbar_left_corto) {
 // center corto: en un ancho ajustado el relleno central es minimo/cero y el
 // bloque derecho sigue anclado a la derecha sin pisarse con el izquierdo.
 // ---------------------------------------------------------------------------
-TEST(statusbar_center_corto) {
-    StatusBarData d;
-    d.name = "archivo.txt"; // 11 columnas
-    d.estado = "SELECCION"; // 9 columnas
-    d.totalLines = 1;
+TEST(chrome_center_corto) {
+    ChromeData d;
+    d.status.name = "archivo.txt"; // 11 columnas
+    d.status.estado = "SELECCION"; // 9 columnas
+    d.status.totalLines = 1;
 
     // Presupuesto del bloque izquierdo en w=35:
     //   35 - (padL 1 + padR 3 + right 8) = 23 -> caben nombre + " - " + estado.
@@ -111,12 +111,12 @@ TEST(statusbar_center_corto) {
 // right corto: sobreescritura explicita del bloque derecho (valor forzado, pantallas sin
 // documento) de pocas columnas; se usa tal cual y se ancla a la derecha.
 // ---------------------------------------------------------------------------
-TEST(statusbar_right_corto) {
-    StatusBarData d;
-    d.name = "archivo.txt";
-    d.estado = "NAVEGACION";
-    d.right = "2/5";               // override: sin documento no hay pct (fila,col)
-    d.totalLines = 0;
+TEST(chrome_right_corto) {
+    ChromeData d;
+    d.status.name = "archivo.txt";
+    d.status.estado = "NAVEGACION";
+    d.status.right = "2/5";               // override: sin documento no hay pct (fila,col)
+    d.status.totalLines = 0;
 
     Rows r = renderRows(d, 40);
     CHECK_EQ(colWidth(r.fixed), 40);
@@ -130,11 +130,11 @@ TEST(statusbar_right_corto) {
 // left demasiado largo: el nombre solo no cabe ni con el maximo fijo
 // (kNameMax=30); se trunca y nunca desborda el ancho.
 // ---------------------------------------------------------------------------
-TEST(statusbar_left_demasiado_largo) {
-    StatusBarData d;
-    d.name = longStr(80); // muy por encima de kNameMax
-    d.estado = "NAVEGACION";
-    d.totalLines = 1;
+TEST(chrome_left_demasiado_largo) {
+    ChromeData d;
+    d.status.name = longStr(80); // muy por encima de kNameMax
+    d.status.estado = "NAVEGACION";
+    d.status.totalLines = 1;
 
     for (int w = 12; w <= 80; w += 7) {
         Rows r = renderRows(d, w);
@@ -152,12 +152,12 @@ TEST(statusbar_left_demasiado_largo) {
 // path demasiado largo: la ruta se sacrifica ANTES que el nombre (truncada
 // por la IZQUIERDA con "..." al inicio) y el derecho queda intacto.
 // ---------------------------------------------------------------------------
-TEST(statusbar_path_demasiado_largo) {
-    StatusBarData d;
-    d.name = "archivo.txt";
-    d.path = "/" + longStr(80) + "/cola_final.txt"; // muy larga
-    d.estado = "NAVEGACION";
-    d.totalLines = 1;
+TEST(chrome_path_demasiado_largo) {
+    ChromeData d;
+    d.status.name = "archivo.txt";
+    d.status.path = "/" + longStr(80) + "/cola_final.txt"; // muy larga
+    d.status.estado = "NAVEGACION";
+    d.status.totalLines = 1;
 
     for (int w = 20; w <= 80; w += 5) {
         Rows r = renderRows(d, w);
@@ -177,16 +177,16 @@ TEST(statusbar_path_demasiado_largo) {
 // todos demasiado largos: nombre, ruta, estado, mensaje y bloque derecho
 // juntos; cada uno cede lo suyo sin que ninguna fila desborde el ancho.
 // ---------------------------------------------------------------------------
-TEST(statusbar_todos_demasiado_largos) {
-    StatusBarData d;
-    d.name = longStr(80);
-    d.path = "/" + longStr(80) + "/x.txt";
-    d.estado = longStr(40);
+TEST(chrome_todos_demasiado_largos) {
+    ChromeData d;
+    d.status.name = longStr(80);
+    d.status.path = "/" + longStr(80) + "/x.txt";
+    d.status.estado = longStr(40);
     d.message = longStr(120, 'm');
-    d.right = longStr(40);
-    d.totalLines = 1000;
-    d.cursorLine = 256;
-    d.cursorCol = 512;
+    d.status.right = longStr(40);
+    d.status.totalLines = 1000;
+    d.status.cursorLine = 256;
+    d.status.cursorCol = 512;
 
     for (int w = 1; w <= 100; ++w) {
         Rows r = renderRows(d, w);
@@ -201,13 +201,13 @@ TEST(statusbar_todos_demasiado_largos) {
 // caso que el fix de v1.1 corrigio (antes la fila fija emitia minimo 12
 // columnas y la de mensajes 4, desbordando en terminales mas chicas).
 // ---------------------------------------------------------------------------
-TEST(statusbar_terminal_extremadamente_angosta) {
-    StatusBarData d;
-    d.name = longStr(80);
-    d.path = "/" + longStr(80);
-    d.estado = longStr(30);
+TEST(chrome_terminal_extremadamente_angosta) {
+    ChromeData d;
+    d.status.name = longStr(80);
+    d.status.path = "/" + longStr(80);
+    d.status.estado = longStr(30);
     d.message = longStr(120, 'm');
-    d.totalLines = 1;
+    d.status.totalLines = 1;
 
     for (int w = 1; w <= 11; ++w) {
         Rows r = renderRows(d, w);
@@ -222,23 +222,23 @@ TEST(statusbar_terminal_extremadamente_angosta) {
 // porcentual; con varias lineas el pct se calcula. En ambos el ancho se
 // respeta y el bloque queda a la derecha.
 // ---------------------------------------------------------------------------
-TEST(statusbar_right_block_edge_layout) {
+TEST(chrome_right_block_edge_layout) {
     for (int w = 15; w <= 40; w += 5) {
-        StatusBarData d;
-        d.name = "a.txt";
-        d.estado = "NAVEGACION";
-        d.totalLines = 5;
-        d.cursorLine = 2; // 2/(5-1) = 50%
+        ChromeData d;
+        d.status.name = "a.txt";
+        d.status.estado = "NAVEGACION";
+        d.status.totalLines = 5;
+        d.status.cursorLine = 2; // 2/(5-1) = 50%
         Rows r = renderRows(d, w);
         CHECK_EQ(colWidth(r.fixed), w);
         CHECK_EQ(r.fixed.back(), ')'); // el (fila,col) cabe entero aca
     }
     // Sin documento (totalLines=0): el bloque derecho se calcula igual
     // (pct 0, (1,1)) si no hay override; 0% -> 1 columna, ancho respetado.
-    StatusBarData d;
-    d.name = "a.txt";
-    d.estado = "NAVEGACION";
-    d.totalLines = 0;
+    ChromeData d;
+    d.status.name = "a.txt";
+    d.status.estado = "NAVEGACION";
+    d.status.totalLines = 0;
     Rows r = renderRows(d, 30);
     CHECK_EQ(colWidth(r.fixed), 30);
     CHECK(contains(r.fixed, "0% (1,1)"));
@@ -249,18 +249,18 @@ TEST(statusbar_right_block_edge_layout) {
 // v1.3/evolución Fase E: el accent de la etiqueta de estado viaja como
 // StyleRole (parámetro, nunca en el DTO); el default usa statusBarAccent.
 // ---------------------------------------------------------------------------
-TEST(statusbar_estado_accent_from_role) {
+TEST(chrome_estado_accent_from_role) {
     TtyTheme t = defaultTheme();
     t.statusBarAccent = "\x1b[34m";      // azul (default)
     t.accentNavegacion = "\x1b[33m";     // amarillo (estado activo)
-    TtyStatusBar bar;
+    TtyChrome bar;
     bar.setTheme(t);
     Rect area; area.width = 40; area.height = 2;
 
-    StatusBarData d;
-    d.name = "a.txt";
-    d.estado = "NAVEGACION";
-    d.totalLines = 1;
+    ChromeData d;
+    d.status.name = "a.txt";
+    d.status.estado = "NAVEGACION";
+    d.status.totalLines = 1;
 
     const std::string fallback = bar.render(area, d);
     CHECK(fallback.find(t.statusBarAccent) != std::string::npos);
@@ -278,7 +278,7 @@ TEST(statusbar_estado_accent_from_role) {
 // como parámetro. Tema custom con los tres ANSI distintos para que el
 // test distinga rol vs default.
 // ---------------------------------------------------------------------------
-TEST(statusbar_list_screens_use_their_roles) {
+TEST(chrome_list_screens_use_their_roles) {
     TtyTheme t = defaultTheme();
     t.statusBarAccent = "\x1b[34m";
     t.accentBuffers = "\x1b[31m";
@@ -301,24 +301,24 @@ TEST(statusbar_list_screens_use_their_roles) {
 // v1.4: el indicador "[*]" se pinta con statusBarModified (no con
 // statusBarName), distinto del nombre y nunca presente si no hay cambios.
 // ---------------------------------------------------------------------------
-TEST(statusbar_modified_indicator_styled) {
+TEST(chrome_modified_indicator_styled) {
     TtyTheme t = defaultTheme();
     t.statusBarModified = "\x1b[1;38;5;200m";
-    TtyStatusBar bar;
+    TtyChrome bar;
     bar.setTheme(t);
     Rect area; area.width = 60; area.height = 2;
 
-    StatusBarData d;
-    d.name = "x.cc";
-    d.modified = true;
-    d.estado = "NAVEGACION";
-    d.totalLines = 1;
+    ChromeData d;
+    d.status.name = "x.cc";
+    d.status.modified = true;
+    d.status.estado = "NAVEGACION";
+    d.status.totalLines = 1;
 
     const std::string out = bar.render(area, d);
     CHECK(out.find(t.statusBarModified + " [*]") != std::string::npos);
 
-    StatusBarData c = d;
-    c.modified = false;
+    ChromeData c = d;
+    c.status.modified = false;
     CHECK(bar.render(area, c).find(" [*]") == std::string::npos);
 }
 
@@ -326,25 +326,63 @@ TEST(statusbar_modified_indicator_styled) {
 // v1.3: un mensaje de tipo Prompt se pinta con theme.prompt;
 // los mensajes Info no llevan ese estilo.
 // ---------------------------------------------------------------------------
-TEST(statusbar_prompt_message_styled) {
+TEST(chrome_prompt_message_styled) {
     TtyTheme t = defaultTheme();
     // Italica: distintiva, no colisiona con el bold de la etiqueta de estado.
     t.prompt = "\x1b[3m";
-    TtyStatusBar bar;
+    TtyChrome bar;
     bar.setTheme(t);
     Rect area; area.width = 60; area.height = 2;
 
-    StatusBarData d;
-    d.name = "x";
-    d.estado = "NAVEGACION";
-    d.totalLines = 1;
+    ChromeData d;
+    d.status.name = "x";
+    d.status.estado = "NAVEGACION";
+    d.status.totalLines = 1;
     d.message = Message("Guardar archivo: /tmp/x", MessageKind::Prompt,
                         std::nullopt);
 
     const std::string out = bar.render(area, d);
     CHECK(out.find(t.prompt + "Guardar archivo: /tmp/x") != std::string::npos);
 
-    StatusBarData c = d;
+    ChromeData c = d;
     c.message = Message("ayuda", MessageKind::Info, std::nullopt);
     CHECK(bar.render(area, c).find(t.prompt) == std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Contrato de composicion: ChromeData = StatusBar + MessageBar independientes.
+// Cambio solo en status -> solo fila 1; cambio solo en message -> solo fila 2.
+// Congela que renderStatus/renderMessage no se pisan entre si.
+// ---------------------------------------------------------------------------
+TEST(chrome_status_and_message_change_isolated_rows) {
+    TtyChrome bar;
+    ChromeData base;
+    base.status.name = "a.txt";
+    base.status.path = "/ruta";
+    base.status.estado = "NAVEGACION";
+    base.status.totalLines = 3;
+    base.message = Message("msg uno", MessageKind::Info, std::nullopt);
+
+    // Solo StatusBar: cambia el nombre, mismo Message.
+    ChromeData onlyStatus = base;
+    onlyStatus.status.name = "b.txt";
+    CHECK(bar.renderStatus(80, onlyStatus.status) !=
+          bar.renderStatus(80, base.status));
+    CHECK_EQ(bar.renderMessage(80, onlyStatus.message),
+             bar.renderMessage(80, base.message));
+    Rows rs = rowsOf(bar.render({0, 0, 80, 2}, onlyStatus));
+    Rows r0 = rowsOf(bar.render({0, 0, 80, 2}, base));
+    CHECK(rs.fixed != r0.fixed);
+    CHECK_EQ(rs.message, r0.message);
+
+    // Solo MessageBar: mismo StatusBar, cambia el texto.
+    ChromeData onlyMsg = base;
+    onlyMsg.message = Message("msg dos", MessageKind::Info, std::nullopt);
+    CHECK_EQ(bar.renderStatus(80, onlyMsg.status),
+             bar.renderStatus(80, base.status));
+    CHECK(bar.renderMessage(80, onlyMsg.message) !=
+          bar.renderMessage(80, base.message));
+    Rows rm = rowsOf(bar.render({0, 0, 80, 2}, onlyMsg));
+    CHECK_EQ(rm.fixed, r0.fixed);
+    CHECK(rm.message != r0.message);
 }

@@ -1324,7 +1324,7 @@ TEST(e2e_13_save_error_invalid_path) {
 // perder el historial de undo/redo, ni cambiar accidentalmente de buffer.
 //
 // openFileInBuffer ante un error real (PermissionDenied) no crea buffer ni
-// toca nada: solo pinta el error en la fila de mensajes. La verificacion es
+// toca nada: solo pinta el error en la MessageBar. La verificacion es
 // que TODO el estado previo sobrevive byte/columna a columna.
 //
 // NOTA: el mecanismo anterior con `chmod 000` no es determinista bajo root

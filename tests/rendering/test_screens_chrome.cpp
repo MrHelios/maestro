@@ -1,16 +1,17 @@
 // Tests de integracion de las tres pantallas (paso 11): Editor,
-// BufferSelector y FileBrowser comparten la MISMA barra comun (StatusBar).
-// Cada pantalla solo construye un StatusBarData y lo entrega al componente;
+// BufferSelector y FileBrowser comparten el MISMO chrome inferior
+// (StatusBar + MessageBar).
+// Cada pantalla solo construye un ChromeData y lo entrega al componente;
 // el chrome (altura, posicion, background, padding, truncamiento y
 // comportamiento ante resize) es IDENTICO en las tres.
 //
-// La unica diferencia entre pantallas debe ser el StatusBarData.
+// La unica diferencia entre pantallas debe ser el ChromeData.
 //
 // Estrategia: para cada pantalla (a) verificamos los invariantes del chrome
-// sobre el frame completo, y (b) reconstruimos el StatusBarData que la
+// sobre el frame completo, y (b) reconstruimos el ChromeData que la
 // pantalla produce y comprobamos que las dos filas inferiores de su frame
-// son EXACTAMENTE lo que pinta StatusBar::render(area, ese dato). Asi se
-// prueba que el chrome es compartido y que solo varia el StatusBarData.
+// son EXACTAMENTE lo que pinta TtyChrome::render(area, ese dato). Asi se
+// prueba que el chrome es compartido y que solo varia el ChromeData.
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -25,7 +26,7 @@
 #include "app/Message.h"
 #include "rendering/Style.h"
 #include "rendering/tty/TtyRenderer.h"
-#include "rendering/tty/TtyStatusBar.h"
+#include "rendering/tty/TtyChrome.h"
 
 namespace {
 
@@ -34,7 +35,7 @@ using testutil::colWidth;
 using testutil::visibleRows;
 using testutil::startsWith;
 
-// Pares de filas de la barra (fija superior + mensajes).
+// Pares de filas del chrome (StatusBar superior + MessageBar).
 struct BarRows {
     std::string fixed;
     std::string message;
@@ -42,8 +43,8 @@ struct BarRows {
 
 // ---------------------------------------------------------------------------
 // Frames de cada pantalla. Las tres pantallas reciben `content` FILAS DE
-// CONTENIDO (viewport.height) y `width` columnas; la barra comun se suma
-// encima (total = content + kStatusBarRows), por eso les pasamos el MISMO
+// CONTENIDO (viewport.height) y `width` columnas; el chrome se suma
+// encima (total = content + kChromeRows), por eso les pasamos el MISMO
 // content/width a las tres para comparar el chrome en igualdad de
 // condiciones.
 // ---------------------------------------------------------------------------
@@ -78,7 +79,7 @@ std::string frameFile(int content, int width) {
         width, content);
 }
 
-// Las DOS filas inferiores del frame (la barra comun) en texto visible.
+// Las DOS filas inferiores del frame (el chrome) en texto visible.
 BarRows barOf(const std::string& frame) {
     const auto rows = visibleRows(frame);
     if (rows.size() < 2) return {rows.back(), ""};
@@ -86,52 +87,52 @@ BarRows barOf(const std::string& frame) {
 }
 
 // ---------------------------------------------------------------------------
-// StatusBarData que cada pantalla deberia estar produciendo (espejo de la
+// ChromeData que cada pantalla deberia estar produciendo (espejo de la
 // logica en Renderer.cpp - si cambia Renderer, actualizar aqui). Al comprobar
-// que la barra del frame == StatusBar::render(area, este dato), probamos que
+// que el chrome del frame == TtyChrome::render(area, este dato), probamos que
 // solo varia el dato; no prueba por si solo que los valores sean
-// funcionalmente correctos (requiere cobertura de StatusBar unit).
+// funcionalmente correctos (requiere cobertura de chrome unit).
 // ---------------------------------------------------------------------------
 
-StatusBarData editorData() {
+ChromeData editorData() {
     const std::string filename = "/ruta/proyecto/archivo.txt";
     size_t slash = filename.find_last_of('/');
-    StatusBarData d;
-    d.name = filename.substr(slash + 1);              // baseName
-    d.path = (slash == 0) ? "/" : filename.substr(0, slash); // dirName
-    d.estado = "NAVEGACION";
+    ChromeData d;
+    d.status.name = filename.substr(slash + 1);              // baseName
+    d.status.path = (slash == 0) ? "/" : filename.substr(0, slash); // dirName
+    d.status.estado = "NAVEGACION";
     d.message = "";
-    d.cursorLine = 0;
-    d.cursorCol = 0;
-    d.totalLines = 3;
+    d.status.cursorLine = 0;
+    d.status.cursorCol = 0;
+    d.status.totalLines = 3;
     return d;
 }
 
-StatusBarData bufferData(int n = 4, int selected = 1) {
-    StatusBarData d;
-    d.name = "Buffers";
-    d.estado = "SELECCIONAR";
-    d.right = std::to_string(std::min(selected + 1, n)) + "/" +
+ChromeData bufferData(int n = 4, int selected = 1) {
+    ChromeData d;
+    d.status.name = "Buffers";
+    d.status.estado = "SELECCIONAR";
+    d.status.right = std::to_string(std::min(selected + 1, n)) + "/" +
               std::to_string(n);
     return d;
 }
 
-StatusBarData fileData(int n = 3) {
-    StatusBarData d;
-    d.name = "/datos/proyecto";
-    d.estado = "ABRIR ARCHIVO";
-    d.right = "1/" + std::to_string(n);
+ChromeData fileData(int n = 3) {
+    ChromeData d;
+    d.status.name = "/datos/proyecto";
+    d.status.estado = "ABRIR ARCHIVO";
+    d.status.right = "1/" + std::to_string(n);
     d.message = "ayuda: direcc de naveg";
     return d;
 }
 
-// Lo que deberia dibujar la barra comun para un dato dado. La geometria de
+// Lo que deberia dibujar el chrome para un dato dado. La geometria del
 // la barra para `content` filas de contenido y `width` columnas es
-// computeLayout(content + kStatusBarRows, width).statusBar; las tres
+// computeLayout(content + kChromeRows, width).chrome; las tres
 // pantallas la calculan igual.
-BarRows expectedBar(const StatusBarData& d, int content, int width) {
-    Rect area = computeLayout(content + kStatusBarRows, width).statusBar;
-    return barOf(TtyStatusBar().render(area, d));
+BarRows expectedBar(const ChromeData& d, int content, int width) {
+    Rect area = computeLayout(content + kChromeRows, width).chrome;
+    return barOf(TtyChrome().render(area, d));
 }
 
 } // namespace
@@ -139,36 +140,36 @@ BarRows expectedBar(const StatusBarData& d, int content, int width) {
 // ---------------------------------------------------------------------------
 // Misma altura y misma posicion de la barra en las tres pantallas:
 // siempre las DOS filas finales del frame (computeLayout reserva
-// kStatusBarRows) y ocupan el mismo rango de filas.
+// kChromeRows) y ocupan el mismo rango de filas.
 // ---------------------------------------------------------------------------
 TEST(integration_height_and_position_same_across_screens) {
     for (int content : {3, 8, 22}) {
         for (int width : {40, 80}) {
-            // Total de filas = content (contenido) + kStatusBarRows (chrome)
+            // Total de filas = content (contenido) + kChromeRows (chrome)
             // en las tres pantallas.
-            const int total = content + kStatusBarRows;
+            const int total = content + kChromeRows;
             const Layout layout = computeLayout(total, width);
             // Cada pantalla le pasa `content` filas de contenido y produce
-            // `total` filas: las ultimas kStatusBarRows son el chrome.
+            // `total` filas: las ultimas kChromeRows son el chrome.
             CHECK_EQ((int)visibleRows(frameEditor(content, width)).size(), total);
             CHECK_EQ((int)visibleRows(frameBuffer(content, width)).size(), total);
             CHECK_EQ((int)visibleRows(frameFile(content, width)).size(), total);
             // La barra arranca en la MISMA fila en las tres pantallas y
-            // ocupa exactamente kStatusBarRows filas (las ultimas del frame).
-            CHECK_EQ(layout.statusBar.height, kStatusBarRows);
-            CHECK_EQ(layout.statusBar.row, content);
-            CHECK_EQ(layout.statusBar.row + layout.statusBar.height, total);
+            // ocupa exactamente kChromeRows filas (las ultimas del frame).
+            CHECK_EQ(layout.chrome.height, kChromeRows);
+            CHECK_EQ(layout.chrome.row, content);
+            CHECK_EQ(layout.chrome.row + layout.chrome.height, total);
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// Las tres pantallas usan la barra comun: sus dos filas inferiores coinciden
-// EXACTAMENTE con StatusBar::render(area, StatusBarData). Es decir, el frame
+// Las tres pantallas usan el chrome comun: sus dos filas inferiores coinciden
+// EXACTAMENTE con TtyChrome::render(area, ChromeData). Es decir, el frame
 // despliega exactamente el chrome que pinta el componente compartido, y solo
-// cambia el StatusBarData que cada pantalla produce.
+// cambia el ChromeData que cada pantalla produce.
 // ---------------------------------------------------------------------------
-TEST(integration_chrome_is_exactly_shared_statusbar) {
+TEST(integration_chrome_is_exactly_shared) {
     for (int content : {6, 22}) {
         for (int width : {30, 80}) {
             BarRows ed = expectedBar(editorData(), content, width);
@@ -190,8 +191,8 @@ TEST(integration_chrome_is_exactly_shared_statusbar) {
 }
 
 // ---------------------------------------------------------------------------
-// Mismo background: la fila fija SIEMPRE lleva kStatusBarStyle
-// en las tres pantallas; la fila de mensajes no lleva ese fondo
+// Mismo background: el StatusBar SIEMPRE lleva kStatusBarStyle
+// en las tres pantallas; el MessageBar no lleva ese fondo
 // (su ancho nunca excede `width`).
 // ---------------------------------------------------------------------------
 TEST(integration_same_background_across_screens) {
@@ -207,7 +208,7 @@ TEST(integration_same_background_across_screens) {
         // El texto fijo (ya sin ANSI) llena todo el ancho con ese fondo.
         CHECK_EQ(colWidth(barOf(frame).fixed), width);
     }
-    // La fila de mensajes no lleva el fondo de la barra (sin relleno de ancho
+    // El MessageBar no lleva el fondo del StatusBar (sin relleno de ancho
     // completo: solo su contenido + paddings).
     for (const std::string& frame : screens) {
         CHECK(colWidth(barOf(frame).message) <= width);
@@ -215,13 +216,13 @@ TEST(integration_same_background_across_screens) {
 }
 
 // ---------------------------------------------------------------------------
-// Mismo padding: las dos filas de la barra arrancan con kStatusBarPadLeft
+// Mismo padding: StatusBar y MessageBar arrancan con kChromePadLeft
 // espacios (alineacion del texto) en las tres pantallas.
 // ---------------------------------------------------------------------------
 TEST(integration_same_padding_across_screens) {
     const int content = 22;
     const int width = 80;
-    const std::string pad = std::string(kStatusBarPadLeft, ' ');
+    const std::string pad = std::string(kChromePadLeft, ' ');
     for (const std::string& frame :
          {frameEditor(content, width), frameBuffer(content, width),
           frameFile(content, width)}) {
@@ -233,9 +234,9 @@ TEST(integration_same_padding_across_screens) {
 
 // ---------------------------------------------------------------------------
 // Mismo truncamiento y mismo comportamiento ante resize: en cualquier ancho
-// (incluidos muy angostos) la barra de cada pantalla nunca escribe fuera del
-// ancho; la fila fija SIEMPRE llena exactamente `width` columnas y la fila
-// de mensajes jamas lo excede.
+// (incluidos muy angostos) el chrome de cada pantalla nunca escribe fuera del
+// ancho; el StatusBar SIEMPRE llena exactamente `width` columnas y el
+// MessageBar jamas lo excede.
 // ---------------------------------------------------------------------------
 TEST(integration_same_resize_behavior_across_screens) {
     for (int content : {4, 10, 22}) {
@@ -272,8 +273,8 @@ TEST(integration_frame_lifecycle_shared) {
 
 // ---------------------------------------------------------------------------
 // Pantalla "Guardar como" (v0.9): mismo chrome compartido que abrir, con
-// estado GUARDAR COMO. El input del nombre vive en la fila de mensajes
-// (DEBAJO del statusbar), compuesto por el Editor en el Message: se trunca
+// estado GUARDAR COMO. El input del nombre vive en el MessageBar
+// (debajo del StatusBar), compuesto por el Editor en el Message: se trunca
 // al ancho (nunca desborda) y el accent semantico es el de guardar.
 // ---------------------------------------------------------------------------
 std::string frameSaveAs(int content, int width, const Message& message) {
@@ -300,14 +301,14 @@ TEST(saveas_screen_shows_input_line_and_estado) {
     CHECK(plain.find("sub/") != std::string::npos);
 }
 
-TEST(saveas_screen_input_lives_in_message_row_below_statusbar) {
+TEST(saveas_screen_input_lives_in_messagebar_below_statusbar) {
     const std::string frame = frameSaveAs(8, 80, saveAsInput("notas.txt"));
     BarRows bar = barOf(frame);
-    // La barra fija conserva el estado; la fila de mensajes lleva el input.
+    // El StatusBar conserva el estado; el MessageBar lleva el input.
     CHECK(bar.fixed.find("GUARDAR COMO") != std::string::npos);
     CHECK(bar.message.find("Nombre del Archivo: notas.txt") != std::string::npos);
-    // Posición: el input es la ÚLTIMA fila (debajo del statusbar) y no
-    // aparece en ninguna fila de contenido por encima de la barra.
+    // Posición: el input es la ÚLTIMA fila (debajo del StatusBar) y no
+    // aparece en ninguna fila de contenido por encima del chrome.
     const auto rows = visibleRows(frame);
     CHECK(rows.size() >= 3);
     CHECK_EQ(rows.back(), bar.message);
@@ -320,7 +321,7 @@ TEST(saveas_screen_truncates_long_input_to_width) {
     const std::string frame =
         frameSaveAs(8, width, saveAsInput(std::string(200, 'x')));
     const std::string plain = stripAnsi(frame);
-    // El nombre completo NO viaja en los bytes: la fila de mensajes se
+    // El nombre completo NO viaja en los bytes: el MessageBar se
     // trunco al ancho, pero el prefijo del input sigue visible.
     CHECK(plain.find(std::string(200, 'x')) == std::string::npos);
     CHECK(plain.find("Nombre del Archivo: ") != std::string::npos);

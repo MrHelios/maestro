@@ -130,10 +130,10 @@ void TtyRenderer::renderEditorContent(
     }
 }
 
-void TtyRenderer::renderStatusBar(std::string& out, const Rect& area,
-                                  const StatusBarData& data,
-                                  StyleRole accent) const {
-    out += encoder_.encodeStatus(area, data, accent);
+void TtyRenderer::renderChrome(std::string& out, const Rect& area,
+                                 const ChromeData& data,
+                                 StyleRole accent) const {
+    out += encoder_.encodeChrome(area, data, accent);
 }
 
 std::string TtyRenderer::buildBufferListScreen(
@@ -145,13 +145,13 @@ std::string TtyRenderer::buildBufferListScreen(
     Layout layout = renderer_.frameBuilder().calculateLayout(height, width);
     renderBufferListContent(out, names, selected, layout.content);
 
-    StatusBarData data;
-    data.name = "Buffers";
-    data.estado = "SELECCIONAR";
+    ChromeData data;
+    data.status.name = "Buffers";
+    data.status.estado = "SELECCIONAR";
     const int total = static_cast<int>(names.size());
-    data.right = std::to_string(std::min(selected + 1, total)) + "/" +
+    data.status.right = std::to_string(std::min(selected + 1, total)) + "/" +
                  std::to_string(total);
-    renderStatusBar(out, layout.statusBar, data, StyleRole::AccentBuffers);
+    renderChrome(out, layout.chrome, data, StyleRole::AccentBuffers);
 
     int rows = std::min(static_cast<int>(names.size()), height);
     if (rows > 0) {
@@ -200,15 +200,15 @@ std::string TtyRenderer::buildFileListFrame(
     Layout layout = renderer_.frameBuilder().calculateLayout(height, width);
     renderFileListContent(out, items, selected, scroll, layout.content);
 
-    StatusBarData data;
-    data.name = path.empty() ? "/" : chrome::collapseHome(path);
-    data.estado = estado;
+    ChromeData data;
+    data.status.name = path.empty() ? "/" : chrome::collapseHome(path);
+    data.status.estado = estado;
     const int total = static_cast<int>(items.size());
-    data.right = total == 0 ? "0/0"
+    data.status.right = total == 0 ? "0/0"
                             : std::to_string(selected - scroll + 1) + "/" +
                                   std::to_string(total);
     data.message = message;
-    renderStatusBar(out, layout.statusBar, data, accent);
+    renderChrome(out, layout.chrome, data, accent);
 
     int rows = std::min(static_cast<int>(items.size()) - scroll, height);
     if (rows > 0) {
@@ -264,7 +264,7 @@ std::string TtyRenderer::buildSaveAsFileListScreen(
     const std::vector<FileListItem>& items, int selected, int scroll,
     const std::string& path, const Message& message, int width, int height) {
     // El input del nombre llega ya compuesto en `message` (lo arma el
-    // Editor en la fila de mensajes, debajo del statusbar). Solo cambian
+    // Editor en el MessageBar, debajo del StatusBar). Solo cambian
     // etiqueta y accent respecto de abrir.
     return buildFileListFrame(items, selected, scroll, path, message, width,
                               height, "GUARDAR COMO", StyleRole::AccentGuardar);

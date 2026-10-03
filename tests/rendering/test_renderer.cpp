@@ -577,7 +577,7 @@ std::string barFrame(const std::string& file, bool modified,
 
 } // namespace
 
-TEST(statusbar_two_rows_present) {
+TEST(chrome_two_rows_present) {
     // Debe haber exactamente una fila fija (fondo gris 60%) y una fila de
     // mensajes (sin estilo). El texto del mensaje no debe estar estilizado.
     std::string out = barFrame("/a/b.txt", false, "hola", State::Navegacion, 200);
@@ -586,7 +586,7 @@ TEST(statusbar_two_rows_present) {
     CHECK(!contains(out, std::string(kStatusBarStyle) + "hola"));
 }
 
-TEST(statusbar_left_format_name_path_estado) {
+TEST(chrome_left_format_name_path_estado) {
     // <nombre> - <ruta> - <ESTADO>, en ese orden. Se compara sobre el texto
     // plano (stripAnsi): los fragmentos llevan colores distintos
     // (nombre blanco, estado dorado) que rompen la contiguedad cruda.
@@ -595,13 +595,13 @@ TEST(statusbar_left_format_name_path_estado) {
     CHECK(contains(stripAnsi(out), "odo.txt - /home/alice/proyecto - NAVEGACION"));
 }
 
-TEST(statusbar_modified_indicator) {
+TEST(chrome_modified_indicator) {
     // Un cambio sin guardar agrega [*] junto al nombre (v1.4: antes [modificado]).
     std::string out = barFrame("/home/a/x.cc", true, "", State::Navegacion, 200);
     CHECK(contains(stripAnsi(out), "x.cc [*] - /home/a - NAVEGACION"));
 }
 
-TEST(statusbar_modified_indicator_survives_long_name) {
+TEST(chrome_modified_indicator_survives_long_name) {
     // Un nombre de archivo largo + modified=true: el sufijo [*] (antes
     // [modificado], v1.4) se RESERVA entero y NO debe perderse ni cortarse.
     // La parte del nombre es la que cede (se trunca), nunca el indicador,
@@ -633,21 +633,21 @@ int barVisibleCols(const std::string& frame) {
 
 } // namespace
 
-TEST(statusbar_modified_marker_exact_fit) {
+TEST(chrome_modified_marker_exact_fit) {
     std::string out = barFrame("/a/x.cc", true, "", State::Navegacion, 29);
     CHECK(contains(out, " [*]"));
     CHECK(contains(stripAnsi(out), "NAVEGACION"));
     CHECK_EQ(barVisibleCols(out), 29);
 }
 
-TEST(statusbar_modified_marker_no_room_uses_modified_color) {
+TEST(chrome_modified_marker_no_room_uses_modified_color) {
     std::string out = barFrame("/a/x.cc", true, "", State::Navegacion, 28);
     CHECK(!contains(stripAnsi(out), " [*]"));
     CHECK(contains(out, std::string(kStatusBarModified)));
     CHECK_EQ(barVisibleCols(out), 28);
 }
 
-TEST(statusbar_label_fills_whole_width_edge) {
+TEST(chrome_label_fills_whole_width_edge) {
     // Caso extremo de la revision: ancho de terminal apenas mayor que la
     // etiqueta de estado (Seleccion -> "SELECCION", 9 columnas). Ahi
     // partsBudget = budget - estadoW - sep podia volverse negativo y el
@@ -662,7 +662,7 @@ TEST(statusbar_label_fills_whole_width_edge) {
     }
 }
 
-TEST(statusbar_label_fills_whole_width_edge_normal) {
+TEST(chrome_label_fills_whole_width_edge_normal) {
     // Mismo chequeo con NAVEGACION (10 cols), cuya banda desbordada cae en
     // anchos un poco menores.
     for (int width = 15; width <= 34; ++width) {
@@ -673,7 +673,7 @@ TEST(statusbar_label_fills_whole_width_edge_normal) {
     }
 }
 
-TEST(statusbar_state_labels) {
+TEST(chrome_state_labels) {
     // SELECCION y COMANDO se mapean 1 a 1 con los estados Seleccion y Prefix.
     std::string sel = barFrame("/a.txt", false, "", State::Seleccion, 200);
     CHECK(contains(stripAnsi(sel), "a.txt - / - SELECCION"));
@@ -682,7 +682,7 @@ TEST(statusbar_state_labels) {
     CHECK(contains(stripAnsi(pre), "a.txt - / - COMANDO"));
 }
 
-TEST(statusbar_right_block_always_visible) {
+TEST(chrome_right_block_always_visible) {
     // (fila,columna) y el porcentaje de altura siempre se muestran, anclados
     // a la derecha, incluso en una terminal estrecha: no es un derrota del
     // sacrificio. Con un documento de una sola linea, la posicion del cursor
@@ -694,7 +694,7 @@ TEST(statusbar_right_block_always_visible) {
     CHECK(contains(stripAnsi(out), "0%"));
 }
 
-TEST(statusbar_cursor_percentage_position) {
+TEST(chrome_cursor_percentage_position) {
     // El bloque derecho conserva (fila,columna) y agrega la posicion vertical
     // del cursor como porcentaje del archivo: 0% en la primera linea, 100% en
     // la ultima. En un doc de 6 lineas, la linea 2 esta al 40% (2 / (6-1)).
@@ -717,7 +717,7 @@ TEST(statusbar_cursor_percentage_position) {
     }
 }
 
-TEST(statusbar_path_sacrificed_before_name) {
+TEST(chrome_path_sacrificed_before_name) {
     // Terminal no muy ancha: la ruta cede con "..." al inicio, el nombre
     // y los bloques (linea,col) / % se mantienen enteros.
     std::string out = barFrame(
@@ -729,7 +729,7 @@ TEST(statusbar_path_sacrificed_before_name) {
     CHECK(contains(out, "(1,1)"));
 }
 
-TEST(statusbar_path_uses_rest_after_name_reserved) {
+TEST(chrome_path_uses_rest_after_name_reserved) {
     // El nombre se reserva primero; la ruta toma SOLO lo que sobra y se
     // agota (hasta "..." ) antes de tocar el nombre. En un presupuesto
     // apretado, el nombre queda completo y la ruta se reduce a lo minimo.
@@ -744,8 +744,8 @@ TEST(statusbar_path_uses_rest_after_name_reserved) {
     CHECK(!contains(out, "verylongdirectory"));
 }
 
-TEST(statusbar_second_row_message_independent) {
-    // La fila de mensajes es propia: se muestra tal cual y se trunca al
+TEST(chrome_second_row_message_independent) {
+    // La MessageBar es propia: se muestra tal cual y se trunca al
     // ancho de la terminal (descontando el padding de la barra superior)
     // sin competir con la barra fija.
     std::string out = barFrame("/a.txt", false, "mensaje de estado", State::Navegacion, 15);
@@ -959,7 +959,7 @@ TEST(edge_all_utf8_only) {
     CHECK(validUtf8(renderRow(line, 2)));
 }
 
-TEST(statusbar_state_label_all_states) {
+TEST(chrome_state_label_all_states) {
     // Los 4 estados producen su etiqueta, mapeando State -> text.
     struct Case { State s; const char* label; };
     Case cases[] = {
@@ -976,7 +976,7 @@ TEST(statusbar_state_label_all_states) {
     }
 }
 
-TEST(statusbar_state_label_persists_across_modified) {
+TEST(chrome_state_label_persists_across_modified) {
     // La etiqueta de estado no se pierde ni se convierte en otra cosa
     // cuando hay [*] (v1.4: antes [modificado]): ambos coexisten.
     std::string out = barFrame("/a/b.txt", true, "", State::Interaccion, 200);
@@ -984,8 +984,8 @@ TEST(statusbar_state_label_persists_across_modified) {
     CHECK(contains(out, "INTERACCION"));
 }
 
-TEST(statusbar_state_label_not_overwritten_by_message) {
-    // El mensaje de estado (fila de mensajes, sin inverso) no pisa la
+TEST(chrome_state_label_not_overwritten_by_message) {
+    // El mensaje de estado (MessageBar, sin inverso) no pisa la
     // etiqueta de la barra fija: ambas filas coexisten.
     std::string out = barFrame("/a/b.txt", false, "mensaje de estado",
                                State::Seleccion, 200);
@@ -993,7 +993,7 @@ TEST(statusbar_state_label_not_overwritten_by_message) {
     CHECK(contains(out, "mensaje de estado"));
 }
 
-TEST(statusbar_state_label_survives_narrow_terminal) {
+TEST(chrome_state_label_survives_narrow_terminal) {
     // Terminal angosta: la etiqueta de estado es de bajo sacrificio y,
     // por encima de la cota minima del bloque Ln/Col (ancho 15), la barra
     // nunca debe desbordar la terminal.
@@ -1005,7 +1005,7 @@ TEST(statusbar_state_label_survives_narrow_terminal) {
     }
 }
 
-TEST(statusbar_state_label_with_long_filename) {
+TEST(chrome_state_label_with_long_filename) {
     // Nombre de archivo largo: se trunca el nombre/ruta, no el estado.
     const std::string nombre = "un_archivo_absurdamente_largo_para_la_barra_"
                                "de_estado_del_editor_de_texto_en_cpp.txt";
@@ -1014,7 +1014,7 @@ TEST(statusbar_state_label_with_long_filename) {
     CHECK(contains(out, "SELECCION"));
 }
 
-TEST(statusbar_state_and_modified_each_state) {
+TEST(chrome_state_and_modified_each_state) {
     // Combinacion estado + modified: con cualquiera de los 4 estados la
     // barra muestra [*] (v1.4: antes [modificado]) y la etiqueta correcta a la vez.
     struct Case { State s; const char* label; };

@@ -187,7 +187,7 @@ TEST(spy_modal_saveas_has_own_metrics) {
     CHECK(spy.renderSaveAsFileListCount == saveAsBase + 1);
     CHECK(spy.renderFileListCount == fileBase);
     CHECK(!spy.pendingInvalidation);
-    // Snapshot: items del browser + input en el mensaje (fila de mensajes).
+    // Snapshot: items del browser + input en el mensaje (MessageBar).
     CHECK(spy.lastFilePath == ed.fileBrowser.path_);
     CHECK(spy.lastFileItems.size() == ed.fileBrowser.entries_.size());
     CHECK(!spy.lastFileItems.empty());

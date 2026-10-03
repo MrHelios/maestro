@@ -14,12 +14,12 @@ struct TtyTheme {
     std::string currentLine;       // resaltado de la fila del cursor (fondo gris)
     std::string selection;         // texto seleccionado (video inverso)
     std::string listSelected;      // item activo de las listas (mismo gris que currentLine)
-    std::string statusBar;         // fondo/base de la barra de estado
-    std::string statusBarName;     // nombre de archivo en la barra
-    std::string statusBarPath;     // ruta en la barra
+    std::string statusBar;         // fondo/base del StatusBar (fila 1)
+    std::string statusBarName;     // nombre de archivo en el StatusBar
+    std::string statusBarPath;     // ruta en el StatusBar
     std::string statusBarAccent;   // etiqueta de estado por defecto
-    std::string statusBarModified; // indicador "[*]" en la barra (v1.4: antes "[modificado]")
-    std::string message;           // fila de mensajes (Info/ayuda, sin color)
+    std::string statusBarModified; // indicador "[*]" en el StatusBar (v1.4: antes "[modificado]")
+    std::string message;           // MessageBar (Info/ayuda, sin color)
     std::string prompt;            // prompts de entrada (p.ej. "Guardar archivo:")
     std::string success;           // mensajes de exito
     std::string warning;           // mensajes de aviso

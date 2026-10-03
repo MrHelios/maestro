@@ -10,7 +10,7 @@
 // TtyEncoder: backend TTY. Traduce Frame (roles semánticos) a secuencias
 // ANSI usando el TtyTheme como tabla de representación.
 //
-// Todo lo que contenga "\x1b"/CSI vive acá (o en TtyDiff/TtyStatusBar::render).
+// Todo lo que contenga "\x1b"/CSI vive acá (o en TtyDiff/TtyChrome::render).
 // Frame jamás contiene ANSI; el TtyTheme es la tabla ANSI de ESTE backend
 // (GuiPainter usará sus propios colores Qt para los mismos roles).
 // ---------------------------------------------------------------------------
@@ -36,13 +36,13 @@ public:
     // caliente de buildScreen: un solo buffer con una sola reserva).
     void appendRow(std::string& out, const StyledRow& row) const;
 
-    // Barra de estado codificada (delega en TtyStatusBar::render con el rol;
-    // el DTO viaja sin ANSI).
-    std::string encodeStatus(const Rect& area,
-                             const StatusBarData& data,
+    // Chrome codificado (delega en TtyChrome::render con el rol;
+    // el DTO viaja sin ANSI). Incluye StatusBar (fila 1) + MessageBar (fila 2).
+    std::string encodeChrome(const Rect& area,
+                             const ChromeData& data,
                              StyleRole accent) const;
-    void appendStatus(std::string& out, const Rect& area,
-                      const StatusBarData& data, StyleRole accent) const;
+    void appendChrome(std::string& out, const Rect& area,
+                      const ChromeData& data, StyleRole accent) const;
 
     // Frame completo (equivale al viejo buildScreen/buildEditorBody +
     // posicionamiento de cursor).

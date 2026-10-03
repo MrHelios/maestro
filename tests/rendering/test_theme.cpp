@@ -17,7 +17,7 @@
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
 #include "rendering/tty/TtyRenderer.h"
-#include "rendering/tty/TtyStatusBar.h"
+#include "rendering/tty/TtyChrome.h"
 
 namespace {
 
@@ -155,7 +155,7 @@ TEST(theme_file_lists_use_listselected_not_selection) {
     CHECK(base.find(defaultTheme().listSelected) != std::string::npos);
 }
 
-TEST(theme_statusbar_uses_theme_for_colors) {
+TEST(theme_chrome_uses_theme_for_colors) {
     TtyTheme t = defaultTheme();
     t.statusBar = kTestBgBlue;
     t.statusBarName = kTestFgRed;
@@ -163,17 +163,17 @@ TEST(theme_statusbar_uses_theme_for_colors) {
     t.error = kTestBgRed;
     t.reset = kTestReset;
 
-    TtyStatusBar bar;
+    TtyChrome bar;
     bar.setTheme(t);
 
     Rect area; area.row = 0; area.col = 0; area.width = 60; area.height = 2;
-    StatusBarData d;
-    d.name = "archivo.txt";
-    d.path = "/ruta";
-    d.estado = "NAVEGACION";
+    ChromeData d;
+    d.status.name = "archivo.txt";
+    d.status.path = "/ruta";
+    d.status.estado = "NAVEGACION";
     d.message = Message("error grave", MessageKind::Error,
                         std::nullopt);
-    d.totalLines = 1;
+    d.status.totalLines = 1;
 
     const std::string out = bar.render(area, d);
     CHECK(out.find(t.statusBar) != std::string::npos);       // base del tema
@@ -181,7 +181,7 @@ TEST(theme_statusbar_uses_theme_for_colors) {
     CHECK(out.find(t.statusBarAccent) != std::string::npos); // - NAVEGACION
     CHECK(out.find(t.error + "error grave") != std::string::npos);
     // Con default theme el output es distinto: se usa el TtyTheme, no constantes.
-    TtyStatusBar plainBar;
+    TtyChrome plainBar;
     CHECK(out != plainBar.render(area, d));
 }
 
@@ -189,7 +189,7 @@ TEST(theme_statusbar_uses_theme_for_colors) {
 // El backend propaga su TtyTheme a la barra de estado compartida: cambiar el
 // tema altera la barra de todas las pantallas (editor y listas).
 // ---------------------------------------------------------------------------
-TEST(theme_renderer_propagates_to_statusbar) {
+TEST(theme_renderer_propagates_to_chrome) {
     TtyTheme t = defaultTheme();
     t.statusBar = kTestBgGreen;
     t.statusBarAccent = kTestFgRed;
@@ -231,7 +231,7 @@ TEST(theme_renderer_propagates_to_statusbar) {
 // Cada reset debe reestablecer el background de la status bar. Esto evita
 // que segmentos con estilos propios dejen zonas de la fila sin el background
 // del TtyTheme.
-TEST(theme_statusbar_background_covers_full_width) {
+TEST(theme_chrome_background_covers_full_width) {
     TtyTheme t = defaultTheme();
     t.statusBar = kTestBgBlue;
     t.statusBarName = kTestFgWhite;
@@ -240,20 +240,20 @@ TEST(theme_statusbar_background_covers_full_width) {
     t.statusBarModified = kTestFgYellow;
     t.reset = kTestReset;
 
-    TtyStatusBar bar;
+    TtyChrome bar;
     bar.setTheme(t);
     Rect area;
     area.row = 0;
     area.col = 0;
     area.width = 60;
     area.height = 2;
-    StatusBarData d;
-    d.name = "archivo.txt";
-    d.path = "/ruta/larga/que/fuerza/varios/segmentos";
-    d.estado = "NAVEGACION";
-    d.totalLines = 100;
-    d.cursorLine = 10;
-    d.cursorCol = 5;
+    ChromeData d;
+    d.status.name = "archivo.txt";
+    d.status.path = "/ruta/larga/que/fuerza/varios/segmentos";
+    d.status.estado = "NAVEGACION";
+    d.status.totalLines = 100;
+    d.status.cursorLine = 10;
+    d.status.cursorCol = 5;
 
     const std::string out = bar.render(area, d);
     size_t nl = out.find("\r\n");

@@ -37,7 +37,7 @@ InputEvent insertCh(char c) {
 // Geometria de test: viewport chico, gutter 3 (docs chicos), content en (0,0).
 // CellPos 0-based: celda = (relCol, relRow).
 Layout testLayout(const Viewport& vp) {
-    return computeLayout(vp.height + kStatusBarRows, vp.width);
+    return computeLayout(vp.height + kChromeRows, vp.width);
 }
 
 Viewport testViewport(int height = 10, int width = 20) {
@@ -255,7 +255,7 @@ TEST(mouse_map_first_last_visible_row) {
     CHECK_EQ(last->line, 3);
 }
 
-TEST(mouse_map_below_doc_and_statusbar_ignored) {
+TEST(mouse_map_below_doc_and_chrome_ignored) {
     Document d;
     d.restore({"a", "b"});
     Viewport vp = testViewport(10, 20);
@@ -525,7 +525,7 @@ TEST(mouse_drag_without_press_ignored) {
 
 TEST(mouse_drag_last_visible_row_is_exact_no_scroll) {
     // La ultima fila visible es seleccion exacta, no intencion de scroll
-    // (el fuera real hacia abajo es la statusbar): el drag no mueve el
+    // (el fuera real hacia abajo es el chrome): el drag no mueve el
     // viewport ni arma el autoscroll temporal.
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
@@ -543,7 +543,7 @@ TEST(mouse_drag_last_visible_row_is_exact_no_scroll) {
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.viewport.top, 0); // sin scroll: endpoint exacto
     CHECK_EQ(b.cursor.line, 3);
-    // Continuidad del gesto: empujar a la statusbar si scrollea.
+    // Continuidad del gesto: empujar al chrome si scrollea.
     ed.processEventForTesting(mouseDrag(4, 5)); // statusbar (relRow=4)
     CHECK_EQ(b.viewport.top, 1);
     CHECK_EQ(b.cursor.line, 4);
@@ -595,8 +595,8 @@ TEST(mouse_drag_autoscroll_horizontal) {
     CHECK(ed.hasSelection());
 }
 
-TEST(mouse_drag_statusbar_scrolls_when_content_below) {
-    // Gesto sobre la statusbar (relRow >= h) con documento debajo:
+TEST(mouse_drag_chrome_scrolls_when_content_below) {
+    // Gesto sobre el chrome (relRow >= h) con documento debajo:
     // scrollea 1 linea y extiende la seleccion, nunca nullopt silencioso.
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
@@ -617,8 +617,8 @@ TEST(mouse_drag_statusbar_scrolls_when_content_below) {
     CHECK(ed.hasSelection());
 }
 
-TEST(mouse_drag_statusbar_at_maxTop_clamps_to_edge) {
-    // Gesto sobre la statusbar ya en el ultimo viewport (top == maxTop):
+TEST(mouse_drag_chrome_at_maxTop_clamps_to_edge) {
+    // Gesto sobre el chrome ya en el ultimo viewport (top == maxTop):
     // no hay nada que desplazar (scroll imposible), pero la intencion de
     // seleccionar hacia el borde sigue siendo valida: se clampdea a la
     // ultima fila visible en lugar de ignorarse (auto-scroll conceptual:
@@ -637,7 +637,7 @@ TEST(mouse_drag_statusbar_at_maxTop_clamps_to_edge) {
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.cursor.line, 6);
-    ed.processEventForTesting(mouseDrag(4, 5)); // statusbar: clamp al borde
+    ed.processEventForTesting(mouseDrag(4, 5)); // chrome: clamp al borde
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.viewport.top, 4); // sin scroll: ya en el limite
@@ -756,8 +756,8 @@ TEST(mouse_click_after_mouse_drag_on_tilde_clears) {
     CHECK(!ed.hasSelection());
 }
 
-TEST(mouse_click_after_mouse_drag_on_statusbar_clears) {
-    // Click en la statusbar tambien debe limpiar la seleccion vigente.
+TEST(mouse_click_after_mouse_drag_on_chrome_clears) {
+    // Click en el chrome tambien debe limpiar la seleccion vigente.
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
     b.document.restore({"hello", "world"});

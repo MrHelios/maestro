@@ -46,7 +46,7 @@ std::vector<FileBrowserEntry> FileBrowser::listDirectory(const std::string& path
     std::filesystem::directory_iterator it(path, ec);
     if (ec) {
         // Sin permiso de lectura / no existe: la lista queda solo con ".."
-        // (si la hay) y el error se muestra en la fila de mensajes.
+        // (si la hay) y el error se muestra en el MessageBar.
         error = "No se pudo leer: " + path;
     } else {
         std::filesystem::directory_iterator end;

@@ -53,7 +53,7 @@ TEST(mouse_autoscroll_outside_top_at_limit) {
 
 TEST(mouse_autoscroll_outside_bottom_at_limit) {
     // Limite inferior: viewport ya en top==maxTop, cursor fuera por abajo
-    // (celda row=h, primera fila de statusbar, fuera del contenido) debe
+    // (celda row=h, primera fila del chrome (StatusBar), fuera del contenido) debe
     // seguir marcando hacia la ultima fila en vez de ignorarse.
     Editor ed;
     std::vector<std::string> lines;

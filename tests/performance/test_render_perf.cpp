@@ -101,21 +101,21 @@ TEST(bench_perf_render_desglose_fases_checked) {
     const Viewport& vp = b.viewport;
 
     const int gutterW = gutterWidth(300, vp.width);
-    const Layout layout = computeLayout(vp.height + kStatusBarRows, vp.width);
+    const Layout layout = computeLayout(vp.height + kChromeRows, vp.width);
 
-    // Espejo de editorBarData (Renderer.cpp, internal linkage): los campos
-    // que la barra realmente pinta. La costura es trivial; lo que se mide
-    // es StatusBar::render.
+    // Espejo de editorChromeData (FrameBuilder.cpp, internal linkage): los campos
+    // que el chrome realmente pinta. La costura es trivial; lo que se mide
+    // es TtyChrome::render.
     auto barData = [&] {
-        StatusBarData d;
-        d.name = "perf.txt";
-        d.path = "";
-        d.estado = "NAVEGACION";
-        d.modified = false;
+        ChromeData d;
+        d.status.name = "perf.txt";
+        d.status.path = "";
+        d.status.estado = "NAVEGACION";
+        d.status.modified = false;
         d.message = fx.msg;
-        d.cursorLine = cur.line;
-        d.cursorCol = cur.col;
-        d.totalLines = doc.lineCount();
+        d.status.cursorLine = cur.line;
+        d.status.cursorCol = cur.col;
+        d.status.totalLines = doc.lineCount();
         return d;
     };
 
@@ -140,10 +140,10 @@ TEST(bench_perf_render_desglose_fases_checked) {
                                   gutterW);
         perf_time::g_sink += out.size();
     });
-    bench("statusBar (data+render)", 20000, [&] {
+    bench("chrome (data+render)", 20000, [&] {
         std::string out;
-        StatusBarData data = barData();
-        tr.renderStatusBar(out, layout.statusBar, data,
+        ChromeData data = barData();
+        tr.renderChrome(out, layout.chrome, data,
                               StyleRole::AccentNavegacion);
         perf_time::g_sink += out.size();
     });
@@ -197,7 +197,7 @@ TEST(bench_perf_bytes_por_evento_hacia_terminal_checked) {
     fx.ed.state_ = State::Interaccion;
 
     // frame() construye el frame completo y deja el cache interno preparado.
-    // No manipulamos rowCache_/statusCache_ directamente: el benchmark debe
+    // No manipulamos rowCache_/chromeCache_ directamente: el benchmark debe
     // depender de la API real del Renderer, no de su implementacion interna.
     const std::string base = fx.frame();
     // Nota: buildDiffFrame se mide aqui pero el ciclo real (perf_ciclo_tecla)

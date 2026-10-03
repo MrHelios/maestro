@@ -5,7 +5,7 @@
 //      por slow-path (sin región, sin 2J).
 //   2. cursor-move puro solo emite CUP + show (sin rewrites de fila).
 //   3. status bar: los 9 State × 2 temas llevan su accent; 5 MessageKind
-//      pintan la fila de mensajes.
+//      pintan la MessageBar.
 //   4. listas: bordes (vacío, scroll!=0, seleccionado inicio/fin).
 //
 // Nota: usan solo la API pública de Renderer (sobreviven al paso 1).
@@ -215,7 +215,7 @@ TEST(fase_e_golden_listas_bordes) {
     TtyRenderer tr;
     const int content = 4;
     const int width = 80;
-    const int total = content + 2;  // + kStatusBarRows
+    const int total = content + 2;  // + kChromeRows
 
     // Buffer: vacía no crashea y llena el chrome.
     std::string empty = tr.buildBufferListScreen({}, 0, width, content);

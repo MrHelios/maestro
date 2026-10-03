@@ -44,7 +44,7 @@ TEST(mouse_tick_stops_when_released_outside_down) {
     ed.active().cursor.col = 0;
 
     ed.handleEvent(pressAt(4, 2)); // linea 11, arma gesto
-    ed.handleEvent(dragAt(4, 5));  // statusbar: arma Down, top 10->11
+    ed.handleEvent(dragAt(4, 5));  // chrome: arma Down, top 10->11
     CHECK_EQ(ed.active().viewport.top, 11);
     CHECK(ed.mouseAutoscrollActive());
 
@@ -96,7 +96,7 @@ TEST(mouse_tick_keeps_scrolling_while_held) {
     ed.active().cursor.col = 0;
 
     ed.handleEvent(pressAt(4, 2)); // linea 11, arma gesto
-    ed.handleEvent(dragAt(4, 5));  // statusbar: arma Down, top 10->11
+    ed.handleEvent(dragAt(4, 5));  // chrome: arma Down, top 10->11
     CHECK_EQ(ed.active().viewport.top, 11);
 
     ed.setMouseButtonPressedQuery([] { return true; });

@@ -1221,7 +1221,7 @@ TEST(renderer_buffer_list_first_selected) {
 
 // El selector mantiene el aspecto del editor: filas vacias con "~". Ya no
 // dibuja su propia barra en video inverso (MULTIBUFFER): produce datos
-// (Buffers | SELECCIONAR | n/total) y se los entrega al StatusBar comun.
+// (Buffers | SELECCIONAR | n/total) y se los entrega al chrome comun.
 TEST(renderer_buffer_list_only_unified_bar) {
     TtyRenderer tr;
     std::string out = tr.buildBufferListScreen({"a.txt", "b.txt"}, 1, 80, 10);
@@ -1230,7 +1230,7 @@ TEST(renderer_buffer_list_only_unified_bar) {
     CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~" + std::string(tr.theme().reset) + "\r\n"));
     CHECK(!contains(out, "~ BUFFERS"));
     // Ya no hay barra en video inverso MULTIBUFFER: la barra es la del
-    // StatusBar comun (fondo gris 60%) con Buffers/SELECCIONAR y el
+    // chrome comun (fondo gris 60%) con Buffers/SELECCIONAR y el
     // contador estilo editor, sin Linea/Col ni la ruta del buffer.
     CHECK(!contains(out, "\x1b[7mMULTIBUFFER"));
     CHECK(contains(out, kStatusBarStyle));

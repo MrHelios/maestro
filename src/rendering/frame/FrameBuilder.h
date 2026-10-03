@@ -100,13 +100,15 @@ public:
     static StyleRole syntaxRoleFor(SyntaxToken tok);
     static std::string stateLabelFor(State state);
 
-    // Payload puro de la barra (barato: sin filas). Lo usan buildFrame y el
-    // backend para patches de status sin reconstruir contenido.
-    struct StatusPayload {
-        StatusBarData data;
-        StyleRole accent = StyleRole::StatusAccentDefault;
+    // Payload puro del chrome (barato: sin filas). Lo usan buildFrame y el
+    // backend para patches del chrome sin reconstruir contenido.
+    //   data.status  -> StatusBar (fila 1 fija)
+    //   data.message -> MessageBar (fila 2, Message)
+    struct ChromePayload {
+        ChromeData data;
+        StyleRole statusAccent = StyleRole::StatusAccentDefault;
     };
-    StatusPayload buildStatus(const std::string& filename, bool modified,
+    ChromePayload buildChrome(const std::string& filename, bool modified,
                               const Message& message, const Cursor& cursor,
                               int totalLines, State state) const;
 

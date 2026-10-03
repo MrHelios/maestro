@@ -1202,7 +1202,7 @@ void Editor::renderFrame() {
         for (const FileBrowserEntry& e : fileBrowser.entries_) {
             items.push_back(FileListItem{e.name, e.isDirectory});
         }
-        // El input vive en la fila de mensajes (debajo del statusbar), como
+        // El input vive en el MessageBar (debajo del StatusBar), como
         // el resto de los prompts modales ("Find: ..."): si hay un mensaje
         // activo se muestra el; si no, la linea de input con el nombre.
         Message shown = statusMessage_;
@@ -1279,7 +1279,7 @@ void Editor::handleMousePress(const InputEvent& event) {
     // Misma reconstruccion que Renderer::calculateLayout: viewport.height
     // es altura de CONTENIDO, computeLayout espera filas totales.
     const Layout layout =
-        computeLayout(b.viewport.height + kStatusBarRows, b.viewport.width);
+        computeLayout(b.viewport.height + kChromeRows, b.viewport.width);
     auto pos = screenToCursor(event.cell, layout,
                               b.viewport, b.document);
     if (!pos.has_value()) {
@@ -1319,7 +1319,7 @@ void Editor::handleMousePress(const InputEvent& event) {
 std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
     Buffer& b = active();
     const Layout layout =
-        computeLayout(b.viewport.height + kStatusBarRows, b.viewport.width);
+        computeLayout(b.viewport.height + kChromeRows, b.viewport.width);
     const int h = layout.content.height;
     const int totalW = layout.content.width;
     if (h <= 0 || totalW <= 0) return std::nullopt;
@@ -1344,7 +1344,7 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
     //   conocida y aceptada: un drag que termina justo en la primera fila
     //   scrollea (y arma el tick); con este reporte no hay forma de
     //   distinguir "seleccionar la primera fila" de "pedir scroll arriba".
-    // - Hacia abajo el fuera real SI llega (statusbar: relRow >= h), asi
+    // - Hacia abajo el fuera real SI llega (chrome inferior: relRow >= h), asi
     //   que no hay sustituto: la ultima fila (h-1) es seleccion exacta,
     //   no intencion de scroll.
     // El resto del interior apaga de inmediato. Al armar (None -> intencion)
@@ -1394,8 +1394,8 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
     // vertical como el armado de arriba: la primera fila (relRow == 0, que
     // ES contenido) scrollea por la misma DECISION sustituta —el fuera
     // hacia arriba no es reportable—; la ultima fila es exclusiva (el
-    // fuera real es la statusbar, relRow >= h). Coordenadas fuera del
-    // contenido por abajo (statusbar) scrollean mientras quede contenido
+    // fuera real es el chrome inferior, relRow >= h). Coordenadas fuera del
+    // contenido por abajo (chrome inferior) scrollean mientras quede contenido
     // por revelar; al llegar al limite las cubren los retornos de arriba.
     bool scrolled = false;
     if (relRow <= 0 && b.viewport.top > 0) {
@@ -1426,7 +1426,8 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
     }
 
     if (!scrolled) {
-        // Sin scroll: mapeo normal (puede ser nullopt en statusbar, que
+        // Sin scroll: mapeo normal (puede ser nullopt fuera del area de
+        // contenido, en el chrome inferior, que
         // aqui ya se trato como borde inferior si habia scroll posible;
         // si no habia scroll posible se ignora el evento).
         return screenToCursor(cell, layout, b.viewport,
@@ -2245,7 +2246,7 @@ void Editor::startSaveAs() {
     }
     saveAsConfirmPath_.clear();
     state_ = State::SaveAsFileBrowser;
-    // El mensaje de ayuda se muestra en la barra inferior via renderer
+    // El mensaje de ayuda se muestra en el MessageBar via renderer
     setStatusMessage("", MessageKind::Info);
 }
 

@@ -20,7 +20,7 @@ enum class CloseResult {
 // undo/redo, filename, modified) vive en cada Buffer; aqui SOLO la
 // coleccion y sus operaciones.
 //
-// Aislado del Editor: no sabe de terminal ni de fila de mensajes. Las
+// Aislado del Editor: no sabe de terminal ni de MessageBar. Las
 // operaciones que alteran el modo del Editor (p.ej. pasar al selector al
 // cerrar el ultimo buffer) devuelven un resultado (CloseResult) que el
 // Editor traduce a su state_/statusMessage_.

@@ -6,8 +6,8 @@
 #include "base/utf8.h"
 
 // Helpers de texto/UTF-8 compartidos entre el Renderer (que arma el frame)
-// y el TtyStatusBar (que arma la barra comun). Viven en un header para poder
-// usarse desde ambos .cpp sin duplicar codigo.
+// y el TtyChrome (que arma el chrome: StatusBar + MessageBar). Viven en un
+// header para poder usarse desde ambos .cpp sin duplicar codigo.
 namespace chrome {
 
 // Devuelve la COLA de `line` de a lo sumo `maxTailCols` columnas visuales

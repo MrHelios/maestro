@@ -1,4 +1,4 @@
-#include "rendering/tty/TtyStatusBar.h"
+#include "rendering/tty/TtyChrome.h"
 
 #include <sstream>
 #include <algorithm>
@@ -8,7 +8,7 @@ using namespace chrome;
 
 namespace {
 
-// Estilo de la fila de mensajes segun el tipo (paso 8). El tipo lo decide
+// Estilo del MessageBar segun el tipo (paso 8). El tipo lo decide
 // la pantalla/el Editor cuando produce el Message; aqui se traduce al color
 // del TtyTheme. Info usa el estilo de mensaje base del TtyTheme; Prompt usa
 // theme.prompt (negrita en los temas por defecto, personalizable).
@@ -23,7 +23,7 @@ const std::string& messageStyle(const TtyTheme& theme, MessageKind kind) {
     return theme.message;
 }
 
-// ---- Limites fijos de la barra de estado (bloque izquierdo) ----
+// ---- Limites fijos del StatusBar (bloque izquierdo) ----
 constexpr int kNameMax    = 30;   // columnas maximas del nombre
 constexpr int kPathMax    = 40;   // columnas maximas de la ruta
 constexpr int kNamePathMax = 60;  // tope combinado nombre + ruta
@@ -96,43 +96,42 @@ BarLeft layoutLeftBlock(const std::string& rawName, const std::string& rawPath,
 
 } // namespace
 
-std::string TtyStatusBar::render(const Rect& area, const StatusBarData& data,
-                                 StyleRole accentRole) {
-    const int width = area.width;
+std::string TtyChrome::renderStatus(int width, const StatusBarData& status,
+                                     StyleRole accentRole) const {
     const TtyTheme& T = theme_;
     std::ostringstream out;
 
-    // Fila fija de la barra de estado. El fondo y los estilos de cada segmento
+    // Fila 1: StatusBar fijo. El fondo y los estilos de cada segmento
     // provienen del TtyTheme. El contenido se compone de nombre, ruta, estado,
     // relleno y bloque derecho anclado al borde.
     out << "\x1b[K";
     out << T.statusBar;
 
-    // Bloque derecho: si hay un `right` explicito (pantallas sin documento:
-    // selector, explorador) se usa tal cual; si no, se calcula la posicion
-    // vertical del cursor como porcentaje del archivo (0% al inicio, 100%
-    // al final; una sola linea => 0%) y luego (fila,columna), anclado a la
-    // derecha.
+    // Bloque derecho del StatusBar: si hay un `right` explicito (pantallas
+    // sin documento: selector, explorador) se usa tal cual; si no, se calcula
+    // la posicion vertical del cursor como porcentaje del archivo (0% al
+    // inicio, 100% al final; una sola linea => 0%) y luego (fila,columna),
+    // anclado a la derecha.
     std::string rightBlock;
-    if (!data.right.empty()) {
-        rightBlock = data.right;
+    if (!status.right.empty()) {
+        rightBlock = status.right;
     } else {
-        int pct = data.totalLines <= 1 ? 0
-                                       : (data.cursorLine * 100) / (data.totalLines - 1);
+        int pct = status.totalLines <= 1 ? 0
+                                       : (status.cursorLine * 100) / (status.totalLines - 1);
         rightBlock = std::to_string(pct) + "% (" +
-                     std::to_string(data.cursorLine + 1) + "," +
-                     std::to_string(data.cursorCol + 1) + ")";
+                     std::to_string(status.cursorLine + 1) + "," +
+                     std::to_string(status.cursorCol + 1) + ")";
     }
     int rightW = colCount(rightBlock);
 
-    // ---- Cota de ancho (v1.1): la barra NUNCA escribe fuera del ancho de
+    // ---- Cota de ancho (v1.1): el StatusBar NUNCA escribe fuera del ancho de
     // la terminal. En una terminal demasiado angosta el contenido fijo
     // (paddings + bloque derecho) no cabe entero; el pad derecho cede
     // primero, luego el bloque derecho (el bloque izquierdo ya sacrifica
     // dentro de su presupuesto, ver layoutLeftBlock). Con esto se garantiza
     // que la fila fija ocupe EXACTAMENTE `width` columnas (nada mas).
-    const int padL = std::min(kStatusBarPadLeft, width);
-    const int padR = std::min(kStatusBarPadRight, std::max(0, width - padL));
+    const int padL = std::min(kChromePadLeft, width);
+    const int padR = std::min(kChromePadRight, std::max(0, width - padL));
     const int rightBudget = std::max(0, width - padL - padR);
     if (rightW > rightBudget) {
         rightBlock = utf8::truncate(rightBlock, rightBudget);
@@ -140,8 +139,8 @@ std::string TtyStatusBar::render(const Rect& area, const StatusBarData& data,
     }
 
     int leftBudget = std::max(0, width - padL - padR - rightW);
-    BarLeft left = layoutLeftBlock(data.name, data.path, data.estado,
-                                data.modified, leftBudget);
+    BarLeft left = layoutLeftBlock(status.name, status.path, status.estado,
+                                status.modified, leftBudget);
 
     int plainW;
     if (left.statusOnly) {
@@ -180,27 +179,38 @@ std::string TtyStatusBar::render(const Rect& area, const StatusBarData& data,
     out << rightBlock;
 
     out << T.reset; // reset de estilo
-
-    // Fila de mensajes (fila propia). Solo existe si el area de la barra
-    // tiene mas de una fila. El texto se colorea por tipo (Message.kind);
-    // el padding izquierdo y derecho coincide con el de la barra superior
-    // para alinear el texto.
-    if (area.height >= 2) {
-        out << "\r\n";
-        out << "\x1b[K";
-        // Misma cota: la fila de mensajes tampoco escribe fuera del ancho.
-        // El padding derecho cede ante un terminal muy angosto.
-        const int msgPadL = std::min(kStatusBarPadLeft, width);
-        const int msgPadR = std::min(kStatusBarPadRight,
-                                     std::max(0, width - msgPadL));
-        for (int i = 0; i < msgPadL; ++i) out << ' ';
-        const std::string& style = messageStyle(T, data.message.kind);
-        out << style;
-        out << utf8::truncate(data.message.text,
-                              std::max(0, width - msgPadL - msgPadR));
-        if (!style.empty()) out << T.reset;
-        for (int i = 0; i < msgPadR; ++i) out << ' ';
-    }
-
     return out.str();
+}
+
+std::string TtyChrome::renderMessage(int width, const Message& message) const {
+    const TtyTheme& T = theme_;
+    std::ostringstream out;
+    // Fila 2: MessageBar (fila propia). El texto se colorea por tipo
+    // (Message.kind); el padding izquierdo y derecho coincide con el del
+    // StatusBar superior para alinear el texto.
+    out << "\x1b[K";
+    // Misma cota: el MessageBar tampoco escribe fuera del ancho.
+    // El padding derecho cede ante un terminal muy angosto.
+    const int msgPadL = std::min(kChromePadLeft, width);
+    const int msgPadR = std::min(kChromePadRight,
+                                 std::max(0, width - msgPadL));
+    for (int i = 0; i < msgPadL; ++i) out << ' ';
+    const std::string& style = messageStyle(T, message.kind);
+    out << style;
+    out << utf8::truncate(message.text,
+                          std::max(0, width - msgPadL - msgPadR));
+    if (!style.empty()) out << T.reset;
+    for (int i = 0; i < msgPadR; ++i) out << ' ';
+    return out.str();
+}
+
+std::string TtyChrome::render(const Rect& area, const ChromeData& data,
+                              StyleRole accentRole) const {
+    std::string out = renderStatus(area.width, data.status, accentRole);
+    // Solo existe MessageBar si el area del chrome tiene mas de una fila.
+    if (area.height >= 2) {
+        out += "\r\n";
+        out += renderMessage(area.width, data.message);
+    }
+    return out;
 }

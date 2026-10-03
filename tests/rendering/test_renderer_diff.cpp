@@ -424,3 +424,49 @@ TEST(render_diff_invalidacion_por_modal_y_resize) {
     CHECK(trasResize.find("\x1b[2J\x1b[H") != std::string::npos);
     CHECK_EQ(h.r.lastViewportH(), 30);
 }
+
+// Contrato de composicion a nivel diff: ChromeData = StatusBar + MessageBar.
+// Solo-cambia-status reescribe solo la fila 1 del chrome; solo-cambia-message
+// reescribe solo la fila 2. Las filas se identifican por su CUP de rewrite
+// (col 1); el cursor cae en el contenido (col != 1).
+TEST(render_diff_chrome_status_and_message_isolated) {
+    DiffHarness h(10);
+    Buffer& b = h.buf();
+    b.viewport.height = 6;
+    b.viewport.width = 40;
+    b.viewport.top = 0;
+    b.viewport.left = 0;
+    b.cursor.line = 0;
+    b.cursor.col = 0;
+    // contentH == viewport.height cuando hay chrome (ver calculateLayout).
+    const int contentH = b.viewport.height;
+    const std::string statusCup =
+        "\x1b[" + std::to_string(contentH + 1) + ";1H";
+    const std::string messageCup =
+        "\x1b[" + std::to_string(contentH + 2) + ";1H";
+
+    // Prime: frame completo con a.txt / msg uno.
+    std::string prime = h.r.buildDiffFrame(
+        b.document, b.cursor, b.viewport, "a.txt", false,
+        Message("msg uno", MessageKind::Info, std::nullopt),
+        State::Navegacion, b.selection);
+    CHECK(prime.find("\x1b[2J") != std::string::npos);
+
+    // Solo StatusBar (mismo Message): debe tocar fila 1, no fila 2.
+    std::string deltaStatus = h.r.buildDiffFrame(
+        b.document, b.cursor, b.viewport, "b.txt", false,
+        Message("msg uno", MessageKind::Info, std::nullopt),
+        State::Navegacion, b.selection);
+    CHECK(deltaStatus.find("\x1b[2J") == std::string::npos);
+    CHECK(deltaStatus.find(statusCup) != std::string::npos);
+    CHECK(deltaStatus.find(messageCup) == std::string::npos);
+
+    // Solo MessageBar (mismo StatusBar): debe tocar fila 2, no fila 1.
+    std::string deltaMessage = h.r.buildDiffFrame(
+        b.document, b.cursor, b.viewport, "b.txt", false,
+        Message("msg dos", MessageKind::Info, std::nullopt),
+        State::Navegacion, b.selection);
+    CHECK(deltaMessage.find("\x1b[2J") == std::string::npos);
+    CHECK(deltaMessage.find(messageCup) != std::string::npos);
+    CHECK(deltaMessage.find(statusCup) == std::string::npos);
+}

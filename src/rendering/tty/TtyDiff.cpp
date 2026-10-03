@@ -86,25 +86,25 @@ bool TtyDiff::patchContentRow(
     return true;
 }
 
-void TtyDiff::patchStatusBar(std::string& out, const Document& doc,
+void TtyDiff::patchChrome(std::string& out, const Document& doc,
                              const Cursor& cursor, const std::string& filename,
                              bool modified, const Message& message, State state,
                              const Layout& layout, int contentH) {
-    auto payload = builder_.buildStatus(filename, modified, message, cursor,
+    auto payload = builder_.buildChrome(filename, modified, message, cursor,
                                         doc.lineCount(), state);
-    const StatusBarData& data = payload.data;
-    if (hasLastStatusData_ && data == lastStatusData_) return;
-    std::string statusBody =
-        encoder_.encodeStatus(layout.statusBar, data, payload.accent);
-    if (statusBody == statusCache_) {
-        lastStatusData_ = data;
-        hasLastStatusData_ = true;
+    const ChromeData& data = payload.data;
+    if (hasLastChromeData_ && data == lastChromeData_) return;
+    std::string chromeBody =
+        encoder_.encodeChrome(layout.chrome, data, payload.statusAccent);
+    if (chromeBody == chromeCache_) {
+        lastChromeData_ = data;
+        hasLastChromeData_ = true;
         return;
     }
 
     std::vector<std::string_view> oldRows, newRows;
-    splitRows(statusCache_, &oldRows);
-    splitRows(statusBody, &newRows);
+    splitRows(chromeCache_, &oldRows);
+    splitRows(chromeBody, &newRows);
     const size_t n = std::max(oldRows.size(), newRows.size());
     for (size_t i = 0; i < n; ++i) {
         std::string_view oldRow =
@@ -117,9 +117,9 @@ void TtyDiff::patchStatusBar(std::string& out, const Document& doc,
         out += "\x1b[K";
         out.append(newRow.data(), newRow.size());
     }
-    statusCache_ = std::move(statusBody);
-    lastStatusData_ = data;
-    hasLastStatusData_ = true;
+    chromeCache_ = std::move(chromeBody);
+    lastChromeData_ = data;
+    hasLastChromeData_ = true;
 }
 
 void TtyDiff::rebuildCache(
@@ -161,12 +161,12 @@ void TtyDiff::rebuildCache(
             dl, gutterW, textWidth)));
     }
 
-    auto payload = builder_.buildStatus(filename, modified, message, cursor,
+    auto payload = builder_.buildChrome(filename, modified, message, cursor,
                                         doc.lineCount(), state);
-    statusCache_ =
-        encoder_.encodeStatus(g.layout.statusBar, payload.data, payload.accent);
-    lastStatusData_ = payload.data;
-    hasLastStatusData_ = true;
+    chromeCache_ =
+        encoder_.encodeChrome(g.layout.chrome, payload.data, payload.statusAccent);
+    lastChromeData_ = payload.data;
+    hasLastChromeData_ = true;
 
     hasCache_ = true;
     cachedContentH_ = contentH;
@@ -228,7 +228,7 @@ std::string TtyDiff::buildCursorMoveFrame(
             }
         }
     }
-    patchStatusBar(out, doc, cursor, filename, modified, message, state, layout,
+    patchChrome(out, doc, cursor, filename, modified, message, state, layout,
                    contentH);
 
     // Contrato visual: solo posicionar/mostrar si el cursor esta en viewport.
@@ -315,7 +315,7 @@ std::string TtyDiff::buildScrollFrame(
         patchContentRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen,
                         bracketClose, cursor.line, gutterW, textWidth, contentH);
     }
-    patchStatusBar(out, doc, cursor, filename, modified, message, state,
+    patchChrome(out, doc, cursor, filename, modified, message, state,
                    g.layout, contentH);
 
     placeCursor(out, doc, cursor, viewport, g, state, /*endFrame=*/false);
@@ -352,7 +352,7 @@ std::string TtyDiff::buildDiffFrame(
             out += row;
             out += "\r\n";
         }
-        out += statusCache_;
+        out += chromeCache_;
         if (state == State::Busqueda) return out;
         {
             placeCursor(out, doc, cursor, viewport, state, /*endFrame=*/true);
@@ -406,23 +406,23 @@ std::string TtyDiff::buildDiffFrame(
     newRows.reserve(fresh.contentRows.size() + 2);
     for (const auto& r : fresh.contentRows)
         newRows.push_back(encoder_.encodeRow(r));
-    const std::string freshStatus = encoder_.encodeStatus(
-        fresh.layout.statusBar, fresh.status, fresh.statusAccent);
-    std::vector<std::string_view> newStatusRows;
-    splitRows(freshStatus, &newStatusRows);
-    for (const auto& sr : newStatusRows)
+    const std::string freshChrome = encoder_.encodeChrome(
+        fresh.layout.chrome, fresh.chrome, fresh.statusAccent);
+    std::vector<std::string_view> newChromeRows;
+    splitRows(freshChrome, &newChromeRows);
+    for (const auto& sr : newChromeRows)
         newRows.emplace_back(sr.data(), sr.size());
 
-    std::vector<std::string_view> oldStatusRows;
-    splitRows(statusCache_, &oldStatusRows);
+    std::vector<std::string_view> oldChromeRows;
+    splitRows(chromeCache_, &oldChromeRows);
     std::string out;
     encoder_.hideCursor(out);
     for (size_t i = 0; i < newRows.size(); ++i) {
         std::string_view oldRow;
         if (i < static_cast<size_t>(contentH)) {
             if (i < rowCache_.size()) oldRow = rowCache_[i];
-        } else if (i - static_cast<size_t>(contentH) < oldStatusRows.size()) {
-            oldRow = oldStatusRows[i - static_cast<size_t>(contentH)];
+        } else if (i - static_cast<size_t>(contentH) < oldChromeRows.size()) {
+            oldRow = oldChromeRows[i - static_cast<size_t>(contentH)];
         }
         if (oldRow == newRows[i]) continue;
         encoder_.moveCursorToRaw(out, static_cast<int>(i) + 1, 1);
@@ -434,13 +434,13 @@ std::string TtyDiff::buildDiffFrame(
     rowCache_.clear();
     for (int i = 0; i < contentH && static_cast<size_t>(i) < newRows.size(); ++i)
         rowCache_.emplace_back(newRows[static_cast<size_t>(i)]);
-    statusCache_.clear();
+    chromeCache_.clear();
     for (size_t i = static_cast<size_t>(contentH); i < newRows.size(); ++i) {
-        if (i > static_cast<size_t>(contentH)) statusCache_ += "\r\n";
-        statusCache_ += newRows[i];
+        if (i > static_cast<size_t>(contentH)) chromeCache_ += "\r\n";
+        chromeCache_ += newRows[i];
     }
-    lastStatusData_ = fresh.status;
-    hasLastStatusData_ = true;
+    lastChromeData_ = fresh.chrome;
+    hasLastChromeData_ = true;
     lastBracketPair_ = bracketPair;
     hasLastBracketPair_ = true;
 

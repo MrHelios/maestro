@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include "rendering/tty/TtyStatusBar.h"
+#include "rendering/tty/TtyChrome.h"
 
 const std::string& TtyEncoder::ansiFor(StyleRole role) const {
     return themeAnsiFor(theme_, role);
@@ -83,18 +83,18 @@ void TtyEncoder::appendRow(std::string& out, const StyledRow& row) const {
     }
 }
 
-std::string TtyEncoder::encodeStatus(const Rect& area,
-                                     const StatusBarData& data,
+std::string TtyEncoder::encodeChrome(const Rect& area,
+                                     const ChromeData& data,
                                      StyleRole accent) const {
     std::string out;
-    appendStatus(out, area, data, accent);
+    appendChrome(out, area, data, accent);
     return out;
 }
 
-void TtyEncoder::appendStatus(std::string& out, const Rect& area,
-                              const StatusBarData& data,
+void TtyEncoder::appendChrome(std::string& out, const Rect& area,
+                              const ChromeData& data,
                               StyleRole accent) const {
-    TtyStatusBar bar;
+    TtyChrome bar;
     bar.setTheme(theme_);
     out += bar.render(area, data, accent);
 }
@@ -119,7 +119,7 @@ void TtyEncoder::appendFrame(std::string& out, const Frame& f) const {
         appendRow(out, row);
         out += "\r\n";
     }
-    appendStatus(out, f.layout.statusBar, f.status, f.statusAccent);
+    appendChrome(out, f.layout.chrome, f.chrome, f.statusAccent);
     // Contrato visual: visible==false -> cell invalida, no pintar cursor.
     // Cubre Busqueda y cursor fuera del viewport (rueda con
     // suppressScrollToCursor_): se deja oculto (beginFrame hizo hide).

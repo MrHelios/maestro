@@ -39,7 +39,7 @@ enum class StyleRole {
     AccentGuardar,
     AccentAbrir,
 
-    MsgInfo,            // fila de mensajes: tipos por MessageKind
+    MsgInfo,            // MessageBar: tipos por MessageKind
     MsgSuccess,
     MsgWarning,
     MsgError,

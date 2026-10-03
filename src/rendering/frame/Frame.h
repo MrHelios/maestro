@@ -8,14 +8,14 @@
 #include "base/SmallVec.h"
 #include "layout/Layout.h"
 #include "platform/CellPos.h"
-#include "rendering/StatusBarData.h"
+#include "rendering/ChromeData.h"
 #include "rendering/Style.h"
 
 // ---------------------------------------------------------------------------
 // Frame (Fase B/C-1): descripción pura de la pantalla, SIN ANSI/CSI.
 //
 // REGLA ARQUITECTÓNICA: Frame nunca contiene secuencias de escape ni
-// operaciones de terminal. Los caches codificados (rowCache_, statusCache_)
+// operaciones de terminal. Los caches codificados (rowCache_, chromeCache_)
 // pertenecen exclusivamente a rendering/tty (TtyDiff).
 //
 //   Editor -> FrameBuilder -> Frame -> TtyEncoder -> diff/scroll -> STDOUT
@@ -95,8 +95,8 @@ struct Frame {
     Frame(Frame&&) = default;
     Frame& operator=(Frame&&) = default;
 
-    std::vector<StyledRow> contentRows; // contentH filas (sin status bar)
-    StatusBarData status;               // DTO puro para la barra común
+    std::vector<StyledRow> contentRows; // contentH filas (sin chrome)
+    ChromeData chrome;                // DTO puro del chrome (StatusBar + MessageBar)
     StyleRole statusAccent = StyleRole::StatusAccentDefault;
     FrameCursor cursor;
     Layout layout;
@@ -116,9 +116,9 @@ struct Frame {
             for (const auto& s : r.segs)
                 if (hasEscView(s.text)) return true;
         }
-        if (hasEsc(status.name) || hasEsc(status.path) ||
-            hasEsc(status.estado) ||
-            hasEsc(status.right) || hasEsc(status.message.text))
+        if (hasEsc(chrome.status.name) || hasEsc(chrome.status.path) ||
+            hasEsc(chrome.status.estado) ||
+            hasEsc(chrome.status.right) || hasEsc(chrome.message.text))
             return true;
         return false;
     }

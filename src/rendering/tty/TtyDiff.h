@@ -13,14 +13,14 @@
 #include "layout/BracketMatcher.h"
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
-#include "rendering/StatusBarData.h"
+#include "rendering/ChromeData.h"
 #include "rendering/frame/FrameBuilder.h"
 #include "rendering/tty/TtyEncoder.h"
 
 // ---------------------------------------------------------------------------
 // TtyDiff: render diferencial del backend TTY.
 //
-// Dueño EXCLUSIVO de los caches codificados (rowCache_/statusCache_ + estado
+// Dueño EXCLUSIVO de los caches codificados (rowCache_/chromeCache_ + estado
 // de viewport/cursor/versión). El contrato común (Frame) nunca los ve:
 // el diff compara filas YA codificadas por TtyEncoder y emite solo CSI
 // puntuales (scroll de región, rewrites de fila, cursor).
@@ -55,7 +55,7 @@ public:
 
     void invalidateCache() {
         hasCache_ = false;
-        hasLastStatusData_ = false;
+        hasLastChromeData_ = false;
     }
 
     // Observabilidad para tests (solo lectura): estado del cache diferencial.
@@ -95,7 +95,7 @@ private:
     TtyEncoder& encoder_;
 
     std::deque<std::string> rowCache_; // una entrada por fila: "\x1b[K" + bytes
-    std::string statusCache_;          // status bar codificada, filas con "\r\n"
+    std::string chromeCache_;          // chrome codificado (StatusBar + MessageBar), filas con "\r\n"
     bool hasCache_ = false;
     int cachedContentH_ = -1;
     int lastViewportW_ = -1;
@@ -106,8 +106,8 @@ private:
     int lastCursorCol_ = 0;
     uint64_t lastVersion_ = 0;
     int lastLineCount_ = 0;
-    StatusBarData lastStatusData_;
-    bool hasLastStatusData_ = false;
+    ChromeData lastChromeData_;
+    bool hasLastChromeData_ = false;
     std::optional<BracketPair> lastBracketPair_;
     bool hasLastBracketPair_ = false;
 
@@ -134,10 +134,10 @@ private:
                          const std::optional<Normalized>& bracketClose,
                          int docLine, int gutterW, int textWidth, int contentH);
 
-    void patchStatusBar(std::string& out, const Document& doc,
-                        const Cursor& cursor, const std::string& filename,
-                        bool modified, const Message& message, State state,
-                        const Layout& layout, int contentH);
+    void patchChrome(std::string& out, const Document& doc,
+                       const Cursor& cursor, const std::string& filename,
+                       bool modified, const Message& message, State state,
+                       const Layout& layout, int contentH);
 
     // Resuelve el cursor con el resolver común (sin clamp duplicado) y lo
     // posiciona/muestra. Busqueda o fuera de viewport => lo deja oculto

@@ -11,23 +11,26 @@
 
 namespace {
 
-// Arma el StatusBarData del Editor. PURO: sin ANSI; el accent vive en
-// Frame::statusAccent como StyleRole y lo resuelve el backend.
-StatusBarData editorBarData(const std::string& filename, bool modified,
+// Arma el ChromeData del Editor. PURO: sin ANSI; el accent de la
+// etiqueta de estado (StatusBar) vive en Frame::statusAccent como
+// StyleRole y lo resuelve el backend.
+//   data.status  -> StatusBar (fila 1 fija)
+//   data.message -> MessageBar (fila 2, Message)
+ChromeData editorChromeData(const std::string& filename, bool modified,
                             const std::string& estado,
                             const Message& message,
                             const Cursor& cursor, int totalLines) {
-    StatusBarData data;
-    data.name = chrome::baseName(filename);
-    if (data.name.empty()) data.name = "[sin nombre]";
-    data.path = chrome::collapseHome(chrome::dirName(filename));
-    if (data.path == ".") data.path = "";
-    data.estado = estado;
-    data.modified = modified;
+    ChromeData data;
+    data.status.name = chrome::baseName(filename);
+    if (data.status.name.empty()) data.status.name = "[sin nombre]";
+    data.status.path = chrome::collapseHome(chrome::dirName(filename));
+    if (data.status.path == ".") data.status.path = "";
+    data.status.estado = estado;
+    data.status.modified = modified;
     data.message = message;
-    data.cursorLine = cursor.line;
-    data.cursorCol = cursor.col;
-    data.totalLines = totalLines;
+    data.status.cursorLine = cursor.line;
+    data.status.cursorCol = cursor.col;
+    data.status.totalLines = totalLines;
     return data;
 }
 
@@ -145,7 +148,7 @@ bool FrameBuilder::updateSyntaxLanguage(const std::string& filename) const {
 }
 
 Layout FrameBuilder::calculateLayout(int contentRows, int width) const {
-    return computeLayout(contentRows + kStatusBarRows, width);
+    return computeLayout(contentRows + kChromeRows, width);
 }
 
 FrameBuilder::EditorGeometry FrameBuilder::editorGeometry(
@@ -487,13 +490,13 @@ StyledRow FrameBuilder::buildContentRow(
     return row;
 }
 
-FrameBuilder::StatusPayload FrameBuilder::buildStatus(
+FrameBuilder::ChromePayload FrameBuilder::buildChrome(
     const std::string& filename, bool modified, const Message& message,
     const Cursor& cursor, int totalLines, State state) const {
-    StatusPayload p;
-    p.data = editorBarData(filename, modified, stateLabelFor(state), message,
+    ChromePayload p;
+    p.data = editorChromeData(filename, modified, stateLabelFor(state), message,
                            cursor, totalLines);
-    p.accent = accentRoleFor(state);
+    p.statusAccent = accentRoleFor(state);
     return p;
 }
 
@@ -547,10 +550,10 @@ Frame FrameBuilder::buildFrame(    const Document& doc,
                                                 bracketClose, docLine, gutterW,
                                                 textWidth));
     }
-    auto payload = buildStatus(filename, modified, message, cursor,
+    auto payload = buildChrome(filename, modified, message, cursor,
                                doc.lineCount(), state);
-    f.status = payload.data;
-    f.statusAccent = payload.accent;
+    f.chrome = std::move(payload.data);
+    f.statusAccent = payload.statusAccent;
     f.cursor.state = state;
     f.cursor.shape = cursorShapeFor(state);
     // Contrato visual explicito: visible solo si el modo lo permite Y el

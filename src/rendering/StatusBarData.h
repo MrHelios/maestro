@@ -2,18 +2,16 @@
 
 #include <string>
 
-#include "app/Message.h"
-
 // ---------------------------------------------------------------------------
-// StatusBarData: DTO puro de la barra común. No conoce TtyTheme ni ANSI.
-// Vive en rendering/ (zona pura). La codificación ANSI vive en
-// rendering/tty/TtyStatusBar que recibe este DTO.
+// StatusBarData: DTO puro de la fila 1 del chrome (StatusBar). No conoce
+// TtyTheme ni ANSI. Vive en rendering/ (zona pura). La codificacion ANSI
+// vive en rendering/tty/TtyChrome que recibe el ChromeData completo.
+// La fila 2 (MessageBar) viaja como `Message` dentro de ChromeData.
 // ---------------------------------------------------------------------------
 struct StatusBarData {
-    std::string name;         // nombre del archivo (izquierda)
+    std::string name;         // nombre del archivo (izquierda, StatusBar)
     std::string path;         // ruta (izquierda); vacia si no aplica
     std::string estado;       // etiqueta de estado (izquierda)
-    Message message;          // fila de mensajes (fila propia, coloreada por tipo)
     std::string right;        // override del bloque derecho; vacio = calcular
     bool modified = false;    // indicador [*] junto al nombre
     int cursorLine = 0;       // fila del cursor (0-indexada)
@@ -23,8 +21,7 @@ struct StatusBarData {
 
 inline bool operator==(const StatusBarData& a, const StatusBarData& b) {
     return a.name == b.name && a.path == b.path && a.estado == b.estado &&
-           a.message.text == b.message.text &&
-           a.message.kind == b.message.kind && a.right == b.right && a.modified == b.modified &&
+           a.right == b.right && a.modified == b.modified &&
            a.cursorLine == b.cursorLine && a.cursorCol == b.cursorCol && a.totalLines == b.totalLines;
 }
 

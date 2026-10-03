@@ -19,7 +19,7 @@
 // No depende de Editor/Renderer: testeable sin construir el engine.
 //
 // Reglas:
-//   - Fuera de layout.content (status bar, etc.) => nullopt.
+//   - Fuera de layout.content (chrome: StatusBar/MessageBar, etc.) => nullopt.
 //   - Fila `~` (docLine >= lineCount) => nullopt.
 //   - Click en gutter (relCol < gutterW) => inicio de la fila (col 0).
 //   - Click en texto o mas alla de EOL => utf8::byteForColumn + alignStart

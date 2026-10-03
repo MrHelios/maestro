@@ -19,10 +19,10 @@
 //   - terminal pequena (muy angosta) y terminal grande.
 //
 // El invariante que se chequea para cada frame es:
-//   1. el numero de filas visibles es exactamente `content + kStatusBarRows`;
+//   1. el numero de filas visibles es exactamente `content + kChromeRows`;
 //   2. ninguna fila visible supera `width` columnas;
 //   3. la fila fija de la barra llena EXACTAMENTE `width` columnas;
-//   4. la fila de mensajes jamas supera `width`;
+//   4. la MessageBar jamas supera `width`;
 //   5. el frame produce UTF-8 valido (ningun multibyte partido).
 #include <algorithm>
 #include <optional>
@@ -97,8 +97,8 @@ std::string frameFile(int n, int content, int width) {
 void checkFrameWithinBounds(const std::string& frame, int content, int width) {
     const auto rows = visibleRows(frame);
 
-    // 1. El frame tiene exactamente content + kStatusBarRows filas visibles.
-    CHECK_EQ((int)rows.size(), content + kStatusBarRows);
+    // 1. El frame tiene exactamente content + kChromeRows filas visibles.
+    CHECK_EQ((int)rows.size(), content + kChromeRows);
 
     // 2. Ninguna fila (contenido, barra fija ni mensajes) supera `width`.
     for (const std::string& r : rows) {
@@ -107,8 +107,8 @@ void checkFrameWithinBounds(const std::string& frame, int content, int width) {
     }
 
     // 3/4. La fila fija llena exactamente el ancho; la de mensajes no lo pasa.
-    CHECK((int)rows.size() >= kStatusBarRows);
-    const int barRow = static_cast<int>(rows.size()) - kStatusBarRows;
+    CHECK((int)rows.size() >= kChromeRows);
+    const int barRow = static_cast<int>(rows.size()) - kChromeRows;
     CHECK_EQ(colWidth(rows[barRow]), width);
     CHECK(colWidth(rows[static_cast<int>(rows.size()) - 1]) <= width);
 }

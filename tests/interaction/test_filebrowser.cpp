@@ -1474,7 +1474,7 @@ TEST(renderer_file_list_layout) {
     // Barra de estado con la ruta y la etiqueta de modo.
     CHECK(contains(out, "/tmp/sandbox"));
     CHECK(contains(out, "ABRIR ARCHIVO"));
-    // Fila de mensajes con la ayuda.
+    // MessageBar con la ayuda.
     CHECK(contains(out, "Enter abrir/entrar"));
     // Filas vacias bajo la lista con el marcador del editor, alineado.
     CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~" + tr.theme().reset + "\r\n"));

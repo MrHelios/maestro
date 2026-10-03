@@ -466,7 +466,8 @@ private:
     void clearSelection();
 
     // Click izquierdo en el viewport: si venia de Seleccion cancela el
-    // highlight EN EL PRESS (valido o en ~/statusbar) y vuelve a
+    // highlight EN EL PRESS (valido o fuera del area de contenido, en el
+    // chrome inferior) y vuelve a
     // Navegacion; luego arma el gesto (mueve el cursor y guarda
     // dragAnchor_) sin crear rango. El drag posterior crea la nueva
     // seleccion, el release sin drag es no-op.
@@ -490,7 +491,7 @@ private:
     // lateral actualiza la intencion de autoscroll temporal (arriba: la
     // primera fila —contenido— se trata como intencion por decision, ya que
     // el fuera hacia arriba no es reportable; abajo: solo el fuera real en
-    // statusbar; el resto apaga); solo util durante el gesto de mouse.
+    // el chrome inferior; el resto apaga); solo util durante el gesto de mouse.
     std::optional<Position> resolveMouseDragPosition(CellPos cell);
     // Aplica una posicion de drag a cursor+seleccion: primer drag efectivo
     // entra a Seleccion (o reinicia el rango), los siguientes extienden
@@ -555,9 +556,10 @@ private:
     bool suppressScrollToCursor_ = false;
 
     // ---- Gesto de seleccion por mouse (press cancela vs drag crea) ----
-    // press en Seleccion limpia el highlight de inmediato (valido o en
-    // ~/statusbar) y vuelve a Navegacion; luego arma (mueve cursor +
-    // guarda anchor). El primer drag efectivo crea la nueva seleccion;
+    // press en Seleccion limpia el highlight de inmediato (valido o fuera
+    // del area de contenido, en el chrome inferior) y vuelve a Navegacion;
+    // luego arma (mueve cursor + guarda anchor). El primer drag efectivo
+    // crea la nueva seleccion;
     // release sin drag es no-op y con drag permanece en Seleccion.
     bool mouseGestureActive_ = false;
     bool mouseDragStarted_ = false;
@@ -566,7 +568,8 @@ private:
 
     // ---- Autoscroll temporal de seleccion por mouse (solo vertical) ----
     // Intencion, no coordenadas: hacia abajo el mouse sigue fuera del area
-    // de edicion (statusbar); hacia arriba no hay fuera reportable, asi que
+    // de edicion, en el chrome inferior; hacia arriba no hay fuera
+    // reportable, asi que
     // por DECISION la primera fila (contenido) cuenta como intencion, con
     // la consecuencia conocida de que un drag terminado justo ahi scrollea.
     // El loop despierta por timeout y tickMouseAutoscroll() da un paso por
@@ -575,7 +578,7 @@ private:
     MouseAutoscrollDirection mouseAutoscrollDirection_ =
         MouseAutoscrollDirection::None;
     // Ultimo drag en zona de scroll (celda 0-based): fuera real por
-    // abajo (statusbar) o primera fila por sustitucion hacia arriba
+    // abajo (chrome inferior) o primera fila por sustitucion hacia arriba
     // (ver DECISION en el bloque de armado). El tick lo re-ejecuta
     // para dar un paso.
     // Nota: NO gatear por cell.valid(). El tick solo lee esta celda bajo
