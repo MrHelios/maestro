@@ -12,9 +12,9 @@
 // actionMessageExpiry_): el texto, su tipo y (si no es persistente) el
 // vencimiento viven juntos en un mismo valor.
 //
-// El Editor produces y entrega un Message; el Renderer decide como mostrarlo
-// (via ChromeData, fila MessageBar): la fila y el color del MessageBar los
-// define el tipo. El Editor no dibuja.
+// El Editor produce y entrega un Message; ChromeData lo transporta al
+// MessageBar y el backend traduce MessageKind al estilo visual
+// correspondiente. El Editor no dibuja.
 //
 // persistence: un Message SIN `expiry` es PERSISTENTE (ayuda de modo,
 // prompts de comando, informacion de estado): se queda hasta que otra cosa

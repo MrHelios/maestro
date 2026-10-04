@@ -116,9 +116,9 @@ struct Frame {
             for (const auto& s : r.segs)
                 if (hasEscView(s.text)) return true;
         }
-        if (hasEsc(chrome.status.name) || hasEsc(chrome.status.path) ||
-            hasEsc(chrome.status.estado) ||
-            hasEsc(chrome.status.right) || hasEsc(chrome.message.text))
+        if (hasEsc(chrome.statusBar.name) || hasEsc(chrome.statusBar.path) ||
+            hasEsc(chrome.statusBar.estado) ||
+            hasEsc(chrome.statusBar.right) || hasEsc(chrome.message.text))
             return true;
         return false;
     }

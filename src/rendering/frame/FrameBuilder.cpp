@@ -14,23 +14,23 @@ namespace {
 // Arma el ChromeData del Editor. PURO: sin ANSI; el accent de la
 // etiqueta de estado (StatusBar) vive en Frame::statusAccent como
 // StyleRole y lo resuelve el backend.
-//   data.status  -> StatusBar (fila 1 fija)
-//   data.message -> MessageBar (fila 2, Message)
+//   data.statusBar  -> StatusBar (fila superior fija)
+//   data.message -> MessageBar (fila inferior, Message)
 ChromeData editorChromeData(const std::string& filename, bool modified,
                             const std::string& estado,
                             const Message& message,
                             const Cursor& cursor, int totalLines) {
     ChromeData data;
-    data.status.name = chrome::baseName(filename);
-    if (data.status.name.empty()) data.status.name = "[sin nombre]";
-    data.status.path = chrome::collapseHome(chrome::dirName(filename));
-    if (data.status.path == ".") data.status.path = "";
-    data.status.estado = estado;
-    data.status.modified = modified;
+    data.statusBar.name = chrome::baseName(filename);
+    if (data.statusBar.name.empty()) data.statusBar.name = "[sin nombre]";
+    data.statusBar.path = chrome::collapseHome(chrome::dirName(filename));
+    if (data.statusBar.path == ".") data.statusBar.path = "";
+    data.statusBar.estado = estado;
+    data.statusBar.modified = modified;
     data.message = message;
-    data.status.cursorLine = cursor.line;
-    data.status.cursorCol = cursor.col;
-    data.status.totalLines = totalLines;
+    data.statusBar.cursorLine = cursor.line;
+    data.statusBar.cursorCol = cursor.col;
+    data.statusBar.totalLines = totalLines;
     return data;
 }
 

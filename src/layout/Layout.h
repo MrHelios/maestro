@@ -23,7 +23,7 @@ struct Rect {
 
 struct Layout {
     Rect content;  // area de contenido de la pantalla activa
-    Rect chrome;   // chrome inferior: StatusBar (fila 1) + MessageBar (fila 2)
+    Rect chrome;   // chrome inferior: StatusBar (fila superior) + MessageBar (fila inferior)
 };
 
 // Filas del chrome inferior. El editor usa DOS: la fila fija del StatusBar y

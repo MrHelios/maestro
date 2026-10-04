@@ -96,7 +96,9 @@ void TtyEncoder::appendChrome(std::string& out, const Rect& area,
                               StyleRole accent) const {
     TtyChrome bar;
     bar.setTheme(theme_);
-    out += bar.render(area, data, accent);
+    // Camino caliente: escritura directa sobre `out`, sin el string
+    // intermedio del viejo `out += bar.render(...)`.
+    bar.append(out, area, data, accent);
 }
 
 std::string TtyEncoder::encodeFrame(const Frame& f) const {

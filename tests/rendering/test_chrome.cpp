@@ -31,10 +31,11 @@ using testutil::stripAnsi;
 using testutil::colWidth;
 using testutil::contains;
 
-// Fila 1 y fila 2 (mensajes) del texto ya sin ANSI, separadas por \r\n.
+// Fila superior (StatusBar) e inferior (MessageBar) del texto ya sin ANSI,
+// separadas por \r\n.
 struct Rows {
     std::string fixed;   // barra de estado superior
-    std::string message; // MessageBar (fila 2)
+    std::string message; // MessageBar (fila inferior)
 };
 
 Rows rowsOf(const std::string& out) {
@@ -64,10 +65,10 @@ std::string longStr(int n, char c = 'n') {
 // ---------------------------------------------------------------------------
 TEST(chrome_left_corto) {
     ChromeData d;
-    d.status.name = "archivo.txt";
-    d.status.path = "/home/usuario";
-    d.status.estado = "NAVEGACION";
-    d.status.totalLines = 1;
+    d.statusBar.name = "archivo.txt";
+    d.statusBar.path = "/home/usuario";
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.totalLines = 1;
 
     Rows r = renderRows(d, 80);
     // La fila fija ocupa exactamente el ancho del area (anclado a la
@@ -88,9 +89,9 @@ TEST(chrome_left_corto) {
 // ---------------------------------------------------------------------------
 TEST(chrome_center_corto) {
     ChromeData d;
-    d.status.name = "archivo.txt"; // 11 columnas
-    d.status.estado = "SELECCION"; // 9 columnas
-    d.status.totalLines = 1;
+    d.statusBar.name = "archivo.txt"; // 11 columnas
+    d.statusBar.estado = "SELECCION"; // 9 columnas
+    d.statusBar.totalLines = 1;
 
     // Presupuesto del bloque izquierdo en w=35:
     //   35 - (padL 1 + padR 3 + right 8) = 23 -> caben nombre + " - " + estado.
@@ -113,10 +114,10 @@ TEST(chrome_center_corto) {
 // ---------------------------------------------------------------------------
 TEST(chrome_right_corto) {
     ChromeData d;
-    d.status.name = "archivo.txt";
-    d.status.estado = "NAVEGACION";
-    d.status.right = "2/5";               // override: sin documento no hay pct (fila,col)
-    d.status.totalLines = 0;
+    d.statusBar.name = "archivo.txt";
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.right = "2/5";               // override: sin documento no hay pct (fila,col)
+    d.statusBar.totalLines = 0;
 
     Rows r = renderRows(d, 40);
     CHECK_EQ(colWidth(r.fixed), 40);
@@ -132,9 +133,9 @@ TEST(chrome_right_corto) {
 // ---------------------------------------------------------------------------
 TEST(chrome_left_demasiado_largo) {
     ChromeData d;
-    d.status.name = longStr(80); // muy por encima de kNameMax
-    d.status.estado = "NAVEGACION";
-    d.status.totalLines = 1;
+    d.statusBar.name = longStr(80); // muy por encima de kNameMax
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.totalLines = 1;
 
     for (int w = 12; w <= 80; w += 7) {
         Rows r = renderRows(d, w);
@@ -154,10 +155,10 @@ TEST(chrome_left_demasiado_largo) {
 // ---------------------------------------------------------------------------
 TEST(chrome_path_demasiado_largo) {
     ChromeData d;
-    d.status.name = "archivo.txt";
-    d.status.path = "/" + longStr(80) + "/cola_final.txt"; // muy larga
-    d.status.estado = "NAVEGACION";
-    d.status.totalLines = 1;
+    d.statusBar.name = "archivo.txt";
+    d.statusBar.path = "/" + longStr(80) + "/cola_final.txt"; // muy larga
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.totalLines = 1;
 
     for (int w = 20; w <= 80; w += 5) {
         Rows r = renderRows(d, w);
@@ -179,14 +180,14 @@ TEST(chrome_path_demasiado_largo) {
 // ---------------------------------------------------------------------------
 TEST(chrome_todos_demasiado_largos) {
     ChromeData d;
-    d.status.name = longStr(80);
-    d.status.path = "/" + longStr(80) + "/x.txt";
-    d.status.estado = longStr(40);
+    d.statusBar.name = longStr(80);
+    d.statusBar.path = "/" + longStr(80) + "/x.txt";
+    d.statusBar.estado = longStr(40);
     d.message = longStr(120, 'm');
-    d.status.right = longStr(40);
-    d.status.totalLines = 1000;
-    d.status.cursorLine = 256;
-    d.status.cursorCol = 512;
+    d.statusBar.right = longStr(40);
+    d.statusBar.totalLines = 1000;
+    d.statusBar.cursorLine = 256;
+    d.statusBar.cursorCol = 512;
 
     for (int w = 1; w <= 100; ++w) {
         Rows r = renderRows(d, w);
@@ -203,11 +204,11 @@ TEST(chrome_todos_demasiado_largos) {
 // ---------------------------------------------------------------------------
 TEST(chrome_terminal_extremadamente_angosta) {
     ChromeData d;
-    d.status.name = longStr(80);
-    d.status.path = "/" + longStr(80);
-    d.status.estado = longStr(30);
+    d.statusBar.name = longStr(80);
+    d.statusBar.path = "/" + longStr(80);
+    d.statusBar.estado = longStr(30);
     d.message = longStr(120, 'm');
-    d.status.totalLines = 1;
+    d.statusBar.totalLines = 1;
 
     for (int w = 1; w <= 11; ++w) {
         Rows r = renderRows(d, w);
@@ -225,10 +226,10 @@ TEST(chrome_terminal_extremadamente_angosta) {
 TEST(chrome_right_block_edge_layout) {
     for (int w = 15; w <= 40; w += 5) {
         ChromeData d;
-        d.status.name = "a.txt";
-        d.status.estado = "NAVEGACION";
-        d.status.totalLines = 5;
-        d.status.cursorLine = 2; // 2/(5-1) = 50%
+        d.statusBar.name = "a.txt";
+        d.statusBar.estado = "NAVEGACION";
+        d.statusBar.totalLines = 5;
+        d.statusBar.cursorLine = 2; // 2/(5-1) = 50%
         Rows r = renderRows(d, w);
         CHECK_EQ(colWidth(r.fixed), w);
         CHECK_EQ(r.fixed.back(), ')'); // el (fila,col) cabe entero aca
@@ -236,9 +237,9 @@ TEST(chrome_right_block_edge_layout) {
     // Sin documento (totalLines=0): el bloque derecho se calcula igual
     // (pct 0, (1,1)) si no hay override; 0% -> 1 columna, ancho respetado.
     ChromeData d;
-    d.status.name = "a.txt";
-    d.status.estado = "NAVEGACION";
-    d.status.totalLines = 0;
+    d.statusBar.name = "a.txt";
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.totalLines = 0;
     Rows r = renderRows(d, 30);
     CHECK_EQ(colWidth(r.fixed), 30);
     CHECK(contains(r.fixed, "0% (1,1)"));
@@ -258,9 +259,9 @@ TEST(chrome_estado_accent_from_role) {
     Rect area; area.width = 40; area.height = 2;
 
     ChromeData d;
-    d.status.name = "a.txt";
-    d.status.estado = "NAVEGACION";
-    d.status.totalLines = 1;
+    d.statusBar.name = "a.txt";
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.totalLines = 1;
 
     const std::string fallback = bar.render(area, d);
     CHECK(fallback.find(t.statusBarAccent) != std::string::npos);
@@ -309,16 +310,16 @@ TEST(chrome_modified_indicator_styled) {
     Rect area; area.width = 60; area.height = 2;
 
     ChromeData d;
-    d.status.name = "x.cc";
-    d.status.modified = true;
-    d.status.estado = "NAVEGACION";
-    d.status.totalLines = 1;
+    d.statusBar.name = "x.cc";
+    d.statusBar.modified = true;
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.totalLines = 1;
 
     const std::string out = bar.render(area, d);
     CHECK(out.find(t.statusBarModified + " [*]") != std::string::npos);
 
     ChromeData c = d;
-    c.status.modified = false;
+    c.statusBar.modified = false;
     CHECK(bar.render(area, c).find(" [*]") == std::string::npos);
 }
 
@@ -335,9 +336,9 @@ TEST(chrome_prompt_message_styled) {
     Rect area; area.width = 60; area.height = 2;
 
     ChromeData d;
-    d.status.name = "x";
-    d.status.estado = "NAVEGACION";
-    d.status.totalLines = 1;
+    d.statusBar.name = "x";
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.totalLines = 1;
     d.message = Message("Guardar archivo: /tmp/x", MessageKind::Prompt,
                         std::nullopt);
 
@@ -351,26 +352,26 @@ TEST(chrome_prompt_message_styled) {
 
 // ---------------------------------------------------------------------------
 // Contrato de composicion: ChromeData = StatusBar + MessageBar independientes.
-// Cambio solo en status -> solo fila 1; cambio solo en message -> solo fila 2.
-// Congela que renderStatus/renderMessage no se pisan entre si.
+// Cambio solo en statusBar -> solo fila superior; cambio solo en message -> solo fila inferior.
+// Congela que renderStatusBar/renderMessageBar no se pisan entre si.
 // ---------------------------------------------------------------------------
 TEST(chrome_status_and_message_change_isolated_rows) {
     TtyChrome bar;
     ChromeData base;
-    base.status.name = "a.txt";
-    base.status.path = "/ruta";
-    base.status.estado = "NAVEGACION";
-    base.status.totalLines = 3;
+    base.statusBar.name = "a.txt";
+    base.statusBar.path = "/ruta";
+    base.statusBar.estado = "NAVEGACION";
+    base.statusBar.totalLines = 3;
     base.message = Message("msg uno", MessageKind::Info, std::nullopt);
 
     // Solo StatusBar: cambia el nombre, mismo Message.
-    ChromeData onlyStatus = base;
-    onlyStatus.status.name = "b.txt";
-    CHECK(bar.renderStatus(80, onlyStatus.status) !=
-          bar.renderStatus(80, base.status));
-    CHECK_EQ(bar.renderMessage(80, onlyStatus.message),
-             bar.renderMessage(80, base.message));
-    Rows rs = rowsOf(bar.render({0, 0, 80, 2}, onlyStatus));
+    ChromeData onlyStatusBar = base;
+    onlyStatusBar.statusBar.name = "b.txt";
+    CHECK(bar.renderStatusBar(80, onlyStatusBar.statusBar) !=
+          bar.renderStatusBar(80, base.statusBar));
+    CHECK_EQ(bar.renderMessageBar(80, onlyStatusBar.message),
+             bar.renderMessageBar(80, base.message));
+    Rows rs = rowsOf(bar.render({0, 0, 80, 2}, onlyStatusBar));
     Rows r0 = rowsOf(bar.render({0, 0, 80, 2}, base));
     CHECK(rs.fixed != r0.fixed);
     CHECK_EQ(rs.message, r0.message);
@@ -378,11 +379,48 @@ TEST(chrome_status_and_message_change_isolated_rows) {
     // Solo MessageBar: mismo StatusBar, cambia el texto.
     ChromeData onlyMsg = base;
     onlyMsg.message = Message("msg dos", MessageKind::Info, std::nullopt);
-    CHECK_EQ(bar.renderStatus(80, onlyMsg.status),
-             bar.renderStatus(80, base.status));
-    CHECK(bar.renderMessage(80, onlyMsg.message) !=
-          bar.renderMessage(80, base.message));
+    CHECK_EQ(bar.renderStatusBar(80, onlyMsg.statusBar),
+             bar.renderStatusBar(80, base.statusBar));
+    CHECK(bar.renderMessageBar(80, onlyMsg.message) !=
+          bar.renderMessageBar(80, base.message));
     Rows rm = rowsOf(bar.render({0, 0, 80, 2}, onlyMsg));
     CHECK_EQ(rm.fixed, r0.fixed);
     CHECK(rm.message != r0.message);
+}
+
+// ---------------------------------------------------------------------------
+// Contrato de altura (espejo de computeLayout): height == 1 -> solo StatusBar
+// (byte a byte igual a renderStatusBar, sin separador de filas); height == 0 ->
+// sin chrome (string vacio, append no toca el buffer).
+// ---------------------------------------------------------------------------
+TEST(chrome_height_one_renders_only_status) {
+    TtyChrome bar;
+    ChromeData d;
+    d.statusBar.name = "a.txt";
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.totalLines = 3;
+    d.message = Message("msg visible", MessageKind::Info, std::nullopt);
+
+    for (int w : {1, 20, 80}) {
+        const std::string full = bar.render({0, 0, w, 1}, d);
+        CHECK_EQ(full, bar.renderStatusBar(w, d.statusBar));
+        CHECK(full.find("\r\n") == std::string::npos);
+        CHECK(!full.empty());
+    }
+}
+
+TEST(chrome_height_zero_renders_empty) {
+    TtyChrome bar;
+    ChromeData d;
+    d.statusBar.name = "a.txt";
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.totalLines = 3;
+    d.message = Message("msg", MessageKind::Info, std::nullopt);
+
+    for (int w : {0, 1, 80}) {
+        CHECK(bar.render({0, 0, w, 0}, d).empty());
+        std::string out = "prefijo";
+        bar.append(out, {0, 0, w, 0}, d);
+        CHECK_EQ(out, "prefijo");
+    }
 }

@@ -102,8 +102,8 @@ public:
 
     // Payload puro del chrome (barato: sin filas). Lo usan buildFrame y el
     // backend para patches del chrome sin reconstruir contenido.
-    //   data.status  -> StatusBar (fila 1 fija)
-    //   data.message -> MessageBar (fila 2, Message)
+    //   data.statusBar -> StatusBar (fila superior fija)
+    //   data.message -> MessageBar (fila inferior, Message)
     struct ChromePayload {
         ChromeData data;
         StyleRole statusAccent = StyleRole::StatusAccentDefault;

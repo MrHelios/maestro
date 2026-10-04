@@ -98,30 +98,30 @@ ChromeData editorData() {
     const std::string filename = "/ruta/proyecto/archivo.txt";
     size_t slash = filename.find_last_of('/');
     ChromeData d;
-    d.status.name = filename.substr(slash + 1);              // baseName
-    d.status.path = (slash == 0) ? "/" : filename.substr(0, slash); // dirName
-    d.status.estado = "NAVEGACION";
+    d.statusBar.name = filename.substr(slash + 1);              // baseName
+    d.statusBar.path = (slash == 0) ? "/" : filename.substr(0, slash); // dirName
+    d.statusBar.estado = "NAVEGACION";
     d.message = "";
-    d.status.cursorLine = 0;
-    d.status.cursorCol = 0;
-    d.status.totalLines = 3;
+    d.statusBar.cursorLine = 0;
+    d.statusBar.cursorCol = 0;
+    d.statusBar.totalLines = 3;
     return d;
 }
 
 ChromeData bufferData(int n = 4, int selected = 1) {
     ChromeData d;
-    d.status.name = "Buffers";
-    d.status.estado = "SELECCIONAR";
-    d.status.right = std::to_string(std::min(selected + 1, n)) + "/" +
+    d.statusBar.name = "Buffers";
+    d.statusBar.estado = "SELECCIONAR";
+    d.statusBar.right = std::to_string(std::min(selected + 1, n)) + "/" +
               std::to_string(n);
     return d;
 }
 
 ChromeData fileData(int n = 3) {
     ChromeData d;
-    d.status.name = "/datos/proyecto";
-    d.status.estado = "ABRIR ARCHIVO";
-    d.status.right = "1/" + std::to_string(n);
+    d.statusBar.name = "/datos/proyecto";
+    d.statusBar.estado = "ABRIR ARCHIVO";
+    d.statusBar.right = "1/" + std::to_string(n);
     d.message = "ayuda: direcc de naveg";
     return d;
 }

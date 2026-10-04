@@ -168,12 +168,12 @@ TEST(theme_chrome_uses_theme_for_colors) {
 
     Rect area; area.row = 0; area.col = 0; area.width = 60; area.height = 2;
     ChromeData d;
-    d.status.name = "archivo.txt";
-    d.status.path = "/ruta";
-    d.status.estado = "NAVEGACION";
+    d.statusBar.name = "archivo.txt";
+    d.statusBar.path = "/ruta";
+    d.statusBar.estado = "NAVEGACION";
     d.message = Message("error grave", MessageKind::Error,
                         std::nullopt);
-    d.status.totalLines = 1;
+    d.statusBar.totalLines = 1;
 
     const std::string out = bar.render(area, d);
     CHECK(out.find(t.statusBar) != std::string::npos);       // base del tema
@@ -248,12 +248,12 @@ TEST(theme_chrome_background_covers_full_width) {
     area.width = 60;
     area.height = 2;
     ChromeData d;
-    d.status.name = "archivo.txt";
-    d.status.path = "/ruta/larga/que/fuerza/varios/segmentos";
-    d.status.estado = "NAVEGACION";
-    d.status.totalLines = 100;
-    d.status.cursorLine = 10;
-    d.status.cursorCol = 5;
+    d.statusBar.name = "archivo.txt";
+    d.statusBar.path = "/ruta/larga/que/fuerza/varios/segmentos";
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.totalLines = 100;
+    d.statusBar.cursorLine = 10;
+    d.statusBar.cursorCol = 5;
 
     const std::string out = bar.render(area, d);
     size_t nl = out.find("\r\n");

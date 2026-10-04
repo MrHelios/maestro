@@ -10,6 +10,7 @@
 // Propiedad economica adicional: una tecla no debe emitir el frame entero.
 // ---------------------------------------------------------------------------
 
+#include <chrono>
 #include <cstdio>
 #include <functional>
 #include <string>
@@ -426,7 +427,7 @@ TEST(render_diff_invalidacion_por_modal_y_resize) {
 }
 
 // Contrato de composicion a nivel diff: ChromeData = StatusBar + MessageBar.
-// Solo-cambia-status reescribe solo la fila 1 del chrome; solo-cambia-message
+// Solo-cambia-statusBar reescribe solo la fila 1 del chrome; solo-cambia-message
 // reescribe solo la fila 2. Las filas se identifican por su CUP de rewrite
 // (col 1); el cursor cae en el contenido (col != 1).
 TEST(render_diff_chrome_status_and_message_isolated) {
@@ -469,4 +470,51 @@ TEST(render_diff_chrome_status_and_message_isolated) {
     CHECK(deltaMessage.find("\x1b[2J") == std::string::npos);
     CHECK(deltaMessage.find(messageCup) != std::string::npos);
     CHECK(deltaMessage.find(statusCup) == std::string::npos);
+}
+
+// Mismo texto, distinto MessageKind: el estilo del MessageBar cambia, asi
+// que el diff debe repintar la fila inferior (congela que `kind` forma parte
+// de la igualdad visual: sameRenderedChrome). Complemento: solo cambia
+// `expiry` -> sin cambio visual -> no repinta el chrome.
+TEST(render_diff_mismo_texto_distinto_kind_repinta) {
+    DiffHarness h(10);
+    Buffer& b = h.buf();
+    b.viewport.height = 6;
+    b.viewport.width = 40;
+    b.viewport.top = 0;
+    b.viewport.left = 0;
+    b.cursor.line = 0;
+    b.cursor.col = 0;
+    const int contentH = b.viewport.height;
+    const std::string statusCup =
+        "\x1b[" + std::to_string(contentH + 1) + ";1H";
+    const std::string messageCup =
+        "\x1b[" + std::to_string(contentH + 2) + ";1H";
+
+    // Prime: "hola" Info.
+    std::string prime = h.r.buildDiffFrame(
+        b.document, b.cursor, b.viewport, "a.txt", false,
+        Message("hola", MessageKind::Info, std::nullopt),
+        State::Navegacion, b.selection);
+    CHECK(prime.find("\x1b[2J") != std::string::npos);
+
+    // Mismo texto, distinto kind: repinta la fila inferior, no la superior.
+    std::string deltaKind = h.r.buildDiffFrame(
+        b.document, b.cursor, b.viewport, "a.txt", false,
+        Message("hola", MessageKind::Error, std::nullopt),
+        State::Navegacion, b.selection);
+    CHECK(deltaKind.find("\x1b[2J") == std::string::npos);
+    CHECK(deltaKind.find(messageCup) != std::string::npos);
+    CHECK(deltaKind.find(statusCup) == std::string::npos);
+
+    // Mismo texto y kind, solo cambia expiry: sin repintado del chrome.
+    const auto later =
+        std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    std::string deltaExpiry = h.r.buildDiffFrame(
+        b.document, b.cursor, b.viewport, "a.txt", false,
+        Message("hola", MessageKind::Error, later),
+        State::Navegacion, b.selection);
+    CHECK(deltaExpiry.find("\x1b[2J") == std::string::npos);
+    CHECK(deltaExpiry.find(messageCup) == std::string::npos);
+    CHECK(deltaExpiry.find(statusCup) == std::string::npos);
 }

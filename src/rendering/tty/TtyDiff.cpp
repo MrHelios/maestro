@@ -93,7 +93,7 @@ void TtyDiff::patchChrome(std::string& out, const Document& doc,
     auto payload = builder_.buildChrome(filename, modified, message, cursor,
                                         doc.lineCount(), state);
     const ChromeData& data = payload.data;
-    if (hasLastChromeData_ && data == lastChromeData_) return;
+    if (hasLastChromeData_ && sameRenderedChrome(data, lastChromeData_)) return;
     std::string chromeBody =
         encoder_.encodeChrome(layout.chrome, data, payload.statusAccent);
     if (chromeBody == chromeCache_) {

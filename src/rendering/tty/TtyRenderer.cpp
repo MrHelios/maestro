@@ -123,7 +123,8 @@ void TtyRenderer::renderEditorContent(
     int textWidth = std::max(0, area.width - gutterW);
     for (int row = 0; row < area.height; ++row) {
         int docLine = viewport.top + row;
-        out += encoder_.encodeRow(renderer_.frameBuilder().buildContentRow(
+        // Sin string intermedio por fila (mismo patrón que renderChrome).
+        encoder_.appendRow(out, renderer_.frameBuilder().buildContentRow(
             doc, cursor, viewport, sel, std::nullopt, std::nullopt,
             std::nullopt, docLine, gutterW, textWidth));
         out += "\r\n";
@@ -133,7 +134,9 @@ void TtyRenderer::renderEditorContent(
 void TtyRenderer::renderChrome(std::string& out, const Rect& area,
                                  const ChromeData& data,
                                  StyleRole accent) const {
-    out += encoder_.encodeChrome(area, data, accent);
+    // Sin string intermedio: el encoder agrega directo sobre `out`
+    // (el viejo `out += encodeChrome(...)` asignaba y copiaba por frame).
+    encoder_.appendChrome(out, area, data, accent);
 }
 
 std::string TtyRenderer::buildBufferListScreen(
@@ -146,10 +149,10 @@ std::string TtyRenderer::buildBufferListScreen(
     renderBufferListContent(out, names, selected, layout.content);
 
     ChromeData data;
-    data.status.name = "Buffers";
-    data.status.estado = "SELECCIONAR";
+    data.statusBar.name = "Buffers";
+    data.statusBar.estado = "SELECCIONAR";
     const int total = static_cast<int>(names.size());
-    data.status.right = std::to_string(std::min(selected + 1, total)) + "/" +
+    data.statusBar.right = std::to_string(std::min(selected + 1, total)) + "/" +
                  std::to_string(total);
     renderChrome(out, layout.chrome, data, StyleRole::AccentBuffers);
 
@@ -201,10 +204,10 @@ std::string TtyRenderer::buildFileListFrame(
     renderFileListContent(out, items, selected, scroll, layout.content);
 
     ChromeData data;
-    data.status.name = path.empty() ? "/" : chrome::collapseHome(path);
-    data.status.estado = estado;
+    data.statusBar.name = path.empty() ? "/" : chrome::collapseHome(path);
+    data.statusBar.estado = estado;
     const int total = static_cast<int>(items.size());
-    data.status.right = total == 0 ? "0/0"
+    data.statusBar.right = total == 0 ? "0/0"
                             : std::to_string(selected - scroll + 1) + "/" +
                                   std::to_string(total);
     data.message = message;

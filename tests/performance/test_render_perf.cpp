@@ -108,14 +108,14 @@ TEST(bench_perf_render_desglose_fases_checked) {
     // es TtyChrome::render.
     auto barData = [&] {
         ChromeData d;
-        d.status.name = "perf.txt";
-        d.status.path = "";
-        d.status.estado = "NAVEGACION";
-        d.status.modified = false;
+        d.statusBar.name = "perf.txt";
+        d.statusBar.path = "";
+        d.statusBar.estado = "NAVEGACION";
+        d.statusBar.modified = false;
         d.message = fx.msg;
-        d.status.cursorLine = cur.line;
-        d.status.cursorCol = cur.col;
-        d.status.totalLines = doc.lineCount();
+        d.statusBar.cursorLine = cur.line;
+        d.statusBar.cursorCol = cur.col;
+        d.statusBar.totalLines = doc.lineCount();
         return d;
     };
 

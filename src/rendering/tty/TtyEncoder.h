@@ -37,7 +37,7 @@ public:
     void appendRow(std::string& out, const StyledRow& row) const;
 
     // Chrome codificado (delega en TtyChrome::render con el rol;
-    // el DTO viaja sin ANSI). Incluye StatusBar (fila 1) + MessageBar (fila 2).
+    // el DTO viaja sin ANSI). Incluye StatusBar (fila superior) + MessageBar (fila inferior).
     std::string encodeChrome(const Rect& area,
                              const ChromeData& data,
                              StyleRole accent) const;

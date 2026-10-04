@@ -191,11 +191,11 @@ TEST(bench_perf_chrome_25k_perf) {
     Layout layout = computeLayout(ed.active().viewport.height + kChromeRows,
                                   ed.active().viewport.width);
     ChromeData d;
-    d.status.name = "bench.cpp";
-    d.status.estado = "NAVEGACION";
-    d.status.cursorLine = ed.active().cursor.line;
-    d.status.cursorCol = 0;
-    d.status.totalLines = n;
+    d.statusBar.name = "bench.cpp";
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.cursorLine = ed.active().cursor.line;
+    d.statusBar.cursorCol = 0;
+    d.statusBar.totalLines = n;
     const int iters = 2000;
     auto t0 = std::chrono::steady_clock::now();
     alloc_stats::resetAll();

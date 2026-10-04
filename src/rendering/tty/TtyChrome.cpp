@@ -1,6 +1,5 @@
 #include "rendering/tty/TtyChrome.h"
 
-#include <sstream>
 #include <algorithm>
 #include "rendering/RenderUtil.h"
 
@@ -96,16 +95,27 @@ BarLeft layoutLeftBlock(const std::string& rawName, const std::string& rawPath,
 
 } // namespace
 
-std::string TtyChrome::renderStatus(int width, const StatusBarData& status,
+std::string TtyChrome::renderStatusBar(int width, const StatusBarData& status,
                                      StyleRole accentRole) const {
-    const TtyTheme& T = theme_;
-    std::ostringstream out;
+    std::string out;
+    // Fila codificada ~ ancho visible + ANSI (base + fragmentos + resets).
+    out.reserve(static_cast<size_t>(std::max(0, width)) + 256);
+    appendStatusBar(out, width, status, accentRole);
+    return out;
+}
 
-    // Fila 1: StatusBar fijo. El fondo y los estilos de cada segmento
+void TtyChrome::appendStatusBar(std::string& out, int width,
+                             const StatusBarData& status,
+                             StyleRole accentRole) const {
+    const TtyTheme& T = theme_;
+
+    // Fila superior del chrome: StatusBar fijo. El fondo y los estilos de cada segmento
     // provienen del TtyTheme. El contenido se compone de nombre, ruta, estado,
     // relleno y bloque derecho anclado al borde.
-    out << "\x1b[K";
-    out << T.statusBar;
+    // NOTA: escritura directa sobre el buffer del caller (sin ostringstream
+    // ni strings intermedios): este es el camino caliente del frame.
+    out += "\x1b[K";
+    out += T.statusBar;
 
     // Bloque derecho del StatusBar: si hay un `right` explicito (pantallas
     // sin documento: selector, explorador) se usa tal cual; si no, se calcula
@@ -153,64 +163,106 @@ std::string TtyChrome::renderStatus(int width, const StatusBarData& status,
                  colCount(left.status) + sepCount * sepW;
     }
 
-    for (int i = 0; i < padL; ++i) out << ' ';
+    for (int i = 0; i < padL; ++i) out += ' ';
 
     // Rol -> ANSI vía el TtyTheme propio (TtyTheme conoce Style, nunca al revés).
     const std::string& accent = themeAnsiFor(T, accentRole);
 
     if (left.statusOnly) {
-        out << accent << left.status << T.reset << T.statusBar;
+        out += accent;
+        out += left.status;
+        out += T.reset;
+        out += T.statusBar;
     } else {
         if (left.modified && !left.showMarker) {
-            out << T.statusBarModified << left.name << T.reset << T.statusBar;
+            out += T.statusBarModified;
+            out += left.name;
+            out += T.reset;
+            out += T.statusBar;
         } else {
-            out << T.statusBarName << left.name << T.reset << T.statusBar;
-            if (left.showMarker) out << T.statusBarModified << kModifiedMarker << T.reset << T.statusBar;
+            out += T.statusBarName;
+            out += left.name;
+            out += T.reset;
+            out += T.statusBar;
+            if (left.showMarker) {
+                out += T.statusBarModified;
+                out.append(kModifiedMarker.data(), kModifiedMarker.size());
+                out += T.reset;
+                out += T.statusBar;
+            }
         }
         if (!left.path.empty()) {
-            out << T.statusBarPath << kSeparator << left.path << T.reset << T.statusBar;
+            out += T.statusBarPath;
+            out.append(kSeparator.data(), kSeparator.size());
+            out += left.path;
+            out += T.reset;
+            out += T.statusBar;
         }
-        out << accent << kSeparator << left.status << T.reset << T.statusBar;
+        out += accent;
+        out.append(kSeparator.data(), kSeparator.size());
+        out += left.status;
+        out += T.reset;
+        out += T.statusBar;
     }
 
     int fill = std::max(0, width - padL - plainW - padR - rightW);
-    for (int i = 0; i < fill; ++i) out << ' ';
-    for (int i = 0; i < padR; ++i) out << ' ';
-    out << rightBlock;
+    out.append(static_cast<size_t>(fill), ' ');
+    out.append(static_cast<size_t>(padR), ' ');
+    out += rightBlock;
 
-    out << T.reset; // reset de estilo
-    return out.str();
+    out += T.reset; // reset de estilo
 }
 
-std::string TtyChrome::renderMessage(int width, const Message& message) const {
+std::string TtyChrome::renderMessageBar(int width, const Message& message) const {
+    std::string out;
+    out.reserve(static_cast<size_t>(std::max(0, width)) + 64);
+    appendMessageBar(out, width, message);
+    return out;
+}
+
+void TtyChrome::appendMessageBar(std::string& out, int width,
+                              const Message& message) const {
     const TtyTheme& T = theme_;
-    std::ostringstream out;
-    // Fila 2: MessageBar (fila propia). El texto se colorea por tipo
+    // Fila inferior del chrome: MessageBar (fila propia). El texto se colorea por tipo
     // (Message.kind); el padding izquierdo y derecho coincide con el del
     // StatusBar superior para alinear el texto.
-    out << "\x1b[K";
+    out += "\x1b[K";
     // Misma cota: el MessageBar tampoco escribe fuera del ancho.
     // El padding derecho cede ante un terminal muy angosto.
     const int msgPadL = std::min(kChromePadLeft, width);
     const int msgPadR = std::min(kChromePadRight,
                                  std::max(0, width - msgPadL));
-    for (int i = 0; i < msgPadL; ++i) out << ' ';
+    out.append(static_cast<size_t>(msgPadL), ' ');
     const std::string& style = messageStyle(T, message.kind);
-    out << style;
-    out << utf8::truncate(message.text,
+    out += style;
+    out += utf8::truncate(message.text,
                           std::max(0, width - msgPadL - msgPadR));
-    if (!style.empty()) out << T.reset;
-    for (int i = 0; i < msgPadR; ++i) out << ' ';
-    return out.str();
+    if (!style.empty()) out += T.reset;
+    out.append(static_cast<size_t>(msgPadR), ' ');
 }
 
 std::string TtyChrome::render(const Rect& area, const ChromeData& data,
                               StyleRole accentRole) const {
-    std::string out = renderStatus(area.width, data.status, accentRole);
+    // Contrato de altura (espejo de computeLayout): height==0 -> sin chrome.
+    if (area.height <= 0) return {};
+    std::string out;
+    out.reserve(static_cast<size_t>(std::max(0, area.width)) * 2 + 512);
+    append(out, area, data, accentRole);
+    return out;
+}
+
+void TtyChrome::append(std::string& out, const Rect& area,
+                       const ChromeData& data, StyleRole accentRole) const {
+    // Contrato de altura (espejo de computeLayout): height==0 -> sin chrome.
+    if (area.height <= 0) return;
+    // Una sola reserva para ambas filas (camino caliente): evita el regrowth
+    // y los 2 strings intermedios del viejo renderStatusBar + renderMessageBar.
+    out.reserve(out.size() +
+                static_cast<size_t>(std::max(0, area.width)) * 2 + 512);
+    appendStatusBar(out, area.width, data.statusBar, accentRole);
     // Solo existe MessageBar si el area del chrome tiene mas de una fila.
     if (area.height >= 2) {
         out += "\r\n";
-        out += renderMessage(area.width, data.message);
+        appendMessageBar(out, area.width, data.message);
     }
-    return out;
 }
