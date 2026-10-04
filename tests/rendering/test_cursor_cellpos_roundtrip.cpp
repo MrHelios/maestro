@@ -9,6 +9,7 @@
 
 #include "test_framework.h"
 
+#include "app/ChromePresentation.h"
 #include "app/EditorState.h"
 #include "app/Message.h"
 #include "document/Cursor.h"
@@ -145,7 +146,7 @@ TEST(cursor_cellpos_resolver_acuerda_con_frame) {
     cur.col = 2;
     CellPos cell;
     CHECK(b.editorCursorPos(doc, cur, vp, cell));
-    Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Navegacion,
+    Frame f = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                            std::nullopt);
     CHECK(f.cursor.visible);
     CHECK(f.cursor.cell == cell);
@@ -197,7 +198,7 @@ TEST(cursor_cellpos_fuera_de_viewport_no_pinta) {
     CellPos cell;
     CHECK(!b.editorCursorPos(doc, cur, vp, cell));
     CHECK(!cell.valid());
-    Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Navegacion,
+    Frame f = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                            std::nullopt);
     CHECK(!f.cursor.visible);
     TtyEncoder enc;

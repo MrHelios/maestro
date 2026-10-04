@@ -4,6 +4,7 @@
 #include "layout/Gutter.h"
 #include "layout/Layout.h"
 #include "base/utf8.h"
+#include "app/ChromePresentation.h"
 #include "rendering/tty/TtyRenderer.h"
 #include "platform/InputEvent.h"  // usa InputEvent común
 #include "test_framework.h"
@@ -15,7 +16,7 @@ std::string frameWithViewport(const std::vector<std::string>& lines, int cursorL
     Document doc; doc.restore(lines);
     Cursor cur; cur.line = cursorLine; cur.col = cursorCol;
     TtyRenderer r;
-    return r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
+    return r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt);
 }
 int cursorTerminalCol(const std::string& frame, const Viewport& vp, int cursorLine) {
     int expectedRow = cursorLine - vp.top + 1;

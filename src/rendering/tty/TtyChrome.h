@@ -12,7 +12,7 @@
 // TtyTheme (tabla ANSI de ESTE backend). rendering/ nunca incluye este header;
 // opera con ChromeData + StyleRole.
 //   renderStatusBar()  -> StatusBar (fila superior fija del chrome)
-//   renderMessageBar() -> MessageBar (fila inferior, Message por tipo)
+//   renderMessageBar() -> MessageBar (fila inferior, MessageBarData por tipo)
 //   render()/append() -> chrome segun area.height: >=2 ambas filas,
 //                        ==1 solo StatusBar, <=0 vacio (ver computeLayout)
 // ---------------------------------------------------------------------------
@@ -46,10 +46,10 @@ public:
     void appendStatusBar(std::string& out, int width, const StatusBarData& status,
                       StyleRole accent = StyleRole::StatusAccentDefault) const;
     // Fila inferior del chrome: MessageBar. Devuelve la fila codificada (con "\x1b[K" inicial,
-    // sin "\r\n"). El estilo sale de Message.kind via el TtyTheme.
-    std::string renderMessageBar(int width, const Message& message) const;
+    // sin "\r\n"). El estilo sale de MessageBarData.kind via el TtyTheme.
+    std::string renderMessageBar(int width, const MessageBarData& message) const;
     // Variante sin allocation extra: agrega la fila inferior a `out`.
-    void appendMessageBar(std::string& out, int width, const Message& message) const;
+    void appendMessageBar(std::string& out, int width, const MessageBarData& message) const;
     // Chrome completo dentro de `area`, espejo de la politica degenerada de
     // computeLayout: height >= 2 -> StatusBar + MessageBar; height == 1 ->
     // solo StatusBar; height <= 0 -> string vacio (sin chrome).

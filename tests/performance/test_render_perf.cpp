@@ -33,6 +33,7 @@
 
 #define private public
 #include "app/Editor.h"
+#include "app/ChromePresentation.h"
 #undef private
 
 #include "base/utf8.h"
@@ -61,13 +62,13 @@ struct RenderFixture {
         return tr.buildScreen(ed.active().document,
                               ed.active().cursor,
                               ed.active().viewport, "perf.txt", false,
-                              msg, ed.state_, std::nullopt);
+                              makeChromeRequest(msg, ed.state_), std::nullopt);
     }
 
     std::string diffFrame(State st) {
         return tr.buildDiffFrame(ed.active().document, ed.active().cursor,
                                  ed.active().viewport, "perf.txt", false,
-                                 msg, st, std::nullopt);
+                                 makeChromeRequest(msg, st), std::nullopt);
     }
 };
 
@@ -112,7 +113,8 @@ TEST(bench_perf_render_desglose_fases_checked) {
         d.statusBar.path = "";
         d.statusBar.estado = "NAVEGACION";
         d.statusBar.modified = false;
-        d.message = fx.msg;
+        d.message.text = fx.msg.text;
+        d.message.kind = fx.msg.kind;
         d.statusBar.cursorLine = cur.line;
         d.statusBar.cursorCol = cur.col;
         d.statusBar.totalLines = doc.lineCount();

@@ -41,7 +41,7 @@ public:
     bool isDarkTheme() const override { return dark_; }
 
     void renderScreenDiff(const Document&, const Cursor&, const Viewport&,
-                          const std::string&, bool, const Message&, State,
+                          const std::string&, bool, const ChromeRequest&,
                           Sink&, const std::optional<Selection>&,
                           const std::optional<Selection>&,
                           const std::optional<BracketPair>&) override {}
@@ -50,11 +50,11 @@ public:
                           Sink&) override {}
 
     void renderFileList(const std::vector<FileListItem>&, int, int,
-                        const std::string&, const Message&, int, int,
+                        const std::string&, const MessageBarData&, int, int,
                         Sink&) override {}
 
     void renderSaveAsFileList(const std::vector<FileListItem>&, int, int,
-                              const std::string&, const Message&, int, int,
+                              const std::string&, const MessageBarData&, int, int,
                               Sink&) override {}
 
 private:

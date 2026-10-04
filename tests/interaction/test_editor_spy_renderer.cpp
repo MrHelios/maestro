@@ -191,7 +191,7 @@ TEST(spy_modal_saveas_has_own_metrics) {
     CHECK(spy.lastFilePath == ed.fileBrowser.path_);
     CHECK(spy.lastFileItems.size() == ed.fileBrowser.entries_.size());
     CHECK(!spy.lastFileItems.empty());
-    CHECK(spy.lastMessage.text.find("Nombre del Archivo: nota.txt") != std::string::npos);
+    CHECK(spy.lastChrome.message.text.find("Nombre del Archivo: nota.txt") != std::string::npos);
 
     // Con mensaje activo (confirmación de overwrite) manda el mensaje:
     // el input cede la fila hasta que el aviso se resuelva.
@@ -200,8 +200,8 @@ TEST(spy_modal_saveas_has_own_metrics) {
     saveAsConfirm(ed);
     CHECK(ed.statusMessage_.text.find("ya existe") != std::string::npos);
     ed.renderFrame();
-    CHECK(spy.lastMessage.text.find("ya existe") != std::string::npos);
-    CHECK(spy.lastMessage.text.find("Nombre del Archivo:") == std::string::npos);
+    CHECK(spy.lastChrome.message.text.find("ya existe") != std::string::npos);
+    CHECK(spy.lastChrome.message.text.find("Nombre del Archivo:") == std::string::npos);
 
     // Y al revés: Abrir no toca la métrica de Guardar como.
     press(ed, InputEventType::Escape);
@@ -341,16 +341,16 @@ TEST(spy_toggle_theme_delegates) {
 
     // El toggle deja mensaje de acción con el tema nuevo (texto + tipo).
     ed.renderFrame();
-    CHECK(spy.lastMessage.text == "Tema claro");
-    CHECK(spy.lastMessage.kind == MessageKind::Info);
+    CHECK(spy.lastChrome.message.text == "Tema claro");
+    CHECK(spy.lastChrome.message.kind == MessageKind::Info);
 
     ed.executeCommand("theme.toggle");
     CHECK(spy.isDarkTheme());
     CHECK(spy.toggleCount == toggleBase + 2);
 
     ed.renderFrame();
-    CHECK(spy.lastMessage.text == "Tema oscuro");
-    CHECK(spy.lastMessage.kind == MessageKind::Info);
+    CHECK(spy.lastChrome.message.text == "Tema oscuro");
+    CHECK(spy.lastChrome.message.kind == MessageKind::Info);
 }
 
 // ---------------------------------------------------------------------------

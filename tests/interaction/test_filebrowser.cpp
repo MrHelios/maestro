@@ -493,7 +493,7 @@ TEST(browser_folders_listed_before_files) {
     TtyRenderer trTmp;
     const std::string outTmp = trTmp.buildFileListScreen(
         std::vector<FileListItem>{{"alfa", true}, {"a.txt", false}}, 0, 0,
-        "/", Message{}, 80, 5);
+        "/", MessageBarData{}, 80, 5);
     CHECK(contains(outTmp, "  alfa/"));
     CHECK(contains(outTmp, "  a.txt"));
 }
@@ -1401,7 +1401,7 @@ TEST(browser_status_label_is_abrir_archivo) {
         items.push_back({e.name, e.isDirectory});
     const std::string out = tr.buildFileListScreen(
         items, ed.fileBrowser.index_, ed.fileBrowser.scroll_,
-        ed.fileBrowser.path_, ed.statusMessage_, 80, 10);
+        ed.fileBrowser.path_, toMessageBar(ed.statusMessage_), 80, 10);
     CHECK(contains(out, "ABRIR ARCHIVO"));
 }
 
@@ -1424,7 +1424,7 @@ TEST(browser_status_path_matches_current_dir) {
         items.push_back({e.name, e.isDirectory});
     const std::string out = tr.buildFileListScreen(
         items, ed.fileBrowser.index_, ed.fileBrowser.scroll_,
-        ed.fileBrowser.path_, ed.statusMessage_, 80, 10);
+        ed.fileBrowser.path_, toMessageBar(ed.statusMessage_), 80, 10);
     CHECK(contains(out, t.path + "/x"));
 }
 

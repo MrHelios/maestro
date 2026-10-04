@@ -14,6 +14,7 @@
 
 #define private public
 #include "app/Editor.h"
+#include "app/ChromePresentation.h"
 #undef private
 
 #include "document/Document.h"
@@ -314,7 +315,7 @@ TEST(bench_perf_render_static_checked) {
         {
             alloc_stats::Scoped s(alloc_stats::kRenderFrame);
             for (int i=0;i<iters;++i){
-                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, State::Navegacion, std::nullopt);
+                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, State::Navegacion), std::nullopt);
                 perf_time::g_sink += out.size();
             }
         }
@@ -351,7 +352,7 @@ TEST(bench_perf_render_cursor_positions_checked) {
             {
                 alloc_stats::Scoped s(alloc_stats::kRenderFrame);
                 for (int i=0;i<iters;++i){
-                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, State::Navegacion, std::nullopt);
+                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, State::Navegacion), std::nullopt);
                     perf_time::g_sink += out.size();
                 }
             }
@@ -385,7 +386,7 @@ TEST(bench_perf_render_syntax_cpp_checked) {
             {
                 alloc_stats::Scoped s(alloc_stats::kRenderFrame);
                 for (int i=0;i<iters;++i){
-                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, State::Navegacion, std::nullopt);
+                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, State::Navegacion), std::nullopt);
                     perf_time::g_sink += out.size();
                 }
             }
@@ -409,7 +410,7 @@ TEST(bench_perf_render_syntax_cpp_checked) {
             {
                 alloc_stats::Scoped s(alloc_stats::kRenderFrame);
                 for (int i=0;i<iters;++i){
-                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.txt", false, Message{}, State::Navegacion, std::nullopt);
+                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.txt", false, makeChromeRequest(Message{}, State::Navegacion), std::nullopt);
                     perf_time::g_sink += out.size();
                 }
             }
@@ -588,12 +589,12 @@ TEST(bench_perf_typing_render_cycle_checked) {
             alloc_stats::Scoped s(alloc_stats::kTyping);
             for (int i=0;i<iters;++i){
                 ed.handleEvent(e);
-                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 perf_time::g_sink += out.size();
                 // undo char to keep doc size stable
                 InputEvent b; b.type=InputEventType::Backspace;
                 ed.handleEvent(b);
-                std::string out2 = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out2 = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 perf_time::g_sink += out2.size();
             }
         }
@@ -627,11 +628,11 @@ TEST(bench_perf_backspace_render_cycle_checked) {
             for (int i=0;i<iters;++i){
                 InputEvent b; b.type=InputEventType::Backspace;
                 ed.handleEvent(b);
-                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 perf_time::g_sink += out.size();
                 InputEvent e; e.type=InputEventType::InsertChar; e.text="x";
                 ed.handleEvent(e);
-                std::string out2 = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out2 = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 perf_time::g_sink += out2.size();
             }
         }
@@ -739,10 +740,10 @@ TEST(bench_perf_move_left_right_checked) {
             alloc_stats::Scoped s(alloc_stats::kOther);
             for (int i=0;i<iters;++i){
                 ed.handleEvent(moveEvent(InputEventType::MoveLeft));
-                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 perf_time::g_sink += out.size();
                 ed.handleEvent(moveEvent(InputEventType::MoveRight));
-                std::string out2 = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out2 = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 perf_time::g_sink += out2.size();
             }
         }
@@ -776,10 +777,10 @@ TEST(bench_perf_page_up_down_render_cycle_checked) {
             alloc_stats::Scoped s(alloc_stats::kOther);
             for (int i=0;i<iters;++i){
                 ed.handleEvent(moveEvent(InputEventType::PageUp));
-                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 perf_time::g_sink += out.size();
                 ed.handleEvent(moveEvent(InputEventType::PageDown));
-                std::string out2 = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out2 = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 perf_time::g_sink += out2.size();
             }
         }
@@ -814,7 +815,7 @@ TEST(bench_perf_scroll_checked) {
             alloc_stats::Scoped s(alloc_stats::kOther);
             for (int i=0;i<iters;++i){
                 ed.handleEvent(moveEvent(InputEventType::MoveDown));
-                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 perf_time::g_sink += out.size();
             }
         }
@@ -892,7 +893,7 @@ TEST(bench_perf_insert_line_render_cycle_checked) {
                 {
                     alloc_stats::Scoped sc(alloc_stats::kOther);
                     ed.handleEvent(moveEvent(InputEventType::InsertNewline));
-                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                     perf_time::g_sink += out.size();
                 }
                 auto e = std::chrono::steady_clock::now();
@@ -972,7 +973,7 @@ TEST(bench_perf_delete_line_checked) {
                 {
                     alloc_stats::Scoped sc(alloc_stats::kOther);
                     ed.active().document.deleteRange(line,0,line+1<ed.active().document.lineCount()?line+1:line,0);
-                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                    std::string out = tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                     perf_time::g_sink += out.size();
                 }
                 auto e = std::chrono::steady_clock::now();
@@ -1014,17 +1015,17 @@ TEST(bench_perf_editor_large_cpp_checked) {
                 // load already done
                 // move
                 ed.handleEvent(moveEvent(InputEventType::MoveLeft));
-                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 // insert char
                 InputEvent e; e.type=InputEventType::InsertChar; e.text="a";
                 ed.handleEvent(e);
-                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 // left/right
                 ed.handleEvent(moveEvent(InputEventType::MoveRight));
-                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 // page down
                 ed.handleEvent(moveEvent(InputEventType::PageDown));
-                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 // bracket match
                 Position bpos{ed.active().cursor.line, ed.active().cursor.col};
                 const auto& spans = tr.activeCache().allSpans();
@@ -1041,7 +1042,7 @@ TEST(bench_perf_editor_large_cpp_checked) {
                     tr.activeCache().markDirty(cl);
                     tr.activeCache().ensureValid(ed.active().document, n);
                 }
-                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, Message{}, ed.state_, std::nullopt);
+                tr.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "bench.cpp", false, makeChromeRequest(Message{}, ed.state_), std::nullopt);
                 perf_time::g_sink += 1;
             }
         }

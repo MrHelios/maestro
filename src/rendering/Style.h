@@ -1,7 +1,5 @@
 #pragma once
 
-#include "app/EditorState.h"
-
 // ---------------------------------------------------------------------------
 // Roles semánticos de estilo (Fase B/C-1).
 //
@@ -10,8 +8,10 @@
 //   - TtyEncoder  : rol -> secuencia ANSI (lee el TtyTheme como tabla ANSI).
 //   - GuiPainter  : rol -> color/fuente Qt (futuro).
 //
-// Este header es puro: no incluye el TtyTheme ni emite secuencias de escape.
-// El TtyTheme sigue siendo la tabla del backend TTY (ver rendering/tty/).
+// Este header es puro: no incluye el TtyTheme ni emite secuencias de escape,
+// y no incluye nada de app/. El mapeo modo -> accent
+// (State -> StyleRole) vive en el adaptador app/ChromePresentation.h, que sí
+// conoce ambos lados.
 // ---------------------------------------------------------------------------
 enum class StyleRole {
     Default,            // texto plano sin estilo
@@ -53,20 +53,3 @@ enum class StyleRole {
     SyntaxNumber,
     SyntaxComment,
 };
-
-// Accent por estado activo. Búsqueda comparte GUARDAR e IrAFila comparte
-// NAVEGACIÓN por diseño (igual que el viejo statePresentation).
-inline StyleRole accentRoleFor(State state) {
-    switch (state) {
-        case State::Navegacion:     return StyleRole::AccentNavegacion;
-        case State::Interaccion:    return StyleRole::AccentInteraccion;
-        case State::Seleccion:      return StyleRole::AccentSeleccion;
-        case State::Prefix:         return StyleRole::AccentComando;
-        case State::BufferSelector: return StyleRole::AccentBuffers;
-        case State::FileBrowser:    return StyleRole::AccentAbrir;
-        case State::Busqueda:       return StyleRole::AccentGuardar;
-        case State::IrAFila:        return StyleRole::AccentNavegacion;
-        case State::SaveAsFileBrowser: return StyleRole::AccentGuardar;
-    }
-    return StyleRole::StatusAccentDefault;
-}

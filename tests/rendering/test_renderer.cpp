@@ -9,6 +9,7 @@
 // usamos construimos un Document/Cursor/Viewport de nivel bajo.
 #include "rendering/tty/TtyRenderer.h"
 #include "app/Editor.h"
+#include "app/ChromePresentation.h"
 #include "rendering/tty/TtyTheme.h"
 #include "base/utf8.h"
 #include "layout/Gutter.h"
@@ -46,8 +47,8 @@ std::string frame(const std::vector<std::string>& lines,
     cursor.col = 0;
 
     TtyRenderer r;
-    return r.buildScreen(doc, cursor, viewport, "test.txt", false, "",
-                         State::Navegacion, sel);
+    return r.buildScreen(doc, cursor, viewport, "test.txt", false,
+                         makeChromeRequest("", State::Navegacion), sel);
 }
 
 
@@ -74,8 +75,8 @@ std::string curFrame(const std::string& line, int byteCol) {
     cursor.col = byteCol;
 
     TtyRenderer r;
-    return r.buildScreen(doc, cursor, viewport, "test.txt", false, "",
-                         State::Navegacion, std::nullopt);
+    return r.buildScreen(doc, cursor, viewport, "test.txt", false,
+                         makeChromeRequest("", State::Navegacion), std::nullopt);
 }
 
 // Extrae la columna VISUAL del texto a la que el renderer mueve el cursor
@@ -292,7 +293,7 @@ std::string textRow(const std::string& line, int cols) {
         vp.width = cols + gutterWidth(2, vp.width);
     Cursor cur; cur.line = 1; cur.col = 0;
     TtyRenderer r;
-    std::string f = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
+    std::string f = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt);
     return rowText(f, 2);
 }
 
@@ -572,7 +573,7 @@ std::string barFrame(const std::string& file, bool modified,
     c.col = 0;
 
     TtyRenderer r;
-    return r.buildScreen(doc, c, v, file, modified, msg, state, std::nullopt);
+    return r.buildScreen(doc, c, v, file, modified, makeChromeRequest(msg, state), std::nullopt);
 }
 
 } // namespace
@@ -711,8 +712,9 @@ TEST(chrome_cursor_percentage_position) {
         c.col = 0;
         TtyRenderer r;
         int expected = (cursorLine * 100) / (lines - 1);
-        std::string out = r.buildScreen(doc, c, v, "/a.txt", false, "",
-                                        State::Navegacion, std::nullopt);
+        std::string out = r.buildScreen(doc, c, v, "/a.txt", false,
+                                        makeChromeRequest("", State::Navegacion),
+                                        std::nullopt);
         CHECK(contains(stripAnsi(out), std::to_string(expected) + "%"));
     }
 }
@@ -1060,8 +1062,8 @@ std::string selCurFrame(const std::string& line, int byteCol,
     cursor.col = byteCol;
 
     TtyRenderer r;
-    return r.buildScreen(doc, cursor, viewport, "test.txt", false, "",
-                         State::Navegacion, sel);
+    return r.buildScreen(doc, cursor, viewport, "test.txt", false,
+                         makeChromeRequest("", State::Navegacion), sel);
 }
 
 TEST(renderer_selection_utf8_cafe_accent) {
@@ -1153,7 +1155,7 @@ std::string curRowFrame(const std::string& line, int width, int cursorLine,
     Viewport vp; vp.top = 0; vp.height = 1; vp.width = width;
     Cursor cur; cur.line = cursorLine; cur.col = 0;
     TtyRenderer r;
-    return r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, sel);
+    return r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), sel);
 }
 
 } // namespace
@@ -1203,7 +1205,7 @@ TEST(currentline_tilde_row_never_highlighted) {
     Viewport vp; vp.top = 0; vp.height = 3; vp.width = 20;
     Cursor cur; cur.line = 0; cur.col = 0;
     TtyRenderer r;
-    std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion,
+    std::string out = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                                     std::nullopt);
     CHECK(contains(out, std::string(kCurrentLineStyle) + "hello"));
     // Las filas 1 y 2 son "~" de relleno: jamas llevan el estilo de fila.
@@ -1254,7 +1256,7 @@ TEST(gutter_shows_correct_numbers_when_scrolled) {
     cur.col = 0;
     
     TtyRenderer r;
-    std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion, std::nullopt);
+    std::string out = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt);
     
     // Para 100 líneas, gutterWidth(100, 20) devuelve 4.
     // El formato es: número alineado a la derecha en (ancho-1) + 1 espacio.
@@ -1278,7 +1280,7 @@ TEST(gutter_tilde_rows_blank) {
     Viewport vp; vp.top = 0; vp.height = 3; vp.width = 20;
     Cursor cur; cur.line = 0; cur.col = 0;
     TtyRenderer r;
-    std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion,
+    std::string out = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                                     std::nullopt);
     CHECK(plainRow(out, 1) == std::string(3, ' ') + "~");
     CHECK(plainRow(out, 2) == std::string(3, ' ') + "~");
@@ -1291,7 +1293,7 @@ TEST(gutter_cursor_col_starts_after_gutter) {
     Viewport vp; vp.top = 0; vp.height = 1; vp.width = 20;
     Cursor cur; cur.line = 0; cur.col = 0;
     TtyRenderer r;
-    std::string out = r.buildScreen(doc, cur, vp, "t", false, "", State::Navegacion,
+    std::string out = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                                     std::nullopt);
     size_t pos = out.rfind("\x1b[1;");
     CHECK(pos != std::string::npos);
@@ -1307,7 +1309,7 @@ TEST(gutter_width_grows_at_digit_threshold) {
     TtyRenderer r;
 
     Document doc99; doc99.restore(std::vector<std::string>(99, "x"));
-    std::string out99 = r.buildScreen(doc99, cur, vp, "t", false, "", State::Navegacion,
+    std::string out99 = r.buildScreen(doc99, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                                       std::nullopt);
     // 99 lineas -> gutter 3: la ultima fila de documento lleva "99 ".
     CHECK(plainRow(out99, 98).substr(0, 3) == "99 ");
@@ -1315,7 +1317,7 @@ TEST(gutter_width_grows_at_digit_threshold) {
     CHECK(plainRow(out99, 99) == std::string(3, ' ') + "~");
 
     Document doc100; doc100.restore(std::vector<std::string>(100, "x"));
-    std::string out100 = r.buildScreen(doc100, cur, vp, "t", false, "", State::Navegacion,
+    std::string out100 = r.buildScreen(doc100, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                                        std::nullopt);
     // 100 lineas -> gutter 4: la fila 99 (linea 100 del doc) se
     // re-renderiza con el nuevo ancho: "100 " (numero + separador).

@@ -13,6 +13,7 @@
 
 #include "test_framework.h"
 
+#include "app/ChromePresentation.h"
 #include "app/EditorState.h"
 #include "app/Message.h"
 #include "document/Cursor.h"
@@ -82,8 +83,9 @@ TEST(frame_sin_ansi_y_con_roles) {
     b.activeCache().setLanguage(SyntaxLanguage::Cpp);
     b.activeCache().ensureValid(doc, doc.lineCount());
     Frame f = b.buildFrame(doc, cur, vp, "a.cpp", true,
-                           Message("hola", MessageKind::Info, std::nullopt),
-                           State::Navegacion, sel, search, br);
+                           makeChromeRequest(Message("hola", MessageKind::Info, std::nullopt),
+                                             State::Navegacion),
+                           sel, search, br);
 
     // Regla arquitectónica: ni un solo ESC en el Frame.
     CHECK(!f.hasAnsi());
@@ -108,7 +110,7 @@ TEST(frame_busqueda_oculta_cursor) {
     Viewport vp = makeVp();
     Cursor cur;
     FrameBuilder b;
-    Frame f = b.buildFrame(doc, cur, vp, "a.cpp", false, "", State::Busqueda,
+    Frame f = b.buildFrame(doc, cur, vp, "a.cpp", false, makeChromeRequest("", State::Busqueda),
                            std::nullopt);
     CHECK(!f.cursor.visible);
     CHECK(!f.hasAnsi());
@@ -169,13 +171,13 @@ TEST(frame_encode_parity_con_buildscreen) {
             r2.activeCache().setLanguage(lang);
             r2.activeCache().ensureValid(doc, doc.lineCount());
             const std::string legacy = r.buildScreen(
-                doc, cur, vp, c.filename, c.modified, msg, c.state,
+                doc, cur, vp, c.filename, c.modified, makeChromeRequest(msg, c.state),
                 c.state == State::Seleccion ? std::optional<Selection>(sel)
                                             : std::nullopt,
                 search, br);
 
             Frame f = b.buildFrame(
-                doc, cur, vp, c.filename, c.modified, msg, c.state,
+                doc, cur, vp, c.filename, c.modified, makeChromeRequest(msg, c.state),
                 c.state == State::Seleccion ? std::optional<Selection>(sel)
                                             : std::nullopt,
                 search, br);
@@ -186,7 +188,7 @@ TEST(frame_encode_parity_con_buildscreen) {
 
             // Primer diff frame (rebuild total) == full screen.
             const std::string diff = r2.buildDiffFrame(
-                doc, cur, vp, c.filename, c.modified, msg, c.state,
+                doc, cur, vp, c.filename, c.modified, makeChromeRequest(msg, c.state),
                 c.state == State::Seleccion ? std::optional<Selection>(sel)
                                             : std::nullopt,
                 search, br);

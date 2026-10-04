@@ -4,7 +4,6 @@
 #include <string_view>
 #include <vector>
 
-#include "app/EditorState.h"
 #include "base/SmallVec.h"
 #include "layout/Layout.h"
 #include "platform/CellPos.h"
@@ -58,14 +57,15 @@ struct StyledRow {
 // `#define CursorShape 0` y cualquier uso del identificador rompe la
 // compilación cuando los headers de X11 ya fueron incluidos (p. ej. via
 // X11Clipboard.h antes que Frame.h).
+//
+// REGLA DE CAPAS: el DTO no conoce el modo del Editor (app::State). El
+// adaptador (FrameBuilder, que sí conoce app/) traduce State -> shape
+// (ver app/ChromePresentation.h::cursorShapeFor) antes de rellenar el
+// Frame. El backend solo lee `shape`.
 enum class FrameCursorShape {
     Block, // Navegacion/Seleccion/etc: bloque (ANSI en TtyEncoder)
     Bar,   // Interaccion: barra (ANSI en TtyEncoder)
 };
-
-inline FrameCursorShape cursorShapeFor(State state) {
-    return state == State::Interaccion ? FrameCursorShape::Bar : FrameCursorShape::Block;
-}
 
 // Cursor visual con contrato explícito (comun TTY/GUI):
 //
@@ -77,15 +77,17 @@ inline FrameCursorShape cursorShapeFor(State state) {
 //
 // El GUI no reproduce ningun clamp: solo mira `visible`. El backend TTY
 // tampoco clampa: si no es visible deja el cursor oculto (hideCursor sin
-// show posterior). `state` se conserva para el estilo legacy/TTY.
+// show posterior).
 struct FrameCursor {
     CellPos cell; // 0-based (col=X, row=Y); valido solo si visible==true
     // Default seguro: oculto, consistente con celda invalida (-1,-1)
     // (la da el default de CellPos; no duplicar el {-1,-1} acá).
     // Todo Frame valido lo rellena FrameBuilder::buildFrame.
+    // NOTA: sin campo `state`: el modo ya viene resuelto como `shape` +
+    // `visible` (la politica "Busqueda oculta el cursor" la aplica el
+    // adaptador). El backend nunca necesita el State.
     bool visible = false;
     FrameCursorShape shape = FrameCursorShape::Block;
-    State state = State::Navegacion;
 };
 
 struct Frame {

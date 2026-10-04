@@ -41,12 +41,12 @@ struct SpyScreenRenderer : public ScreenRenderer {
     SyntaxCache* lastCache = nullptr;
 
     // Último snapshot mínimo por tipo
-    State lastState{};
     std::string lastFilename;
     bool lastModified = false;
-    // Snapshot del ÚLTIMO frame: Message completo (texto + tipo +
-    // vencimiento), no solo el texto: el tipo decide fila y color.
-    Message lastMessage;
+    // Snapshot del ÚLTIMO frame: presentación resuelta (ChromeRequest:
+    // mensaje + etiqueta + acento + cursor). El spy no conoce State ni
+    // expiraciones: igual que el rendering, solo ve lo ya resuelto.
+    ChromeRequest lastChrome;
     std::optional<Selection> lastSelection;
     std::optional<Selection> lastSearchHighlight;
     std::optional<BracketPair> lastBracketPair;
@@ -81,18 +81,16 @@ struct SpyScreenRenderer : public ScreenRenderer {
                           const Viewport&,
                           const std::string& filename,
                           bool modified,
-                          const Message& message,
-                          State state,
+                          const ChromeRequest& chrome,
                           Sink&,
                           const std::optional<Selection>& selection = std::nullopt,
                           const std::optional<Selection>& searchHighlight = std::nullopt,
                           const std::optional<BracketPair>& bracketPair = std::nullopt) override {
         ++renderScreenDiffCount;
         pendingInvalidation = false; // el render consume
-        lastState = state;
+        lastChrome = chrome;
         lastFilename = filename;
         lastModified = modified;
-        lastMessage = message;
         // Asignación incondicional: un frame sin selección debe LIMPIAR el
         // snapshot, no conservar el valor del frame anterior.
         lastSelection = selection;
@@ -117,10 +115,9 @@ struct SpyScreenRenderer : public ScreenRenderer {
         lastBufferNames = names;
         lastBufferListSelected = selected;
         // Limpieza cruzada: el snapshot describe solo el último frame.
-        lastState = {};
+        lastChrome = ChromeRequest{};
         lastFilename.clear();
         lastModified = false;
-        lastMessage = Message{};
         lastSelection.reset();
         lastSearchHighlight.reset();
         lastBracketPair.reset();
@@ -134,7 +131,7 @@ struct SpyScreenRenderer : public ScreenRenderer {
                         int selected,
                         int scroll,
                         const std::string& path,
-                        const Message&,
+                        const MessageBarData& message,
                         int,
                         int,
                         Sink&) override {
@@ -144,11 +141,11 @@ struct SpyScreenRenderer : public ScreenRenderer {
         lastFileListSelected = selected;
         lastFileListScroll = scroll;
         lastFilePath = path;
+        lastChrome.message = message;
         // Limpieza cruzada: el snapshot describe solo el último frame.
-        lastState = {};
+        lastChrome.estado.clear();
         lastFilename.clear();
         lastModified = false;
-        lastMessage = Message{};
         lastSelection.reset();
         lastSearchHighlight.reset();
         lastBracketPair.reset();
@@ -160,7 +157,7 @@ struct SpyScreenRenderer : public ScreenRenderer {
                               int selected,
                               int scroll,
                               const std::string& path,
-                              const Message& message,
+                              const MessageBarData& message,
                               int,
                               int,
                               Sink&) override {
@@ -170,12 +167,12 @@ struct SpyScreenRenderer : public ScreenRenderer {
         lastFileListSelected = selected;
         lastFileListScroll = scroll;
         lastFilePath = path;
-        // El input llega ya compuesto en `message` (MessageBar):
+        // El input llega ya compuesto en `message` (MessageBarData):
         // se conserva para observarlo (input o mensaje activo).
-        lastMessage = message;
+        lastChrome.message = message;
         // Limpieza cruzada: el snapshot describe solo el último frame
-        // (lastMessage queda: ES el contenido de este frame).
-        lastState = {};
+        // (lastChrome.message queda: ES el contenido de este frame).
+        lastChrome.estado.clear();
         lastFilename.clear();
         lastModified = false;
         lastSelection.reset();

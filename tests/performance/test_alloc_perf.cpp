@@ -27,6 +27,7 @@
 
 #define private public
 #include "app/Editor.h"
+#include "app/ChromePresentation.h"
 #undef private
 
 namespace {
@@ -160,8 +161,8 @@ TEST(bench_alloc_render_frame_bordes_checked) {
         for (int i = 0; i < 200; ++i) {
             std::string out = r.buildScreen(
                 ed.active().document, ed.active().cursor,
-                ed.active().viewport, "perf.txt", false, msg,
-                State::Navegacion, std::nullopt);
+                ed.active().viewport, "perf.txt", false,
+                makeChromeRequest(msg, State::Navegacion), std::nullopt);
             if (out.empty()) CHECK(false);
         }
     }
@@ -177,8 +178,8 @@ TEST(bench_alloc_render_frame_bordes_checked) {
         for (int i = 0; i < 200; ++i) {
             std::string out = r.buildScreen(
                 ed.active().document, ed.active().cursor,
-                ed.active().viewport, "perf.txt", false, msg,
-                State::Navegacion, std::nullopt);
+                ed.active().viewport, "perf.txt", false,
+                makeChromeRequest(msg, State::Navegacion), std::nullopt);
             if (out.empty()) CHECK(false);
         }
     }
@@ -391,7 +392,7 @@ TEST(bench_alloc_carga_y_resize_checked) {
         alloc_stats::Scoped scope(alloc_stats::kRenderFrame);
         ed.active().viewport.width = 120; ed.active().viewport.height = 40;
         for (int i = 0; i < 200; ++i) {
-            std::string out = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "perf.txt", false, msg, State::Navegacion, std::nullopt);
+            std::string out = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "perf.txt", false, makeChromeRequest(msg, State::Navegacion), std::nullopt);
             if (out.empty()) CHECK(false);
             ed.active().viewport.width = 80 + (i%40);
         }

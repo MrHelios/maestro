@@ -32,33 +32,37 @@ void TtyDiff::splitRows(const std::string& body,
     }
 }
 
-void TtyDiff::emitCursor(std::string& out, CellPos pos, bool visible,
-                         State state, bool endFrame) {
-    // Contrato visual: solo posicionar/mostrar si el cursor esta en
-    // viewport. Si esta fuera (rueda con suppressScrollToCursor_) o el modo
-    // lo oculta (Busqueda) se deja oculto (hide de beginFrame).
-    if (state == State::Busqueda || !visible) return;
+void TtyDiff::emitCursor(std::string& out, CellPos pos,
+                         FrameCursorShape shape, bool visible, bool endFrame) {
+    // Contrato visual: `visible` ya combina modo (Búsqueda oculta, resuelto
+    // por app/ en ChromeRequest) y viewport. Si es false se deja oculto
+    // (hide de beginFrame).
+    if (!visible) return;
     encoder_.moveCursorTo(out, pos);
-    encoder_.setCursorStyle(out, state);
+    encoder_.setCursorStyle(out, shape);
     if (endFrame) encoder_.endFrame(out);
     else encoder_.showCursor(out);
 }
 
 void TtyDiff::placeCursor(std::string& out, const Document& doc,
                           const Cursor& cursor, const Viewport& viewport,
-                          State state, bool endFrame) {
+                          FrameCursorShape shape, bool visibleByMode,
+                          bool endFrame) {
     CellPos pos;
-    const bool visible = builder_.editorCursorPos(doc, cursor, viewport, pos);
-    emitCursor(out, pos, visible, state, endFrame);
+    const bool inViewport =
+        builder_.editorCursorPos(doc, cursor, viewport, pos);
+    emitCursor(out, pos, shape, visibleByMode && inViewport, endFrame);
 }
 
 void TtyDiff::placeCursor(std::string& out, const Document& doc,
                           const Cursor& cursor, const Viewport& viewport,
-                          const FrameBuilder::EditorGeometry& g, State state,
+                          const FrameBuilder::EditorGeometry& g,
+                          FrameCursorShape shape, bool visibleByMode,
                           bool endFrame) {
     CellPos pos;
-    const bool visible = builder_.editorCursorPos(doc, cursor, viewport, g, pos);
-    emitCursor(out, pos, visible, state, endFrame);
+    const bool inViewport =
+        builder_.editorCursorPos(doc, cursor, viewport, g, pos);
+    emitCursor(out, pos, shape, visibleByMode && inViewport, endFrame);
 }
 
 bool TtyDiff::patchContentRow(
@@ -88,10 +92,10 @@ bool TtyDiff::patchContentRow(
 
 void TtyDiff::patchChrome(std::string& out, const Document& doc,
                              const Cursor& cursor, const std::string& filename,
-                             bool modified, const Message& message, State state,
+                             bool modified, const ChromeRequest& chrome,
                              const Layout& layout, int contentH) {
-    auto payload = builder_.buildChrome(filename, modified, message, cursor,
-                                        doc.lineCount(), state);
+    auto payload = builder_.buildChrome(filename, modified, cursor,
+                                        doc.lineCount(), chrome);
     const ChromeData& data = payload.data;
     if (hasLastChromeData_ && sameRenderedChrome(data, lastChromeData_)) return;
     std::string chromeBody =
@@ -124,8 +128,8 @@ void TtyDiff::patchChrome(std::string& out, const Document& doc,
 
 void TtyDiff::rebuildCache(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
-    const std::string& filename, bool modified, const Message& message,
-    State state, const std::optional<Selection>& selection,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
     builder_.updateSyntaxLanguage(filename);
@@ -161,8 +165,8 @@ void TtyDiff::rebuildCache(
             dl, gutterW, textWidth)));
     }
 
-    auto payload = builder_.buildChrome(filename, modified, message, cursor,
-                                        doc.lineCount(), state);
+    auto payload = builder_.buildChrome(filename, modified, cursor,
+                                        doc.lineCount(), chrome);
     chromeCache_ =
         encoder_.encodeChrome(g.layout.chrome, payload.data, payload.statusAccent);
     lastChromeData_ = payload.data;
@@ -178,8 +182,7 @@ void TtyDiff::rebuildCache(
 
 std::string TtyDiff::buildCursorMoveFrame(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
-    const std::string& filename, bool modified, const Message& message,
-    State state) {
+    const std::string& filename, bool modified, const ChromeRequest& chrome) {
     builder_.updateSyntaxLanguage(filename);
     const FrameBuilder::EditorGeometry g =
         builder_.editorGeometry(doc, viewport);
@@ -228,12 +231,13 @@ std::string TtyDiff::buildCursorMoveFrame(
             }
         }
     }
-    patchChrome(out, doc, cursor, filename, modified, message, state, layout,
+    patchChrome(out, doc, cursor, filename, modified, chrome, layout,
                    contentH);
 
     // Contrato visual: solo posicionar/mostrar si el cursor esta en viewport.
     // Si esta fuera (rueda con suppressScrollToCursor_) se deja oculto.
-    placeCursor(out, doc, cursor, viewport, g, state, /*endFrame=*/false);
+    placeCursor(out, doc, cursor, viewport, g, chrome.cursorShape,
+                chrome.cursorVisibleByMode, /*endFrame=*/false);
     lastCursorLine_ = cursor.line;
     lastCursorCol_ = cursor.col;
     lastVersion_ = doc.version();
@@ -246,8 +250,8 @@ std::string TtyDiff::buildCursorMoveFrame(
 // while scrolling by one or more rows.
 std::string TtyDiff::buildScrollFrame(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
-    const std::string& filename, bool modified, const Message& message,
-    State state, const std::optional<Selection>& selection,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair, int deltaTop) {
     builder_.updateSyntaxLanguage(filename);
@@ -315,10 +319,11 @@ std::string TtyDiff::buildScrollFrame(
         patchContentRow(out, doc, cursor, viewport, sel, searchSel, bracketOpen,
                         bracketClose, cursor.line, gutterW, textWidth, contentH);
     }
-    patchChrome(out, doc, cursor, filename, modified, message, state,
+    patchChrome(out, doc, cursor, filename, modified, chrome,
                    g.layout, contentH);
 
-    placeCursor(out, doc, cursor, viewport, g, state, /*endFrame=*/false);
+    placeCursor(out, doc, cursor, viewport, g, chrome.cursorShape,
+                chrome.cursorVisibleByMode, /*endFrame=*/false);
 
     updateCacheState(viewport, cursor, doc);
     return out;
@@ -326,8 +331,8 @@ std::string TtyDiff::buildScrollFrame(
 
 std::string TtyDiff::buildDiffFrame(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
-    const std::string& filename, bool modified, const Message& message,
-    State state, const std::optional<Selection>& selection,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
     const bool langChanged = builder_.updateSyntaxLanguage(filename);
@@ -341,7 +346,7 @@ std::string TtyDiff::buildDiffFrame(
     if (!hasCache_ || langChanged || viewport.width != lastViewportW_ ||
         viewport.height != lastViewportH_ || cachedContentH_ != contentH ||
         bracketChanged) {
-        rebuildCache(doc, cursor, viewport, filename, modified, message, state,
+        rebuildCache(doc, cursor, viewport, filename, modified, chrome,
                      selection, searchHighlight, bracketPair);
         lastViewportW_ = viewport.width;
         lastViewportH_ = viewport.height;
@@ -353,9 +358,10 @@ std::string TtyDiff::buildDiffFrame(
             out += "\r\n";
         }
         out += chromeCache_;
-        if (state == State::Busqueda) return out;
+        if (!chrome.cursorVisibleByMode) return out;
         {
-            placeCursor(out, doc, cursor, viewport, state, /*endFrame=*/true);
+            placeCursor(out, doc, cursor, viewport, chrome.cursorShape,
+                        chrome.cursorVisibleByMode, /*endFrame=*/true);
             // Si esta fuera del viewport se deja oculto (sin show): respeta
             // el contrato visible==false sin clampar al borde.
         }
@@ -375,7 +381,7 @@ std::string TtyDiff::buildDiffFrame(
     // scrolls deliberately use the diff path.
     if ((deltaTop == 1 || deltaTop == -1) && deltaLeft == 0 && noHighlight) {
         const std::string scrollFrame = buildScrollFrame(
-            doc, cursor, viewport, filename, modified, message, state,
+            doc, cursor, viewport, filename, modified, chrome,
             selection, searchHighlight, bracketPair, deltaTop);
         if (!scrollFrame.empty()) return scrollFrame;
     }
@@ -389,7 +395,7 @@ std::string TtyDiff::buildDiffFrame(
             (cursor.line != lastCursorLine_ || cursor.col != lastCursorCol_);
         if (sameLineEdit || pureCursorMove) {
             const std::string moveFrame = buildCursorMoveFrame(
-                doc, cursor, viewport, filename, modified, message, state);
+                doc, cursor, viewport, filename, modified, chrome);
             if (!moveFrame.empty()) return moveFrame;
         }
     }
@@ -400,7 +406,7 @@ std::string TtyDiff::buildDiffFrame(
     // original se preserva: las filas nuevas ya traen el suyo y el rewrite
     // puntual agrega otro clear).
     Frame fresh = builder_.buildFrame(doc, cursor, viewport, filename, modified,
-                                      message, state, selection,
+                                      chrome, selection,
                                       searchHighlight, bracketPair);
     std::vector<std::string> newRows;
     newRows.reserve(fresh.contentRows.size() + 2);
@@ -444,12 +450,13 @@ std::string TtyDiff::buildDiffFrame(
     lastBracketPair_ = bracketPair;
     hasLastBracketPair_ = true;
 
-    if (state == State::Busqueda) {
+    if (!chrome.cursorVisibleByMode) {
         updateCacheState(viewport, cursor, doc);
         return out;
     }
     {
-        placeCursor(out, doc, cursor, viewport, state, /*endFrame=*/false);
+        placeCursor(out, doc, cursor, viewport, chrome.cursorShape,
+                    chrome.cursorVisibleByMode, /*endFrame=*/false);
     }
 
     updateCacheState(viewport, cursor, doc);

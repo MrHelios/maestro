@@ -5,6 +5,7 @@
 
 #include "test_framework.h"
 
+#include "app/ChromePresentation.h"
 #include "app/EditorState.h"
 #include "app/Message.h"
 #include "document/Cursor.h"
@@ -42,7 +43,7 @@ TEST(frame_cursor_visible_inside_viewport) {
     cur.line = 25;
     cur.col = 0;
     FrameBuilder b;
-    Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Navegacion,
+    Frame f = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                            std::nullopt);
     CHECK(f.cursor.visible);
     CHECK(f.cursor.cell.valid());
@@ -58,7 +59,7 @@ TEST(frame_cursor_hidden_below_viewport_wheel_case) {
     cur.line = 29;
     cur.col = 0;
     FrameBuilder b;
-    Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Navegacion,
+    Frame f = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                            std::nullopt);
     CHECK(!f.cursor.visible);
     CHECK(!f.cursor.cell.valid());
@@ -71,7 +72,7 @@ TEST(frame_cursor_hidden_above_viewport) {
     cur.line = 20;
     cur.col = 0;
     FrameBuilder b;
-    Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Navegacion,
+    Frame f = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                            std::nullopt);
     CHECK(!f.cursor.visible);
 }
@@ -85,7 +86,7 @@ TEST(frame_cursor_hidden_horizontal_offscreen) {
     cur.line = 0;
     cur.col = 0;
     FrameBuilder b;
-    Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Navegacion,
+    Frame f = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                            std::nullopt);
     CHECK(!f.cursor.visible);
 }
@@ -102,7 +103,7 @@ TEST(frame_cursor_hidden_right_offscreen) {
     cur.line = 0;
     cur.col = 200; // final de la linea larga, fuera por derecha
     FrameBuilder b;
-    Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Navegacion,
+    Frame f = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                            std::nullopt);
     CHECK(!f.cursor.visible);
     CHECK(!f.cursor.cell.valid());
@@ -115,7 +116,7 @@ TEST(frame_cursor_busqueda_hidden_even_inside) {
     cur.line = 0;
     cur.col = 0;
     FrameBuilder b;
-    Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Busqueda,
+    Frame f = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda),
                            std::nullopt);
     CHECK(!f.cursor.visible);
     CHECK(!f.cursor.cell.valid());
@@ -126,10 +127,10 @@ TEST(frame_cursor_shape_follows_state) {
     Viewport vp = makeVp(0);
     Cursor cur;
     FrameBuilder b;
-    Frame fNav = b.buildFrame(doc, cur, vp, "t", false, "", State::Navegacion,
+    Frame fNav = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                               std::nullopt);
     CHECK(fNav.cursor.shape == FrameCursorShape::Block);
-    Frame fInt = b.buildFrame(doc, cur, vp, "t", false, "", State::Interaccion,
+    Frame fInt = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Interaccion),
                               std::nullopt);
     CHECK(fInt.cursor.visible);
     CHECK(fInt.cursor.shape == FrameCursorShape::Bar);
@@ -156,7 +157,7 @@ TEST(frame_cursor_tty_hides_when_not_visible) {
     cur.line = 29;
     cur.col = 0;
     FrameBuilder b;
-    Frame f = b.buildFrame(doc, cur, vp, "t", false, "", State::Navegacion,
+    Frame f = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                            std::nullopt);
     TtyEncoder enc;
     std::string out = enc.encodeFrame(f);

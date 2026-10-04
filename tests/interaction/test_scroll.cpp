@@ -130,9 +130,9 @@ TEST(scroll_renders_new_window) {
     ed.active().viewport.top = 10;
     ed.active().cursor.line = 12;
     TtyRenderer r;
-    std::string before = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, "", ed.state_, std::nullopt);
+    std::string before = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, makeChromeRequest("", ed.state_), std::nullopt);
     press(ed, InputEventType::ScrollDown);
-    std::string after = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, "", ed.state_, std::nullopt);
+    std::string after = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, makeChromeRequest("", ed.state_), std::nullopt);
     CHECK(before != after);
     CHECK(contains(after, "line 13"));
 }
@@ -304,11 +304,11 @@ TEST(scroll_terminal_event_to_viewport) {
     ed.active().viewport.top = 20;
     ed.active().cursor.line = 25;
     TtyRenderer r;
-    std::string before = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, "", ed.state_, std::nullopt);
+    std::string before = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, makeChromeRequest("", ed.state_), std::nullopt);
     ed.handleEvent(e);
     CHECK_EQ(ed.active().viewport.top, 17);
     CHECK_EQ(ed.active().cursor.line, 25);
-    std::string after = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, "", ed.state_, std::nullopt);
+    std::string after = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, makeChromeRequest("", ed.state_), std::nullopt);
     CHECK(before != after);
     CHECK(contains(after, "line 17"));
 
@@ -334,7 +334,7 @@ TEST(scroll_renderFrame_diff_visual) {
     ed.renderFrame();
     CHECK_EQ(ed.active().viewport.top, 10);
     TtyRenderer r;
-    std::string screenBefore = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, "", ed.state_, std::nullopt);
+    std::string screenBefore = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, makeChromeRequest("", ed.state_), std::nullopt);
     CHECK(contains(screenBefore, "line 10"));
     press(ed, InputEventType::ScrollDown);
     CHECK_EQ(ed.active().viewport.top, 13);
@@ -342,7 +342,7 @@ TEST(scroll_renderFrame_diff_visual) {
     ed.renderFrame();
     CHECK_EQ(ed.active().viewport.top, 13);
     CHECK_EQ(ed.active().cursor.line, 12);
-    std::string screenAfter = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, "", ed.state_, std::nullopt);
+    std::string screenAfter = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, "t", false, makeChromeRequest("", ed.state_), std::nullopt);
     CHECK(screenBefore != screenAfter);
     CHECK(contains(screenAfter, "line 13"));
     CHECK(screenAfter.find("\x1b[?1049h") == std::string::npos);

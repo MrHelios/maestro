@@ -49,8 +49,8 @@ TEST(scroll_wheel_up_bottom_cursor_stays_in_content) {
     {
         TtyRenderer r;
         std::string before = r.buildScreen(ed.active().document, ed.active().cursor,
-                                           ed.active().viewport, "t", false, "",
-                                           ed.state_, std::nullopt);
+                                           ed.active().viewport, "t", false,
+                                           makeChromeRequest("", ed.state_), std::nullopt);
         CHECK_EQ(cursorScreenRow(before), 10);
     }
 
@@ -62,14 +62,14 @@ TEST(scroll_wheel_up_bottom_cursor_stays_in_content) {
     {
         FrameBuilder fb;
         Frame f = fb.buildFrame(ed.active().document, ed.active().cursor,
-                                ed.active().viewport, "t", false, "",
-                                ed.state_, std::nullopt);
+                                ed.active().viewport, "t", false,
+                                makeChromeRequest("", ed.state_), std::nullopt);
         CHECK(!f.cursor.visible);
     }
     TtyRenderer r;
     std::string screen = r.buildScreen(ed.active().document, ed.active().cursor,
-                                       ed.active().viewport, "t", false, "",
-                                       ed.state_, std::nullopt);
+                                       ed.active().viewport, "t", false,
+                                       makeChromeRequest("", ed.state_), std::nullopt);
     // Sin posicionamiento de cursor: oculto, nunca en status bar/mensajes.
     CHECK_EQ(cursorScreenRow(screen), -1);
     CHECK(screen.find(" q") == std::string::npos);
@@ -92,8 +92,8 @@ TEST(scroll_wheel_down_top_cursor_stays_in_content) {
     {
         TtyRenderer r;
         std::string before = r.buildScreen(ed.active().document, ed.active().cursor,
-                                           ed.active().viewport, "t", false, "",
-                                           ed.state_, std::nullopt);
+                                           ed.active().viewport, "t", false,
+                                           makeChromeRequest("", ed.state_), std::nullopt);
         CHECK_EQ(cursorScreenRow(before), 1);
     }
 
@@ -105,14 +105,14 @@ TEST(scroll_wheel_down_top_cursor_stays_in_content) {
     {
         FrameBuilder fb;
         Frame f = fb.buildFrame(ed.active().document, ed.active().cursor,
-                                ed.active().viewport, "t", false, "",
-                                ed.state_, std::nullopt);
+                                ed.active().viewport, "t", false,
+                                makeChromeRequest("", ed.state_), std::nullopt);
         CHECK(!f.cursor.visible);
     }
     TtyRenderer r;
     std::string screen = r.buildScreen(ed.active().document, ed.active().cursor,
-                                       ed.active().viewport, "t", false, "",
-                                       ed.state_, std::nullopt);
+                                       ed.active().viewport, "t", false,
+                                       makeChromeRequest("", ed.state_), std::nullopt);
     CHECK_EQ(cursorScreenRow(screen), -1);
     CHECK(screen.find(" q") == std::string::npos);
     CHECK(screen.find("\x1b[?25h") == std::string::npos);

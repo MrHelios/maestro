@@ -293,7 +293,7 @@ TEST(chrome_list_screens_use_their_roles) {
 
     const std::string file = tr.buildFileListScreen(
         std::vector<FileListItem>{{"a.txt", false}}, 0, 0, "/ruta",
-        Message("ayuda"), 80, 5);
+        MessageBarData("ayuda"), 80, 5);
     CHECK(file.find(t.accentAbrir) != std::string::npos);
     CHECK(file.find(t.statusBarAccent) == std::string::npos);
 }
@@ -339,14 +339,13 @@ TEST(chrome_prompt_message_styled) {
     d.statusBar.name = "x";
     d.statusBar.estado = "NAVEGACION";
     d.statusBar.totalLines = 1;
-    d.message = Message("Guardar archivo: /tmp/x", MessageKind::Prompt,
-                        std::nullopt);
+    d.message = MessageBarData("Guardar archivo: /tmp/x", MessageKind::Prompt);
 
     const std::string out = bar.render(area, d);
     CHECK(out.find(t.prompt + "Guardar archivo: /tmp/x") != std::string::npos);
 
     ChromeData c = d;
-    c.message = Message("ayuda", MessageKind::Info, std::nullopt);
+    c.message = MessageBarData("ayuda", MessageKind::Info);
     CHECK(bar.render(area, c).find(t.prompt) == std::string::npos);
 }
 
@@ -362,7 +361,7 @@ TEST(chrome_status_and_message_change_isolated_rows) {
     base.statusBar.path = "/ruta";
     base.statusBar.estado = "NAVEGACION";
     base.statusBar.totalLines = 3;
-    base.message = Message("msg uno", MessageKind::Info, std::nullopt);
+    base.message = MessageBarData("msg uno", MessageKind::Info);
 
     // Solo StatusBar: cambia el nombre, mismo Message.
     ChromeData onlyStatusBar = base;
@@ -378,7 +377,7 @@ TEST(chrome_status_and_message_change_isolated_rows) {
 
     // Solo MessageBar: mismo StatusBar, cambia el texto.
     ChromeData onlyMsg = base;
-    onlyMsg.message = Message("msg dos", MessageKind::Info, std::nullopt);
+    onlyMsg.message = MessageBarData("msg dos", MessageKind::Info);
     CHECK_EQ(bar.renderStatusBar(80, onlyMsg.statusBar),
              bar.renderStatusBar(80, base.statusBar));
     CHECK(bar.renderMessageBar(80, onlyMsg.message) !=
@@ -399,7 +398,7 @@ TEST(chrome_height_one_renders_only_status) {
     d.statusBar.name = "a.txt";
     d.statusBar.estado = "NAVEGACION";
     d.statusBar.totalLines = 3;
-    d.message = Message("msg visible", MessageKind::Info, std::nullopt);
+    d.message = MessageBarData("msg visible", MessageKind::Info);
 
     for (int w : {1, 20, 80}) {
         const std::string full = bar.render({0, 0, w, 1}, d);
@@ -415,7 +414,7 @@ TEST(chrome_height_zero_renders_empty) {
     d.statusBar.name = "a.txt";
     d.statusBar.estado = "NAVEGACION";
     d.statusBar.totalLines = 3;
-    d.message = Message("msg", MessageKind::Info, std::nullopt);
+    d.message = MessageBarData("msg", MessageKind::Info);
 
     for (int w : {0, 1, 80}) {
         CHECK(bar.render({0, 0, w, 0}, d).empty());

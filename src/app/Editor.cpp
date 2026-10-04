@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 
 #include "base/utf8.h"
+#include "app/ChromePresentation.h"
 #include "layout/Gutter.h"
 #include "layout/ScreenToCursor.h"
 #include "syntax/SyntaxHighlighter.h"
@@ -1193,7 +1194,7 @@ void Editor::renderFrame() {
         }
         renderer_->renderFileList(items,
                                 fileBrowser.index_, fileBrowser.scroll_,
-                                fileBrowser.path_, statusMessage_,
+                                fileBrowser.path_, toMessageBar(statusMessage_),
                                 b.viewport.width, b.viewport.height, sink());
     } else if (state_ == State::SaveAsFileBrowser) {
         fileBrowser.clampScroll(b.viewport.height);
@@ -1213,7 +1214,7 @@ void Editor::renderFrame() {
         }
         renderer_->renderSaveAsFileList(items,
                                         fileBrowser.index_, fileBrowser.scroll_,
-                                        fileBrowser.path_, shown,
+                                        fileBrowser.path_, toMessageBar(shown),
                                         b.viewport.width, b.viewport.height, sink());
     } else {
         // Sincroniza lenguaje del cache con el buffer activo antes de bracket/render
@@ -1258,8 +1259,7 @@ void Editor::renderFrame() {
             b.viewport,
             b.filename,
             b.modified,
-            statusMessage_,
-            state_,
+            makeChromeRequest(statusMessage_, state_),
             sink(),
             b.selection,
             searchHighlight_,

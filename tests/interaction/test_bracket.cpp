@@ -186,8 +186,8 @@ TEST(bracket_selection_highlight_hidden_but_jump_works) {
     Document doc = ed.active().document;
     Cursor cur = ed.active().cursor;
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=40;
-    std::string outSel = r.buildScreen(doc, cur, vp, "t.cpp", false, Message{}, State::Seleccion, std::nullopt, std::nullopt, std::nullopt);
-    std::string outNav = r.buildScreen(doc, cur, vp, "t.cpp", false, Message{}, State::Navegacion, std::nullopt, std::nullopt, ed.bracketPair_);
+    std::string outSel = r.buildScreen(doc, cur, vp, "t.cpp", false, makeChromeRequest(Message{}, State::Seleccion), std::nullopt, std::nullopt, std::nullopt);
+    std::string outNav = r.buildScreen(doc, cur, vp, "t.cpp", false, makeChromeRequest(Message{}, State::Navegacion), std::nullopt, std::nullopt, ed.bracketPair_);
     CHECK(outSel.find("\x1b[48;5;221m") == std::string::npos);
     CHECK(outNav.find("\x1b[48;5;221m") != std::string::npos);
     ed.handleEvent(ev(InputEventType::Prefix));
@@ -265,7 +265,7 @@ TEST(bracket_unicode_before) {
     TtyRenderer r;
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=40;
     Cursor cur = ed.active().cursor;
-    std::string out = r.buildScreen(ed.active().document, cur, vp, "t.cpp", false, Message{}, State::Navegacion, std::nullopt, std::nullopt, ed.bracketPair_);
+    std::string out = r.buildScreen(ed.active().document, cur, vp, "t.cpp", false, makeChromeRequest(Message{}, State::Navegacion), std::nullopt, std::nullopt, ed.bracketPair_);
     CHECK(out.find("\x1b[48;5;221m") != std::string::npos);
 }
 TEST(bracket_tab_before) {
@@ -280,7 +280,7 @@ TEST(bracket_tab_before) {
     TtyRenderer r;
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=40;
     Cursor cur = ed.active().cursor;
-    std::string out = r.buildScreen(ed.active().document, cur, vp, "t.cpp", false, Message{}, State::Navegacion, std::nullopt, std::nullopt, ed.bracketPair_);
+    std::string out = r.buildScreen(ed.active().document, cur, vp, "t.cpp", false, makeChromeRequest(Message{}, State::Navegacion), std::nullopt, std::nullopt, ed.bracketPair_);
     CHECK(out.find("\x1b[48;5;221m") != std::string::npos);
 }
 

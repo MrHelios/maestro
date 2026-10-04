@@ -19,6 +19,7 @@
 
 #define private public
 #include "app/Editor.h"
+#include "app/ChromePresentation.h"
 #undef private
 
 #include "document/Document.h"
@@ -118,7 +119,7 @@ TEST(bench_perf_render_diff_25k_checked) {
     // primar cache con frame completo (fuera de medicion)
     {
         std::string base = tr.buildScreen(ed.active().document, ed.active().cursor,
-            ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
+            ed.active().viewport, "bench.cpp", false, makeChromeRequest(msg, ed.state_), std::nullopt);
         perf_time::g_sink += base.size();
     }
     const int iters = 50;
@@ -134,14 +135,14 @@ TEST(bench_perf_render_diff_25k_checked) {
             e.text = "a";
             ed.handleEvent(e);
             auto out = tr.buildDiffFrame(ed.active().document, ed.active().cursor,
-                ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
+                ed.active().viewport, "bench.cpp", false, makeChromeRequest(msg, ed.state_), std::nullopt);
             perf_time::g_sink += out.size();
             ++frames;
             InputEvent b;
             b.type = InputEventType::Backspace;
             ed.handleEvent(b);
             auto out2 = tr.buildDiffFrame(ed.active().document, ed.active().cursor,
-                ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
+                ed.active().viewport, "bench.cpp", false, makeChromeRequest(msg, ed.state_), std::nullopt);
             perf_time::g_sink += out2.size();
             ++frames;
             // scroll 1 linea cada 10 iters (todas las filas cambian, 1 frame extra)
@@ -149,7 +150,7 @@ TEST(bench_perf_render_diff_25k_checked) {
                 ed.active().viewport.top += 1;
                 ed.active().cursor.line += 1;
                 auto outs = tr.buildDiffFrame(ed.active().document, ed.active().cursor,
-                    ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
+                    ed.active().viewport, "bench.cpp", false, makeChromeRequest(msg, ed.state_), std::nullopt);
                 perf_time::g_sink += outs.size();
                 ++frames;
             }
@@ -165,7 +166,7 @@ TEST(bench_perf_render_diff_25k_checked) {
     ed.active().viewport.width = 120;
     {
         auto outr = tr.buildDiffFrame(ed.active().document, ed.active().cursor,
-            ed.active().viewport, "bench.cpp", false, msg, ed.state_, std::nullopt);
+            ed.active().viewport, "bench.cpp", false, makeChromeRequest(msg, ed.state_), std::nullopt);
         perf_arch::reportVerbose("%-48s %6zu bytes tras resize 120\n", "diff resize", outr.size());
         perf_time::g_sink += outr.size();
     }

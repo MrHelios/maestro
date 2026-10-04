@@ -146,9 +146,6 @@ void TtyEncoder::moveCursorToRaw(std::string& out, int row, int col) const {
 
 void TtyEncoder::hideCursor(std::string& out) const { out += "\x1b[?25l"; }
 void TtyEncoder::showCursor(std::string& out) const { out += "\x1b[?25h"; }
-void TtyEncoder::setCursorStyle(std::string& out, State state) const {
-    setCursorStyle(out, cursorShapeFor(state));
-}
 void TtyEncoder::setCursorStyle(std::string& out, FrameCursorShape shape) const {
     if (shape == FrameCursorShape::Bar) out += "\x1b[1 q";
     else out += "\x1b[2 q";

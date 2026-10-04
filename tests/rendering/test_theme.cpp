@@ -10,6 +10,7 @@
 
 #include "test_framework.h"
 #include "helpers/test_render_utils.h"
+#include "app/ChromePresentation.h"
 
 #include "rendering/tty/TtyTheme.h"
 #include "document/Document.h"
@@ -48,8 +49,8 @@ std::string editorFrameWithSelection(const TtyTheme& theme, int width = 200) {
     Selection sel;
     sel.anchor = Position{0, 0};
     sel.position = Position{0, 5};
-    return r.buildScreen(doc, cur, vp, "/a/b.txt", false, "",
-                         State::Navegacion, sel);
+    return r.buildScreen(doc, cur, vp, "/a/b.txt", false,
+                         makeChromeRequest("", State::Navegacion), sel);
 }
 
 // Monta el frame del selector de buffers con el primer elemento seleccionado
@@ -65,7 +66,7 @@ std::string fileFrameWithSelection(const TtyTheme& theme, int width = 200) {
     tr.setTheme(theme);
     return tr.buildFileListScreen(
         std::vector<FileListItem>{{"aa.txt", false}, {"bb.txt", false}}, 0, 0,
-        "/tmp", Message{}, width, 5);
+        "/tmp", MessageBarData{}, width, 5);
 }
 
 } // namespace
@@ -171,8 +172,7 @@ TEST(theme_chrome_uses_theme_for_colors) {
     d.statusBar.name = "archivo.txt";
     d.statusBar.path = "/ruta";
     d.statusBar.estado = "NAVEGACION";
-    d.message = Message("error grave", MessageKind::Error,
-                        std::nullopt);
+    d.message = MessageBarData("error grave", MessageKind::Error);
     d.statusBar.totalLines = 1;
 
     const std::string out = bar.render(area, d);
@@ -201,8 +201,9 @@ TEST(theme_renderer_propagates_to_chrome) {
     Document doc; doc.restore({"x"});
     Viewport vp; vp.top = 0; vp.height = 2; vp.width = 80;
     Cursor cur; cur.line = 0; cur.col = 0;
-    std::string ed = r.buildScreen(doc, cur, vp, "/a/b.txt", false, "",
-                                   State::Navegacion, std::nullopt);
+    std::string ed = r.buildScreen(doc, cur, vp, "/a/b.txt", false,
+                                   makeChromeRequest("", State::Navegacion),
+                                   std::nullopt);
     CHECK(ed.find(t.statusBar) != std::string::npos);
 
     // BufferSelector: mismo tema en el backend, misma barra.
@@ -214,7 +215,7 @@ TEST(theme_renderer_propagates_to_chrome) {
     // FileBrowser: idem.
     std::string file = tr.buildFileListScreen(
         std::vector<FileListItem>{{"a.txt", false}}, 0, 0, "/ruta",
-        Message("ayuda"), 80, 5);
+        MessageBarData("ayuda"), 80, 5);
     CHECK(file.find(t.statusBar) != std::string::npos);
 
     // Con el default theme la barra usaria otro color: el TtyTheme se propaga.
@@ -222,8 +223,9 @@ TEST(theme_renderer_propagates_to_chrome) {
     // Con el tema custom (barra verde) el frame NO contiene el gris del
     // default theme; con un Renderer sin setTheme si.
     CHECK(ed.find(defaultTheme().statusBar) == std::string::npos);
-    std::string edDefault = r2.buildScreen(doc, cur, vp, "/a/b.txt", false, "",
-                                           State::Navegacion, std::nullopt);
+    std::string edDefault = r2.buildScreen(doc, cur, vp, "/a/b.txt", false,
+                                           makeChromeRequest("", State::Navegacion),
+                                           std::nullopt);
     CHECK(edDefault.find(defaultTheme().statusBar) != std::string::npos);
     CHECK(ed != edDefault);
 }

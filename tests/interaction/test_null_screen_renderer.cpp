@@ -2,6 +2,7 @@
 #define private public
 #include "app/Editor.h"
 #undef private
+#include "app/ChromePresentation.h"
 #include "rendering/ScreenRenderer.h"
 #include "rendering/NullScreenRenderer.h"
 #include "rendering/Sink.h"
@@ -35,11 +36,11 @@ TEST(null_screen_renderer_noop_render) {
     Document doc; doc.restore({"x"});
     Cursor cur; Viewport vp; vp.top=0; vp.height=1; vp.width=10;
     Message msg; State st = State::Navegacion;
-    nsr.renderScreenDiff(doc, cur, vp, "t", false, msg, st, sink,
+    nsr.renderScreenDiff(doc, cur, vp, "t", false, makeChromeRequest(msg, st), sink,
                          std::nullopt, std::nullopt, std::nullopt);
     nsr.renderBufferList({"a"}, 0, 10, 10, sink);
     std::vector<FileListItem> items;
-    nsr.renderFileList(items, 0, 0, "/", msg, 10, 10, sink);
+    nsr.renderFileList(items, 0, 0, "/", toMessageBar(msg), 10, 10, sink);
     CHECK(sink.calls == 0);
     CHECK(sink.bytes == 0);
 

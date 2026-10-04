@@ -72,7 +72,7 @@ TEST(syntax_block_comment_multiline_incremental_update) {
     Message msg;
     // Prime: full rebuild, deja rowCache_ caliente y lastVersion_/lastCursor.
     tty.buildDiffFrame(b.document, b.cursor, b.viewport,
-                       b.filename, false, msg, State::Navegacion,
+                       b.filename, false, makeChromeRequest(msg, State::Navegacion),
                        std::nullopt, std::nullopt, std::nullopt);
 
     // --- Fase 1: abrir /* en fila 1 y cerrar */ en fila 4 (sin tocar lineCount)
@@ -84,7 +84,7 @@ TEST(syntax_block_comment_multiline_incremental_update) {
 
     // Render incremental como hace el editor al teclear (diff de una fila).
     tty.buildDiffFrame(b.document, b.cursor, b.viewport,
-                       b.filename, false, msg, State::Navegacion,
+                       b.filename, false, makeChromeRequest(msg, State::Navegacion),
                        std::nullopt, std::nullopt, std::nullopt);
 
     // Oraculo: reparse completo (lo que se ve al entrar/salir del archivo).
@@ -119,7 +119,7 @@ TEST(syntax_block_comment_multiline_incremental_update) {
     b.cursor.col = 0;
 
     tty.buildDiffFrame(b.document, b.cursor, b.viewport,
-                       b.filename, false, msg, State::Navegacion,
+                       b.filename, false, makeChromeRequest(msg, State::Navegacion),
                        std::nullopt, std::nullopt, std::nullopt);
 
     SyntaxCache fresh2;

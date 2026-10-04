@@ -60,7 +60,9 @@ public:
     void moveCursorTo(std::string& out, CellPos cell) const;
     void hideCursor(std::string& out) const;
     void showCursor(std::string& out) const;
-    void setCursorStyle(std::string& out, State state) const;
+    // NOTA: sin overload por State: el DTO ya trae la forma resuelta
+    // (FrameCursorShape). La traduccion State -> shape vive en el adaptador
+    // app/ChromePresentation.h.
     void setCursorStyle(std::string& out, FrameCursorShape shape) const;
     void beginFrame(std::string& out) const;
     void endFrame(std::string& out) const;

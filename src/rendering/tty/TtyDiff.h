@@ -5,8 +5,6 @@
 #include <string>
 #include <vector>
 
-#include "app/EditorState.h"
-#include "app/Message.h"
 #include "document/Cursor.h"
 #include "document/Document.h"
 #include "document/Selection.h"
@@ -14,11 +12,14 @@
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
 #include "rendering/ChromeData.h"
+#include "rendering/ChromeRequest.h"
 #include "rendering/frame/FrameBuilder.h"
 #include "rendering/tty/TtyEncoder.h"
 
 // ---------------------------------------------------------------------------
-// TtyDiff: render diferencial del backend TTY.
+// TtyDiff: render diferencial del backend TTY. Zona pura: no incluye nada
+// de app/; la presentación (mensaje + etiqueta + acento + forma del cursor
+// + visibilidad por modo) llega ya resuelta en ChromeRequest.
 //
 // Dueño EXCLUSIVO de los caches codificados (rowCache_/chromeCache_ + estado
 // de viewport/cursor/versión). El contrato común (Frame) nunca los ve:
@@ -68,8 +69,7 @@ public:
                                const Viewport& viewport,
                                const std::string& filename,
                                bool modified,
-                               const Message& message,
-                               State state,
+                               const ChromeRequest& chrome,
                                const std::optional<Selection>& selection = std::nullopt,
                                const std::optional<Selection>& searchHighlight = std::nullopt,
                                const std::optional<BracketPair>& bracketPair = std::nullopt);
@@ -80,8 +80,7 @@ public:
                                  const Viewport& viewport,
                                  const std::string& filename,
                                  bool modified,
-                                 const Message& message,
-                                 State state,
+                                 const ChromeRequest& chrome,
                                  const std::optional<Selection>& selection,
                                  const std::optional<Selection>& searchHighlight,
                                  const std::optional<BracketPair>& bracketPair,
@@ -116,12 +115,11 @@ private:
                                      const Viewport& viewport,
                                      const std::string& filename,
                                      bool modified,
-                                     const Message& message,
-                                     State state);
+                                     const ChromeRequest& chrome);
 
     void rebuildCache(const Document& doc, const Cursor& cursor,
                       const Viewport& viewport, const std::string& filename,
-                      bool modified, const Message& message, State state,
+                      bool modified, const ChromeRequest& chrome,
                       const std::optional<Selection>& selection,
                       const std::optional<Selection>& searchHighlight,
                       const std::optional<BracketPair>& bracketPair);
@@ -136,23 +134,24 @@ private:
 
     void patchChrome(std::string& out, const Document& doc,
                        const Cursor& cursor, const std::string& filename,
-                       bool modified, const Message& message, State state,
+                       bool modified, const ChromeRequest& chrome,
                        const Layout& layout, int contentH);
 
     // Resuelve el cursor con el resolver común (sin clamp duplicado) y lo
-    // posiciona/muestra. Busqueda o fuera de viewport => lo deja oculto
-    // (contrato visible==false). endFrame=true cierra con endFrame en vez
-    // de showCursor (camino de frame completo). Única versión con el bloque
-    // resolve -> CUP -> style -> show/end (4 caminos lo usan).
+    // posiciona/muestra. visibleByMode==false o fuera de viewport => lo deja
+    // oculto (contrato visible==false). endFrame=true cierra con endFrame en
+    // vez de showCursor (camino de frame completo). Única versión con el
+    // bloque resolve -> CUP -> style -> show/end (4 caminos lo usan).
     void placeCursor(std::string& out, const Document& doc,
                      const Cursor& cursor, const Viewport& viewport,
-                     State state, bool endFrame);
+                     FrameCursorShape shape, bool visibleByMode, bool endFrame);
     void placeCursor(std::string& out, const Document& doc,
                      const Cursor& cursor, const Viewport& viewport,
-                     const FrameBuilder::EditorGeometry& g, State state,
+                     const FrameBuilder::EditorGeometry& g,
+                     FrameCursorShape shape, bool visibleByMode,
                      bool endFrame);
-    void emitCursor(std::string& out, CellPos pos, bool visible, State state,
-                    bool endFrame);
+    void emitCursor(std::string& out, CellPos pos, FrameCursorShape shape,
+                    bool visible, bool endFrame);
 
     void updateCacheState(const Viewport& viewport, const Cursor& cursor,
                           const Document& doc);

@@ -21,6 +21,7 @@
 #include "platform/InputEvent.h"  // usa InputEvent común
 
 #define private public
+#include "app/ChromePresentation.h"
 #include "app/Editor.h"
 #include "rendering/tty/TtyRenderer.h"
 #include "rendering/tty/TtySink.h"
@@ -200,7 +201,7 @@ struct DiffHarness {
         Buffer& b = buf();
         return r.buildDiffFrame(
             b.document, b.cursor, b.viewport, b.filename, b.modified,
-            Message(""), State::Navegacion, b.selection);
+            makeChromeRequest(Message(""), State::Navegacion), b.selection);
     }
 };
 
@@ -219,7 +220,7 @@ TEST(render_diff_pantalla_identica_al_frame_completo) {
         bool allowFullClear = !h.r.hasCache();
         checkDiffMatchesFull(viaDiff, viaFull,
             h.getDiffOutput(),
-            h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, Message(""), State::Navegacion, b.selection),
+            h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message(""), State::Navegacion), b.selection),
             allowFullClear);
     };
 
@@ -249,8 +250,8 @@ TEST(render_diff_tecla_emite_menos_que_frame_completo) {
     h.getDiffOutput();
 
     const std::size_t fullSize = h.r.buildScreen(
-        b.document, b.cursor, b.viewport, b.filename, b.modified, Message(""),
-        State::Navegacion, b.selection).size();
+        b.document, b.cursor, b.viewport, b.filename, b.modified,
+        makeChromeRequest(Message(""), State::Navegacion), b.selection).size();
 
     const std::size_t deltaSize = [&] {
         h.ed.handleEvent(key('a'));
@@ -270,13 +271,13 @@ TEST(render_diff_segundo_frame_solo_mueve_cursor) {
     viaFull.apply(init);
     const std::size_t fullSize = h.r.buildScreen(
         h.buf().document, h.buf().cursor, h.buf().viewport, h.buf().filename,
-        h.buf().modified, Message(""), State::Navegacion, h.buf().selection).size();
+        h.buf().modified, makeChromeRequest(Message(""), State::Navegacion), h.buf().selection).size();
 
     h.buf().cursor.col = 5;
     const std::string delta = h.getDiffOutput();
     const std::string full = h.r.buildScreen(
         h.buf().document, h.buf().cursor, h.buf().viewport, h.buf().filename,
-        h.buf().modified, Message(""), State::Navegacion, h.buf().selection);
+        h.buf().modified, makeChromeRequest(Message(""), State::Navegacion), h.buf().selection);
 
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, false);
     CHECK(delta.size() < fullSize / 4);
@@ -295,7 +296,7 @@ TEST(render_diff_edicion_una_sola_linea_solo_esa_fila) {
     const std::string delta = h.getDiffOutput();
     const std::string full = h.r.buildScreen(
         h.buf().document, h.buf().cursor, h.buf().viewport, h.buf().filename,
-        h.buf().modified, Message(""), State::Navegacion, h.buf().selection);
+        h.buf().modified, makeChromeRequest(Message(""), State::Navegacion), h.buf().selection);
 
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, false);
     int rewrites = 0;
@@ -313,14 +314,14 @@ TEST(render_diff_linea_se_encoge_no_deja_basura) {
     for (int i = 0; i < 20; ++i) h.ed.handleEvent(key('a'));
     b.viewport.scrollToCursor(b.cursor);
     std::string delta = h.getDiffOutput();
-    std::string full = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, Message(""), State::Navegacion, b.selection);
+    std::string full = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message(""), State::Navegacion), b.selection);
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, allow1);
 
     for (int i = 0; i < 10; ++i) h.ed.handleEvent(move(InputEventType::Backspace));
     b.viewport.scrollToCursor(b.cursor);
 
     delta = h.getDiffOutput();
-    full = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, Message(""), State::Navegacion, b.selection);
+    full = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message(""), State::Navegacion), b.selection);
 
     CHECK(delta.find("\x1b[K") != std::string::npos);
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, true);
@@ -340,7 +341,7 @@ TEST(render_diff_scroll_reescribe_filas_sin_borrado_total) {
     const std::string delta = h.getDiffOutput();
     const std::string full = h.r.buildScreen(
         h.buf().document, h.buf().cursor, h.buf().viewport, h.buf().filename,
-        h.buf().modified, Message(""), State::Navegacion, h.buf().selection);
+        h.buf().modified, makeChromeRequest(Message(""), State::Navegacion), h.buf().selection);
 
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, false);
     int rewrites = 0;
@@ -361,7 +362,7 @@ TEST(render_diff_scroll_realista_reescribe_filas_sin_borrado_total) {
     const std::string delta = h.getDiffOutput();
     const std::string full = h.r.buildScreen(
         b.document, b.cursor, b.viewport, b.filename, b.modified,
-        Message(""), State::Navegacion, b.selection);
+        makeChromeRequest(Message(""), State::Navegacion), b.selection);
 
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, false);
     int rewrites = 0;
@@ -374,7 +375,7 @@ TEST(render_diff_vuelta_de_filebrowser_es_completo) {
     NullSink null;
     TtyRenderer tr;
     h.getDiffOutput();
-    tr.renderFileList(std::vector<FileListItem>{{"a.txt", false}, {"b.txt", false}}, 0, 0, "/tmp", Message(""), 80, 24, null);
+    tr.renderFileList(std::vector<FileListItem>{{"a.txt", false}, {"b.txt", false}}, 0, 0, "/tmp", MessageBarData(""), 80, 24, null);
     // El backend no se autoinvalida: el caller invalida al entrar/salir
     // del modal (igual que Editor::renderFrame).
     h.r.invalidateCache();
@@ -393,13 +394,13 @@ TEST(render_diff_mensaje_temporal) {
     viaFull.apply(init);
 
     b.viewport.scrollToCursor(b.cursor);
-    std::string deltaMsg = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, b.filename, b.modified, Message("Guardando..."), State::Navegacion, b.selection);
-    std::string fullMsg = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, Message("Guardando..."), State::Navegacion, b.selection);
+    std::string deltaMsg = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message("Guardando..."), State::Navegacion), b.selection);
+    std::string fullMsg = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message("Guardando..."), State::Navegacion), b.selection);
 
     checkDiffMatchesFull(viaDiff, viaFull, deltaMsg, fullMsg, false);
 
-    std::string deltaClear = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, b.filename, b.modified, Message(""), State::Navegacion, b.selection);
-    std::string fullClear = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, Message(""), State::Navegacion, b.selection);
+    std::string deltaClear = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message(""), State::Navegacion), b.selection);
+    std::string fullClear = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message(""), State::Navegacion), b.selection);
 
     checkDiffMatchesFull(viaDiff, viaFull, deltaClear, fullClear, false);
 }
@@ -449,15 +450,17 @@ TEST(render_diff_chrome_status_and_message_isolated) {
     // Prime: frame completo con a.txt / msg uno.
     std::string prime = h.r.buildDiffFrame(
         b.document, b.cursor, b.viewport, "a.txt", false,
-        Message("msg uno", MessageKind::Info, std::nullopt),
-        State::Navegacion, b.selection);
+        makeChromeRequest(Message("msg uno", MessageKind::Info, std::nullopt),
+                          State::Navegacion),
+        b.selection);
     CHECK(prime.find("\x1b[2J") != std::string::npos);
 
     // Solo StatusBar (mismo Message): debe tocar fila 1, no fila 2.
     std::string deltaStatus = h.r.buildDiffFrame(
         b.document, b.cursor, b.viewport, "b.txt", false,
-        Message("msg uno", MessageKind::Info, std::nullopt),
-        State::Navegacion, b.selection);
+        makeChromeRequest(Message("msg uno", MessageKind::Info, std::nullopt),
+                          State::Navegacion),
+        b.selection);
     CHECK(deltaStatus.find("\x1b[2J") == std::string::npos);
     CHECK(deltaStatus.find(statusCup) != std::string::npos);
     CHECK(deltaStatus.find(messageCup) == std::string::npos);
@@ -465,8 +468,9 @@ TEST(render_diff_chrome_status_and_message_isolated) {
     // Solo MessageBar (mismo StatusBar): debe tocar fila 2, no fila 1.
     std::string deltaMessage = h.r.buildDiffFrame(
         b.document, b.cursor, b.viewport, "b.txt", false,
-        Message("msg dos", MessageKind::Info, std::nullopt),
-        State::Navegacion, b.selection);
+        makeChromeRequest(Message("msg dos", MessageKind::Info, std::nullopt),
+                          State::Navegacion),
+        b.selection);
     CHECK(deltaMessage.find("\x1b[2J") == std::string::npos);
     CHECK(deltaMessage.find(messageCup) != std::string::npos);
     CHECK(deltaMessage.find(statusCup) == std::string::npos);
@@ -494,26 +498,30 @@ TEST(render_diff_mismo_texto_distinto_kind_repinta) {
     // Prime: "hola" Info.
     std::string prime = h.r.buildDiffFrame(
         b.document, b.cursor, b.viewport, "a.txt", false,
-        Message("hola", MessageKind::Info, std::nullopt),
-        State::Navegacion, b.selection);
+        makeChromeRequest(Message("hola", MessageKind::Info, std::nullopt),
+                          State::Navegacion),
+        b.selection);
     CHECK(prime.find("\x1b[2J") != std::string::npos);
 
     // Mismo texto, distinto kind: repinta la fila inferior, no la superior.
     std::string deltaKind = h.r.buildDiffFrame(
         b.document, b.cursor, b.viewport, "a.txt", false,
-        Message("hola", MessageKind::Error, std::nullopt),
-        State::Navegacion, b.selection);
+        makeChromeRequest(Message("hola", MessageKind::Error, std::nullopt),
+                          State::Navegacion),
+        b.selection);
     CHECK(deltaKind.find("\x1b[2J") == std::string::npos);
     CHECK(deltaKind.find(messageCup) != std::string::npos);
     CHECK(deltaKind.find(statusCup) == std::string::npos);
 
-    // Mismo texto y kind, solo cambia expiry: sin repintado del chrome.
-    const auto later =
-        std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    // Misma presentación (texto y kind): sin repintado del chrome.
+    // El `expiry` temporal del Message ya no viaja al rendering por
+    // construcción (makeChromeRequest solo lleva texto + tipo), asi que dos
+    // Messages que difieren solo en vencimiento producen el mismo request.
     std::string deltaExpiry = h.r.buildDiffFrame(
         b.document, b.cursor, b.viewport, "a.txt", false,
-        Message("hola", MessageKind::Error, later),
-        State::Navegacion, b.selection);
+        makeChromeRequest(Message("hola", MessageKind::Error, std::nullopt),
+                          State::Navegacion),
+        b.selection);
     CHECK(deltaExpiry.find("\x1b[2J") == std::string::npos);
     CHECK(deltaExpiry.find(messageCup) == std::string::npos);
     CHECK(deltaExpiry.find(statusCup) == std::string::npos);

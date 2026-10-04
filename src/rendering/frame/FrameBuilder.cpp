@@ -11,14 +11,14 @@
 
 namespace {
 
-// Arma el ChromeData del Editor. PURO: sin ANSI; el accent de la
-// etiqueta de estado (StatusBar) vive en Frame::statusAccent como
-// StyleRole y lo resuelve el backend.
+// Arma el ChromeData desde la presentación ya resuelta. PURO: sin ANSI y
+// sin app/; el accent de la etiqueta de estado (StatusBar) vive en
+// Frame::statusAccent como StyleRole y lo resuelve el backend.
 //   data.statusBar  -> StatusBar (fila superior fija)
-//   data.message -> MessageBar (fila inferior, Message)
+//   data.message -> MessageBar (fila inferior, MessageBarData: texto+tipo)
 ChromeData editorChromeData(const std::string& filename, bool modified,
                             const std::string& estado,
-                            const Message& message,
+                            const MessageBarData& message,
                             const Cursor& cursor, int totalLines) {
     ChromeData data;
     data.statusBar.name = chrome::baseName(filename);
@@ -93,21 +93,6 @@ StyleRole FrameBuilder::syntaxRoleFor(SyntaxToken tok) {
         case SyntaxToken::Comment:      return StyleRole::SyntaxComment;
     }
     return StyleRole::SyntaxKeyword;
-}
-
-std::string FrameBuilder::stateLabelFor(State state) {
-    switch (state) {
-        case State::Navegacion:     return "NAVEGACION";
-        case State::Interaccion:    return "INTERACCION";
-        case State::Seleccion:      return "SELECCION";
-        case State::Prefix:         return "COMANDO";
-        case State::BufferSelector: return "BUFFERS";
-        case State::FileBrowser:    return "ABRIR";
-        case State::Busqueda:       return "BUSQUEDA";
-        case State::IrAFila:        return "IR A FILA";
-        case State::SaveAsFileBrowser: return "GUARDAR COMO";
-    }
-    return "";
 }
 
 void FrameBuilder::normalizeBracketPair(const std::optional<BracketPair>& pair,
@@ -491,12 +476,12 @@ StyledRow FrameBuilder::buildContentRow(
 }
 
 FrameBuilder::ChromePayload FrameBuilder::buildChrome(
-    const std::string& filename, bool modified, const Message& message,
-    const Cursor& cursor, int totalLines, State state) const {
+    const std::string& filename, bool modified, const Cursor& cursor,
+    int totalLines, const ChromeRequest& chrome) const {
     ChromePayload p;
-    p.data = editorChromeData(filename, modified, stateLabelFor(state), message,
-                           cursor, totalLines);
-    p.statusAccent = accentRoleFor(state);
+    p.data = editorChromeData(filename, modified, chrome.estado, chrome.message,
+                              cursor, totalLines);
+    p.statusAccent = chrome.accent;
     return p;
 }
 
@@ -505,8 +490,7 @@ Frame FrameBuilder::buildFrame(    const Document& doc,
     const Viewport& viewport,
     const std::string& filename,
     bool modified,
-    const Message& message,
-    State state,
+    const ChromeRequest& chrome,
     const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) const {
@@ -550,19 +534,20 @@ Frame FrameBuilder::buildFrame(    const Document& doc,
                                                 bracketClose, docLine, gutterW,
                                                 textWidth));
     }
-    auto payload = buildChrome(filename, modified, message, cursor,
-                               doc.lineCount(), state);
+    auto payload = buildChrome(filename, modified, cursor,
+                               doc.lineCount(), chrome);
     f.chrome = std::move(payload.data);
     f.statusAccent = payload.statusAccent;
-    f.cursor.state = state;
-    f.cursor.shape = cursorShapeFor(state);
+    f.cursor.shape = chrome.cursorShape;
     // Contrato visual explicito: visible solo si el modo lo permite Y el
     // cursor logico esta dentro del viewport. Cuando la rueda mueve el
     // viewport con suppressScrollToCursor_ (cursor off-screen), visible=false
     // y cell queda invalida a proposito para que ningun backend la pinte.
+    // La politica por modo ya viene resuelta en chrome.cursorVisibleByMode;
+    // el DTO solo lleva el resultado (AND con el viewport).
     CellPos pos;
     const bool inViewport = editorCursorPos(doc, cursor, viewport, g, pos);
-    const bool visible = state != State::Busqueda && inViewport;
+    const bool visible = chrome.cursorVisibleByMode && inViewport;
     f.cursor.visible = visible;
     if (visible)
         f.cursor.cell = pos;  // ya 0-based, sin restar

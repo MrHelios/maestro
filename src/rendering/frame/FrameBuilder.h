@@ -3,8 +3,6 @@
 #include <optional>
 #include <string>
 
-#include "app/EditorState.h"
-#include "app/Message.h"
 #include "document/Cursor.h"
 #include "document/Document.h"
 #include "document/Selection.h"
@@ -12,6 +10,7 @@
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
 #include "platform/CellPos.h"
+#include "rendering/ChromeRequest.h"
 #include "rendering/frame/Frame.h"
 #include "syntax/SyntaxCache.h"
 #include "syntax/SyntaxHighlighter.h"
@@ -19,7 +18,13 @@
 #include "syntax/SyntaxToken.h"
 
 // ---------------------------------------------------------------------------
-// FrameBuilder (Fase B/C-1): construye el Frame puro desde el Editor.
+// FrameBuilder (Fase B/C-1): construye el Frame puro desde parámetros puros.
+//
+// ZONA PURA: no incluye nada de app/. Recibe la presentación ya resuelta
+// (rendering/ChromeRequest.h: mensaje + etiqueta + acento + forma del cursor
+// + visibilidad por modo); app/ la arma con app/ChromePresentation.h antes
+// de invocar. Los DTOs que produce (Frame, ChromeData, StyleRole) tampoco
+// incluyen nada de app/.
 //
 // No emite ANSI/CSI, no toca la terminal, no guarda filas codificadas.
 // Solo resuelve geometría, visibilidad, selección, brackets y sintaxis en
@@ -38,8 +43,7 @@ public:
                      const Viewport& viewport,
                      const std::string& filename,
                      bool modified,
-                     const Message& message,
-                     State state,
+                     const ChromeRequest& chrome,
                      const std::optional<Selection>& selection = std::nullopt,
                      const std::optional<Selection>& searchHighlight = std::nullopt,
                      const std::optional<BracketPair>& bracketPair = std::nullopt) const;
@@ -98,19 +102,18 @@ public:
                                      std::optional<Normalized>& outOpen,
                                      std::optional<Normalized>& outClose);
     static StyleRole syntaxRoleFor(SyntaxToken tok);
-    static std::string stateLabelFor(State state);
 
     // Payload puro del chrome (barato: sin filas). Lo usan buildFrame y el
     // backend para patches del chrome sin reconstruir contenido.
     //   data.statusBar -> StatusBar (fila superior fija)
-    //   data.message -> MessageBar (fila inferior, Message)
+    //   data.message -> MessageBar (fila inferior, MessageBarData: texto+tipo)
     struct ChromePayload {
         ChromeData data;
         StyleRole statusAccent = StyleRole::StatusAccentDefault;
     };
     ChromePayload buildChrome(const std::string& filename, bool modified,
-                              const Message& message, const Cursor& cursor,
-                              int totalLines, State state) const;
+                              const Cursor& cursor, int totalLines,
+                              const ChromeRequest& chrome) const;
 
 private:
     mutable SyntaxHighlighter syntaxHighlighter_;

@@ -23,6 +23,7 @@
 #include "document/Cursor.h"
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
+#include "app/ChromePresentation.h"
 #include "app/Message.h"
 #include "rendering/Style.h"
 #include "rendering/tty/TtyRenderer.h"
@@ -61,7 +62,8 @@ std::string frameEditor(int content, int width) {
     cursor.col = 0;
     TtyRenderer r;
     return r.buildScreen(doc, cursor, vp, "/ruta/proyecto/archivo.txt",
-                         false, "", State::Navegacion, std::nullopt);
+                         false, makeChromeRequest("", State::Navegacion),
+                         std::nullopt);
 }
 
 std::string frameBuffer(int content, int width, int selected = 1) {
@@ -75,7 +77,7 @@ std::string frameFile(int content, int width) {
     return tr.buildFileListScreen(
         std::vector<FileListItem>{
             {"a.txt", false}, {"b.txt", false}, {"c.txt", false}},
-        0, 0, "/datos/proyecto", Message("ayuda: direcc de naveg"),
+        0, 0, "/datos/proyecto", MessageBarData("ayuda: direcc de naveg"),
         width, content);
 }
 
@@ -282,7 +284,7 @@ std::string frameSaveAs(int content, int width, const Message& message) {
     return tr.buildSaveAsFileListScreen(
         std::vector<FileListItem>{
             {"sub", true}, {"a.txt", false}, {"b.txt", false}},
-        0, 0, "/datos/proyecto", message, width, content);
+        0, 0, "/datos/proyecto", toMessageBar(message), width, content);
 }
 
 Message saveAsInput(const std::string& fileName) {

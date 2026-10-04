@@ -6,7 +6,8 @@
 // StatusBarData: DTO puro de la fila superior del chrome (StatusBar). No conoce
 // TtyTheme ni ANSI. Vive en rendering/ (zona pura). La codificacion ANSI
 // vive en rendering/tty/TtyChrome que recibe el ChromeData completo.
-// La fila inferior (MessageBar) viaja como `Message` dentro de ChromeData.
+// La fila inferior (MessageBar) viaja como `MessageBarData` dentro de
+// ChromeData (solo texto + tipo; sin vencimiento temporal).
 // ---------------------------------------------------------------------------
 struct StatusBarData {
     std::string name;         // nombre del archivo (izquierda, StatusBar)

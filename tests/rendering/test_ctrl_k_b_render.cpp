@@ -7,6 +7,7 @@
 #include <memory>
 #define private public
 #include "app/Editor.h"
+#include "app/ChromePresentation.h"
 #undef private
 
 // El default del Editor es Null neutro; estos tests verifican el diff del
@@ -54,15 +55,15 @@ TEST(ctrl_k_b_renders_new_buffer_immediately){
 
     TtyRenderer& r = ttyOf(ed);
     Buffer& curBBB = ed.active();
-    std::string prime = r.buildDiffFrame(curBBB.document, curBBB.cursor, curBBB.viewport, curBBB.filename, curBBB.modified, Message{}, State::Navegacion, curBBB.selection);
+    std::string prime = r.buildDiffFrame(curBBB.document, curBBB.cursor, curBBB.viewport, curBBB.filename, curBBB.modified, makeChromeRequest(Message{}, State::Navegacion), curBBB.selection);
     (void)prime;
 
     previousBuffer(ed);
     Buffer& curAAA = ed.active();
     CHECK(curAAA.document.lineAt(0) == "AAA_CONTENT");
 
-    std::string diff = r.buildDiffFrame(curAAA.document, curAAA.cursor, curAAA.viewport, curAAA.filename, curAAA.modified, Message{}, State::Navegacion, curAAA.selection);
-    std::string full = r.buildScreen(curAAA.document, curAAA.cursor, curAAA.viewport, curAAA.filename, curAAA.modified, Message{}, State::Navegacion, curAAA.selection);
+    std::string diff = r.buildDiffFrame(curAAA.document, curAAA.cursor, curAAA.viewport, curAAA.filename, curAAA.modified, makeChromeRequest(Message{}, State::Navegacion), curAAA.selection);
+    std::string full = r.buildScreen(curAAA.document, curAAA.cursor, curAAA.viewport, curAAA.filename, curAAA.modified, makeChromeRequest(Message{}, State::Navegacion), curAAA.selection);
 
     CHECK(diff.find("AAA_CONTENT") != std::string::npos);
     CHECK(diff.size() > 100);
@@ -85,12 +86,12 @@ TEST(ctrl_k_b_diff_equals_full_after_switch){
     press(ed, InputEventType::Escape);
 
     TtyRenderer& r = ttyOf(ed);
-    r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
+    r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, makeChromeRequest(Message{}, State::Navegacion), ed.active().selection);
 
     previousBuffer(ed);
     Buffer& b = ed.active();
-    std::string diff = r.buildDiffFrame(b.document, b.cursor, b.viewport, b.filename, b.modified, Message{}, State::Navegacion, b.selection);
-    std::string full = r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, Message{}, State::Navegacion, b.selection);
+    std::string diff = r.buildDiffFrame(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message{}, State::Navegacion), b.selection);
+    std::string full = r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message{}, State::Navegacion), b.selection);
 
     auto strip = [](const std::string& s){
         std::string t = testutil::stripAnsi(s);
@@ -116,17 +117,17 @@ TEST(ctrl_k_b_toggle_twice_renders_correctly){
     press(ed, InputEventType::Escape);
 
     TtyRenderer& r = ttyOf(ed);
-    r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
+    r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, makeChromeRequest(Message{}, State::Navegacion), ed.active().selection);
 
     previousBuffer(ed);
     CHECK(ed.active().document.lineAt(0)=="AAA_TOGGLE");
-    std::string diff1 = r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
+    std::string diff1 = r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, makeChromeRequest(Message{}, State::Navegacion), ed.active().selection);
     CHECK(diff1.find("AAA_TOGGLE")!=std::string::npos);
     CHECK(diff1.find("\x1b[2J\x1b[H")!=std::string::npos);
 
     previousBuffer(ed);
     CHECK(ed.active().document.lineAt(0)=="BBB_TOGGLE");
-    std::string diff2 = r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
+    std::string diff2 = r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, makeChromeRequest(Message{}, State::Navegacion), ed.active().selection);
     CHECK(diff2.find("BBB_TOGGLE")!=std::string::npos);
     CHECK(diff2.find("\x1b[2J\x1b[H")!=std::string::npos);
     CHECK(diff2.find("AAA_TOGGLE")==std::string::npos);
@@ -140,13 +141,13 @@ TEST(ctrl_k_b_no_previous_buffer_no_crash){
     type(ed, "ONLY_ONE");
     press(ed, InputEventType::Escape);
     TtyRenderer& r = ttyOf(ed);
-    std::string prime = r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
+    std::string prime = r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, makeChromeRequest(Message{}, State::Navegacion), ed.active().selection);
     (void)prime;
     CHECK(!ed.previousBuffer_.valid);
     previousBuffer(ed);
     CHECK(ed.buffers.activeBuffer_==0);
     CHECK(ed.active().document.lineAt(0)=="ONLY_ONE");
     CHECK(ed.statusMessage_.text=="No hay buffer anterior.");
-    std::string full = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, Message{}, State::Navegacion, ed.active().selection);
+    std::string full = r.buildScreen(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, makeChromeRequest(Message{}, State::Navegacion), ed.active().selection);
     CHECK(full.find("ONLY_ONE")!=std::string::npos);
 }

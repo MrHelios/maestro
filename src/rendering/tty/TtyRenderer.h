@@ -4,14 +4,13 @@
 #include <string>
 #include <vector>
 
-#include "app/EditorState.h"
-#include "app/Message.h"
 #include "document/Cursor.h"
 #include "document/Document.h"
 #include "document/Selection.h"
 #include "layout/BracketMatcher.h"
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
+#include "rendering/ChromeRequest.h"
 #include "rendering/Renderer.h"
 #include "rendering/ScreenRenderer.h"
 #include "rendering/Sink.h"
@@ -55,8 +54,7 @@ public:
                             const Viewport& viewport,
                             const std::string& filename,
                             bool modified,
-                            const Message& message,
-                            State state,
+                            const ChromeRequest& chrome,
                             const std::optional<Selection>& selection = std::nullopt,
                             const std::optional<Selection>& searchHighlight = std::nullopt,
                             const std::optional<BracketPair>& bracketPair = std::nullopt);
@@ -66,8 +64,7 @@ public:
                       const Viewport& viewport,
                       const std::string& filename,
                       bool modified,
-                      const Message& message,
-                      State state,
+                      const ChromeRequest& chrome,
                       Sink& sink,
                       const std::optional<Selection>& selection = std::nullopt,
                       const std::optional<Selection>& searchHighlight = std::nullopt,
@@ -81,8 +78,7 @@ public:
                           const Viewport& viewport,
                           const std::string& filename,
                           bool modified,
-                          const Message& message,
-                          State state,
+                          const ChromeRequest& chrome,
                           Sink& sink,
                           const std::optional<Selection>& selection,
                           const std::optional<Selection>& searchHighlight,
@@ -93,8 +89,7 @@ public:
                                const Viewport& viewport,
                                const std::string& filename,
                                bool modified,
-                               const Message& message,
-                               State state,
+                               const ChromeRequest& chrome,
                                const std::optional<Selection>& selection = std::nullopt,
                                const std::optional<Selection>& searchHighlight = std::nullopt,
                                const std::optional<BracketPair>& bracketPair = std::nullopt);
@@ -116,7 +111,7 @@ public:
                                     int selected,
                                     int scroll,
                                     const std::string& path,
-                                    const Message& message,
+                                    const MessageBarData& message,
                                     int width,
                                     int height);
 
@@ -124,19 +119,19 @@ public:
                         int selected,
                         int scroll,
                         const std::string& path,
-                        const Message& message,
+                        const MessageBarData& message,
                         int width,
                         int height,
                         Sink& sink) override;
 
     // SaveAs file list: mismo layout que file list; el input del nombre
-    // llega ya compuesto en `message` (MessageBar, debajo del StatusBar).
+    // llega ya compuesto en `message` (MessageBarData, debajo del StatusBar).
     // Solo cambian etiqueta y accent.
     std::string buildSaveAsFileListScreen(const std::vector<FileListItem>& items,
                                           int selected,
                                           int scroll,
                                           const std::string& path,
-                                          const Message& message,
+                                          const MessageBarData& message,
                                           int width,
                                           int height);
 
@@ -144,7 +139,7 @@ public:
                               int selected,
                               int scroll,
                               const std::string& path,
-                              const Message& message,
+                              const MessageBarData& message,
                               int width,
                               int height,
                               Sink& sink) override;
@@ -177,9 +172,6 @@ public:
     void endFrame(std::string& out) { encoder_.endFrame(out); }
     void hideCursor(std::string& out) { encoder_.hideCursor(out); }
     void showCursor(std::string& out) { encoder_.showCursor(out); }
-    void setCursorStyle(std::string& out, State state) {
-        encoder_.setCursorStyle(out, state);
-    }
     void setCursorStyle(std::string& out, FrameCursorShape shape) {
         encoder_.setCursorStyle(out, shape);
     }
@@ -210,7 +202,7 @@ private:
                                    int selected,
                                    int scroll,
                                    const std::string& path,
-                                   const Message& message,
+                                   const MessageBarData& message,
                                    int width,
                                    int height,
                                    const char* estado,

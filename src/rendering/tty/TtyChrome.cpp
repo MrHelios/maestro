@@ -8,7 +8,7 @@ using namespace chrome;
 namespace {
 
 // Estilo del MessageBar segun el tipo (paso 8). El tipo lo decide
-// la pantalla/el Editor cuando produce el Message; aqui se traduce al color
+// la pantalla/el Editor cuando produce el mensaje; aqui se traduce al color
 // del TtyTheme. Info usa el estilo de mensaje base del TtyTheme; Prompt usa
 // theme.prompt (negrita en los temas por defecto, personalizable).
 const std::string& messageStyle(const TtyTheme& theme, MessageKind kind) {
@@ -213,7 +213,7 @@ void TtyChrome::appendStatusBar(std::string& out, int width,
     out += T.reset; // reset de estilo
 }
 
-std::string TtyChrome::renderMessageBar(int width, const Message& message) const {
+std::string TtyChrome::renderMessageBar(int width, const MessageBarData& message) const {
     std::string out;
     out.reserve(static_cast<size_t>(std::max(0, width)) + 64);
     appendMessageBar(out, width, message);
@@ -221,10 +221,10 @@ std::string TtyChrome::renderMessageBar(int width, const Message& message) const
 }
 
 void TtyChrome::appendMessageBar(std::string& out, int width,
-                              const Message& message) const {
+                              const MessageBarData& message) const {
     const TtyTheme& T = theme_;
     // Fila inferior del chrome: MessageBar (fila propia). El texto se colorea por tipo
-    // (Message.kind); el padding izquierdo y derecho coincide con el del
+    // (MessageBarData.kind); el padding izquierdo y derecho coincide con el del
     // StatusBar superior para alinear el texto.
     out += "\x1b[K";
     // Misma cota: el MessageBar tampoco escribe fuera del ancho.

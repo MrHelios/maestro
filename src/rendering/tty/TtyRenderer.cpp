@@ -65,12 +65,12 @@ void TtyRenderer::toggleTheme() {
 
 std::string TtyRenderer::buildScreen(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
-    const std::string& filename, bool modified, const Message& message,
-    State state, const std::optional<Selection>& selection,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
     Frame f = renderer_.frameBuilder().buildFrame(
-        doc, cursor, viewport, filename, modified, message, state, selection,
+        doc, cursor, viewport, filename, modified, chrome, selection,
         searchHighlight, bracketPair);
     std::string out;
     encoder_.appendFrame(out, f);
@@ -79,38 +79,38 @@ std::string TtyRenderer::buildScreen(
 
 void TtyRenderer::renderScreen(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
-    const std::string& filename, bool modified, const Message& message,
-    State state, Sink& sink,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    Sink& sink,
     const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
     std::string buffer = buildScreen(doc, cursor, viewport, filename, modified,
-                                      message, state, selection,
+                                      chrome, selection,
                                       searchHighlight, bracketPair);
     sink.writeStdout(buffer);
 }
 
 void TtyRenderer::renderScreenDiff(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
-    const std::string& filename, bool modified, const Message& message,
-    State state, Sink& sink,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    Sink& sink,
     const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
     const std::string out =
-        buildDiffFrame(doc, cursor, viewport, filename, modified, message,
-                        state, selection, searchHighlight, bracketPair);
+        buildDiffFrame(doc, cursor, viewport, filename, modified, chrome,
+                        selection, searchHighlight, bracketPair);
     if (!sink.writeStdout(out)) diff_.invalidateCache();
 }
 
 std::string TtyRenderer::buildDiffFrame(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
-    const std::string& filename, bool modified, const Message& message,
-    State state, const std::optional<Selection>& selection,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
     return diff_.buildDiffFrame(doc, cursor, viewport, filename, modified,
-                                 message, state, selection, searchHighlight,
+                                 chrome, selection, searchHighlight,
                                  bracketPair);
 }
 
@@ -195,7 +195,7 @@ void TtyRenderer::renderBufferList(const std::vector<std::string>& names,
 
 std::string TtyRenderer::buildFileListFrame(
     const std::vector<FileListItem>& items, int selected, int scroll,
-    const std::string& path, const Message& message, int width, int height,
+    const std::string& path, const MessageBarData& message, int width, int height,
     const char* estado, StyleRole accent) {
     std::string out;
     encoder_.beginFrame(out);
@@ -225,7 +225,7 @@ std::string TtyRenderer::buildFileListFrame(
 
 std::string TtyRenderer::buildFileListScreen(
     const std::vector<FileListItem>& items, int selected, int scroll,
-    const std::string& path, const Message& message, int width, int height) {
+    const std::string& path, const MessageBarData& message, int width, int height) {
     return buildFileListFrame(items, selected, scroll, path, message, width,
                               height, "ABRIR ARCHIVO", StyleRole::AccentAbrir);
 }
@@ -256,7 +256,7 @@ void TtyRenderer::renderFileListContent(
 void TtyRenderer::renderFileList(const std::vector<FileListItem>& items,
                                  int selected, int scroll,
                                  const std::string& path,
-                                 const Message& message, int width, int height,
+                                 const MessageBarData& message, int width, int height,
                                  Sink& sink) {
     std::string buffer =
         buildFileListScreen(items, selected, scroll, path, message, width, height);
@@ -265,7 +265,7 @@ void TtyRenderer::renderFileList(const std::vector<FileListItem>& items,
 
 std::string TtyRenderer::buildSaveAsFileListScreen(
     const std::vector<FileListItem>& items, int selected, int scroll,
-    const std::string& path, const Message& message, int width, int height) {
+    const std::string& path, const MessageBarData& message, int width, int height) {
     // El input del nombre llega ya compuesto en `message` (lo arma el
     // Editor en el MessageBar, debajo del StatusBar). Solo cambian
     // etiqueta y accent respecto de abrir.
@@ -276,7 +276,7 @@ std::string TtyRenderer::buildSaveAsFileListScreen(
 void TtyRenderer::renderSaveAsFileList(const std::vector<FileListItem>& items,
                                        int selected, int scroll,
                                        const std::string& path,
-                                       const Message& message, int width, int height,
+                                       const MessageBarData& message, int width, int height,
                                        Sink& sink) {
     std::string buffer =
         buildSaveAsFileListScreen(items, selected, scroll, path, message, width, height);

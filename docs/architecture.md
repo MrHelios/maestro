@@ -90,3 +90,26 @@ activa; hoy simplemente no se usa NDEBUG.
   structs de `termios`.
 - Resolver `InputEvent -> acción` fuera del *semantic handling* del Editor
   (los keymaps solo traducen; no conocen modos ni estado).
+
+## 6. Frontera `app/` / `rendering/` (tipos puros, traducción en `app/`)
+
+**Regla:** ningún header de `rendering/` incluye nada de `app/`.
+`Frame` (`rendering/frame/Frame.h`), `ChromeData`/`MessageBarData`
+(`rendering/ChromeData.h`), `ChromeRequest` (`rendering/ChromeRequest.h`),
+`StatusBarData` y `StyleRole` (`rendering/Style.h`) más `MessageKind`
+(`rendering/MessageKind.h`) son zona pura: ni `expiry` temporal ni `State`
+del Editor viajan en ellos, ni siquiera como parámetros (los puertos
+`ScreenRenderer`, `FrameBuilder`, `TtyDiff` y `TtyRenderer` reciben
+`ChromeRequest`/`MessageBarData` ya resueltos).
+
+El `app::Message` (texto + tipo + `expiry`) y el `State` se traducen en
+`app/ChromePresentation.h`, punto común de traducción:
+
+- `toMessageBar`: `Message -> MessageBarData` (solo texto + tipo; el `expiry`
+  nunca entra al rendering porque no es estado visual).
+- `makeChromeRequest`: `(Message, State) -> ChromeRequest` (mensaje +
+  etiqueta + acento + forma del cursor + visibilidad por modo). `app/`
+  (hoy: `Editor::renderFrame`) la invoca antes de llamar al rendering.
+
+Los tests que ejercitan el rendering directamente arman el `ChromeRequest`
+con `makeChromeRequest` (pueden incluir `app/`: son tests, no la frontera).

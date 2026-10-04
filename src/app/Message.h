@@ -6,28 +6,26 @@
 #include <ostream>
 #include <string>
 
+#include "rendering/MessageKind.h"
+
 // ---------------------------------------------------------------------------
 // Mensaje al usuario (paso 8). Un solo tipo reemplaza al trio que antes vivia
 // repartido en el Editor (statusMessage_ + actionMessageActive_ +
 // actionMessageExpiry_): el texto, su tipo y (si no es persistente) el
 // vencimiento viven juntos en un mismo valor.
 //
-// El Editor produce y entrega un Message; ChromeData lo transporta al
-// MessageBar y el backend traduce MessageKind al estilo visual
-// correspondiente. El Editor no dibuja.
+// El Editor produce y entrega un Message; el adaptador (FrameBuilder) lo
+// traduce a MessageBarData (rendering/, solo texto + tipo) y ChromeData lo
+// transporta al MessageBar; el backend traduce MessageKind al estilo visual
+// correspondiente. El Editor no dibuja. rendering/ nunca incluye este
+// header: la direccion es app -> rendering (Message.h incluye
+// rendering/MessageKind.h, nunca al reves).
 //
 // persistence: un Message SIN `expiry` es PERSISTENTE (ayuda de modo,
 // prompts de comando, informacion de estado): se queda hasta que otra cosa
 // lo reemplace y nunca se limpia por tiempo. Un Message CON `expiry` es de
 // ACCION (feedback de una accion ya realizada): expira solo pasado ese
 // momento, para no quedar pegado en pantalla.
-enum class MessageKind {
-    Info,     // informacion normal / ayuda / prompt
-    Success,  // accion realizada correctamente ("Guardado.", "Pegado.")
-    Warning,  // aviso ("Solo hay un buffer.", "Nada para pegar.")
-    Error,    // fallo ("Error al guardar:", "No se pudo leer")
-    Prompt,   // prompt de entrada ("Guardar archivo:") -> negrita (v1.3)
-};
 
 struct Message {
     Message() = default;

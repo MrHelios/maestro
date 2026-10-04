@@ -38,6 +38,7 @@
 #include "layout/Layout.h"
 #include "base/utf8.h"
 #include "layout/Viewport.h"
+#include "app/ChromePresentation.h"
 #include "app/Message.h"
 #include "rendering/tty/TtyRenderer.h"
 
@@ -66,7 +67,7 @@ std::string frameEditor(const std::vector<std::string>& lines,
     cur.col = 0;
     TtyRenderer r;
     return r.buildScreen(doc, cur, vp, "/ruta/proyecto/archivo.txt",
-                         false, Message(msg), State::Navegacion, sel);
+                         false, makeChromeRequest(Message(msg), State::Navegacion), sel);
 }
 
 // BufferSelector: lista de `n` nombres.
@@ -85,7 +86,7 @@ std::string frameFile(int n, int content, int width) {
         items.push_back({"archivo_" + std::to_string(i) + ".cpp", false});
     TtyRenderer tr;
     return tr.buildFileListScreen(items, 0, 0, "/datos/proyecto",
-                                     Message("ayuda: direcc de naveg"), width, content);
+                                     MessageBarData("ayuda: direcc de naveg"), width, content);
 }
 
 // ----- Invariante global de regresion ---------------------------------------
@@ -330,7 +331,7 @@ TEST(regression_gutter_clamped_at_narrow_width) {
             Viewport vp; vp.top = top; vp.height = 6; vp.width = width;
             Cursor cur; cur.line = top; cur.col = 0;
             TtyRenderer r;
-            return r.buildScreen(d, cur, vp, "/ruta/proyecto/archivo.txt", false, Message(""), State::Navegacion, std::nullopt);
+            return r.buildScreen(d, cur, vp, "/ruta/proyecto/archivo.txt", false, makeChromeRequest(Message(""), State::Navegacion), std::nullopt);
         };
         {
             std::string f = frameAt(0);

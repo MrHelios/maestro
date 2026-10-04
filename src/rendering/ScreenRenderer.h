@@ -4,13 +4,12 @@
 #include <string>
 #include <vector>
 
-#include "app/EditorState.h"
-#include "app/Message.h"
 #include "document/Cursor.h"
 #include "document/Document.h"
 #include "document/Selection.h"
 #include "layout/BracketMatcher.h"
 #include "layout/Viewport.h"
+#include "rendering/ChromeRequest.h"
 #include "rendering/Sink.h"
 #include "syntax/SyntaxCache.h"
 
@@ -42,6 +41,13 @@ struct FileListItem {
 // buildDiffFrame, theme(), primitivas del encoder) pertenece a este puerto:
 // eso es API observacional propia de cada backend y la usan sus tests y
 // benches directamente, nunca a través del Editor.
+//
+// FRONTERA app -> rendering: app/ arma la presentación ya resuelta
+// (rendering/ChromeRequest.h vía app/ChromePresentation.h::makeChromeRequest;
+// Message -> MessageBarData vía toMessageBar) y el rendering solo recibe
+// tipos puros: ningún header de rendering/ incluye app/. Los DTOs que
+// circulan por dentro (Frame, ChromeData con MessageBarData, StyleRole)
+// tampoco incluyen nada de app/.
 // ---------------------------------------------------------------------------
 class ScreenRenderer {
 public:
@@ -63,8 +69,7 @@ public:
                                   const Viewport& viewport,
                                   const std::string& filename,
                                   bool modified,
-                                  const Message& message,
-                                  State state,
+                                  const ChromeRequest& chrome,
                                   Sink& sink,
                                   const std::optional<Selection>& selection = std::nullopt,
                                   const std::optional<Selection>& searchHighlight = std::nullopt,
@@ -84,7 +89,7 @@ public:
                                 int selected,
                                 int scroll,
                                 const std::string& path,
-                                const Message& message,
+                                const MessageBarData& message,
                                 int width,
                                 int height,
                                 Sink& sink) = 0;
@@ -98,7 +103,7 @@ public:
                                       int selected,
                                       int scroll,
                                       const std::string& path,
-                                      const Message& message,
+                                      const MessageBarData& message,
                                       int width,
                                       int height,
                                       Sink& sink) = 0;

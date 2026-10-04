@@ -3,8 +3,6 @@
 #include <optional>
 #include <string>
 
-#include "app/EditorState.h"
-#include "app/Message.h"
 #include "document/Cursor.h"
 #include "document/Document.h"
 #include "document/Selection.h"
