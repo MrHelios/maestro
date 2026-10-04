@@ -478,8 +478,8 @@ TEST(render_diff_chrome_status_and_message_isolated) {
 
 // Mismo texto, distinto MessageKind: el estilo del MessageBar cambia, asi
 // que el diff debe repintar la fila inferior (congela que `kind` forma parte
-// de la igualdad visual: sameRenderedChrome). Complemento: solo cambia
-// `expiry` -> sin cambio visual -> no repinta el chrome.
+// de la igualdad visual del ChromeData). Complemento: mismo texto y kind
+// (el `expiry` ya no viaja al rendering) -> sin repintado del chrome.
 TEST(render_diff_mismo_texto_distinto_kind_repinta) {
     DiffHarness h(10);
     Buffer& b = h.buf();

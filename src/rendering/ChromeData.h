@@ -50,15 +50,9 @@ inline bool operator==(const ChromeData& a, const ChromeData& b) {
     return a.statusBar == b.statusBar && a.message == b.message;
 }
 
-// Igualdad visual: ¿producirian A y B los mismos bytes en TtyChrome?
-// Compara el estado observable por el renderer (StatusBar + text/kind del
-// MessageBar). Se conserva como alias de operator== para los callers del
-// diff: el DTO ya no lleva `expiry`, asi que la igualdad estructural ES la
-// visual (antes habia que ignorar expiry a proposito).
-inline bool sameRenderedChrome(const ChromeData& a, const ChromeData& b) {
-    return a.statusBar == b.statusBar && a.message.text == b.message.text &&
-           a.message.kind == b.message.kind;
-}
+// NOTA: no hay `sameRenderedChrome` separado: el DTO solo lleva estado
+// visual (StatusBar + text/kind del MessageBar), asi que la igualdad
+// estructural ES la igualdad visual. El diff usa operator== directo.
 
 inline bool operator!=(const ChromeData& a, const ChromeData& b) {
     return !(a == b);
