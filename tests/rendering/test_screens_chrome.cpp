@@ -288,8 +288,11 @@ std::string frameSaveAs(int content, int width, const Message& message) {
 }
 
 Message saveAsInput(const std::string& fileName) {
+    // "Nombre del Archivo: ".size() == 20: igual que el objeto real del
+    // Editor (ver kHelpSaveAsPrompt), para que la igualdad de MessageBarData
+    // (que incluye boldPrefix) no diverja del código bajo test.
     return Message{"Nombre del Archivo: " + fileName + " (Control+S para Guardar)",
-                   MessageKind::Prompt, std::nullopt};
+                   MessageKind::Prompt, std::nullopt, std::nullopt, 20};
 }
 
 TEST(saveas_screen_shows_input_line_and_estado) {

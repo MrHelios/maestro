@@ -102,6 +102,7 @@ inline MessageBarData toMessageBar(const Message& m) {
     b.text = m.text;
     b.kind = m.kind;
     b.cursor = m.cursor;
+    b.boldPrefix = m.boldPrefix;
     return b;
 }
 

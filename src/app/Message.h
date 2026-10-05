@@ -36,8 +36,9 @@ struct Message {
     // Ctor completo: lo usan setStatusMessage/setActionMessage.
     Message(std::string t, MessageKind k,
             std::optional<std::chrono::steady_clock::time_point> e,
-            std::optional<int> c = std::nullopt)
-        : text(std::move(t)), kind(k), expiry(e), cursor(c) {}
+            std::optional<int> c = std::nullopt,
+            std::optional<int> boldPrefix = std::nullopt)
+        : text(std::move(t)), kind(k), expiry(e), cursor(c), boldPrefix(boldPrefix) {}
 
     std::string text;
     MessageKind kind = MessageKind::Info;
@@ -48,6 +49,18 @@ struct Message {
     // con decoraciones como " - not found" o " (Control+S...)" después).
     // nullopt => al final del texto visible (mensajes sin input).
     std::optional<int> cursor;
+    // Longitud en bytes del prefijo a pintar en negrita (etiqueta del
+    // prompt: "Find: ", "ir a fila: ", ...). nullopt => todo el texto con
+    // el estilo de `kind` (comportamiento anterior). Cuando tiene valor,
+    // solo esos primeros bytes van en negrita; el resto (input del usuario
+    // + sufijos decorativos) va sin negrita.
+    // Contrato: nullopt = legacy; con valor, siempre >= 0 (una longitud no
+    // puede ser negativa). Además debe caer en un límite UTF-8 válido del
+    // texto: los prompts actuales usan etiquetas fijas ASCII ("Find: ",
+    // "ir a fila: ", ...), así que se cumple por construcción. Los
+    // productores (ver promptBoldPrefix en Editor.cpp) solo generan valores
+    // >= 0; un negativo es un bug.
+    std::optional<int> boldPrefix;
 
     bool persistent() const { return !expiry.has_value(); }
     bool expired() const {

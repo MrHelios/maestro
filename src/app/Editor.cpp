@@ -43,6 +43,12 @@ constexpr const char* kHelpSaveAsSuffix = " (Control+S para Guardar)";
 inline int promptCursor(const char* prompt, const std::string& query) {
     return static_cast<int>(std::string(prompt).size() + query.size());
 }
+// Longitud en bytes de la etiqueta del prompt ("Find: ", "ir a fila: ",
+// ...): es lo unico que va en negrita; el input del usuario y los sufijos
+// decorativos van sin negrita (ver Message::boldPrefix).
+inline int promptBoldPrefix(const char* prompt) {
+    return static_cast<int>(std::string(prompt).size());
+}
 // Limite superior del nombre (basename): NAME_MAX en ext4 = 255 bytes.
 // Se cuenta en bytes (no caracteres) porque el filesystem cuenta bytes;
 // UTF-8 multibyte cuenta multiple. El path completo ademas se valida
@@ -299,8 +305,9 @@ bool Editor::isClipboardEmpty() const {
 }
 
 void Editor::setStatusMessage(const std::string& msg, MessageKind kind,
-                               std::optional<int> cursor) {
-    statusMessage_ = Message{msg, kind, std::nullopt, cursor};
+                               std::optional<int> cursor,
+                               std::optional<int> boldPrefix) {
+    statusMessage_ = Message{msg, kind, std::nullopt, cursor, boldPrefix};
 }
 
 void Editor::setActionMessage(const std::string& msg, MessageKind kind) {
@@ -1235,7 +1242,8 @@ void Editor::renderFrame() {
             shown = Message{std::string(kHelpSaveAsPrompt) + saveAsFileName_ +
                                 kHelpSaveAsSuffix,
                             MessageKind::Prompt, std::nullopt,
-                            promptCursor(kHelpSaveAsPrompt, saveAsFileName_)};
+                            promptCursor(kHelpSaveAsPrompt, saveAsFileName_),
+                            promptBoldPrefix(kHelpSaveAsPrompt)};
         }
         renderer_->renderSaveAsFileList(items,
                                         fileBrowser.index_, fileBrowser.scroll_,
@@ -2442,7 +2450,8 @@ void Editor::startSearch() {
     clearSearchHighlight();
     state_ = State::Busqueda;
     setStatusMessage(std::string(kHelpBusqueda), MessageKind::Prompt,
-                     promptCursor(kHelpBusqueda, searchQuery_));
+                     promptCursor(kHelpBusqueda, searchQuery_),
+                     promptBoldPrefix(kHelpBusqueda));
 }
 
 std::vector<Position> Editor::collectMatches(const std::string& query) const {
@@ -2472,7 +2481,8 @@ void Editor::updateSearchMessage(bool found, int current, int total) {
     }
     // El cursor queda al final de la query, antes de " - not found"/" (i/N)".
     setStatusMessage(msg, MessageKind::Prompt,
-                     promptCursor(kHelpBusqueda, searchQuery_));
+                     promptCursor(kHelpBusqueda, searchQuery_),
+                     promptBoldPrefix(kHelpBusqueda));
 }
 
 void Editor::setSearchHighlight(const Position& pos, int len) {
@@ -2882,7 +2892,8 @@ void Editor::startGoToLine() {
     goToLineQuery_.clear();
     state_ = State::IrAFila;
     setStatusMessage(std::string(kHelpIrAFila), MessageKind::Prompt,
-                     promptCursor(kHelpIrAFila, goToLineQuery_));
+                     promptCursor(kHelpIrAFila, goToLineQuery_),
+                     promptBoldPrefix(kHelpIrAFila));
 }
 
 void Editor::handleIrAFilaEvent(const InputEvent& event) {
@@ -2892,14 +2903,16 @@ void Editor::handleIrAFilaEvent(const InputEvent& event) {
             if (event.text.size() == 1 && event.text[0] >= '0' && event.text[0] <= '9') {
                 goToLineQuery_ += event.text;
                 setStatusMessage(std::string(kHelpIrAFila) + goToLineQuery_, MessageKind::Prompt,
-                                 promptCursor(kHelpIrAFila, goToLineQuery_));
+                                 promptCursor(kHelpIrAFila, goToLineQuery_),
+                                 promptBoldPrefix(kHelpIrAFila));
             }
             break;
         case InputEventType::Backspace:
             if (!goToLineQuery_.empty()) {
                 goToLineQuery_.pop_back();
                 setStatusMessage(std::string(kHelpIrAFila) + goToLineQuery_, MessageKind::Prompt,
-                                 promptCursor(kHelpIrAFila, goToLineQuery_));
+                                 promptCursor(kHelpIrAFila, goToLineQuery_),
+                                 promptBoldPrefix(kHelpIrAFila));
             }
             break;
         case InputEventType::InsertNewline: {
@@ -2923,11 +2936,13 @@ void Editor::handleIrAFilaEvent(const InputEvent& event) {
                     } else {
                         // Unificamos el feedback en el propio prompt para evitar
                         // la sobrescritura inmediata entre setActionMessage y setStatusMessage.
-                        setStatusMessage(std::string(kHelpIrAFila) + " [1-" + std::to_string(maxLines) + "]", MessageKind::Error);
+                        setStatusMessage(std::string(kHelpIrAFila) + " [1-" + std::to_string(maxLines) + "]", MessageKind::Error,
+                                         std::nullopt, promptBoldPrefix(kHelpIrAFila));
                         goToLineQuery_.clear();
                     }
                 } catch (const std::out_of_range&) {
-                    setStatusMessage(std::string(kHelpIrAFila) + " [valor invalido]", MessageKind::Error);
+                    setStatusMessage(std::string(kHelpIrAFila) + " [valor invalido]", MessageKind::Error,
+                                     std::nullopt, promptBoldPrefix(kHelpIrAFila));
                     goToLineQuery_.clear();
                 }
             }
@@ -2964,7 +2979,8 @@ void Editor::startRename() {
     state_ = State::Renombrar;
     setStatusMessage(std::string(kHelpRenombrar) + renameQuery_,
                      MessageKind::Prompt,
-                     promptCursor(kHelpRenombrar, renameQuery_));
+                     promptCursor(kHelpRenombrar, renameQuery_),
+                     promptBoldPrefix(kHelpRenombrar));
 }
 
 void Editor::handleRenameEvent(const InputEvent& event) {
@@ -2988,13 +3004,15 @@ void Editor::handleRenameEvent(const InputEvent& event) {
                         std::string(kHelpRenombrar) + renameQuery_ +
                             " [max 255 bytes]",
                         MessageKind::Error,
-                        promptCursor(kHelpRenombrar, renameQuery_));
+                        promptCursor(kHelpRenombrar, renameQuery_),
+                        promptBoldPrefix(kHelpRenombrar));
                 } else {
                     renameQuery_ += event.text;
                     setStatusMessage(
                         std::string(kHelpRenombrar) + renameQuery_,
                         MessageKind::Prompt,
-                        promptCursor(kHelpRenombrar, renameQuery_));
+                        promptCursor(kHelpRenombrar, renameQuery_),
+                        promptBoldPrefix(kHelpRenombrar));
                 }
             }
             break;
@@ -3009,7 +3027,8 @@ void Editor::handleRenameEvent(const InputEvent& event) {
                 setStatusMessage(
                     std::string(kHelpRenombrar) + renameQuery_,
                     MessageKind::Prompt,
-                    promptCursor(kHelpRenombrar, renameQuery_));
+                    promptCursor(kHelpRenombrar, renameQuery_),
+                    promptBoldPrefix(kHelpRenombrar));
             }
             break;
         case InputEventType::InsertNewline:
@@ -3033,13 +3052,15 @@ void Editor::commitRename() {
     if (q.empty()) {
         setStatusMessage(std::string(kHelpRenombrar) + "[nombre vacio]",
                          MessageKind::Error,
-                         promptCursor(kHelpRenombrar, q));
+                         promptCursor(kHelpRenombrar, q),
+                         promptBoldPrefix(kHelpRenombrar));
         return;
     }
     if (q.size() > kMaxRenameBytes) {
         setStatusMessage(std::string(kHelpRenombrar) + "[max 255 bytes]",
                          MessageKind::Error,
-                         promptCursor(kHelpRenombrar, q));
+                         promptCursor(kHelpRenombrar, q),
+                         promptBoldPrefix(kHelpRenombrar));
         return;
     }
     if (q == "." || q == ".." ||
@@ -3048,7 +3069,8 @@ void Editor::commitRename() {
         setStatusMessage(
             std::string(kHelpRenombrar) + "[nombre invalido: sin rutas]",
             MessageKind::Error,
-            promptCursor(kHelpRenombrar, q));
+            promptCursor(kHelpRenombrar, q),
+            promptBoldPrefix(kHelpRenombrar));
         return;
     }
     const std::string oldPath = b.filename;

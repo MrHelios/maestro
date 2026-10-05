@@ -251,7 +251,8 @@ private:
     // kActionMessageTimeout: se limpia solo pasado ese tiempo, para no
     // quedar pegado en pantalla.
     void setStatusMessage(const std::string& msg, MessageKind kind = MessageKind::Info,
-                           std::optional<int> cursor = std::nullopt);
+                           std::optional<int> cursor = std::nullopt,
+                           std::optional<int> boldPrefix = std::nullopt);
     void setActionMessage(const std::string& msg, MessageKind kind = MessageKind::Info);
     // En el ciclo principal, si hay un mensaje de accion expirado se limpia
     // (statusMessage_ pasa a vacio). Nunca toca los persistentes.

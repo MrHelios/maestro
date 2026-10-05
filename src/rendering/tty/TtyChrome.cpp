@@ -1,6 +1,7 @@
 #include "rendering/tty/TtyChrome.h"
 
 #include <algorithm>
+#include <cassert>
 #include "rendering/RenderUtil.h"
 
 using namespace chrome;
@@ -226,6 +227,9 @@ void TtyChrome::appendMessageBar(std::string& out, int width,
     // Fila inferior del chrome: MessageBar (fila propia). El texto se colorea por tipo
     // (MessageBarData.kind); el padding izquierdo y derecho coincide con el del
     // StatusBar superior para alinear el texto.
+    // Si hay boldPrefix: solo esos primeros bytes van en negrita
+    // (theme.prompt, etiqueta del prompt); el resto (input del usuario +
+    // sufijos decorativos) va sin negrita.
     out += "\x1b[K";
     // Misma cota: el MessageBar tampoco escribe fuera del ancho.
     // El padding derecho cede ante un terminal muy angosto.
@@ -233,11 +237,39 @@ void TtyChrome::appendMessageBar(std::string& out, int width,
     const int msgPadR = std::min(kChromePadRight,
                                  std::max(0, width - msgPadL));
     out.append(static_cast<size_t>(msgPadL), ' ');
-    const std::string& style = messageStyle(T, message.kind);
-    out += style;
-    out += utf8::truncate(message.text,
-                          std::max(0, width - msgPadL - msgPadR));
-    if (!style.empty()) out += T.reset;
+    const int avail = std::max(0, width - msgPadL - msgPadR);
+    const std::string vis =
+        utf8::truncate(message.text, avail);
+    if (message.boldPrefix.has_value() && *message.boldPrefix > 0) {
+        // Invariante del DTO (ver ChromeData.h): el prefijo es >= 0 y cae
+        // en un límite UTF-8 válido (las etiquetas son ASCII, se cumple por
+        // construcción). El truncado previo también cae en borde de
+        // carácter, así que el min() con lo visible sigue siendo seguro.
+        // No se repara un negativo silenciosamente: es un bug del productor.
+        assert(*message.boldPrefix >= 0);
+        int preBytes = *message.boldPrefix;
+        if (preBytes > static_cast<int>(vis.size())) preBytes = static_cast<int>(vis.size());
+        const std::string pre = vis.substr(0, static_cast<size_t>(preBytes));
+        const std::string suf = vis.substr(static_cast<size_t>(preBytes));
+        if (!pre.empty()) {
+            out += T.prompt;
+            out += pre;
+            if (!T.prompt.empty()) out += T.reset;
+        }
+        if (!suf.empty()) {
+            const std::string& sufStyle = (message.kind == MessageKind::Prompt)
+                                              ? T.message
+                                              : messageStyle(T, message.kind);
+            out += sufStyle;
+            out += suf;
+            if (!sufStyle.empty()) out += T.reset;
+        }
+    } else {
+        const std::string& style = messageStyle(T, message.kind);
+        out += style;
+        out += vis;
+        if (!style.empty()) out += T.reset;
+    }
     out.append(static_cast<size_t>(msgPadR), ' ');
 }
 

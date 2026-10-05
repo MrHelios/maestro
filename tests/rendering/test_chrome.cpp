@@ -344,6 +344,15 @@ TEST(chrome_prompt_message_styled) {
     const std::string out = bar.render(area, d);
     CHECK(out.find(t.prompt + "Guardar archivo: /tmp/x") != std::string::npos);
 
+    // Con boldPrefix solo la etiqueta va en negrita: el input/resto va sin
+    // negrita (hay un reset entre ambos tramos, ya no son contiguos).
+    ChromeData split = d;
+    split.message.boldPrefix = 17;  // "Guardar archivo: ".size()
+    const std::string outSplit = bar.render(area, split);
+    CHECK(outSplit.find(t.prompt + "Guardar archivo: ") != std::string::npos);
+    CHECK(outSplit.find(t.prompt + "Guardar archivo: /tmp/x") == std::string::npos);
+    CHECK(outSplit.find("/tmp/x") != std::string::npos);
+
     ChromeData c = d;
     c.message = MessageBarData("ayuda", MessageKind::Info);
     CHECK(bar.render(area, c).find(t.prompt) == std::string::npos);

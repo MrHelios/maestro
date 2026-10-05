@@ -70,6 +70,24 @@ TEST(chrome_presentation_message_drops_expiry) {
     CHECK(bar.kind == MessageKind::Error);
 }
 
+TEST(chrome_presentation_message_propagates_cursor_and_bold_prefix) {
+    // El cursor de edición y el prefijo en negrita sí viajan al rendering
+    // (solo el `expiry` temporal se queda en app/).
+    Message m(std::string("Find: ho"), MessageKind::Prompt, std::nullopt,
+              8, 6);
+    const MessageBarData bar = toMessageBar(m);
+    CHECK(bar.text == "Find: ho");
+    CHECK(bar.kind == MessageKind::Prompt);
+    CHECK(bar.cursor.has_value());
+    CHECK_EQ(*bar.cursor, 8);
+    CHECK(bar.boldPrefix.has_value());
+    CHECK_EQ(*bar.boldPrefix, 6);
+
+    // Sin prefijo sigue siendo nullopt (mensajes no-prompt).
+    const MessageBarData plain = toMessageBar(Message("hola"));
+    CHECK(!plain.boldPrefix.has_value());
+}
+
 TEST(chrome_presentation_request_assembles_all_fields) {
     Message m("nota", MessageKind::Prompt, std::nullopt);
     const ChromeRequest r = makeChromeRequest(m, State::Busqueda);

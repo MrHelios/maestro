@@ -9,6 +9,7 @@
 #include "rendering/RenderUtil.h"
 #include "rendering/Sink.h"
 #include "rendering/tty/TtyRenderer.h"
+#include "rendering/tty/TtyChrome.h"
 #include "helpers/test_render_utils.h"
 #include "helpers/test_tty_renderer.h"
 #define private public
@@ -196,12 +197,16 @@ TEST(messagebar_busqueda_editor_escribir_mueve_cursor) {
     CHECK(contains(f0, Ansi::CURSOR_BLINK));
     typeBytes(ed, "ho");
     std::string f1 = fullFrame(ed, sink);
-    CHECK(contains(f1, "Find: ho"));
+    // Con boldPrefix solo la etiqueta va en negrita: hay un reset ANSI entre
+    // "Find: " y la query, asi que no son contiguos en el frame.
+    CHECK(contains(f1, "Find: "));
+    CHECK(contains(f1, "ho"));
     CHECK(!contains(f1, expectedDocSeq(ed)));
     CHECK_EQ(countOccurrences(f1, Ansi::CURSOR_SHOW), 1);
     press(ed, InputEventType::Backspace);
     std::string f2 = fullFrame(ed, sink);
-    CHECK(contains(f2, "Find: h"));
+    CHECK(contains(f2, "Find: "));
+    CHECK(contains(f2, "h"));
     CHECK(!contains(f2, expectedDocSeq(ed)));
     CHECK_EQ(countOccurrences(f2, Ansi::CURSOR_SHOW), 1);
 }
@@ -220,7 +225,9 @@ TEST(messagebar_busqueda_notfound_cursor_despues_de_query) {
     Viewport vp = ed.active().viewport;
     const std::string row = std::to_string(vp.height + 2);
     std::string f = fullFrame(ed, sink);
-    CHECK(contains(f, "Find: xyz - not found"));
+    // Etiqueta en negrita + resto sin negrita: no contiguos por el reset.
+    CHECK(contains(f, "Find: "));
+    CHECK(contains(f, "xyz - not found"));
     CHECK_EQ(countOccurrences(f, "\x1b[" + row + ";11H"), 1);
     CHECK(!contains(f, "\x1b[" + row + ";23H"));
     CHECK_EQ(countOccurrences(f, Ansi::CURSOR_SHOW), 1);
@@ -240,7 +247,8 @@ TEST(messagebar_busqueda_contador_cursor_despues_de_query) {
     Viewport vp = ed.active().viewport;
     const std::string row = std::to_string(vp.height + 2);
     std::string f = fullFrame(ed, sink);
-    CHECK(contains(f, "Find: ho (1/2)"));
+    CHECK(contains(f, "Find: "));
+    CHECK(contains(f, "ho (1/2)"));
     CHECK_EQ(countOccurrences(f, "\x1b[" + row + ";10H"), 1);
     CHECK(!contains(f, "\x1b[" + row + ";15H"));
     CHECK_EQ(countOccurrences(f, Ansi::CURSOR_SHOW), 1);
@@ -257,7 +265,9 @@ TEST(messagebar_irafila_editor_escribir_mueve_cursor) {
     CHECK(ed.getStateForTesting() == State::IrAFila);
     typeBytes(ed, "2");
     std::string f1 = fullFrame(ed, sink);
-    CHECK(contains(f1, "ir a fila: 2"));
+    // Solo la etiqueta va en negrita (reset entre etiqueta y query).
+    CHECK(contains(f1, "ir a fila: "));
+    CHECK(ed.getGoToLineQueryForTesting() == "2");
     CHECK(!contains(f1, expectedDocSeq(ed)));
     CHECK_EQ(countOccurrences(f1, Ansi::CURSOR_SHOW), 1);
     CHECK(contains(f1, Ansi::CURSOR_BLINK));
@@ -354,6 +364,26 @@ TEST(messagebar_utf8_wide_cursor_truncado_con_ancho_angosto) {
     CHECK(!contains(frame, "\x1b[7;30H"));
     CHECK_EQ(countOccurrences(frame, Ansi::CURSOR_SHOW), 1);
     CHECK(contains(frame, Ansi::CURSOR_BLINK));
+}
+
+// Solo la etiqueta del prompt va en negrita: el input del usuario y los
+// sufijos decorativos van sin negrita (reset entre ambos tramos).
+TEST(messagebar_solo_etiqueta_en_negrita) {
+    TtyChrome chrome;
+    const TtyTheme& T = chrome.theme();
+    MessageBarData msg{std::string("ir a fila: 85"), MessageKind::Prompt};
+    msg.boldPrefix = 11;
+    const std::string row = chrome.renderMessageBar(40, msg);
+    // Estructura exacta prefix/reset/suffix: la etiqueta sale en negrita y
+    // la query aparece justo tras el reset, fuera del modo bold (el estilo
+    // del sufijo en Prompt es T.message, sin negrita). Esto demuestra que
+    // el input salió del bold, no solo que el texto está presente.
+    CHECK(contains(row, T.prompt + "ir a fila: " + T.reset + T.message + "85"));
+    // El mensaje completo NO va en un solo tramo en negrita.
+    CHECK(!contains(row, T.prompt + "ir a fila: 85"));
+    // Sin prefijo: comportamiento anterior (todo con el estilo del kind).
+    MessageBarData legacy{std::string("ir a fila: 85"), MessageKind::Prompt};
+    CHECK(contains(chrome.renderMessageBar(40, legacy), T.prompt + "ir a fila: 85"));
 }
 
 // Terminal degeneradamente angosta (width=1): padL consume la única columna,

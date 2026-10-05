@@ -35,6 +35,17 @@ struct MessageBarData {
     // texto visible. Lo pone app/ (ver app/Message.h::cursor); el rendering
     // solo lo posiciona (ver chrome::messageBarCursorCell).
     std::optional<int> cursor;
+    // Longitud en bytes del prefijo en negrita (etiqueta del prompt).
+    // nullopt => todo el texto con el estilo de `kind`. Con valor: solo
+    // esos primeros bytes en negrita (theme.prompt); el resto sin negrita
+    // (input del usuario + sufijos decorativos).
+    // Contrato: nullopt = legacy; con valor, siempre >= 0 y sobre un límite
+    // UTF-8 válido del texto (las etiquetas de prompt son ASCII, así que se
+    // cumple por construcción). Un valor mayor que el texto visible se
+    // recorta a lo visible (terminal angosta); un negativo, o un corte en
+    // medio de un carácter multibyte, es un bug del productor, nunca un caso
+    // a reparar aquí.
+    std::optional<int> boldPrefix;
 
     bool empty() const { return text.empty(); }
 };
@@ -45,7 +56,8 @@ inline constexpr int kMessageBarPadLeft = 1;
 inline constexpr int kMessageBarPadRight = 3;
 
 inline bool operator==(const MessageBarData& a, const MessageBarData& b) {
-    return a.text == b.text && a.kind == b.kind && a.cursor == b.cursor;
+    return a.text == b.text && a.kind == b.kind && a.cursor == b.cursor &&
+           a.boldPrefix == b.boldPrefix;
 }
 
 inline bool operator!=(const MessageBarData& a, const MessageBarData& b) {
