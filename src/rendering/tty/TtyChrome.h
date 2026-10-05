@@ -27,8 +27,10 @@
 // ---------------------------------------------------------------------------
 
 // ---- Padding por fila (StatusBar y MessageBar comparten valores) ----
-inline constexpr int kChromePadLeft = 1;   // espacio inicial antes del nombre
-inline constexpr int kChromePadRight = 3;   // margen derecho: bloque (%, fila,col) no pegado al borde
+// Fuente canónica en rendering/ChromeData.h (zona neutra, la usa también
+// el cálculo del cursor en el MessageBar). Aliases para compatibilidad.
+inline constexpr int kChromePadLeft = kMessageBarPadLeft;   // espacio inicial antes del nombre
+inline constexpr int kChromePadRight = kMessageBarPadRight;   // margen derecho: bloque (%, fila,col) no pegado al borde
 
 // Componente del chrome inferior. Dibuja la fila fija (StatusBar) y la
 // fila del MessageBar dentro del area que le da el Renderer. Es la ultima

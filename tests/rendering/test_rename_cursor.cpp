@@ -6,6 +6,7 @@
 #include "layout/Gutter.h"
 #include "layout/Layout.h"
 #include "platform/InputEvent.h"
+#include "rendering/RenderUtil.h"
 #include "rendering/Sink.h"
 #include "rendering/tty/TtyRenderer.h"
 #include "helpers/test_render_utils.h"
@@ -16,15 +17,15 @@
 #undef private
 
 // Cursor durante Renombrar (Ctrl+K r):
-// - cursorVisibleForMode(Renombrar) == true (solo Busqueda oculta).
-// - El renderer pinta UN solo cursor (un CUP + un SHOW) en la posicion
-//   del documento; el prompt vive como texto en el MessageBar (igual que
-//   IrAFila: ningun prompt mueve el cursor fisico al chrome).
-// - Tras Enter/Esc el prompt desaparece del MessageBar y el cursor sigue
-//   siendo unico en el lugar del archivo.
+// - cursorVisibleForMode(Renombrar) == true y cursorInMessageBar == true.
+// - El renderer pinta UN solo cursor parpadeante (un CUP + un SHOW) al final
+//   del texto del MessageBar; el cursor del documento se desactiva.
+// - Tras Enter/Esc el prompt desaparece del MessageBar y el cursor vuelve
+//   al archivo (un solo CUP en el documento).
 
 namespace Ansi {
 constexpr const char* CURSOR_SHOW = "\x1b[?25h";
+constexpr const char* CURSOR_BLINK = "\x1b[1 q";
 }
 
 namespace {
@@ -101,12 +102,17 @@ std::string expectedCursorSeq(Editor& ed) {
 
 TEST(rename_cursorVisibleForMode_es_true) {
     CHECK(cursorVisibleForMode(State::Renombrar));
-    CHECK(!cursorVisibleForMode(State::Busqueda));
+    CHECK(cursorVisibleForMode(State::Busqueda));
     CHECK(cursorVisibleForMode(State::Navegacion));
     CHECK(cursorVisibleForMode(State::IrAFila));
+    CHECK(cursorInMessageBarFor(State::Renombrar));
+    CHECK(cursorInMessageBarFor(State::Busqueda));
+    CHECK(cursorInMessageBarFor(State::IrAFila));
+    CHECK(cursorInMessageBarFor(State::SaveAsFileBrowser));
+    CHECK(!cursorInMessageBarFor(State::Navegacion));
 }
 
-TEST(rename_prompt_cursor_unico_en_posicion_documento) {
+TEST(rename_prompt_cursor_unico_en_messagebar) {
     Document doc;
     doc.restore({"hola mundo"});
     Viewport vp;
@@ -120,19 +126,26 @@ TEST(rename_prompt_cursor_unico_en_posicion_documento) {
     TtyRenderer r;
     Message prompt{std::string("Nombre del archivo: orig.txt"),
                    MessageKind::Prompt, std::nullopt};
+    ChromeRequest chrome = makeChromeRequest(prompt, State::Renombrar);
     std::string frame = r.buildScreen(doc, cur, vp, "t", false,
-                                      makeChromeRequest(prompt, State::Renombrar),
+                                      chrome,
                                       std::nullopt, std::nullopt);
     CHECK(contains(frame, "Nombre del archivo:"));
-    const std::string seq = cursorMoveSeq(doc, cur, vp);
-    CHECK_EQ(countOccurrences(frame, seq), 1);
+    Layout layout = computeLayout(vp.height + kChromeRows, vp.width);
+    CellPos mbar = chrome::messageBarCursorCell(layout.chrome, chrome.message);
+    CHECK(mbar.valid());
+    const std::string mbarSeq = "\x1b[" + std::to_string(mbar.row + 1) +
+                                ";" + std::to_string(mbar.col + 1) + "H";
+    const std::string docSeq = cursorMoveSeq(doc, cur, vp);
+    CHECK(!contains(frame, docSeq));
+    CHECK_EQ(countOccurrences(frame, mbarSeq), 1);
     CHECK_EQ(countOccurrences(frame, Ansi::CURSOR_SHOW), 1);
-    // Contraste: Busqueda oculta el cursor en la misma posicion.
-    std::string fBus = r.buildScreen(doc, cur, vp, "t", false,
-                                     makeChromeRequest("", State::Busqueda),
+    CHECK(contains(frame, Ansi::CURSOR_BLINK));
+    // Contraste: Navegacion sigue en el documento.
+    std::string fNav = r.buildScreen(doc, cur, vp, "t", false,
+                                     makeChromeRequest("", State::Navegacion),
                                      std::nullopt, std::nullopt);
-    CHECK(!contains(fBus, Ansi::CURSOR_SHOW));
-    CHECK(!contains(fBus, seq));
+    CHECK(contains(fNav, docSeq));
 }
 
 TEST(rename_esc_saca_prompt_y_cursor_vuelve_al_archivo) {
@@ -146,16 +159,18 @@ TEST(rename_esc_saca_prompt_y_cursor_vuelve_al_archivo) {
 
     openRename(ed);
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Renombrar));
-    const std::string seq = expectedCursorSeq(ed);
+    const std::string docSeq = expectedCursorSeq(ed);
     std::string during = fullFrame(ed, sink);
     CHECK(contains(during, "Nombre del archivo:"));
-    CHECK_EQ(countOccurrences(during, seq), 1);
+    // Durante el prompt el cursor del documento se desactiva.
+    CHECK(!contains(during, docSeq));
     CHECK_EQ(countOccurrences(during, Ansi::CURSOR_SHOW), 1);
+    CHECK(contains(during, Ansi::CURSOR_BLINK));
 
     press(ed, InputEventType::Escape);
     std::string after = fullFrame(ed, sink);
     CHECK(!contains(after, "Nombre del archivo:"));
-    CHECK_EQ(countOccurrences(after, seq), 1);
+    CHECK_EQ(countOccurrences(after, docSeq), 1);
     CHECK_EQ(countOccurrences(after, Ansi::CURSOR_SHOW), 1);
 }
 

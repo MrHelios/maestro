@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 
 #include "rendering/MessageKind.h"
@@ -29,12 +30,22 @@ struct MessageBarData {
 
     std::string text;
     MessageKind kind = MessageKind::Info;
+    // Byte offset dentro de `text` donde va el cursor de edición (prompts
+    // con input al inicio + decoraciones después). nullopt => al final del
+    // texto visible. Lo pone app/ (ver app/Message.h::cursor); el rendering
+    // solo lo posiciona (ver chrome::messageBarCursorCell).
+    std::optional<int> cursor;
 
     bool empty() const { return text.empty(); }
 };
 
+// Padding del MessageBar (fuente neutra compartida entre TtyChrome y el
+// cálculo del cursor en el MessageBar). TtyChrome.h mantiene aliases.
+inline constexpr int kMessageBarPadLeft = 1;
+inline constexpr int kMessageBarPadRight = 3;
+
 inline bool operator==(const MessageBarData& a, const MessageBarData& b) {
-    return a.text == b.text && a.kind == b.kind;
+    return a.text == b.text && a.kind == b.kind && a.cursor == b.cursor;
 }
 
 inline bool operator!=(const MessageBarData& a, const MessageBarData& b) {

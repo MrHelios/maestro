@@ -4,9 +4,12 @@
 #include <string>
 #include <string_view>
 #include "base/utf8.h"
+#include "layout/Layout.h"
+#include "platform/CellPos.h"
+#include "rendering/ChromeData.h"
 
-// Helpers de texto/UTF-8 compartidos entre el Renderer (que arma el frame)
-// y el TtyChrome (que arma el chrome: StatusBar + MessageBar). Viven en un
+// Helpers puros compartidos entre el Renderer (que arma el frame) y el
+// TtyChrome (que arma el chrome: StatusBar + MessageBar). Viven en un
 // header para poder usarse desde ambos .cpp sin duplicar codigo.
 namespace chrome {
 
@@ -62,6 +65,42 @@ inline std::string collapseHome(const std::string& path) {
     if (path.size() > h.size() && path[h.size()] != '/')
         return path;
     return "~" + path.substr(h.size());
+}
+
+// Celda 0-based del cursor de edición del MessageBar. Replica el
+// truncado/padding de TtyChrome::appendMessageBar para que el CUP caiga
+// sobre lo pintado. `chromeArea` es layout.chrome.
+// Requiere height>=2 (si no hay MessageBar devuelve CellPos inválida).
+// Con msg.cursor (byte offset al final del input, antes de decoraciones
+// como " - not found" o " (Control+S...)") el cursor va ahí; sin él, al
+// final del texto visible. Siempre clampado a lo visible y a maxCol.
+inline CellPos messageBarCursorCell(const Rect& chromeArea,
+                                    const MessageBarData& msg) {
+    if (chromeArea.height < 2 || chromeArea.width <= 0) return CellPos{};
+    const int width = chromeArea.width;
+    const int padL =
+        kMessageBarPadLeft < width ? kMessageBarPadLeft : width;
+    const int padR =
+        kMessageBarPadRight < (width - padL) ? kMessageBarPadRight
+                                            : (width - padL > 0 ? width - padL : 0);
+    const int avail = width - padL - padR > 0 ? width - padL - padR : 0;
+    int wantCols;
+    if (msg.cursor.has_value()) {
+        int off = *msg.cursor;
+        if (off < 0) off = 0;
+        if (off > static_cast<int>(msg.text.size())) off = static_cast<int>(msg.text.size());
+        const std::string_view pre(msg.text.data(), static_cast<size_t>(off));
+        const int preCols = utf8::columnOf(pre, static_cast<int>(pre.size()));
+        wantCols = preCols < avail ? preCols : avail;
+    } else {
+        const std::string vis = utf8::truncate(msg.text, avail);
+        wantCols = utf8::columnOf(vis, static_cast<int>(vis.size()));
+    }
+    int col = chromeArea.col + padL + wantCols;
+    const int maxCol = chromeArea.col + width - 1;
+    if (col > maxCol) col = maxCol;
+    const int row = chromeArea.row + 1;
+    return CellPos(col, row);
 }
 
 } // namespace chrome

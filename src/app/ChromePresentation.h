@@ -16,8 +16,9 @@
 //
 //   State -> etiqueta de la StatusBar (stateLabelForPresentation)
 //   State -> rol de acento de la etiqueta (accentRoleFor)
-//   State -> forma del cursor (cursorShapeFor)
-//   State -> visibilidad por modo (cursorVisibleForMode; Busqueda oculta)
+//   State -> forma del cursor (cursorShapeFor; Interacción + 4 prompts parpadean)
+//   State -> visibilidad por modo (cursorVisibleForMode; siempre visible)
+//   State -> cursor en MessageBar (cursorInMessageBarFor; 4 prompts con input)
 //   Message -> MessageBarData (toMessageBar; el expiry no viaja al rendering)
 //   (Message, State) -> ChromeRequest (makeChromeRequest; lo usa app/ antes
 //   de invocar a ScreenRenderer/FrameBuilder)
@@ -48,14 +49,33 @@ inline StyleRole accentRoleFor(State state) {
 }
 
 inline FrameCursorShape cursorShapeFor(State state) {
-    return state == State::Interaccion ? FrameCursorShape::Bar
-                                       : FrameCursorShape::Block;
+    // Interacción parpadea en el contenido; los 4 prompts con input en el
+    // MessageBar (Búsqueda / IrAFila / Guardar como / Renombrar) parpadean
+    // en el MessageBar. El resto es bloque fijo.
+    switch (state) {
+        case State::Interaccion:
+        case State::Busqueda:
+        case State::IrAFila:
+        case State::SaveAsFileBrowser:
+        case State::Renombrar:
+            return FrameCursorShape::Bar;
+        default:
+            return FrameCursorShape::Block;
+    }
 }
 
-// Visibilidad aportada por el modo (independiente del viewport): Busqueda
-// oculta el cursor; el resto lo muestra (si el viewport lo contiene).
+// Visibilidad aportada por el modo (independiente del viewport): todos los
+// modos muestran cursor (los prompts lo muestran en el MessageBar, ver
+// cursorInMessageBarFor). El viewport puede ocultarlo igual si queda fuera.
 inline bool cursorVisibleForMode(State state) {
-    return state != State::Busqueda;
+    (void)state;
+    return true;
+}
+
+// true si el cursor edita el MessageBar (se desactiva el del contenido).
+inline bool cursorInMessageBarFor(State state) {
+    return state == State::Busqueda || state == State::IrAFila ||
+           state == State::SaveAsFileBrowser || state == State::Renombrar;
 }
 
 inline std::string stateLabelForPresentation(State state) {
@@ -75,12 +95,13 @@ inline std::string stateLabelForPresentation(State state) {
 }
 
 // Message del Editor (texto + tipo + expiry) -> DTO puro del MessageBar
-// (texto + tipo). El vencimiento temporal no es estado visual y nunca viaja
-// al rendering.
+// (texto + tipo + cursor de edición). El vencimiento temporal no es estado
+// visual y nunca viaja al rendering.
 inline MessageBarData toMessageBar(const Message& m) {
     MessageBarData b;
     b.text = m.text;
     b.kind = m.kind;
+    b.cursor = m.cursor;
     return b;
 }
 
@@ -94,5 +115,6 @@ inline ChromeRequest makeChromeRequest(const Message& m, State s) {
     r.accent = accentRoleFor(s);
     r.cursorShape = cursorShapeFor(s);
     r.cursorVisibleByMode = cursorVisibleForMode(s);
+    r.cursorInMessageBar = cursorInMessageBarFor(s);
     return r;
 }

@@ -197,7 +197,8 @@ private:
                                const Rect& area);
     // Frame compartido de los listados de archivos (abrir y guardar como):
     // lista a full del area de contenido + barra de estado + cursor.
-    // Solo varian etiqueta y accent.
+    // Solo varian etiqueta y accent. Guardar como pone el cursor
+    // parpadeante en el MessageBar (input del nombre); abrir lo deja en la lista.
     std::string buildFileListFrame(const std::vector<FileListItem>& items,
                                    int selected,
                                    int scroll,
@@ -206,5 +207,6 @@ private:
                                    int width,
                                    int height,
                                    const char* estado,
-                                   StyleRole accent);
+                                   StyleRole accent,
+                                   bool cursorInMessageBar = false);
 };

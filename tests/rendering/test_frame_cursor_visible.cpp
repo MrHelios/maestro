@@ -13,6 +13,7 @@
 #include "layout/Viewport.h"
 #include "rendering/frame/Frame.h"
 #include "rendering/frame/FrameBuilder.h"
+#include "rendering/RenderUtil.h"
 #include "rendering/tty/TtyEncoder.h"
 
 namespace {
@@ -109,17 +110,23 @@ TEST(frame_cursor_hidden_right_offscreen) {
     CHECK(!f.cursor.cell.valid());
 }
 
-TEST(frame_cursor_busqueda_hidden_even_inside) {
+TEST(frame_cursor_busqueda_en_messagebar_aunque_documento_visible) {
     Document doc = makeDoc();
     Viewport vp = makeVp(0);
     Cursor cur;
     cur.line = 0;
     cur.col = 0;
     FrameBuilder b;
-    Frame f = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda),
+    Message prompt{std::string("Find: ho"), MessageKind::Prompt, std::nullopt};
+    Frame f = b.buildFrame(doc, cur, vp, "t", false, makeChromeRequest(prompt, State::Busqueda),
                            std::nullopt);
-    CHECK(!f.cursor.visible);
-    CHECK(!f.cursor.cell.valid());
+    // El cursor del contenido se desactiva; el cursor va al MessageBar.
+    CHECK(f.cursor.visible);
+    CHECK(f.cursor.cell.valid());
+    const CellPos expected = chrome::messageBarCursorCell(f.layout.chrome, f.chrome.message);
+    CHECK(expected.valid());
+    CHECK(f.cursor.cell == expected);
+    CHECK(f.cursor.shape == FrameCursorShape::Bar);
 }
 
 TEST(frame_cursor_shape_follows_state) {

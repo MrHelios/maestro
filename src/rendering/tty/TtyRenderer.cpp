@@ -196,7 +196,7 @@ void TtyRenderer::renderBufferList(const std::vector<std::string>& names,
 std::string TtyRenderer::buildFileListFrame(
     const std::vector<FileListItem>& items, int selected, int scroll,
     const std::string& path, const MessageBarData& message, int width, int height,
-    const char* estado, StyleRole accent) {
+    const char* estado, StyleRole accent, bool cursorInMessageBar) {
     std::string out;
     encoder_.beginFrame(out);
 
@@ -213,10 +213,20 @@ std::string TtyRenderer::buildFileListFrame(
     data.message = message;
     renderChrome(out, layout.chrome, data, accent);
 
-    int rows = std::min(static_cast<int>(items.size()) - scroll, height);
-    if (rows > 0) {
-        int cursorRow = selected - scroll + 1;
-        encoder_.moveCursorToRaw(out, cursorRow, 1);
+    if (cursorInMessageBar) {
+        // Input del nombre en el MessageBar: cursor parpadeante al final del
+        // texto visible (nunca en la lista).
+        const CellPos mbar = chrome::messageBarCursorCell(layout.chrome, message);
+        if (mbar.valid()) {
+            encoder_.moveCursorTo(out, mbar);
+            encoder_.setCursorStyle(out, FrameCursorShape::Bar);
+        }
+    } else {
+        int rows = std::min(static_cast<int>(items.size()) - scroll, height);
+        if (rows > 0) {
+            int cursorRow = selected - scroll + 1;
+            encoder_.moveCursorToRaw(out, cursorRow, 1);
+        }
     }
 
     encoder_.endFrame(out);
@@ -268,9 +278,10 @@ std::string TtyRenderer::buildSaveAsFileListScreen(
     const std::string& path, const MessageBarData& message, int width, int height) {
     // El input del nombre llega ya compuesto en `message` (lo arma el
     // Editor en el MessageBar, debajo del StatusBar). Solo cambian
-    // etiqueta y accent respecto de abrir.
+    // etiqueta y accent respecto de abrir, más el cursor al MessageBar.
     return buildFileListFrame(items, selected, scroll, path, message, width,
-                              height, "GUARDAR COMO", StyleRole::AccentGuardar);
+                              height, "GUARDAR COMO", StyleRole::AccentGuardar,
+                              /*cursorInMessageBar=*/true);
 }
 
 void TtyRenderer::renderSaveAsFileList(const std::vector<FileListItem>& items,

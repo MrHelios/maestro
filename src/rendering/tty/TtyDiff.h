@@ -137,11 +137,26 @@ private:
                        bool modified, const ChromeRequest& chrome,
                        const Layout& layout, int contentH);
 
+    // Única operación conceptual para emitir el cursor del frame
+    // diferencial. TODOS los caminos del diff pasan por acá (un camino nuevo
+    // que llame directo a placeCursor() dejaría sin cursor al MessageBar):
+    //   cursorInMessageBar -> cursor parpadeante al final del texto visible
+    //                         del MessageBar (desactiva el del contenido);
+    //   resto              -> cursor del documento (placeCursor: resolver
+    //                         común, sin clamp).
+    // `g` es la geometría ya resuelta del frame (los fast paths la tienen;
+    // los caminos de rebuild la calculan con editorGeometry: costo
+    // despreciable frente al re-encode total).
+    void emitCurrentCursor(std::string& out, const Document& doc,
+                          const Cursor& cursor, const Viewport& viewport,
+                          const FrameBuilder::EditorGeometry& g,
+                          const ChromeRequest& chrome, bool endFrame);
+
     // Resuelve el cursor con el resolver común (sin clamp duplicado) y lo
     // posiciona/muestra. visibleByMode==false o fuera de viewport => lo deja
     // oculto (contrato visible==false). endFrame=true cierra con endFrame en
     // vez de showCursor (camino de frame completo). Única versión con el
-    // bloque resolve -> CUP -> style -> show/end (4 caminos lo usan).
+    // bloque resolve -> CUP -> style -> show/end (la usa emitCurrentCursor).
     void placeCursor(std::string& out, const Document& doc,
                      const Cursor& cursor, const Viewport& viewport,
                      FrameCursorShape shape, bool visibleByMode, bool endFrame);

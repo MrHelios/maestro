@@ -5,6 +5,7 @@
 #include "layout/Gutter.h"
 #include "layout/Layout.h"
 #include "base/utf8.h"
+#include "rendering/RenderUtil.h"
 #include "rendering/tty/TtyRenderer.h"
 #include "test_framework.h"
 #include "helpers/test_render_utils.h"
@@ -39,18 +40,29 @@ std::string cursorMoveSeq(const Document& doc, const Cursor& cur, const Viewport
 
 using testutil::contains;
 
+std::string messageBarSeq(const MessageBarData& msg, const Viewport& vp) {
+    Layout layout = computeLayout(vp.height + kChromeRows, vp.width);
+    CellPos c = chrome::messageBarCursorCell(layout.chrome, msg);
+    return "\x1b[" + std::to_string(c.row + 1) + ";" +
+           std::to_string(c.col + 1) + "H";
 }
 
-TEST(renderer_busqueda_no_posiciona_cursor){
+}
+
+TEST(renderer_busqueda_posiciona_cursor_en_messagebar){
     Document doc; doc.restore({"hola mundo hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
     TtyRenderer r;
-    std::string frame = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda), std::nullopt, std::nullopt);
-    std::string seq = cursorMoveSeq(doc, cur, vp);
-    CHECK(!contains(frame, seq));
-    CHECK(!contains(frame, Ansi::CURSOR_SHOW));
-    CHECK(contains(frame, Ansi::CURSOR_HIDE));
+    Message prompt{std::string("Find: ho"), MessageKind::Prompt, std::nullopt};
+    ChromeRequest chrome = makeChromeRequest(prompt, State::Busqueda);
+    std::string frame = r.buildScreen(doc, cur, vp, "t", false, chrome, std::nullopt, std::nullopt);
+    std::string docSeq = cursorMoveSeq(doc, cur, vp);
+    std::string mbarSeq = messageBarSeq(chrome.message, vp);
+    CHECK(!contains(frame, docSeq));
+    CHECK(contains(frame, mbarSeq));
+    CHECK(contains(frame, Ansi::CURSOR_SHOW));
+    CHECK(contains(frame, Ansi::CURSOR_BLINK));
 }
 
 TEST(renderer_navegacion_sigue_posicionando_cursor){
@@ -71,11 +83,16 @@ TEST(renderer_busqueda_highlight_sigue_apareciendo){
     TtyRenderer r;
     Selection sel; sel.anchor={0,0}; sel.position={0,4};
     std::optional<Selection> hl = sel;
-    std::string frame = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda), std::nullopt, hl);
+    Message prompt{std::string("Find: ho"), MessageKind::Prompt, std::nullopt};
+    ChromeRequest chrome = makeChromeRequest(prompt, State::Busqueda);
+    std::string frame = r.buildScreen(doc, cur, vp, "t", false, chrome, std::nullopt, hl);
     CHECK(contains(frame, std::string(Ansi::HIGHLIGHT_BG) + "hola" + Ansi::RESET));
+    // El cursor sigue en el MessageBar aunque haya highlight en el contenido.
+    CHECK(contains(frame, messageBarSeq(chrome.message, vp)));
+    CHECK(contains(frame, Ansi::CURSOR_SHOW));
 }
 
-TEST(renderer_busqueda_diff_no_posiciona_cursor){
+TEST(renderer_busqueda_diff_posiciona_cursor_en_messagebar){
     Document doc; doc.restore({"hola mundo hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
@@ -85,31 +102,38 @@ TEST(renderer_busqueda_diff_no_posiciona_cursor){
     // prime cache with Navegacion
     std::string f1 = r.buildDiffFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt, std::nullopt);
     CHECK(contains(f1, Ansi::CURSOR_SHOW));
-    // diff to Busqueda should hide cursor
-    std::string f2 = r.buildDiffFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda), std::nullopt, hl);
-    std::string seq = cursorMoveSeq(doc, cur, vp);
-    CHECK(!contains(f2, seq));
-    CHECK(!contains(f2, Ansi::CURSOR_SHOW));
+    // diff a Busqueda mueve el cursor al MessageBar (no lo oculta)
+    Message prompt{std::string("Find: ho"), MessageKind::Prompt, std::nullopt};
+    ChromeRequest chrome = makeChromeRequest(prompt, State::Busqueda);
+    std::string f2 = r.buildDiffFrame(doc, cur, vp, "t", false, chrome, std::nullopt, hl);
+    std::string docSeq = cursorMoveSeq(doc, cur, vp);
+    CHECK(!contains(f2, docSeq));
+    CHECK(contains(f2, messageBarSeq(chrome.message, vp)));
+    CHECK(contains(f2, Ansi::CURSOR_SHOW));
     CHECK(contains(f2, std::string(Ansi::HIGHLIGHT_BG) + "hola" + Ansi::RESET));
     // also test fresh Busqueda diff (cache miss path)
     TtyRenderer r2;
-    std::string f3 = r2.buildDiffFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda), std::nullopt, hl);
-    CHECK(!contains(f3, seq));
-    CHECK(!contains(f3, Ansi::CURSOR_SHOW));
+    std::string f3 = r2.buildDiffFrame(doc, cur, vp, "t", false, chrome, std::nullopt, hl);
+    CHECK(!contains(f3, docSeq));
+    CHECK(contains(f3, messageBarSeq(chrome.message, vp)));
+    CHECK(contains(f3, Ansi::CURSOR_SHOW));
     CHECK(contains(f3, std::string(Ansi::HIGHLIGHT_BG) + "hola" + Ansi::RESET));
 }
 
-TEST(renderer_busqueda_transicion_oculto_y_visible){
+TEST(renderer_busqueda_transicion_messagebar_y_documento){
     Document doc; doc.restore({"hola mundo hola"});
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=30;
     Cursor cur; cur.line=0; cur.col=0;
     TtyRenderer r;
     Selection sel; sel.anchor={0,0}; sel.position={0,4};
     std::optional<Selection> hl = sel;
+    Message prompt{std::string("Find: ho"), MessageKind::Prompt, std::nullopt};
+    ChromeRequest chromeBus = makeChromeRequest(prompt, State::Busqueda);
     std::string fNav1 = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt, std::nullopt);
     CHECK(contains(fNav1, Ansi::CURSOR_SHOW));
-    std::string fBus = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda), std::nullopt, hl);
-    CHECK(!contains(fBus, Ansi::CURSOR_SHOW));
+    std::string fBus = r.buildScreen(doc, cur, vp, "t", false, chromeBus, std::nullopt, hl);
+    CHECK(contains(fBus, Ansi::CURSOR_SHOW));
+    CHECK(contains(fBus, messageBarSeq(chromeBus.message, vp)));
     CHECK(contains(fBus, std::string(Ansi::HIGHLIGHT_BG) + "hola" + Ansi::RESET));
     std::string fNav2 = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt, std::nullopt);
     CHECK(contains(fNav2, Ansi::CURSOR_SHOW));
@@ -119,8 +143,9 @@ TEST(renderer_busqueda_transicion_oculto_y_visible){
     TtyRenderer rd;
     std::string d1 = rd.buildDiffFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt, std::nullopt);
     CHECK(contains(d1, Ansi::CURSOR_SHOW));
-    std::string d2 = rd.buildDiffFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda), std::nullopt, hl);
-    CHECK(!contains(d2, Ansi::CURSOR_SHOW));
+    std::string d2 = rd.buildDiffFrame(doc, cur, vp, "t", false, chromeBus, std::nullopt, hl);
+    CHECK(contains(d2, Ansi::CURSOR_SHOW));
+    CHECK(contains(d2, messageBarSeq(chromeBus.message, vp)));
     std::string d3 = rd.buildDiffFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt, std::nullopt);
     CHECK(contains(d3, Ansi::CURSOR_SHOW));
     CHECK(contains(d3, seq));
@@ -132,11 +157,14 @@ TEST(renderer_busqueda_diff_cache_con_modificacion){
     Cursor cur; cur.line=0; cur.col=0;
     Selection sel; sel.anchor={0,0}; sel.position={0,4};
     std::optional<Selection> hl = sel;
+    Message prompt{std::string("Find: ho"), MessageKind::Prompt, std::nullopt};
+    ChromeRequest chromeBus = makeChromeRequest(prompt, State::Busqueda);
     TtyRenderer rd;
     std::string d1 = rd.buildDiffFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt, std::nullopt);
     CHECK(contains(d1, Ansi::CURSOR_SHOW));
-    std::string d2 = rd.buildDiffFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda), std::nullopt, hl);
-    CHECK(!contains(d2, Ansi::CURSOR_SHOW));
+    std::string d2 = rd.buildDiffFrame(doc, cur, vp, "t", false, chromeBus, std::nullopt, hl);
+    CHECK(contains(d2, Ansi::CURSOR_SHOW));
+    CHECK(contains(d2, messageBarSeq(chromeBus.message, vp)));
     CHECK(contains(d2, std::string(Ansi::HIGHLIGHT_BG) + "hola" + Ansi::RESET));
     doc.restore({"hola mundo X"});
     std::string d3 = rd.buildDiffFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt, std::nullopt);
@@ -217,17 +245,22 @@ TEST(renderer_documento_vacio_no_falla){
     CHECK(!contains(fNav, std::string(Ansi::HIGHLIGHT_BG) + "hola"));
     std::string seq = cursorMoveSeq(doc, cur, vp);
     CHECK(contains(fNav, seq));
-    std::string fBus = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda), std::nullopt, std::nullopt);
+    Message prompt{std::string("Find: "), MessageKind::Prompt, std::nullopt};
+    ChromeRequest chromeBus = makeChromeRequest(prompt, State::Busqueda);
+    std::string fBus = r.buildScreen(doc, cur, vp, "t", false, chromeBus, std::nullopt, std::nullopt);
     CHECK(!fBus.empty());
-    CHECK(!contains(fBus, Ansi::CURSOR_SHOW));
-    CHECK(contains(fBus, Ansi::CURSOR_HIDE));
+    CHECK(contains(fBus, Ansi::CURSOR_SHOW));
+    CHECK(contains(fBus, Ansi::CURSOR_BLINK));
+    CHECK(contains(fBus, messageBarSeq(chromeBus.message, vp)));
+    CHECK(!contains(fBus, seq));
     TtyRenderer rd;
     std::string d1 = rd.buildDiffFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt, std::nullopt);
     CHECK(!d1.empty());
     CHECK(contains(d1, Ansi::CURSOR_SHOW));
-    std::string d2 = rd.buildDiffFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda), std::nullopt, std::nullopt);
+    std::string d2 = rd.buildDiffFrame(doc, cur, vp, "t", false, chromeBus, std::nullopt, std::nullopt);
     CHECK(!d2.empty());
-    CHECK(!contains(d2, Ansi::CURSOR_SHOW));
+    CHECK(contains(d2, Ansi::CURSOR_SHOW));
+    CHECK(contains(d2, messageBarSeq(chromeBus.message, vp)));
 }
 
 TEST(renderer_cursor_fuera_viewport_seguro) {
@@ -260,14 +293,19 @@ TEST(renderer_cursor_fuera_viewport_seguro) {
     CHECK(!contains(fNav, Ansi::CURSOR_SHOW));
     CHECK(contains(fNav, Ansi::CURSOR_HIDE));
 
+    Message prompt{std::string("Find: ho"), MessageKind::Prompt, std::nullopt};
+    ChromeRequest chromeBus = makeChromeRequest(prompt, State::Busqueda);
     std::string fBus = r.buildScreen(
-        doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda),
+        doc, cur, vp, "t", false, chromeBus,
         std::nullopt, std::nullopt
     );
 
+    // Aunque el cursor del documento esté fuera del viewport, el cursor del
+    // MessageBar sigue visible (no depende del viewport del documento).
     CHECK(!fBus.empty());
-    CHECK(!contains(fBus, Ansi::CURSOR_SHOW));
-    CHECK(contains(fBus, Ansi::CURSOR_HIDE));
+    CHECK(contains(fBus, Ansi::CURSOR_SHOW));
+    CHECK(contains(fBus, Ansi::CURSOR_BLINK));
+    CHECK(contains(fBus, messageBarSeq(chromeBus.message, vp)));
 
     TtyRenderer rd;
 
@@ -280,12 +318,13 @@ TEST(renderer_cursor_fuera_viewport_seguro) {
     CHECK(!contains(d1, Ansi::CURSOR_SHOW));
 
     std::string d2 = rd.buildDiffFrame(
-        doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda),
+        doc, cur, vp, "t", false, chromeBus,
         std::nullopt, std::nullopt
     );
 
     CHECK(!d2.empty());
-    CHECK(!contains(d2, Ansi::CURSOR_SHOW));
+    CHECK(contains(d2, Ansi::CURSOR_SHOW));
+    CHECK(contains(d2, messageBarSeq(chromeBus.message, vp)));
 }
 
 TEST(renderer_resaltado_multilinea){
@@ -300,19 +339,23 @@ TEST(renderer_resaltado_multilinea){
     CHECK(contains(fSel, Ansi::HIGHLIGHT_BG));
     CHECK(contains(fSel, std::string(Ansi::HIGHLIGHT_BG) + "la mundo" + Ansi::RESET));
     CHECK(contains(fSel, std::string(Ansi::HIGHLIGHT_BG) + "adi" + Ansi::RESET));
-    std::string fBus = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda), std::nullopt, hl);
+    Message promptBusMsg{std::string("Find: ho"), MessageKind::Prompt, std::nullopt};
+    ChromeRequest chromeBus = makeChromeRequest(promptBusMsg, State::Busqueda);
+    std::string fBus = r.buildScreen(doc, cur, vp, "t", false, chromeBus, std::nullopt, hl);
     CHECK(!fBus.empty());
     CHECK(contains(fBus, Ansi::HIGHLIGHT_BG));
     CHECK(contains(fBus, std::string(Ansi::HIGHLIGHT_BG) + "la mundo" + Ansi::RESET));
     CHECK(contains(fBus, std::string(Ansi::HIGHLIGHT_BG) + "adi" + Ansi::RESET));
-    CHECK(!contains(fBus, Ansi::CURSOR_SHOW));
+    CHECK(contains(fBus, Ansi::CURSOR_SHOW));
+    CHECK(contains(fBus, messageBarSeq(chromeBus.message, vp)));
     Selection sel2; sel2.anchor={0,2}; sel2.position={2,4};
     std::optional<Selection> hl2 = sel2;
-    std::string fMulti3 = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda), std::nullopt, hl2);
+    std::string fMulti3 = r.buildScreen(doc, cur, vp, "t", false, chromeBus, std::nullopt, hl2);
     CHECK(contains(fMulti3, Ansi::HIGHLIGHT_BG));
     CHECK(contains(fMulti3, std::string(Ansi::HIGHLIGHT_BG) + "adios mundo" + Ansi::RESET));
     TtyRenderer rd;
-    std::string d1 = rd.buildDiffFrame(doc, cur, vp, "t", false, makeChromeRequest("", State::Busqueda), std::nullopt, hl);
+    std::string d1 = rd.buildDiffFrame(doc, cur, vp, "t", false, chromeBus, std::nullopt, hl);
     CHECK(contains(d1, Ansi::HIGHLIGHT_BG));
     CHECK(contains(d1, std::string(Ansi::HIGHLIGHT_BG) + "adi" + Ansi::RESET));
+    CHECK(contains(d1, Ansi::CURSOR_SHOW));
 }

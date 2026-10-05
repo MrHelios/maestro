@@ -35,13 +35,19 @@ struct Message {
     Message(const char* s) : text(s) {}
     // Ctor completo: lo usan setStatusMessage/setActionMessage.
     Message(std::string t, MessageKind k,
-            std::optional<std::chrono::steady_clock::time_point> e)
-        : text(std::move(t)), kind(k), expiry(e) {}
+            std::optional<std::chrono::steady_clock::time_point> e,
+            std::optional<int> c = std::nullopt)
+        : text(std::move(t)), kind(k), expiry(e), cursor(c) {}
 
     std::string text;
     MessageKind kind = MessageKind::Info;
     // nullopt => persistente (no expira).
     std::optional<std::chrono::steady_clock::time_point> expiry;
+    // Byte offset dentro de `text` donde va el cursor de edición cuando el
+    // mensaje es un prompt con input (el input vive al inicio: prompt+query,
+    // con decoraciones como " - not found" o " (Control+S...)" después).
+    // nullopt => al final del texto visible (mensajes sin input).
+    std::optional<int> cursor;
 
     bool persistent() const { return !expiry.has_value(); }
     bool expired() const {

@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "rendering/Style.h"
+#include "rendering/RenderUtil.h"
 #include "rendering/tty/TtyScroll.h"
 
 void TtyDiff::updateCacheState(const Viewport& viewport, const Cursor& cursor,
@@ -63,6 +64,23 @@ void TtyDiff::placeCursor(std::string& out, const Document& doc,
     const bool inViewport =
         builder_.editorCursorPos(doc, cursor, viewport, g, pos);
     emitCursor(out, pos, shape, visibleByMode && inViewport, endFrame);
+}
+
+void TtyDiff::emitCurrentCursor(std::string& out, const Document& doc,
+                                const Cursor& cursor, const Viewport& viewport,
+                                const FrameBuilder::EditorGeometry& g,
+                                const ChromeRequest& chrome, bool endFrame) {
+    if (chrome.cursorInMessageBar) {
+        const CellPos mbar =
+            chrome::messageBarCursorCell(g.layout.chrome, chrome.message);
+        emitCursor(out, mbar, chrome.cursorShape,
+                   mbar.valid() && chrome.cursorVisibleByMode, endFrame);
+        return;
+    }
+    // Contrato visual: solo posicionar/mostrar si el cursor esta en viewport.
+    // Si esta fuera (rueda con suppressScrollToCursor_) se deja oculto.
+    placeCursor(out, doc, cursor, viewport, g, chrome.cursorShape,
+                chrome.cursorVisibleByMode, endFrame);
 }
 
 bool TtyDiff::patchContentRow(
@@ -236,10 +254,8 @@ std::string TtyDiff::buildCursorMoveFrame(
     patchChrome(out, doc, cursor, filename, modified, chrome, layout,
                    contentH);
 
-    // Contrato visual: solo posicionar/mostrar si el cursor esta en viewport.
-    // Si esta fuera (rueda con suppressScrollToCursor_) se deja oculto.
-    placeCursor(out, doc, cursor, viewport, g, chrome.cursorShape,
-                chrome.cursorVisibleByMode, /*endFrame=*/false);
+    emitCurrentCursor(out, doc, cursor, viewport, g, chrome,
+                      /*endFrame=*/false);
     lastCursorLine_ = cursor.line;
     lastCursorCol_ = cursor.col;
     lastVersion_ = doc.version();
@@ -324,8 +340,8 @@ std::string TtyDiff::buildScrollFrame(
     patchChrome(out, doc, cursor, filename, modified, chrome,
                    g.layout, contentH);
 
-    placeCursor(out, doc, cursor, viewport, g, chrome.cursorShape,
-                chrome.cursorVisibleByMode, /*endFrame=*/false);
+    emitCurrentCursor(out, doc, cursor, viewport, g, chrome,
+                      /*endFrame=*/false);
 
     updateCacheState(viewport, cursor, doc);
     return out;
@@ -362,10 +378,12 @@ std::string TtyDiff::buildDiffFrame(
         out += chromeCache_;
         if (!chrome.cursorVisibleByMode) return out;
         {
-            placeCursor(out, doc, cursor, viewport, chrome.cursorShape,
-                        chrome.cursorVisibleByMode, /*endFrame=*/true);
             // Si esta fuera del viewport se deja oculto (sin show): respeta
             // el contrato visible==false sin clampar al borde.
+            const FrameBuilder::EditorGeometry g =
+                builder_.editorGeometry(doc, viewport);
+            emitCurrentCursor(out, doc, cursor, viewport, g, chrome,
+                              /*endFrame=*/true);
         }
         return out;
     }
@@ -457,8 +475,11 @@ std::string TtyDiff::buildDiffFrame(
         return out;
     }
     {
-        placeCursor(out, doc, cursor, viewport, chrome.cursorShape,
-                    chrome.cursorVisibleByMode, /*endFrame=*/false);
+        // Geometría ya resuelta por buildFrame (mismo doc/viewport): sin
+        // re-cómputo.
+        const FrameBuilder::EditorGeometry g{fresh.layout, fresh.gutterW};
+        emitCurrentCursor(out, doc, cursor, viewport, g, chrome,
+                          /*endFrame=*/false);
     }
 
     updateCacheState(viewport, cursor, doc);

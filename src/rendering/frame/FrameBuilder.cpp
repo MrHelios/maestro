@@ -539,6 +539,19 @@ Frame FrameBuilder::buildFrame(    const Document& doc,
     f.chrome = std::move(payload.data);
     f.statusAccent = payload.statusAccent;
     f.cursor.shape = chrome.cursorShape;
+    // Prompts con input en el MessageBar: se desactiva el cursor del
+    // contenido y se posiciona al final del texto visible del MessageBar.
+    if (chrome.cursorInMessageBar) {
+        const CellPos mbar = chrome::messageBarCursorCell(g.layout.chrome, chrome.message);
+        if (mbar.valid() && chrome.cursorVisibleByMode) {
+            f.cursor.visible = true;
+            f.cursor.cell = mbar;
+        } else {
+            f.cursor.visible = false;
+            f.cursor.cell = CellPos{};
+        }
+        return f;
+    }
     // Contrato visual explicito: visible solo si el modo lo permite Y el
     // cursor logico esta dentro del viewport. Cuando la rueda mueve el
     // viewport con suppressScrollToCursor_ (cursor off-screen), visible=false

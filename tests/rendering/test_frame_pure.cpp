@@ -22,6 +22,7 @@
 #include "layout/BracketMatcher.h"
 #include "layout/Viewport.h"
 #include "rendering/tty/TtyRenderer.h"
+#include "rendering/RenderUtil.h"
 #include "rendering/Style.h"
 #include "rendering/frame/Frame.h"
 #include "rendering/frame/FrameBuilder.h"
@@ -105,20 +106,25 @@ TEST(frame_sin_ansi_y_con_roles) {
     CHECK(hasSyntax);
 }
 
-TEST(frame_busqueda_oculta_cursor) {
+TEST(frame_busqueda_cursor_en_messagebar) {
     Document doc = makeDoc();
     Viewport vp = makeVp();
     Cursor cur;
     FrameBuilder b;
-    Frame f = b.buildFrame(doc, cur, vp, "a.cpp", false, makeChromeRequest("", State::Busqueda),
+    Message prompt{std::string("Find: ho"), MessageKind::Prompt, std::nullopt};
+    Frame f = b.buildFrame(doc, cur, vp, "a.cpp", false, makeChromeRequest(prompt, State::Busqueda),
                            std::nullopt);
-    CHECK(!f.cursor.visible);
+    CHECK(f.cursor.visible);
+    CHECK(f.cursor.cell.valid());
+    const CellPos expected = chrome::messageBarCursorCell(f.layout.chrome, f.chrome.message);
+    CHECK(expected.valid());
+    CHECK(f.cursor.cell == expected);
     CHECK(!f.hasAnsi());
 
     TtyEncoder enc;
     std::string out = enc.encodeFrame(f);
-    // Sin estilo ni posicionamiento de cursor (camino Busqueda).
-    CHECK(out.find(" q") == std::string::npos);
+    // Cursor parpadeante posicionado en el MessageBar.
+    CHECK(out.find(" q") != std::string::npos);
 }
 
 TEST(frame_encode_parity_con_buildscreen) {
