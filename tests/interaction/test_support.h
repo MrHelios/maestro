@@ -137,8 +137,8 @@ inline void assertStateConsistent(Editor& ed){
     }
     if(ed.active().selection.has_value() && ed.active().selection->anchor==ed.active().selection->position) CHECK(!ed.hasSelection());
     if(auto norm=ed.selection()) CHECK(norm->start.line<norm->end.line || (norm->start.line==norm->end.line && norm->start.col<=norm->end.col));
-    CHECK(ed.state_==State::Navegacion||ed.state_==State::Interaccion||ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAsFileBrowser||ed.state_==State::FileBrowser||ed.state_==State::Busqueda||ed.state_==State::IrAFila);
-    if(ed.hasSelection()) CHECK(ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAsFileBrowser||ed.state_==State::FileBrowser||ed.state_==State::Busqueda||ed.state_==State::IrAFila);
+    CHECK(ed.state_==State::Navegacion||ed.state_==State::Interaccion||ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAsFileBrowser||ed.state_==State::FileBrowser||ed.state_==State::Busqueda||ed.state_==State::IrAFila||ed.state_==State::Renombrar);
+    if(ed.hasSelection()) CHECK(ed.state_==State::Seleccion||ed.state_==State::Prefix||ed.state_==State::BufferSelector||ed.state_==State::SaveAsFileBrowser||ed.state_==State::FileBrowser||ed.state_==State::Busqueda||ed.state_==State::IrAFila||ed.state_==State::Renombrar);
     if(ed.state_==State::Seleccion) CHECK(ed.active().selection.has_value());
     for(const std::string& l: ed.getClipboardBlock()) CHECK(utf8::isValid(l));
 }

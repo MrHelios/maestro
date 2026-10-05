@@ -62,6 +62,7 @@ const std::string& accentForState(const TtyTheme& t, State s) {
         case State::FileBrowser: return t.accentAbrir;
         case State::Busqueda: return t.accentGuardar;
         case State::IrAFila: return t.accentNavegacion;
+        case State::Renombrar: return t.accentGuardar;
     }
     return t.statusBarAccent;
 }

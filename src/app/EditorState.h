@@ -23,6 +23,11 @@
 //                con ↑/↓ (Enter solo entra a carpetas, nunca abre archivos)
 //                y se escribe el nombre en el input inferior; Ctrl+S guarda,
 //                ESC cancela. Modal puro.
+//   Renombrar (Ctrl+K r): prompt "Nombre del archivo:" para renombrar el
+//                archivo del buffer activo en su mismo directorio (solo
+//                basename, sin rutas ni creacion de directorios). Enter
+//                confirma, ESC cancela a Navegacion. Solo valido si el
+//                buffer ya tiene nombre; si no, se cancela solo.
 //   FileBrowser (v0.6.4): explorador de archivos modal tras Ctrl+K o. Se
 //                navega desde el directorio de trabajo (cwd()). Solo se
 //                aceptan ↑/↓, Enter y ESC (Ctrl+K tambien cancela). Enter
@@ -51,4 +56,5 @@ enum class State {
     Busqueda,
     IrAFila,
     SaveAsFileBrowser,
+    Renombrar,
 };

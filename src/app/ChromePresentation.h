@@ -42,6 +42,7 @@ inline StyleRole accentRoleFor(State state) {
         case State::Busqueda:       return StyleRole::AccentGuardar;
         case State::IrAFila:        return StyleRole::AccentNavegacion;
         case State::SaveAsFileBrowser: return StyleRole::AccentGuardar;
+        case State::Renombrar: return StyleRole::AccentGuardar;
     }
     return StyleRole::StatusAccentDefault;
 }
@@ -68,6 +69,7 @@ inline std::string stateLabelForPresentation(State state) {
         case State::Busqueda:       return "BUSQUEDA";
         case State::IrAFila:        return "IR A FILA";
         case State::SaveAsFileBrowser: return "GUARDAR COMO";
+        case State::Renombrar: return "RENOMBRAR";
     }
     return "";
 }

@@ -206,6 +206,7 @@ public:
     // Getters para testing
     State getStateForTesting() const { return state_; }
     std::string getGoToLineQueryForTesting() const { return goToLineQuery_; }
+    std::string getRenameQueryForTesting() const { return renameQuery_; }
     Buffer& getActiveBufferForTesting() { return active(); }
 
     // Consulta del estado del botón físico del mouse: responde si el botón
@@ -427,6 +428,15 @@ private:
     std::string goToLineQuery_;
     void startGoToLine();
     void handleIrAFilaEvent(const InputEvent& event);
+
+    // ---- Renombrar archivo (Ctrl+K r) ----
+    // Prompt "Nombre del archivo:" que renombra el archivo del buffer
+    // activo en su mismo directorio (solo basename, sin crear carpetas).
+    // Solo valido si el buffer ya tiene nombre.
+    std::string renameQuery_;
+    void startRename();
+    void handleRenameEvent(const InputEvent& event);
+    void commitRename();
 
     // ---- Bracket matching (feature h) ----
     std::optional<BracketPair> bracketPair_;

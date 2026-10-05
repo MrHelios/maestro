@@ -32,6 +32,12 @@ constexpr const char* kHelpEmpty = "";
 constexpr const char* kHelpPrefix =
     "command: Ctrl+k";
 constexpr const char* kHelpIrAFila = "ir a fila: ";
+constexpr const char* kHelpRenombrar = "Nombre del archivo: ";
+// Limite superior del nombre (basename): NAME_MAX en ext4 = 255 bytes.
+// Se cuenta en bytes (no caracteres) porque el filesystem cuenta bytes;
+// UTF-8 multibyte cuenta multiple. El path completo ademas se valida
+// contra PATH_MAX en commitRename.
+constexpr size_t kMaxRenameBytes = 255;
 constexpr int kIndentLen = 4;
 inline int shiftColumn(int col, int delta) {
     return delta > 0 ? col + delta : std::max(0, col + delta);
@@ -363,6 +369,12 @@ void Editor::registerCommands() {
     });
     commands_.registerCommand("navegacion.ir_a_fila", [this] {
         startGoToLine();
+    });
+    commands_.registerCommand("archivo.renombrar", [this] {
+        // Via GUI (sin Prefix) no hay priorState_ guardado: capturarlo
+        // como hace buffer.guardar para poder volver al contexto.
+        if (state_ != State::Prefix) priorState_ = state_;
+        startRename();
     });
 
 
@@ -1603,6 +1615,14 @@ void Editor::handleEvent(const InputEvent& event) {
         return;
     }
 
+    // Renombrar es modal puro como Busqueda/SaveAsFileBrowser: se despacha
+    // ANTES del bloque global (Undo/Redo/Prefix) para que esas teclas no
+    // se filtren al documento ni aniden un prefijo dentro del prompt.
+    if (state_ == State::Renombrar) {
+        handleRenameEvent(event);
+        return;
+    }
+
     // Undo/Redo y la entrada al prefijo estan disponibles en los 3 modos
     // y no dependen de state_, asi que se evaluan ANTES del despacho por
     // modo. Nota: Ctrl+S (Save) SOLO tiene efecto tras el prefijo (lo
@@ -2200,6 +2220,10 @@ void Editor::handlePrefixKey(const InputEvent& event) {
             }
             if (event.text == "m" || event.text == "M") { // Ctrl+K m: salto bracket
                 commands_.execute("bracket.jump");
+                break;
+            }
+            if (event.text == "r" || event.text == "R") { // Ctrl+K r: renombrar archivo
+                commands_.execute("archivo.renombrar");
                 break;
             }
             // Cualquier otra letra: cae en el cancel del default.
@@ -2899,6 +2923,172 @@ void Editor::handleIrAFilaEvent(const InputEvent& event) {
             // Cualquier otra tecla es no-op (se descarta)
             break;
     }
+}
+
+// ---- Renombrar archivo (Ctrl+K r) ----
+void Editor::startRename() {
+    Buffer& b = active();
+    if (b.filename.empty()) {
+        state_ = priorState_;
+        setActionMessage("El archivo aun no esta guardado.",
+                         MessageKind::Warning);
+        return;
+    }
+    if (b.modified) {
+        state_ = priorState_;
+        setActionMessage("Guarda antes de renombrar.",
+                         MessageKind::Warning);
+        return;
+    }
+    renameQuery_ =
+        std::filesystem::path(b.filename).filename().string();
+    state_ = State::Renombrar;
+    setStatusMessage(std::string(kHelpRenombrar) + renameQuery_,
+                     MessageKind::Prompt);
+}
+
+void Editor::handleRenameEvent(const InputEvent& event) {
+    switch (event.type) {
+        case InputEventType::InsertChar: {
+            // Contrato basename: el input con '/' o '\' se RECHAZA entero
+            // (no se filtra: "a/b" no se convierte en "ab", se descarta).
+            // Chequeo a nivel byte, seguro UTF-8: 0x2F y 0x5C nunca son
+            // bytes de continuacion multibyte. Nunca se interpreta como
+            // ruta ni se crean directorios.
+            if (event.text.find('/') != std::string::npos ||
+                event.text.find('\\') != std::string::npos) {
+                setActionMessage("El nombre no puede contener rutas.",
+                                 MessageKind::Warning);
+                break;
+            }
+            if (!event.text.empty()) {
+                if (renameQuery_.size() + event.text.size() >
+                    kMaxRenameBytes) {
+                    setStatusMessage(
+                        std::string(kHelpRenombrar) + renameQuery_ +
+                            " [max 255 bytes]",
+                        MessageKind::Error);
+                } else {
+                    renameQuery_ += event.text;
+                    setStatusMessage(
+                        std::string(kHelpRenombrar) + renameQuery_,
+                        MessageKind::Prompt);
+                }
+            }
+            break;
+        }
+        case InputEventType::Backspace:
+            if (!renameQuery_.empty()) {
+                int cols = utf8::columnOf(
+                    renameQuery_,
+                    static_cast<int>(renameQuery_.size()));
+                renameQuery_ =
+                    utf8::truncate(renameQuery_, cols - 1);
+                setStatusMessage(
+                    std::string(kHelpRenombrar) + renameQuery_,
+                    MessageKind::Prompt);
+            }
+            break;
+        case InputEventType::InsertNewline:
+            commitRename();
+            break;
+        case InputEventType::Escape:
+            renameQuery_.clear();
+            state_ = priorState_;
+            setStatusMessage("", MessageKind::Info);
+            setActionMessage("Renombrado cancelado.",
+                             MessageKind::Warning);
+            break;
+        default:
+            break;
+    }
+}
+
+void Editor::commitRename() {
+    Buffer& b = active();
+    const std::string& q = renameQuery_;
+    if (q.empty()) {
+        setStatusMessage(std::string(kHelpRenombrar) + "[nombre vacio]",
+                         MessageKind::Error);
+        return;
+    }
+    if (q.size() > kMaxRenameBytes) {
+        setStatusMessage(std::string(kHelpRenombrar) + "[max 255 bytes]",
+                         MessageKind::Error);
+        return;
+    }
+    if (q == "." || q == ".." ||
+        q.find('/') != std::string::npos ||
+        q.find('\\') != std::string::npos) {
+        setStatusMessage(
+            std::string(kHelpRenombrar) + "[nombre invalido: sin rutas]",
+            MessageKind::Error);
+        return;
+    }
+    const std::string oldPath = b.filename;
+    if (oldPath.empty()) {
+        renameQuery_.clear();
+        state_ = priorState_;
+        setActionMessage("El archivo aun no esta guardado.",
+                         MessageKind::Warning);
+        return;
+    }
+    std::string dir =
+        std::filesystem::path(oldPath).parent_path().string();
+    std::string newPath = resolveAbsolutePath(
+        (dir.empty() ? std::string(".") : dir) + "/" + q);
+    if (newPath.empty()) {
+        setActionMessage("Ruta invalida.", MessageKind::Error);
+        return;
+    }
+    if (newPath.size() > 4000) {
+        setActionMessage("Ruta demasiado larga.", MessageKind::Error);
+        return;
+    }
+    if (newPath == oldPath) {
+        renameQuery_.clear();
+        state_ = priorState_;
+        setStatusMessage("", MessageKind::Info);
+        setActionMessage("Sin cambios.", MessageKind::Info);
+        return;
+    }
+    if (isDirectory(newPath)) {
+        setActionMessage("Es una carpeta: " + newPath,
+                         MessageKind::Error);
+        return;
+    }
+    for (int i = 0; i < buffers.count(); ++i) {
+        if (&buffers.at(i) == &b) continue;
+        if (buffers.at(i).filename == newPath) {
+            setActionMessage("Destino ya abierto: " + newPath,
+                             MessageKind::Error);
+            return;
+        }
+    }
+    std::error_code ec;
+    if (std::filesystem::exists(newPath, ec)) {
+        setActionMessage("Ya existe: " + newPath, MessageKind::Error);
+        return;
+    }
+    std::filesystem::rename(oldPath, newPath, ec);
+    if (ec) {
+        setActionMessage("No se pudo renombrar: " + ec.message(),
+                         MessageKind::Error);
+        return;
+    }
+    // Orden como loadIntoActiveBuffer: primero se actualiza filename para
+    // que unwatchFile(oldPath) no vea al propio buffer activo y salte el
+    // unwatch por su guarda ("otro buffer aun usa ese path").
+    b.filename = newPath;
+    unwatchFile(oldPath);
+    b.syncSavedState();
+    b.savedIdentity = captureIdentity(newPath);
+    watchFile(newPath);
+    renderer_->invalidateCache();
+    renameQuery_.clear();
+    state_ = priorState_;
+    setStatusMessage("", MessageKind::Info);
+    setActionMessage("Renombrado: " + newPath, MessageKind::Success);
 }
 
 BracketSpanSource Editor::makeBracketSpanSource(Buffer& buf, SyntaxLanguage lang) {

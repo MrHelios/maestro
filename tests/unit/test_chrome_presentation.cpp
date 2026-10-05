@@ -45,6 +45,8 @@ TEST(chrome_presentation_state_mapping) {
          FrameCursorShape::Block, true},
         {State::SaveAsFileBrowser, "GUARDAR COMO", StyleRole::AccentGuardar,
          FrameCursorShape::Block, true},
+        {State::Renombrar, "RENOMBRAR", StyleRole::AccentGuardar,
+         FrameCursorShape::Block, true},
     };
     for (const auto& c : cases) {
         CHECK(stateLabelForPresentation(c.state) == c.label);
