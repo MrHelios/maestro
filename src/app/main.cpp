@@ -1,17 +1,95 @@
 #include <cstdio>
 #include <memory>
+#include <string>
+#include <vector>
 #include "app/Editor.h"
 #include "platform/MouseButton.h"
+#include "platform/gui/GuiRunLoop.h"
 #include "platform/tty/TtyRunLoop.h"
+#include "rendering/gui/GuiRenderer.h"
 #include "rendering/tty/TtyRenderer.h"
 #include "rendering/tty/TtySink.h"
 
+namespace {
+void printHelp(const char* prog) {
+    std::printf("Uso: %s [--gui] [archivo]\n", prog);
+    std::printf("\n");
+    std::printf("  sin flags      modo terminal (TTY)\n");
+    std::printf("  --gui          modo ventana SDL2 (mismo binario)\n");
+    std::printf("  -h, --help     esta ayuda\n");
+}
+
+struct Args {
+    bool gui = false;
+    bool help = false;
+    std::string file;
+    bool bad = false;
+};
+
+Args parseArgs(int argc, char* argv[]) {
+    Args a;
+    for (int i = 1; i < argc; ++i) {
+        std::string s = argv[i];
+        if (s == "--gui") {
+            a.gui = true;
+        } else if (s == "-h" || s == "--help") {
+            a.help = true;
+        } else if (!s.empty() && s[0] == '-' && a.file.empty()) {
+            // Flag desconocido: error claro en vez de tratarlo como archivo.
+            a.bad = true;
+        } else if (a.file.empty()) {
+            a.file = s;
+        } else {
+            a.bad = true;
+        }
+    }
+    return a;
+}
+}  // namespace
+
 // main es el composition root: acá se cablean los backends concretos
-// (TtyRenderer, TtySink, X11MouseButtonQuery, TtyRunLoop) con el engine
-// (Editor), que solo conoce puertos neutros (ScreenRenderer, Sink, oracle)
-// y la fachada handleEvent/resize/renderFrame/tick. El futuro GUI construirá
-// los suyos sin tocar src/app/ (solo este archivo).
+// (TtyRenderer/TtySink/X11MouseButtonQuery/TtyRunLoop o
+// GuiRenderer/GuiRunLoop) con el engine (Editor), que solo conoce puertos
+// neutros (ScreenRenderer, Sink, oracle) y la fachada
+// handleEvent/resize/renderFrame/tick. Un solo binario, dos modos:
+// TTY por defecto, GUI con --gui.
 int main(int argc, char* argv[]) {
+    Args args = parseArgs(argc, argv);
+    const char* prog = argc > 0 ? argv[0] : "maestro";
+    if (args.help) {
+        printHelp(prog);
+        return 0;
+    }
+    if (args.bad) {
+        std::fprintf(stderr, "Uso: %s [--gui] [archivo]\n", prog);
+        return 1;
+    }
+
+    auto openFile = [&](Editor& editor) -> int {
+        if (args.file.empty()) return 0;
+        if (Editor::isDirectory(args.file)) {
+            std::fprintf(stderr,
+                          "Error: '%s' es una carpeta. Solo se pueden abrir archivos.\n",
+                          args.file.c_str());
+            return 1;
+        }
+        editor.loadIntoActiveBuffer(args.file);
+        return 0;
+    };
+
+    if (args.gui) {
+        // Rama GUI: backend SDL2 + loop de ventana. Sin tocar src/app/
+        // más allá de este archivo (el Editor solo ve ScreenRenderer).
+        auto guiRenderer = std::make_unique<GuiRenderer>();
+        GuiRenderer* raw = guiRenderer.get();
+        Editor editor(std::move(guiRenderer));
+        if (int rc = openFile(editor)) return rc;
+        GuiRunLoop loop(editor);
+        loop.setGuiRenderer(raw);
+        return loop.run();
+    }
+
+    // Rama TTY (comportamiento histórico intacto).
     // Dueño explícito del recurso X11 (sin static de proceso). Vive lo que
     // vive el editor, que lo consulta vía oracle en el tick de autoscroll.
     platform::X11MouseButtonQuery mouseQuery;
@@ -27,18 +105,7 @@ int main(int argc, char* argv[]) {
     // Único cableado productivo: no hay fallback global oculto.
     editor.setMouseButtonPressedQuery([&] { return mouseQuery.held(); });
 
-    // Sin argumentos: arranca con el buffer vacío "SinNombre" que ya
-    // crea BufferManager en su constructor. Con un path: lo abre (o crea
-    // en memoria si no existe).
-    if (argc >= 2) {
-        if (Editor::isDirectory(argv[1])) {
-            std::fprintf(stderr,
-                         "Error: '%s' es una carpeta. Solo se pueden abrir archivos.\n",
-                         argv[1]);
-            return 1;
-        }
-        editor.loadIntoActiveBuffer(argv[1]);
-    }
+    if (int rc = openFile(editor)) return rc;
 
     // El loop TTY vive fuera del Editor: mide el tamaño inicial
     // vía resize() y corre el ciclo. El Editor solo recibe eventos.
