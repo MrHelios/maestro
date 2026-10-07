@@ -4,6 +4,7 @@
 
 #include "base/utf8.h"
 #include "diagnostics/Instrument.h"
+#include "rendering/ListLines.h"
 #include "rendering/RenderUtil.h"
 
 namespace {
@@ -170,18 +171,19 @@ void TtyRenderer::renderBufferListContent(
     std::string& out, const std::vector<std::string>& names, int selected,
     const Rect& area) {
     const TtyTheme& T = encoder_.theme();
-    int rows = 0;
-    for (size_t i = 0; i < names.size() && rows < area.height; ++i, ++rows) {
+    // Texto y relleno salen del builder compartido con la GUI
+    // (rendering/ListLines.h); acá solo se envuelve en ANSI.
+    const std::vector<ListLine> lines =
+        buildBufferListLines(names, area.height);
+    for (size_t r = 0; r < lines.size(); ++r) {
         encoder_.appendClearLine(out);
-        std::string line = "  " + names[i];
-        bool isSelected = (static_cast<int>(i) == selected);
-        renderFilledRow(out, line, area.width,
-                        isSelected ? T.listSelected : "", T.reset);
-        out += "\r\n";
-    }
-    for (int r = rows; r < area.height; ++r) {
-        encoder_.appendClearLine(out);
-        renderEmptyMarkerRow(out, T, area.width);
+        if (lines[r].filler) {
+            renderEmptyMarkerRow(out, T, area.width);
+        } else {
+            const bool isSelected = (static_cast<int>(r) == selected);
+            renderFilledRow(out, lines[r].text, area.width,
+                            isSelected ? T.listSelected : "", T.reset);
+        }
         out += "\r\n";
     }
 }
@@ -244,20 +246,18 @@ void TtyRenderer::renderFileListContent(
     std::string& out, const std::vector<FileListItem>& items, int selected,
     int scroll, const Rect& area) {
     const TtyTheme& T = encoder_.theme();
-    int rows = 0;
-    for (int row = 0; row < area.height; ++row, ++rows) {
-        int idx = scroll + row;
+    // Idem buffer: composición compartida, ANSI solo acá.
+    const std::vector<ListLine> lines =
+        buildFileListLines(items, scroll, area.height);
+    for (size_t r = 0; r < lines.size(); ++r) {
         encoder_.appendClearLine(out);
-        if (idx < static_cast<int>(items.size())) {
-            const FileListItem& item = items[static_cast<size_t>(idx)];
-            std::string line =
-                "  " + item.name + (item.isDirectory ? "/" : "");
-
-            bool isSelected = (idx == selected);
-            renderFilledRow(out, line, area.width,
-                            isSelected ? T.listSelected : "", T.reset);
-        } else {
+        if (lines[r].filler) {
             renderEmptyMarkerRow(out, T, area.width);
+        } else {
+            const bool isSelected =
+                (scroll + static_cast<int>(r) == selected);
+            renderFilledRow(out, lines[r].text, area.width,
+                            isSelected ? T.listSelected : "", T.reset);
         }
         out += "\r\n";
     }

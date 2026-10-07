@@ -8,26 +8,11 @@ const std::string& TtyEncoder::ansiFor(StyleRole role) const {
     return themeAnsiFor(theme_, role);
 }
 
-namespace {
-
-// ¿El rol es un token de sintaxis? En la fila del cursor se envuelve con
-// currentLine + estilo (viejo camino syntax+currentLine de renderEditorRow).
-bool isSyntaxRole(StyleRole r) {
-    switch (r) {
-        case StyleRole::SyntaxKeyword:
-        case StyleRole::SyntaxType:
-        case StyleRole::SyntaxPreprocessor:
-        case StyleRole::SyntaxString:
-        case StyleRole::SyntaxCharacter:
-        case StyleRole::SyntaxNumber:
-        case StyleRole::SyntaxComment:
-            return true;
-        default:
-            return false;
-    }
-}
-
-} // namespace
+// NOTA: la política de fondos (qué familia toca a cada rol en la línea
+// actual) vive una sola vez en rendering/Style.h::rowBgKindFor, que la GUI
+// consume directo. Estas ramas por rol están congeladas byte a byte (los
+// códigos del TtyTheme combinan fg+bg y no se pueden reexpresar sin cambiar
+// bytes): el test de paridad TTY↔GUI congela que ambas deciden lo mismo.
 
 std::string TtyEncoder::encodeRow(const StyledRow& row) const {
     std::string out;

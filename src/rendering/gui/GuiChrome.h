@@ -65,8 +65,30 @@ inline GuiColor cursorColor(bool dark) {
 }
 
 // Texto por rol (paridad con los ANSI de TtyTheme, aproximados a RGB).
+// Cubre TODOS los roles del Frame (contenido + listas + chrome). Los
+// valores son aproximaciones a la paleta 256 del TTY, no exactos por
+// diseño: los tests solo congelan distinción (roles distintos =>
+// colores distintos donde importa) y paridad dark!=light.
 inline GuiColor colorFor(StyleRole role, bool dark) {
     switch (role) {
+        case StyleRole::Default:
+            return dark ? GuiColor{0xD4, 0xD4, 0xD4} : GuiColor{0x1E, 0x1E, 0x1E};
+        case StyleRole::Gutter:
+            return dark ? GuiColor{0x6C, 0x6C, 0x6C} : GuiColor{0x94, 0x94, 0x94};
+        case StyleRole::GutterCurrent:
+            return dark ? GuiColor{0x51, 0xAF, 0xEF} : GuiColor{0x00, 0x5F, 0xA0};
+        case StyleRole::GutterBlank:
+            return dark ? GuiColor{0x12, 0x13, 0x14} : GuiColor{0xFF, 0xFF, 0xFF};
+        case StyleRole::Marker:
+            return dark ? GuiColor{0x5F, 0x87, 0x5F} : GuiColor{0x6E, 0x6E, 0x6E};
+        case StyleRole::CurrentLine:
+            return dark ? GuiColor{0xD4, 0xD4, 0xD4} : GuiColor{0x1E, 0x1E, 0x1E};
+        case StyleRole::Selection:
+            return dark ? GuiColor{0xFF, 0xFF, 0xFF} : GuiColor{0x1E, 0x1E, 0x1E};
+        case StyleRole::BracketMatch:
+            return GuiColor{0x1E, 0x1E, 0x1E};
+        case StyleRole::ListSelected:
+            return dark ? GuiColor{0xFF, 0xFF, 0xFF} : GuiColor{0x1E, 0x1E, 0x1E};
         case StyleRole::StatusBase:
             return dark ? GuiColor{0x8C, 0x8C, 0x8C} : GuiColor{0xEB, 0xEB, 0xEB};
         case StyleRole::StatusName:
@@ -90,9 +112,66 @@ inline GuiColor colorFor(StyleRole role, bool dark) {
         case StyleRole::MsgWarning:
         case StyleRole::MsgError:
         case StyleRole::MsgInfo:
+            // Por diseño los mensajes van sin color propio (ver README
+            // v0.9): mismo tono que el texto base.
+            return dark ? GuiColor{0xD4, 0xD4, 0xD4} : GuiColor{0x1E, 0x1E, 0x1E};
+        case StyleRole::SyntaxKeyword:
+            return dark ? GuiColor{0x51, 0xAF, 0xEF} : GuiColor{0x00, 0x5F, 0xA0};
+        case StyleRole::SyntaxType:
+            return dark ? GuiColor{0xAF, 0x87, 0xFF} : GuiColor{0x5F, 0x00, 0x87};
+        case StyleRole::SyntaxPreprocessor:
+            return dark ? GuiColor{0xFF, 0x87, 0x00} : GuiColor{0x8A, 0x4B, 0x00};
+        case StyleRole::SyntaxString:
+        case StyleRole::SyntaxCharacter:
+            return dark ? GuiColor{0x87, 0xD7, 0x87} : GuiColor{0x00, 0x5F, 0x00};
+        case StyleRole::SyntaxNumber:
+            return dark ? GuiColor{0xFF, 0xAF, 0x00} : GuiColor{0x8A, 0x4B, 0x00};
+        case StyleRole::SyntaxComment:
+            return dark ? GuiColor{0x6C, 0x6C, 0x6C} : GuiColor{0x94, 0x94, 0x94};
         default:
             return dark ? GuiColor{0xD4, 0xD4, 0xD4} : GuiColor{0x1E, 0x1E, 0x1E};
     }
+}
+
+// Fondo por familia (paridad aproximada con TtyTheme). La DECISIÓN de qué
+// familia toca a cada segmento vive una sola vez en
+// rendering/Style.h::rowBgKindFor; acá solo está la tabla familia -> RGB
+// de ESTE backend (igual que TtyTheme es la tabla del TTY).
+inline GuiColor currentLineBackground(bool dark) {
+    return dark ? GuiColor{0x3A, 0x3A, 0x3A} : GuiColor{0xE4, 0xE4, 0xE4};
+}
+inline GuiColor selectionBackground(bool dark) {
+    return dark ? GuiColor{0x5F, 0x5F, 0x87} : GuiColor{0xBD, 0xBD, 0xFF};
+}
+inline GuiColor bracketBackground() { return GuiColor{0xFF, 0xD7, 0x5F}; }
+inline GuiColor guiBgFor(RowBgKind kind, bool dark) {
+    switch (kind) {
+        case RowBgKind::CurrentLine:
+        case RowBgKind::List:
+            return currentLineBackground(dark);
+        case RowBgKind::Selection:
+            // Búsqueda y selección comparten rol (FrameBuilder los fusiona
+            // en Selection): mismo fondo destacado en ambos.
+            return selectionBackground(dark);
+        case RowBgKind::Bracket:
+            return bracketBackground();
+        case RowBgKind::Content:
+        default:
+            return background(dark);
+    }
+}
+
+// Estilo resuelto para un segmento del Frame (fg + bg concretos).
+// Implementa la política compartida rowBgKindFor: el fg sale de la tabla
+// colorFor de este backend y el bg de guiBgFor. (GutterBlank no necesita
+// caso propio: su fg ya es el fondo, los espacios son invisibles.)
+struct GuiStyle {
+    GuiColor fg;
+    GuiColor bg;
+};
+inline GuiStyle styleFor(StyleRole role, bool isCurrentLine, bool dark) {
+    return GuiStyle{colorFor(role, dark),
+                    guiBgFor(rowBgKindFor(role, isCurrentLine), dark)};
 }
 
 inline GuiColor messageColor(MessageKind kind, bool dark) {

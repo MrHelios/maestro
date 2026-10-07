@@ -11,6 +11,7 @@
 #include "layout/Viewport.h"
 #include "rendering/ChromeData.h"
 #include "rendering/ChromeRequest.h"
+#include "rendering/ListLines.h"
 #include "rendering/ScreenRenderer.h"
 #include "rendering/Sink.h"
 #include "rendering/frame/Frame.h"
@@ -20,21 +21,46 @@
 #include "syntax/SyntaxCache.h"
 
 // ---------------------------------------------------------------------------
-// GuiRenderer (Fase GUI-2 chrome): backend SDL2 del puerto neutro
-// ScreenRenderer.
-//
-// El header NO incluye <SDL.h> a propósito: el puntero al renderer SDL se
-// guarda opaco (void*) y solo el .cpp conoce SDL bajo #ifdef HAVE_SDL2.
-// Así el mismo TU compila con WITH_SDL2=0 sin headers de desarrollo.
+// GuiRenderer: backend SDL2 del puerto neutro ScreenRenderer.
 //
 // Chrome: StatusBar (fila superior) + MessageBar (fila inferior) con el MISMO
 // DTO y posicion de cursor que TTY (FrameBuilder + chrome::
 // messageBarCursorCell). El cursor de los 4 prompts con input (Busqueda /
 // IrAFila / SaveAs / Renombrar) va DENTRO del input del MessageBar
 // (msg.cursor, antes de decoraciones), nunca al final ni en la lista.
-// El pintado completo del contenido (filas, gutter, sintaxis) sigue en
-// Fase 3; el area de contenido queda en fondo liso por ahora.
+// Contenido: filas del Frame (gutter + sintaxis + Selection, que fusiona
+// selección y highlight de búsqueda + BracketMatch + fondo de línea actual)
+// y listas modales (BufferSelector / FileBrowser / SaveAs) con la misma
+// composición que TTY ("  nombre", "/" en carpetas, "~" de relleno).
+// Sin SDL los render* son no-op seguros pero dejan snapshot testeable
+// (lastContentRows_/lastListLines_).
 // ---------------------------------------------------------------------------
+// Snapshot testeable sin SDL: una fila de contenido como texto+roles.
+// Es el DTO que la GUI pinta (segmentos del Frame) y lo que los tests
+// afirman sin ventana: sintaxis, Selection (selección + highlight de
+// búsqueda, fusionados en FrameBuilder), BracketMatch y CurrentLine.
+struct GuiContentSeg {
+    std::string text;
+    StyleRole role = StyleRole::Default;
+};
+struct GuiContentRow {
+    std::vector<GuiContentSeg> segs;
+    bool isCurrentLine = false;
+    std::string plain() const {
+        std::string out;
+        for (const auto& s : segs) out += s.text;
+        return out;
+    }
+    bool hasRole(StyleRole r) const {
+        for (const auto& s : segs)
+            if (s.role == r) return true;
+        return false;
+    }
+};
+
+// Las líneas visibles de los modales son rendering::ListLine
+// (ver rendering/ListLines.h: composición compartida con TTY).
+
 class GuiRenderer : public ScreenRenderer {
 public:
     GuiRenderer();
@@ -90,6 +116,24 @@ public:
     StyleRole lastAccent() const { return lastAccent_; }
     FrameCursor lastCursor() const { return lastCursor_; }
     Layout lastLayout() const { return lastLayout_; }
+    // Contenido testeable sin SDL:
+    //   - renderScreenDiff deja las filas del Frame (texto + rol por
+    //     segmento, con Selection = selección o highlight de búsqueda).
+    //   - renderBufferList/FileList/SaveAs dejan las líneas visibles del
+    //     modal (exactamente content.height entradas ListLine: items +
+    //     relleno con filler=true; FileBrowser respeta scroll,
+    //     BufferSelector desde 0). Un archivo real llamado "~" llega con
+    //     filler=false aunque su texto sea idéntico al del relleno.
+    //   - lastListSelected: índice seleccionado tal cual lo recibió (-1 si
+    //     vacío/inválido para no afirmar un cursor oculto).
+    const std::vector<GuiContentRow>& lastContentRows() const {
+        return lastContentRows_;
+    }
+    const std::vector<ListLine>& lastListLines() const {
+        return lastListLines_;
+    }
+    int lastListSelected() const { return lastListSelected_; }
+    int lastListScroll() const { return lastListScroll_; }
 
     void renderScreenDiff(const Document& doc,
                           const Cursor& cursor,
@@ -139,4 +183,9 @@ private:
     mutable StyleRole lastAccent_ = StyleRole::StatusAccentDefault;
     mutable FrameCursor lastCursor_;
     mutable Layout lastLayout_;
+    // Snapshots puros (ver getters): se rellenan SIEMPRE, con o sin SDL.
+    mutable std::vector<GuiContentRow> lastContentRows_;
+    mutable std::vector<ListLine> lastListLines_;
+    mutable int lastListSelected_ = -1;
+    mutable int lastListScroll_ = 0;
 };

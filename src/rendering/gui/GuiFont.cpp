@@ -194,6 +194,12 @@ void* GuiFont::textTexture(void* sdlRenderer, const std::string& text,
         static_cast<SDL_Renderer*>(sdlRenderer), surf);
     SDL_FreeSurface(surf);
     if (!tex) return nullptr;
+    // La superficie blended trae fondo transparente: se fija BLENDMODE_BLEND
+    // explícito (defensa en profundidad: los SDL2 modernos ya lo activan
+    // solo ante superficies con alfa, pero no todos los backends/versiones
+    // lo garantizan; sin blend el RenderCopy pegaría cajas negras opacas).
+    // Se fija una vez al crear (el caché conserva el modo por textura).
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
     (*cache)[std::move(key)] = tex;
     return static_cast<void*>(tex);
 }

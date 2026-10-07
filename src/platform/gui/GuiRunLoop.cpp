@@ -10,6 +10,17 @@
 
 GuiRunLoop::GuiRunLoop(Editor& editor) : editor_(editor) {}
 
+void GuiRunLoop::idleStep(std::chrono::steady_clock::time_point now) {
+    editor_.tick(now);
+    editor_.renderFrame();
+}
+
+int GuiRunLoop::idleDelayMs(std::chrono::steady_clock::time_point now) const {
+    int waitMs = editor_.nextTimeoutMs(now);
+    if (waitMs < 0 || waitMs > 30) waitMs = 30;
+    return waitMs;
+}
+
 #ifndef HAVE_SDL2
 
 int GuiRunLoop::run() {
@@ -136,11 +147,9 @@ int GuiRunLoop::run() {
             // Sin eventos: tick por timeout (mensajes/autoscroll) y pausa
             // para no quemar CPU. El delay sale del Editor.
             const auto now = std::chrono::steady_clock::now();
-            int waitMs = editor_.nextTimeoutMs(now);
-            if (waitMs < 0 || waitMs > 30) waitMs = 30;
+            const int waitMs = idleDelayMs(now);
             if (waitMs > 0) SDL_Delay(static_cast<Uint32>(waitMs));
-            editor_.tick(std::chrono::steady_clock::now());
-            editor_.renderFrame();
+            idleStep(std::chrono::steady_clock::now());
         }
     }
 
