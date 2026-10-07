@@ -33,6 +33,19 @@ else
 SDL_LIBS :=
 endif
 
+# --- Texto GUI (SDL_ttf, Fase 1) ---
+# Solo si están los headers (libsdl2-ttf-dev): define HAVE_SDL2_TTF y linkea
+# -lSDL2_ttf. Sin ellos la GUI compila igual en modo degradado (fondo sólido
+# sin texto). La fuente se busca en runtime (ver GuiFont: MAESTRO_FONT o
+# candidatos del sistema como DejaVuSansMono).
+ifeq ($(WITH_SDL2),1)
+HAVE_TTF_HDR := $(shell test -f /usr/include/SDL2/SDL_ttf.h && echo 1 || echo 0)
+ifeq ($(HAVE_TTF_HDR),1)
+CXXFLAGS += -DHAVE_SDL2_TTF
+SDL_LIBS += -lSDL2_ttf
+endif
+endif
+
 # El binario final se llama "maestro" y vive en build/: el punto de
 # entrada del proyecto para el usuario es el script wrapper ./maestro en
 # la raiz (ver README), que decide si compila+abre el editor o delega en

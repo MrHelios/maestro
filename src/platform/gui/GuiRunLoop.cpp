@@ -24,18 +24,20 @@ int GuiRunLoop::run() {
 #include <SDL2/SDL.h>
 
 namespace {
-// Celda estimada hasta tener métricas reales de fuente (Fase texto).
-constexpr int kEstCellW = 9;
-constexpr int kEstCellH = 18;
+// Celda de respaldo si la fuente no cargó (GuiFont usa la misma).
+constexpr int kFallbackCellW = 9;
+constexpr int kFallbackCellH = 18;
 
-platform::WindowSize sizeFor(int pxW, int pxH) {
+platform::WindowSize sizeFor(int pxW, int pxH, int cellW, int cellH) {
+    if (cellW <= 0) cellW = kFallbackCellW;
+    if (cellH <= 0) cellH = kFallbackCellH;
     platform::WindowSize s;
     s.pixelW = pxW;
     s.pixelH = pxH;
-    s.cellW = kEstCellW;
-    s.cellH = kEstCellH;
-    s.cols = pxW / kEstCellW;
-    s.rows = pxH / kEstCellH;
+    s.cellW = cellW;
+    s.cellH = cellH;
+    s.cols = pxW / cellW;
+    s.rows = pxH / cellH;
     if (s.cols < 1) s.cols = 1;
     if (s.rows < 1) s.rows = 1;
     return s;
@@ -75,11 +77,18 @@ int GuiRunLoop::run() {
     // usa (NullSink de descarte, vive todo el run).
     NullSink discard;
     editor_.setSink(discard);
-    if (gui_) gui_->setSdlRenderer(static_cast<void*>(ren));
+    // Abre la fuente y mide la celda real ANTES del primer resize: de acá
+    // salen cols/filas = píxeles/celda (ya no estimados).
+    if (gui_) gui_->initForRenderer(static_cast<void*>(ren));
 
-    int pxW = 960, pxH = 600;
-    SDL_GetWindowSize(win, &pxW, &pxH);
-    editor_.resize(sizeFor(pxW, pxH));
+    auto currentSize = [&] {
+        int pxW = 960, pxH = 600;
+        SDL_GetWindowSize(win, &pxW, &pxH);
+        const int cw = gui_ ? gui_->cellW() : kFallbackCellW;
+        const int ch = gui_ ? gui_->cellH() : kFallbackCellH;
+        return sizeFor(pxW, pxH, cw, ch);
+    };
+    editor_.resize(currentSize());
     editor_.renderFrame();
 
     while (editor_.isRunning()) {
@@ -98,8 +107,7 @@ int GuiRunLoop::run() {
                 case SDL_WINDOWEVENT:
                     if (ev.window.event == SDL_WINDOWEVENT_RESIZED ||
                         ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
-                        SDL_GetWindowSize(win, &pxW, &pxH);
-                        editor_.resize(sizeFor(pxW, pxH));
+                        editor_.resize(currentSize());
                         editor_.renderFrame();
                     }
                     break;

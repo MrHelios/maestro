@@ -12,20 +12,19 @@
 #include "rendering/ChromeRequest.h"
 #include "rendering/ScreenRenderer.h"
 #include "rendering/Sink.h"
+#include "rendering/gui/GuiFont.h"
 #include "syntax/SyntaxCache.h"
 
 // ---------------------------------------------------------------------------
-// GuiRenderer (Fase GUI-0, stub): backend SDL2 del puerto neutro
-// ScreenRenderer.
-//
-// Paso inicial del binario único con --gui: implementa la interfaz para que
-// el Editor no distinga backends, pero todavía NO dibuja texto. Cuando hay
-// SDL2 disponible pinta un fondo sólido (prueba el camino
-// Editor -> renderer -> ventana); sin SDL2 es no-op como NullScreenRenderer.
+// GuiRenderer (Fase GUI-1): backend SDL2 del puerto neutro ScreenRenderer.
 //
 // El header NO incluye <SDL.h> a propósito: el puntero al renderer SDL se
 // guarda opaco (void*) y solo el .cpp conoce SDL bajo #ifdef HAVE_SDL2.
 // Así el mismo TU compila con WITH_SDL2=0 sin headers de desarrollo.
+//
+// Fase 1: abre la fuente mono (GuiFont), expone la celda real para el resize
+// y pinta fondo + una línea de prueba (nombre de archivo y métricas).
+// El pintado completo del Frame (filas, gutter, sintaxis) llega en Fase 2.
 // ---------------------------------------------------------------------------
 class GuiRenderer : public ScreenRenderer {
 public:
@@ -40,7 +39,17 @@ public:
 
     // El loop GUI inyecta el SDL_Renderer* real (no-owned). Sin inyectar,
     // los render* son no-op seguros (útil en tests sin ventana).
-    void setSdlRenderer(void* r) { sdlRenderer_ = r; }
+    void setSdlRenderer(void* r);
+    // Variante completa: inyecta renderer + abre la fuente y mide la celda.
+    // Debe llamarse tras crear el SDL_Renderer y antes del primer resize.
+    void initForRenderer(void* r, int fontPixels = 16);
+
+    // Métricas de celda en píxeles (de la fuente; 9x18 estimados si no hay).
+    // El loop las usa para rows/cols = píxeles/celda.
+    int cellW() const { return font_.cellW(); }
+    int cellH() const { return font_.cellH(); }
+    bool hasFont() const { return font_.ok(); }
+    const std::string& fontPath() const { return font_.path(); }
 
     void renderScreenDiff(const Document& doc,
                           const Cursor& cursor,
@@ -82,4 +91,5 @@ private:
     SyntaxCache* cache_ = nullptr;
     // SDL_Renderer* opaco (solo se toca en el .cpp bajo HAVE_SDL2).
     void* sdlRenderer_ = nullptr;
+    GuiFont font_;
 };
