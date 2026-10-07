@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include "rendering/ChromeLayout.h"
 #include "rendering/RenderUtil.h"
 
 using namespace chrome;
@@ -23,76 +24,8 @@ const std::string& messageStyle(const TtyTheme& theme, MessageKind kind) {
     return theme.message;
 }
 
-// ---- Limites fijos del StatusBar (bloque izquierdo) ----
-constexpr int kNameMax    = 30;   // columnas maximas del nombre
-constexpr int kPathMax    = 40;   // columnas maximas de la ruta
-constexpr int kNamePathMax = 60;  // tope combinado nombre + ruta
-constexpr std::string_view kSeparator = " - ";
-constexpr std::string_view kModifiedMarker = " [*]";
-
-// Construye el bloque izquierdo respetando los límites de nombre/ruta y
-// el presupuesto disponible. La ruta se sacrifica antes que el nombre;
-// si tampoco cabe el nombre, solo conserva el estado.
-// Piezas `name`/`status` separadas para aplicar estilos del TtyTheme
-// (T.statusBarName, T.statusBarPath, T.statusBarModified y accent).
-//
-// CONTRATO DE ANCHO:
-// layoutLeftBlock() garantiza que el bloque que render() construye a partir
-// de BarLeft no supera `budget` columnas visibles. render() usa el mismo
-// calculo para determinar el relleno restante de la barra.
-struct BarLeft {
-    std::string name;
-    std::string path;
-    std::string status;
-    bool modified;
-    bool showMarker;
-    bool statusOnly;
-};
-
-BarLeft layoutLeftBlock(const std::string& rawName, const std::string& rawPath,
-                        const std::string& status, bool modified, int budget) {
-    if (budget <= 0) return {"", "", utf8::truncate(status, 0), false, false, true};
-
-    std::string name = rawName;
-    if (name.empty()) name = "[sin nombre]";
-
-    std::string path = rawPath;
-
-    int markerW = modified ? colCount(kModifiedMarker) : 0;
-    int nameBudget = kNameMax - markerW;
-    name = utf8::truncate(name, nameBudget);
-    if (colCount(path) > kPathMax)
-        path = utf8TruncateFront(path, kPathMax);
-    if (colCount(name) + markerW + colCount(path) > kNamePathMax)
-        path = utf8TruncateFront(path, std::max(0, kNamePathMax - colCount(name) - markerW));
-
-    int statusW = colCount(status);
-    int sepW = colCount(kSeparator);
-    int partsBudget = budget - statusW - sepW;
-    if (budget <= statusW || partsBudget <= 0)
-        return {"", "", utf8::truncate(status, budget), false, false, true};
-
-    int nameW = colCount(name);
-    int effectiveNameW = nameW + markerW;
-    if (effectiveNameW >= partsBudget) {
-        if (modified) {
-            if (partsBudget < markerW) {
-                // Borde extremadamente angosto: no cabe [*] completo.
-                name = utf8::truncate(name, partsBudget);
-                return {name, "", status, true, false, false};
-            }
-            name = utf8::truncate(name, partsBudget - markerW);
-            return {name, "", status, true, true, false};
-        }
-        name = utf8::truncate(name, partsBudget);
-        return {name, "", status, false, false, false};
-    }
-
-    int pathBudget = partsBudget - effectiveNameW - sepW;
-    if (path.empty() || pathBudget <= 0) return {name, "", status, modified, modified, false};
-    return {name, utf8TruncateFront(path, pathBudget),
-            status, modified, modified, false};
-}
+// (Composición del StatusBar en rendering/ChromeLayout.h, compartida con la
+// GUI: layoutStatusLeft + statusRightBlock + statusLeftPlainText.)
 
 } // namespace
 
@@ -118,28 +51,16 @@ void TtyChrome::appendStatusBar(std::string& out, int width,
     out += "\x1b[K";
     out += T.statusBar;
 
-    // Bloque derecho del StatusBar: si hay un `right` explicito (pantallas
-    // sin documento: selector, explorador) se usa tal cual; si no, se calcula
-    // la posicion vertical del cursor como porcentaje del archivo (0% al
-    // inicio, 100% al final; una sola linea => 0%) y luego (fila,columna),
-    // anclado a la derecha.
-    std::string rightBlock;
-    if (!status.right.empty()) {
-        rightBlock = status.right;
-    } else {
-        int pct = status.totalLines <= 1 ? 0
-                                       : (status.cursorLine * 100) / (status.totalLines - 1);
-        rightBlock = std::to_string(pct) + "% (" +
-                     std::to_string(status.cursorLine + 1) + "," +
-                     std::to_string(status.cursorCol + 1) + ")";
-    }
+    // Bloque derecho (política compartida en ChromeLayout.h): override tal
+    // cual o % + (fila,columna), anclado a la derecha.
+    std::string rightBlock = statusRightBlock(status);
     int rightW = colCount(rightBlock);
 
     // ---- Cota de ancho (v1.1): el StatusBar NUNCA escribe fuera del ancho de
     // la terminal. En una terminal demasiado angosta el contenido fijo
     // (paddings + bloque derecho) no cabe entero; el pad derecho cede
     // primero, luego el bloque derecho (el bloque izquierdo ya sacrifica
-    // dentro de su presupuesto, ver layoutLeftBlock). Con esto se garantiza
+    // dentro de su presupuesto, ver layoutStatusLeft). Con esto se garantiza
     // que la fila fija ocupe EXACTAMENTE `width` columnas (nada mas).
     const int padL = std::min(kChromePadLeft, width);
     const int padR = std::min(kChromePadRight, std::max(0, width - padL));
@@ -150,16 +71,16 @@ void TtyChrome::appendStatusBar(std::string& out, int width,
     }
 
     int leftBudget = std::max(0, width - padL - padR - rightW);
-    BarLeft left = layoutLeftBlock(status.name, status.path, status.estado,
-                                status.modified, leftBudget);
+    StatusLeft left = layoutStatusLeft(status.name, status.path, status.estado,
+                                       status.modified, leftBudget);
 
     int plainW;
     if (left.statusOnly) {
         plainW = colCount(left.status);
     } else {
         int sepCount = left.path.empty() ? 1 : 2;
-        int markerW = left.showMarker ? colCount(kModifiedMarker) : 0;
-        int sepW = colCount(kSeparator);
+        int markerW = left.showMarker ? colCount(kStatusModifiedMarker) : 0;
+        int sepW = colCount(kStatusSeparator);
         plainW = colCount(left.name) + markerW + colCount(left.path) +
                  colCount(left.status) + sepCount * sepW;
     }
@@ -187,20 +108,20 @@ void TtyChrome::appendStatusBar(std::string& out, int width,
             out += T.statusBar;
             if (left.showMarker) {
                 out += T.statusBarModified;
-                out.append(kModifiedMarker.data(), kModifiedMarker.size());
+                out.append(kStatusModifiedMarker.data(), kStatusModifiedMarker.size());
                 out += T.reset;
                 out += T.statusBar;
             }
         }
         if (!left.path.empty()) {
             out += T.statusBarPath;
-            out.append(kSeparator.data(), kSeparator.size());
+            out.append(kStatusSeparator.data(), kStatusSeparator.size());
             out += left.path;
             out += T.reset;
             out += T.statusBar;
         }
         out += accent;
-        out.append(kSeparator.data(), kSeparator.size());
+        out.append(kStatusSeparator.data(), kStatusSeparator.size());
         out += left.status;
         out += T.reset;
         out += T.statusBar;
