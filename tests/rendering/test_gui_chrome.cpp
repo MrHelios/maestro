@@ -7,7 +7,8 @@
 //   - Pintado SDL real (sección final, driver de video "dummy" headless +
 //     renderer por software + SDL_RenderReadPixels): verifica que lo que se
 //     pinta en píxeles reproduce el snapshot (fondos de selección/listas,
-//     cursor opaco, MessageBar, sin cajas negras del blended). Sin SDL2
+//     cursor en bloque con glifo invertido, MessageBar, sin cajas negras
+//     del blended). Sin SDL2
 //     compilado o sin video dummy se skipean, no fallan.
 
 #include <chrono>
@@ -24,6 +25,7 @@
 #include "filesystem/NullFileWatcher.h"
 #include "helpers/FakeClipboard.h"
 #include "helpers/test_render_utils.h"
+#include "layout/Gutter.h"
 #include "layout/Layout.h"
 #include "platform/gui/GuiRunLoop.h"
 #include "syntax/SyntaxCache.h"
@@ -549,7 +551,9 @@ TEST(gui_contenido_bracket_match_en_snapshot) {
     cur.col = 8;  // sobre '{' aprox (el par lo resuelve el caller real)
     Message msg{std::string(""), MessageKind::Info, std::nullopt};
     ChromeRequest cr = makeChromeRequest(msg, State::Navegacion);
-    BracketPair pair{{0, 8}, {0, 21}};
+    // "int f() { return 0; }" mide 21 bytes: '{' en 8, '}' en 20. Cada
+    // extremo del par identifica UN carácter ([col, col+1), ver BracketPair).
+    BracketPair pair{{0, 8}, {0, 20}};
     gui.renderScreenDiff(doc, cur, vp, "t.cpp", false, cr, sink, std::nullopt,
                          std::nullopt, pair);
     CHECK(gui.lastContentRows()[0].hasRole(StyleRole::BracketMatch));
@@ -789,6 +793,80 @@ TEST(gui_sdl_fondo_contenido_y_linea_actual) {
 // "caja negra": si un camino de texturas dejara de mezclar alfa, este test
 // lo caza (verificado por mutación sobre el fill de fondo, que también
 // tumba este test).
+// El fondo pintado en cada celda es exactamente styleFor(rol, línea
+// actual).bg, en una sola capa opaca (un fill por segmento, sin overlays
+// con alfa ni segundas pasadas). El resolver del cursor Block recupera el
+// fondo efectivo con la MISMA llamada y los mismos argumentos (ver
+// blockGlyphInContent); si el pintor compusiera fondos en etapas, ambos
+// divergirían. Sin fuente cada celda es fill sólido y la comparación es
+// píxel a píxel exacta, rol por rol —incluido Bracket, que solo ocupa sus
+// propias celdas y no se puede muestrear más allá del texto— en ambos
+// temas. (ListSelected, misma tabla, en el test de modales.)
+TEST(gui_sdl_fondos_igualan_stylefor) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;  // sin fuente a propósito: fills exactos, sin tinta.
+    gui.setSdlRenderer(sdl.ren);
+    CHECK(!gui.hasFont());
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"abcdef", "gh"});
+    Viewport vp = makeVp(10, 40);
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+    Selection sel{{0, 1}, {0, 4}};    // "bcd": fondo Selection
+    BracketPair pair{{0, 0}, {0, 5}};  // 'a' y 'f': fondo Bracket
+    // Línea 0 = actual; bloque aparcado en el relleno (celda 9, EOL),
+    // fuera de las celdas muestreadas salvo la 9, que se afirma como fill.
+    Cursor cur;
+    cur.line = 0;
+    cur.col = 100;  // clamp a EOL → celda 9 (espacio de relleno)
+    for (bool firstTheme : {true, false}) {
+        const bool dark = gui.isDarkTheme();
+        gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                             makeChromeRequest(msg, State::Navegacion), sink,
+                             sel, std::nullopt, pair);
+        CHECK(gui.lastCursor().visible);
+        const int cw = gui.cellW(), ch = gui.cellH();
+        auto bgAt = [&](int c, int r, GuiColor& out) {
+            return readPixel(sdl.ren, c * cw + cw / 2, r * ch + ch / 2, out);
+        };
+        GuiColor got{};
+        // Fila actual: gutter ('1'), 'a' bracket, 'b' selection,
+        // 'e' línea actual, 'f' bracket, relleno línea actual.
+        CHECK(bgAt(1, 0, got));
+        CHECK(got == guichrome::styleFor(StyleRole::GutterCurrent, true,
+                                         dark)
+                         .bg);
+        CHECK(bgAt(3, 0, got));
+        CHECK(got ==
+              guichrome::styleFor(StyleRole::BracketMatch, true, dark).bg);
+        CHECK(bgAt(4, 0, got));
+        CHECK(got == guichrome::styleFor(StyleRole::Selection, true, dark).bg);
+        CHECK(bgAt(7, 0, got));
+        CHECK(got == guichrome::styleFor(StyleRole::CurrentLine, true,
+                                         dark)
+                         .bg);
+        CHECK(bgAt(8, 0, got));
+        CHECK(got ==
+              guichrome::styleFor(StyleRole::BracketMatch, true, dark).bg);
+        // Celda 9: el cursor (fill sobre espacio de relleno, sin glifo).
+        CHECK_EQ(gui.lastCursor().cell.col, 9);
+        CHECK(bgAt(9, 0, got));
+        CHECK(got == guichrome::cursorColor(dark));
+        // Fila no actual: texto plano sobre fondo base.
+        CHECK(bgAt(3, 1, got));
+        CHECK(got ==
+              guichrome::styleFor(StyleRole::Default, false, dark).bg);
+        if (firstTheme) gui.toggleTheme();
+    }
+#endif
+}
+
 TEST(gui_sdl_seleccion_pinta_fondo_sin_cajas_negras) {
 #ifndef HAVE_SDL2
     SKIP("sin SDL2");
@@ -824,8 +902,345 @@ TEST(gui_sdl_seleccion_pinta_fondo_sin_cajas_negras) {
 #endif
 }
 
-// El cursor en bloque se pinta opaco DESPUÉS del texto: el centro de su
-// celda es exactamente el color del cursor (independiente de fuente).
+// Límite entre segmentos bajo el bloque: el cursor en el primer carácter
+// seleccionado cae dentro del segmento Selection (la frontera no se corre
+// una celda). Lo fija el snapshot (rol exacto en la celda); los píxeles
+// confirman que el glifo sigue legible sobre el bloque.
+TEST(gui_sdl_cursor_block_en_borde_seleccion) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola mundo"});
+    Viewport vp = makeVp(10, 40);
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+    Selection sel{{0, 1}, {0, 4}};  // "ola": frontera visual en col 1
+    Cursor cur;
+    cur.line = 0;
+    cur.col = 1;  // 'o', primer seleccionado
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink, sel,
+                         std::nullopt, std::nullopt);
+    CHECK(gui.lastCursor().visible);
+    CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
+    const Layout lo = gui.lastLayout();
+    const CellPos cell = gui.lastCursor().cell;
+    CHECK_EQ(cell.col, gutterWidth(doc.lineCount(), vp.width) + 1);
+    // La celda pertenece al segmento Selection (no al previo): la frontera
+    // visual [1,4) se atribuye sin corrimiento.
+    {
+        const int relCol = cell.col - lo.content.col;
+        const auto& row = gui.lastContentRows()[0];
+        CHECK(row.hasRole(StyleRole::Selection));
+        int acc = 0;
+        bool found = false;
+        for (const auto& seg : row.segs) {
+            const int cols = colWidth(seg.text);
+            if (relCol >= acc && relCol < acc + cols) {
+                CHECK(seg.role == StyleRole::Selection);
+                CHECK_EQ(seg.text.substr(
+                             static_cast<size_t>(relCol - acc), 1),
+                         "o");
+                found = true;
+                break;
+            }
+            acc += cols;
+        }
+        CHECK(found);
+    }
+    // ...y en píxeles el glifo es el correcto en su posición: misma máscara
+    // de tinta que una referencia con el cursor aparcado (un vecino
+    // erróneo también dejaría la celda no sólida, así que presencia de
+    // tinta sola no basta). Tolerancia acotada por el jitter de 1px de
+    // SDL_ttf en-cadena vs aislado (ver gutter_no_desplaza_glifo).
+    const bool dark = gui.isDarkTheme();
+    const int cw = gui.cellW(), ch = gui.cellH();
+    const GuiColor cc = guichrome::cursorColor(dark);
+    if (!gui.hasFont()) {
+        // Degradado sin fuente: fill sólido (nada que invertir).
+        for (int dx = 0; dx < cw; ++dx)
+            for (int dy = 0; dy < ch; ++dy) {
+                CHECK(readPixel(sdl.ren, cell.col * cw + dx,
+                                cell.row * ch + dy, probe));
+                CHECK(probe == cc);
+            }
+    } else {
+        auto readColumn = [&](int c, int r, std::vector<GuiColor>& out) {
+            out.clear();
+            for (int dx = 0; dx < cw; ++dx)
+                for (int dy = 0; dy < ch; ++dy) {
+                    GuiColor g{};
+                    if (!readPixel(sdl.ren, c * cw + dx, r * ch + dy, g))
+                        return false;
+                    out.push_back(g);
+                }
+            return true;
+        };
+        std::vector<GuiColor> curPx;
+        CHECK(readColumn(cell.col, cell.row, curPx));
+        // Referencia: mismos estilos (misma selección), cursor aparcado en
+        // el relleno sin tocar la celda.
+        Cursor park;
+        park.line = 0;
+        park.col = 100;  // clamp a EOL
+        gui.renderScreenDiff(doc, park, vp, "t.txt", false,
+                             makeChromeRequest(msg, State::Navegacion), sink,
+                             sel, std::nullopt, std::nullopt);
+        CHECK(gui.lastCursor().visible);
+        std::vector<GuiColor> refPx;
+        CHECK(readColumn(cell.col, cell.row, refPx));
+        const GuiColor selBg = guichrome::selectionBackground(dark);
+        auto inkMask = [&](const std::vector<GuiColor>& v,
+                           const GuiColor& bg) {
+            std::vector<char> m;
+            m.reserve(v.size());
+            for (const GuiColor& g : v) m.push_back(g != bg);
+            return m;
+        };
+        CHECK_EQ(refPx.size(), curPx.size());
+        const auto rm = inkMask(refPx, selBg);
+        const auto cm = inkMask(curPx, cc);
+        int refInk = 0, mismatch = 0;
+        for (size_t i = 0; i < rm.size(); ++i) {
+            refInk += rm[i] ? 1 : 0;
+            if (rm[i] != cm[i]) ++mismatch;
+        }
+        CHECK(refInk > 10);
+        CHECK(mismatch <= 4);
+    }
+#endif
+}
+
+// Política del cursor en bloque (ver GuiChrome.h): fondo uniforme del
+// cursor + glifo con el fondo EFECTIVO de la celda (inversión exacta), o
+// fondo base como fallback cuando el efectivo no contrasta (bracket en
+// dark). Sin fuente se deja solo el fill.
+TEST(gui_cursor_glyph_politica_inversion_y_contraste) {
+    // Las 4 familias de fondo de contenido + lista, en ambos temas: el fg
+    // que decide cursorGlyphFg siempre contrasta con el cursor.
+    const RowBgKind kinds[] = {RowBgKind::Content, RowBgKind::CurrentLine,
+                               RowBgKind::Selection, RowBgKind::Bracket,
+                               RowBgKind::List};
+    for (bool dark : {true, false}) {
+        const GuiColor cc = guichrome::cursorColor(dark);
+        for (RowBgKind k : kinds) {
+            const GuiColor cellBg = guichrome::guiBgFor(k, dark);
+            const GuiColor fg = guichrome::cursorGlyphFg(cellBg, dark);
+            CHECK(guichrome::cursorContrastRatio(fg, cc) >=
+                  guichrome::kCursorGlyphMinContrast);
+        }
+    }
+    // Inversión exacta donde hay contraste: el fg es el fondo efectivo.
+    for (bool dark : {true, false}) {
+        for (RowBgKind k :
+             {RowBgKind::Content, RowBgKind::CurrentLine, RowBgKind::Selection,
+              RowBgKind::List}) {
+            const GuiColor cellBg = guichrome::guiBgFor(k, dark);
+            CHECK(guichrome::cursorGlyphFg(cellBg, dark) == cellBg);
+        }
+    }
+    // Caso que motivó el fallback: bracket amarillo sobre cursor claro en
+    // dark no contrasta -> se usa el fondo base (contraste garantizado).
+    {
+        const GuiColor bracket = guichrome::guiBgFor(RowBgKind::Bracket, true);
+        CHECK(guichrome::cursorContrastRatio(
+                  bracket, guichrome::cursorColor(true)) <
+              guichrome::kCursorGlyphMinContrast);
+        CHECK(guichrome::cursorGlyphFg(bracket, true) ==
+              guichrome::background(true));
+        CHECK(guichrome::cursorContrastRatio(
+                  guichrome::background(true),
+                  guichrome::cursorColor(true)) >=
+              guichrome::kCursorGlyphMinContrast);
+    }
+    // En light el bracket sí contrasta con el cursor oscuro: inversión
+    // exacta también ahí.
+    {
+        const GuiColor bracket =
+            guichrome::guiBgFor(RowBgKind::Bracket, false);
+        CHECK(guichrome::cursorGlyphFg(bracket, false) == bracket);
+    }
+}
+
+// El glifo repintado usa el fondo REAL pintado en la celda (no una
+// abstracción): por cada rol con fondo propio se mide el fondo pintado en
+// una referencia aparcada (moda del píxel, >50%), se deriva el fg esperado
+// con la política y se afirman fill + núcleo de ese color en el cursor.
+// Cierra el triángulo con los otros dos tests: politica_* certifica la
+// función contra familias abstractas, fondos_igualan_stylefor que lo
+// pintado == styleFor(rol), y este que el resolver recupera ese mismo RGB
+// (un fondo efectivo erróneo daría otro fg y el conteo caería a ~0).
+// El snapshot fija (rol, carácter) por caso para que el test no sea
+// autoconsistente ante un Frame degenerado.
+TEST(gui_sdl_cursor_glifo_usa_fondo_real_pintado) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.hasFont()) SKIP("sin fuente");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Viewport vp = makeVp(10, 40);
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+
+    auto readColumn = [&](int c, int r, int cw, int ch,
+                          std::vector<GuiColor>& out) {
+        out.clear();
+        for (int dx = 0; dx < cw; ++dx)
+            for (int dy = 0; dy < ch; ++dy) {
+                GuiColor g{};
+                if (!readPixel(sdl.ren, c * cw + dx, r * ch + dy, g))
+                    return false;
+                out.push_back(g);
+            }
+        return true;
+    };
+    // Moda de color + fracción (celda ~190px: O(n²) despreciable).
+    auto topColor = [&](const std::vector<GuiColor>& v) {
+        std::vector<std::pair<GuiColor, int>> counts;
+        for (const GuiColor& g : v) {
+            bool found = false;
+            for (auto& kv : counts)
+                if (kv.first == g) {
+                    ++kv.second;
+                    found = true;
+                    break;
+                }
+            if (!found) counts.push_back({g, 1});
+        }
+        std::pair<GuiColor, int> best{{}, -1};
+        for (const auto& kv : counts)
+            if (kv.second > best.second) best = kv;
+        return std::pair<GuiColor, double>{
+            best.first, best.second / static_cast<double>(v.size())};
+    };
+
+    struct Case {
+        std::vector<std::string> lines;
+        int curLine;
+        int curCol;  // byte del glifo (ASCII: byte == columna visual)
+        std::optional<Selection> sel;
+        std::optional<BracketPair> pair;
+        StyleRole role;  // rol esperado en la celda (premisa del snapshot)
+        const char* glyph;
+    };
+    const Selection selBc{{0, 1}, {0, 3}};  // "bc"
+    // Bracket sobre 'm' (trazo grueso: núcleo sólido amplio para contar;
+    // el rol es posicional, el carácter es irrelevante).
+    const BracketPair brParen{{0, 0}, {0, 1}};  // 'm' y 'w'
+    // NOTA: no hay caso Default/content: la fila del cursor siempre es la
+    // actual, así que un fondo Content bajo el bloque es inalcanzable en
+    // contenido (el cursor nunca pisa gutter ni "~"; ver comentario en el
+    // resolver). Las familias alcanzables son estas tres.
+    const std::vector<Case> cases = {
+        {{"ab"}, 0, 1, std::nullopt, std::nullopt, StyleRole::CurrentLine, "b"},
+        {{"abcd"},
+         0,
+         1,
+         selBc,
+         std::nullopt,
+         StyleRole::Selection,
+         "b"},
+        {{"mw"},
+         0,
+         0,
+         std::nullopt,
+         brParen,
+         StyleRole::BracketMatch,
+         "m"},
+    };
+
+    for (bool firstTheme : {true, false}) {
+        const bool dark = gui.isDarkTheme();
+        const GuiColor cc = guichrome::cursorColor(dark);
+        const int cw = gui.cellW(), ch = gui.cellH();
+        for (const Case& cs : cases) {
+            Document doc;
+            doc.restore(cs.lines);
+            Cursor cur;
+            cur.line = cs.curLine;
+            cur.col = cs.curCol;
+            gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                                 makeChromeRequest(msg, State::Navegacion),
+                                 sink, cs.sel, std::nullopt, cs.pair);
+            CHECK(gui.lastCursor().visible);
+            CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
+            const Layout lo = gui.lastLayout();
+            const CellPos cell = gui.lastCursor().cell;
+            const int gw = gutterWidth(doc.lineCount(), vp.width);
+            CHECK_EQ(cell.col, lo.content.col + gw + cs.curCol);
+            // Premisa del snapshot: rol y carácter exactos en la celda.
+            {
+                const int relCol = cell.col - lo.content.col;
+                const auto& row =
+                    gui.lastContentRows()[static_cast<size_t>(cell.row -
+                                                              lo.content.row)];
+                int acc = 0;
+                bool found = false;
+                for (const auto& seg : row.segs) {
+                    const int cols = colWidth(seg.text);
+                    if (relCol >= acc && relCol < acc + cols) {
+                        CHECK(seg.role == cs.role);
+                        CHECK_EQ(seg.text.substr(
+                                     static_cast<size_t>(relCol - acc), 1),
+                                 cs.glyph);
+                        found = true;
+                        break;
+                    }
+                    acc += cols;
+                }
+                CHECK(found);
+            }
+            std::vector<GuiColor> curPx;
+            CHECK(readColumn(cell.col, cell.row, cw, ch, curPx));
+            // Referencia aparcada: misma fila y estilos, sin cursor encima.
+            Cursor park;
+            park.line = cs.curLine;
+            park.col = 100;  // clamp a EOL
+            gui.renderScreenDiff(doc, park, vp, "t.txt", false,
+                                 makeChromeRequest(msg, State::Navegacion),
+                                 sink, cs.sel, std::nullopt, cs.pair);
+            CHECK(gui.lastCursor().visible);
+            std::vector<GuiColor> refPx;
+            CHECK(readColumn(cell.col, cell.row, cw, ch, refPx));
+            // Fondo real medido (moda >50%: el glifo es minoría).
+            const auto [paintedBg, bgFrac] = topColor(refPx);
+            CHECK(bgFrac > 0.5);
+            const GuiColor expectFg =
+                guichrome::cursorGlyphFg(paintedBg, dark);
+            // Fill aplicado (moda = cursor) + núcleo del fg derivado del
+            // fondo MEDIDO (no de la familia abstracta).
+            const auto [curMode, curFrac] = topColor(curPx);
+            CHECK(curMode == cc);
+            CHECK(curFrac > 0.5);
+            // Núcleo en el fg esperado. Los glifos de trazo fino ('l', '(')
+            // apenas tienen píxeles de cobertura total a 16px, por eso los
+            // casos usan letras de trazo grueso con núcleo amplio.
+            int core = 0;
+            for (const GuiColor& g : curPx)
+                if (g == expectFg) ++core;
+            CHECK(core >= 5);
+        }
+        if (firstTheme) gui.toggleTheme();
+    }
+#endif
+}
+
+// El cursor en bloque invierte el glifo (paridad con el TTY): la celda se
+// rellena con el color del cursor y el carácter se repinta encima con el
+// fg de la política (fondo efectivo o fallback), así sigue legible. Sin
+// fuente se deja solo el fill.
 TEST(gui_sdl_cursor_block_cubre_celda) {
 #ifndef HAVE_SDL2
     SKIP("sin SDL2");
@@ -840,7 +1255,7 @@ TEST(gui_sdl_cursor_block_cubre_celda) {
     Document doc;
     doc.restore({"hola"});
     Viewport vp = makeVp(10, 40);
-    Cursor cur;
+    Cursor cur;  // (0,0) -> sobre la 'h'
     Message msg{std::string(""), MessageKind::Info, std::nullopt};
     gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
                          makeChromeRequest(msg, State::Navegacion), sink,
@@ -849,9 +1264,610 @@ TEST(gui_sdl_cursor_block_cubre_celda) {
     CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
     const int cw = gui.cellW(), ch = gui.cellH();
     const CellPos cell = gui.lastCursor().cell;
-    CHECK(readPixel(sdl.ren, cell.col * cw + cw / 2, cell.row * ch + ch / 2,
-                    probe));
-    CHECK(probe == guichrome::cursorColor(gui.isDarkTheme()));
+    const GuiColor cc = guichrome::cursorColor(gui.isDarkTheme());
+    // Toda la celda: el fondo del cursor está presente (no lo tapa el texto
+    // original) y, con fuente, hay píxeles distintos (el glifo invertido).
+    bool hasBg = false;
+    bool hasOther = false;
+    for (int dx = 0; dx < cw; ++dx)
+        for (int dy = 0; dy < ch; ++dy) {
+            CHECK(readPixel(sdl.ren, cell.col * cw + dx, cell.row * ch + dy,
+                            probe));
+            if (probe == cc)
+                hasBg = true;
+            else
+                hasOther = true;
+        }
+    CHECK(hasBg);
+    if (gui.hasFont()) {
+        CHECK(hasOther);  // el glifo se repintó: la celda no es sólida
+    } else {
+        CHECK(!hasOther);  // degradado sin fuente: solo fill
+    }
+#endif
+}
+
+// Celda vacía (cursor en EOL, sobre el relleno de línea actual): el bloque
+// es solo fill sólido, sin glifo que invertir. La posición se deriva del
+// documento (byte EOL, no una columna mágica) y se verifica cada eslabón:
+// columna visual → celda (gutter + viewport) → segmento del snapshot
+// (espacio de relleno CurrentLine) → píxeles.
+TEST(gui_sdl_cursor_block_en_vacio_es_fill_solido) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola"});  // ASCII a propósito: byte == columna visual.
+    Viewport vp = makeVp(10, 40);
+    CHECK_EQ(vp.left, 0);
+    const std::string& line = doc.lineAt(0);
+    const int eolByte = static_cast<int>(line.size());
+    const int eolVis = colWidth(line);
+    CHECK_EQ(eolByte, 4);
+    CHECK_EQ(eolVis, 4);
+    Cursor cur;
+    cur.line = 0;
+    cur.col = eolByte;  // EOL: más allá del último glifo, sobre el relleno
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    CHECK(gui.lastCursor().visible);
+    CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
+    const Layout lo = gui.lastLayout();
+    CHECK_EQ(lo.content.col, 0);
+    CHECK_EQ(lo.content.row, 0);
+    // Eslabón visual: el cursor EOL resuelve al ancho visible de la línea.
+    CHECK_EQ(cur.visualColumn(doc), eolVis);
+    // Eslabón celda: gutter + viewport (sin left) + EOL visual.
+    const CellPos cell = gui.lastCursor().cell;
+    CHECK_EQ(cell.row, lo.content.row);  // fila actual, primera visible
+    const int gutterW = cell.col - lo.content.col - eolVis;
+    CHECK_EQ(gutterW, gutterWidth(doc.lineCount(), vp.width));
+    // Eslabón snapshot: la celda cae en un espacio del relleno
+    // (CurrentLine), no sobre un glifo.
+    {
+        const int relCol = cell.col - lo.content.col;
+        const auto& row = gui.lastContentRows()[0];
+        CHECK(row.isCurrentLine);
+        int acc = 0;
+        bool found = false;
+        for (const auto& seg : row.segs) {
+            const int cols = colWidth(seg.text);
+            if (relCol >= acc && relCol < acc + cols) {
+                CHECK(seg.role == StyleRole::CurrentLine);
+                CHECK_EQ(seg.text.substr(
+                             static_cast<size_t>(relCol - acc), 1),
+                         " ");
+                found = true;
+                break;
+            }
+            acc += cols;
+        }
+        CHECK(found);
+    }
+    // ...y en píxeles es fill sólido (nada que invertir).
+    const int cw = gui.cellW(), ch = gui.cellH();
+    const GuiColor cc = guichrome::cursorColor(gui.isDarkTheme());
+    for (int dx = 0; dx < cw; ++dx)
+        for (int dy = 0; dy < ch; ++dy) {
+            CHECK(readPixel(sdl.ren, cell.col * cw + dx, cell.row * ch + dy,
+                            probe));
+            CHECK(probe == cc);
+        }
+    // Más allá de EOL colapsa a la misma celda vacía (clamp a EOL).
+    {
+        Cursor beyond;
+        beyond.line = 0;
+        beyond.col = 100;
+        gui.renderScreenDiff(doc, beyond, vp, "t.txt", false,
+                             makeChromeRequest(msg, State::Navegacion), sink,
+                             std::nullopt, std::nullopt, std::nullopt);
+        CHECK(gui.lastCursor().visible);
+        CHECK(gui.lastCursor().cell == cell);
+    }
+#endif
+}
+
+// Tabulación bajo el bloque: el Frame expande tabs antes de segmentar,
+// así que el cursor sobre el byte del tab cae al inicio de su expansión
+// (espacios → solo fill) y pasada la expansión vuelve a haber glifo en su
+// celda exacta. El interior de la expansión es inalcanzable para el cursor
+// (ver cursor_visual_siempre_en_inicio_de_celda).
+TEST(gui_sdl_cursor_block_en_tab_sin_desplazar) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"a\tb"});  // visual: a@0, tab→1..3, b@4
+    Viewport vp = makeVp(10, 40);
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+    const int cw = gui.cellW(), ch = gui.cellH();
+    const GuiColor cc = guichrome::cursorColor(gui.isDarkTheme());
+    const int gw = gutterWidth(doc.lineCount(), vp.width);
+    CHECK_EQ(gw, 3);
+
+    // Sobre el byte del tab: visual = inicio de la expansión (1), celda de
+    // espacio → fill sólido.
+    {
+        Cursor cur;
+        cur.line = 0;
+        cur.col = 1;
+        gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                             makeChromeRequest(msg, State::Navegacion), sink,
+                             std::nullopt, std::nullopt, std::nullopt);
+        CHECK(gui.lastCursor().visible);
+        CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
+        CHECK_EQ(cur.visualColumn(doc), 1);
+        const CellPos cell = gui.lastCursor().cell;
+        CHECK_EQ(cell.col, gw + 1);
+        for (int dx = 0; dx < cw; ++dx)
+            for (int dy = 0; dy < ch; ++dy) {
+                CHECK(readPixel(sdl.ren, cell.col * cw + dx,
+                                cell.row * ch + dy, probe));
+                CHECK(probe == cc);
+            }
+    }
+    // Pasada la expansión (byte de 'b'): glifo legible en su celda exacta.
+    {
+        Cursor cur;
+        cur.line = 0;
+        cur.col = 2;
+        gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                             makeChromeRequest(msg, State::Navegacion), sink,
+                             std::nullopt, std::nullopt, std::nullopt);
+        CHECK(gui.lastCursor().visible);
+        CHECK_EQ(cur.visualColumn(doc), 4);
+        const CellPos cell = gui.lastCursor().cell;
+        CHECK_EQ(cell.col, gw + 4);
+        // El snapshot confirma 'b' (no un resto de la expansión).
+        {
+            const int relCol = cell.col - gui.lastLayout().content.col;
+            const auto& row = gui.lastContentRows()[0];
+            int acc = 0;
+            bool found = false;
+            for (const auto& seg : row.segs) {
+                const int cols = colWidth(seg.text);
+                if (relCol >= acc && relCol < acc + cols) {
+                    CHECK_EQ(seg.text.substr(
+                                 static_cast<size_t>(relCol - acc), 1),
+                             "b");
+                    found = true;
+                    break;
+                }
+                acc += cols;
+            }
+            CHECK(found);
+        }
+        bool hasBg = false, hasOther = false;
+        for (int dx = 0; dx < cw; ++dx)
+            for (int dy = 0; dy < ch; ++dy) {
+                CHECK(readPixel(sdl.ren, cell.col * cw + dx,
+                                cell.row * ch + dy, probe));
+                if (probe == cc)
+                    hasBg = true;
+                else
+                    hasOther = true;
+            }
+        CHECK(hasBg);
+        if (gui.hasFont()) {
+            CHECK(hasOther);
+        } else {
+            CHECK(!hasOther);
+        }
+    }
+#endif
+}
+
+// Bracket con fondo amarillo en dark: el fondo efectivo no contrasta con
+// el cursor claro y la política usa el fallback (fondo base). El glifo
+// sigue legible: la celda conserva fondo de cursor y no es sólida.
+TEST(gui_sdl_cursor_block_en_bracket_usa_fallback_legible) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.isDarkTheme()) SKIP("caso dark: bracket vs cursor claro");
+    if (!gui.hasFont()) SKIP("sin fuente");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"int f() { return 0; }"});
+    Viewport vp = makeVp(10, 40);
+    Cursor cur;
+    cur.line = 0;
+    cur.col = 8;  // sobre '{'
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+    // Misma cadena de 21 bytes: '{' en 8, '}' en 20. Cada extremo es UN
+    // carácter ([col, col+1); un EOL/fuera de rango se descarta en silencio,
+    // así que el índice de cierre debe ser exacto para que el par viva.
+    BracketPair pair{{0, 8}, {0, 20}};
+    gui.renderScreenDiff(doc, cur, vp, "t.cpp", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, pair);
+    CHECK(gui.lastCursor().visible);
+    CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
+    // Ambos lados del par llevan BracketMatch (gutter 3 + byte).
+    {
+        const auto& row = gui.lastContentRows()[0];
+        CHECK(row.hasRole(StyleRole::BracketMatch));
+        for (int byte : {8, 20}) {
+            const int relCol = gutterWidth(doc.lineCount(), vp.width) + byte;
+            int acc = 0;
+            bool found = false;
+            for (const auto& seg : row.segs) {
+                const int cols = colWidth(seg.text);
+                if (relCol >= acc && relCol < acc + cols) {
+                    CHECK(seg.role == StyleRole::BracketMatch);
+                    found = true;
+                    break;
+                }
+                acc += cols;
+            }
+            CHECK(found);
+        }
+    }
+    const int cw = gui.cellW(), ch = gui.cellH();
+    const CellPos cell = gui.lastCursor().cell;
+    const GuiColor cc = guichrome::cursorColor(true);
+    bool hasBg = false;
+    bool hasOther = false;
+    for (int dx = 0; dx < cw; ++dx)
+        for (int dy = 0; dy < ch; ++dy) {
+            CHECK(readPixel(sdl.ren, cell.col * cw + dx, cell.row * ch + dy,
+                            probe));
+            if (probe == cc)
+                hasBg = true;
+            else
+                hasOther = true;
+        }
+    CHECK(hasBg);
+    CHECK(hasOther);  // fallback legible: el '{' se repintó, no es sólida
+#endif
+}
+
+// Carácter ancho (2 columnas) bajo el bloque, con fondo que fuerza el
+// fallback de contraste (bracket amarillo en dark): el resolver lo recorre
+// con las mismas primitivas de celdas que el pintor (sin doble contabilidad
+// por segmento). Dos capas:
+//   a) Sin fuente (determinista en todos los entornos): el fill ancho-doble
+//      cubre exactamente las 2 celdas del carácter, sin tocar las vecinas.
+//   b) Con fuente que avance el carácter 2 celdas (si la fuente solo tiene
+//      .notdef de 1 celda se skipea: sin avance doble no hay nada que
+//      probar del pintado): el glifo se repinta en su posición con el fg
+//      del fallback, celda por celda, sin derrame.
+TEST(gui_sdl_cursor_block_en_ancho_doble_legible) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    // "a漢b": 漢 = U+6F22, 2 cols visuales (bytes E6 BC A2).
+    doc.restore({std::string("a\xe6\xbc\xa2") + "b"});
+    Viewport vp = makeVp(10, 40);
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+    // Cada extremo identifica UN carácter ([col, col+1)): el open cubre el
+    // 漢 (bytes [1,2) → visual [1,3): columnOf redondea por celda
+    // consumiendo el carácter entero) y el close cubre 'b' (byte 4,
+    // a propósito: las assertions de la vecina derecha dependen de su
+    // fondo amarillo). El fondo amarillo no contrasta con el cursor claro
+    // en dark, así el fg del glifo es el fallback y el amarillo original
+    // no debe aparecer en el span.
+    BracketPair pair{{0, 1}, {0, 4}};
+    const GuiColor bracketBg = guichrome::guiBgFor(RowBgKind::Bracket, true);
+    const GuiColor cc = guichrome::cursorColor(true);
+
+    // a) Sin fuente: solo fills, píxel a píxel exactos. El renderer sin
+    // fuente pinta fondos pero no texto: el span del 漢 debe quedar
+    // sólido en color cursor en ambas celdas y las vecinas intactas.
+    {
+        GuiRenderer gui;  // a propósito sin initForRenderer: sin fuente.
+        if (gui.isDarkTheme() != true) SKIP("caso dark");
+        gui.setSdlRenderer(sdl.ren);
+        CHECK(!gui.hasFont());
+        const int cw = gui.cellW(), ch = gui.cellH();
+        auto solidAt = [&](int c, int r, const GuiColor& want) {
+            for (int dx = 0; dx < cw; ++dx)
+                for (int dy = 0; dy < ch; ++dy) {
+                    GuiColor g{};
+                    if (!readPixel(sdl.ren, c * cw + dx, r * ch + dy, g))
+                        return false;
+                    if (g != want) return false;
+                }
+            return true;
+        };
+        Cursor cur;
+        cur.line = 0;
+        cur.col = 1;  // byte lead del 漢
+        gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                             makeChromeRequest(msg, State::Navegacion), sink,
+                             std::nullopt, std::nullopt, pair);
+        CHECK(gui.lastCursor().visible);
+        CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
+        CHECK(gui.lastContentRows()[0].hasRole(StyleRole::BracketMatch));
+        const CellPos cell = gui.lastCursor().cell;
+        // Fill ancho-doble: ambas celdas sólidas en cursor...
+        CHECK(solidAt(cell.col, cell.row, cc));
+        CHECK(solidAt(cell.col + 1, cell.row, cc));
+        // ...y las vecinas conservan su fondo ('a' línea actual, 'b'
+        // bracket): ni el fill ni nada se desplazó una celda.
+        const GuiColor curBg =
+            guichrome::currentLineBackground(true);
+        CHECK(solidAt(cell.col - 1, cell.row, curBg));
+        CHECK(solidAt(cell.col + 2, cell.row, bracketBg));
+    }
+
+    // b) Con fuente de avance doble real: el glifo se repinta en posición.
+    // Se elige un carácter ancho (2 cols según utf8) que la fuente avance
+    // 2 celdas; si ninguno (p. ej. fuente sin CJK, que sustituye por
+    // .notdef de 1 celda y desalinea la fila misma de la grilla) se
+    // skipea: sin avance doble no hay nada que probar del pintado acá.
+    {
+        GuiRenderer gui;
+        gui.initForRenderer(sdl.ren);
+        if (!gui.isDarkTheme()) SKIP("caso dark: bracket vs cursor claro");
+        if (!gui.hasFont()) SKIP("sin fuente");
+        const char* kWideCandidates[] = {
+            u8"\u6F22",  // 漢 CJK
+            u8"\u1100",  // ᄀ jamo hangul
+            u8"\u2B1B",  // ⬛
+            u8"\u2B50",  // ⭐
+            u8"\u3002",  // 。
+            u8"\uFF21",  // Ａ fullwidth
+        };
+        const int cw = gui.cellW(), ch = gui.cellH();
+        std::string wide;
+        for (const char* cand : kWideCandidates) {
+            const std::string line = std::string("a") + cand + "b";
+            if (gui.textWidthPx(line) ==
+                gui.textWidthPx("a") + 2 * cw + gui.textWidthPx("b")) {
+                wide = cand;
+                break;
+            }
+        }
+        if (wide.empty()) SKIP("fuente sin avance doble para anchos");
+        // Premisa del resolver: el elegido es ancho-doble (3 bytes UTF-8).
+        CHECK_EQ(static_cast<int>(wide.size()), 3);
+        CHECK_EQ(utf8::cellWidth(wide, 0, 3), 2);
+        doc.restore({std::string("a") + wide + "b"});
+        BracketPair pairW{{0, 1}, {0, 1 + static_cast<int>(wide.size())}};
+
+        auto readColumn = [&](int c, int r, std::vector<GuiColor>& out) {
+            out.clear();
+            for (int dx = 0; dx < cw; ++dx)
+                for (int dy = 0; dy < ch; ++dy) {
+                    GuiColor g{};
+                    if (!readPixel(sdl.ren, c * cw + dx, r * ch + dy, g))
+                        return false;
+                    out.push_back(g);
+                }
+            return true;
+        };
+
+        // 1) Cursor sobre el lead del carácter ancho.
+        Cursor cur;
+        cur.line = 0;
+        cur.col = 1;
+        gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                             makeChromeRequest(msg, State::Navegacion), sink,
+                             std::nullopt, std::nullopt, pairW);
+        CHECK(gui.lastCursor().visible);
+        CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
+        const CellPos cell = gui.lastCursor().cell;
+        std::vector<GuiColor> curA, curB, curL, curN;
+        CHECK(readColumn(cell.col, cell.row, curA));
+        CHECK(readColumn(cell.col + 1, cell.row, curB));
+        CHECK(readColumn(cell.col - 1, cell.row, curL));
+        CHECK(readColumn(cell.col + 2, cell.row, curN));
+
+        // 2) Referencia: misma fila y estilos, cursor aparcado en el
+        // relleno (no toca el span ni las vecinas).
+        Cursor park;
+        park.line = 0;
+        park.col = 100;  // clamp a EOL
+        gui.renderScreenDiff(doc, park, vp, "t.txt", false,
+                             makeChromeRequest(msg, State::Navegacion), sink,
+                             std::nullopt, std::nullopt, pairW);
+        CHECK(gui.lastCursor().visible);
+        std::vector<GuiColor> refA, refB, refL, refN;
+        CHECK(readColumn(cell.col, cell.row, refA));
+        CHECK(readColumn(cell.col + 1, cell.row, refB));
+        CHECK(readColumn(cell.col - 1, cell.row, refL));
+        CHECK(readColumn(cell.col + 2, cell.row, refN));
+
+        // Sin derrame ni desplazamiento fuera del span: vecinas idénticas.
+        CHECK(refL == curL);
+        CHECK(refN == curN);
+        // Premisa no vacua: la referencia tenía amarillo en el span.
+        {
+            bool anyYellow = false;
+            for (const auto& v : {refA, refB})
+                for (const GuiColor& g : v)
+                    if (g == bracketBg) anyYellow = true;
+            CHECK(anyYellow);
+        }
+        // Glifo en posición, celda por celda: fondo de cursor + tinta del
+        // fallback en ambas (un glifo desplazado una celda dejaría una
+        // sólida) y cero amarillo original (cobertura total del fill).
+        for (const auto& v : {curA, curB}) {
+            bool anyBg = false, anyInk = false, anyYellow = false;
+            for (const GuiColor& g : v) {
+                if (g == cc)
+                    anyBg = true;
+                else
+                    anyInk = true;
+                if (g == bracketBg) anyYellow = true;
+            }
+            CHECK(anyBg);
+            CHECK(anyInk);
+            CHECK(!anyYellow);
+        }
+    }
+#endif
+}
+
+// Gutter + cursor en letra no inicial: el glifo repintado es el de la
+// celda del cursor, sin doble conteo del gutter. relCol y segmentos viven
+// en el mismo marco con origen en content.col (gutter incluido en ambos);
+// restar el gutter además del origen —o saltearlo en el recorrido—
+// desplazaría el glifo una celda. Se caza comparando la máscara de tinta
+// contra una referencia con el cursor aparcado: mismo conjunto de píxeles
+// de tinta en las mismas coordenadas (los colores se invierten, la forma
+// no se mueve).
+TEST(gui_sdl_cursor_block_gutter_no_desplaza_glifo) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.hasFont()) SKIP("sin fuente");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"abcdef"});  // ASCII: byte == columna visual
+    Viewport vp = makeVp(10, 40);
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+    const bool dark = gui.isDarkTheme();
+    // Fila actual sin sintaxis/selección: rol CurrentLine en todo el texto.
+    const GuiColor cellBg = guichrome::currentLineBackground(dark);
+    const GuiColor cc = guichrome::cursorColor(dark);
+    const int cw = gui.cellW(), ch = gui.cellH();
+
+    auto readColumn = [&](int c, int r, std::vector<GuiColor>& out) {
+        out.clear();
+        for (int dx = 0; dx < cw; ++dx)
+            for (int dy = 0; dy < ch; ++dy) {
+                GuiColor g{};
+                if (!readPixel(sdl.ren, c * cw + dx, r * ch + dy, g))
+                    return false;
+                out.push_back(g);
+            }
+        return true;
+    };
+    auto inkMask = [&](const std::vector<GuiColor>& v, const GuiColor& bg) {
+        std::vector<char> m;
+        m.reserve(v.size());
+        for (const GuiColor& g : v) m.push_back(g != bg);
+        return m;
+    };
+
+    // Cursor sobre 'd' (4ª letra, byte 3): celda = gutter + 3.
+    Cursor cur;
+    cur.line = 0;
+    cur.col = 3;
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    CHECK(gui.lastCursor().visible);
+    CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
+    CHECK(gui.lastContentRows()[0].isCurrentLine);
+    const CellPos cell = gui.lastCursor().cell;
+    CHECK_EQ(cell.col, gutterWidth(doc.lineCount(), vp.width) + 3);
+    std::vector<GuiColor> curPx;
+    CHECK(readColumn(cell.col, cell.row, curPx));
+
+    // Referencia: misma fila y estilos, cursor aparcado en el relleno.
+    Cursor park;
+    park.line = 0;
+    park.col = 100;  // clamp a EOL
+    gui.renderScreenDiff(doc, park, vp, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    CHECK(gui.lastCursor().visible);
+    std::vector<GuiColor> refPx;
+    CHECK(readColumn(cell.col, cell.row, refPx));
+
+    // Misma máscara de tinta en las mismas coordenadas: el glifo repintado
+    // es 'd' en su posición. Comparación con tolerancia acotada (no
+    // igualdad exacta): SDL_ttf puede rasterizar 1px distinto el mismo
+    // glifo en-cadena (textura de la fila, con kerning/redondeo de avances
+    // acumulados) que aislado (textura del cursor) —observado: 1px de 190—.
+    // Un desplazamiento real por doble conteo del gutter movería la máscara
+    // una celda entera (decenas de píxeles) o la dejaría sólida, muy por
+    // encima de la cota.
+    {
+        CHECK_EQ(refPx.size(), curPx.size());
+        const auto rm = inkMask(refPx, cellBg);
+        const auto cm = inkMask(curPx, cc);
+        int refInk = 0, mismatch = 0;
+        for (size_t i = 0; i < rm.size(); ++i) {
+            refInk += rm[i] ? 1 : 0;
+            if (rm[i] != cm[i]) ++mismatch;
+        }
+        CHECK(refInk > 10);   // premisa no vacua: la 'd' tiene tinta real
+        CHECK(mismatch <= 4);  // 1px de jitter SDL_ttf sí; una celda no
+    }
+    // No vacua en fondo tampoco: la celda no es sólida en ningún render.
+    {
+        bool refBg = false, curBg = false;
+        for (const GuiColor& g : refPx)
+            if (g == cellBg) refBg = true;
+        for (const GuiColor& g : curPx)
+            if (g == cc) curBg = true;
+        CHECK(refBg);
+        CHECK(curBg);
+    }
+#endif
+}
+
+// Cursor en lista modal: cae en el espacio líder ("  nombre", col 0 del
+// contenido), así el bloque es fill sólido. Cubre la rama de modales del
+// resolver de punta a punta (DTO + píxeles): el cursor nunca va sobre una
+// letra en estas pantallas (col fija del contenido).
+TEST(gui_sdl_lista_cursor_en_espacio_es_fill_solido) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    gui.renderBufferList({"a.txt", "b.txt"}, 1, 40, 10, sink);
+    CHECK(gui.lastCursor().visible);
+    CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
+    const Layout lo = gui.lastLayout();
+    const CellPos cell = gui.lastCursor().cell;
+    CHECK_EQ(cell.col, lo.content.col);  // espacio líder, nunca sobre letra
+    CHECK_EQ(cell.row, lo.content.row + 1);
+    CHECK_EQ(gui.lastListSelected(), 1);
+    CHECK_EQ(gui.lastListLines()[1].text, "  b.txt");
+    CHECK(!gui.lastListLines()[1].filler);
+    const int cw = gui.cellW(), ch = gui.cellH();
+    const GuiColor cc = guichrome::cursorColor(gui.isDarkTheme());
+    for (int dx = 0; dx < cw; ++dx)
+        for (int dy = 0; dy < ch; ++dy) {
+            CHECK(readPixel(sdl.ren, cell.col * cw + dx, cell.row * ch + dy,
+                            probe));
+            CHECK(probe == cc);
+        }
 #endif
 }
 

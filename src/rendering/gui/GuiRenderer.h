@@ -120,6 +120,12 @@ public:
     int cellH() const { return font_.cellH(); }
     bool hasFont() const { return font_.ok(); }
     const std::string& fontPath() const { return font_.path(); }
+    // Ancho en píxeles de `text` con la fuente actual (0 sin fuente).
+    // Expone GuiFont::textWidth para tests (p. ej. verificar que la fuente
+    // avanza un carácter ancho 2 celdas antes de afirmar su pintado).
+    int textWidthPx(const std::string& text) const {
+        return font_.textWidth(text);
+    }
 
     // Ultimo frame calculado por los render* (para tests sin SDL: sin
     // ventana no hay pixeles que afirmar, pero si DTO + cursor).

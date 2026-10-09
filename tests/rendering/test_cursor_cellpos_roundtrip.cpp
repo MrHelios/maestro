@@ -4,6 +4,7 @@
 // TtyEncoder::moveCursorTo(CellPos) y el -1 simétrico en decodeMouseSgr.
 // Este test cierra el lazo: CellPos -> CUP -> SGR -> CellPos, en bordes,
 // más el caso fuera de viewport (visible=false no pinta).
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -12,6 +13,7 @@
 #include "app/ChromePresentation.h"
 #include "app/EditorState.h"
 #include "app/Message.h"
+#include "base/utf8.h"
 #include "document/Cursor.h"
 #include "document/Document.h"
 #include "layout/Viewport.h"
@@ -185,6 +187,78 @@ TEST(cursor_cellpos_borde_derecho_resolver) {
         CellPos cell;
         CHECK(!b.editorCursorPos(doc, cur, vp, cell));
         CHECK(!cell.valid());
+    }
+}
+
+TEST(cursor_visual_siempre_en_inicio_de_celda) {
+    // Invariancia que sostiene al cursor Block GUI: la columna visual del
+    // cursor siempre cae en inicio de celda, nunca en la segunda mitad de
+    // un carácter ancho ni en el interior de una expansión de tab. La
+    // garantizan Cursor::visualColumn (alignStart) en la ida y
+    // utf8::byteForColumn (devuelve el lead) en la vuelta del mouse; el
+    // resolver GUI (blockGlyphInContent) trata la 2ª mitad como
+    // inalcanzable a partir de esta garantía.
+    const std::string line =
+        std::string("a\xe6\xbc\xa2") + "\tb" + std::string("\xe4\xb8\xad") + "x";
+    const int n = static_cast<int>(line.size());
+    // Inicios de celda visuales con la misma expansión de tab que el pintor.
+    std::vector<int> starts;
+    {
+        int col = 0, i = 0;
+        starts.push_back(0);
+        while (i < n) {
+            if (line[i] == '\t') {
+                col += utf8::TAB_WIDTH - (col % utf8::TAB_WIDTH);
+                ++i;
+            } else {
+                int w = utf8::cellWidth(line, i, n);
+                if (w <= 0) w = 1;
+                int len = utf8::cellLen(line, i, n);
+                if (len <= 0) len = 1;
+                col += w;
+                i += len;
+            }
+            starts.push_back(col);
+        }
+    }
+    // La línea tiene segundas mitades e interiores de tab reales (2 y 6 no
+    // son inicios; el tab interior tampoco): el test no es vacuo.
+    CHECK(std::find(starts.begin(), starts.end(), 2) == starts.end());
+    CHECK(std::find(starts.begin(), starts.end(), 6) == starts.end());
+    auto isStart = [&](int v) {
+        return std::find(starts.begin(), starts.end(), v) != starts.end();
+    };
+    // Ida (teclado/programa): todo byte resuelve a inicio de celda.
+    Cursor cur;
+    cur.line = 0;
+    for (int b = 0; b <= n; ++b) {
+        cur.col = b;
+        CHECK(isStart(cur.visualColumn(line)));
+    }
+    // Vuelta (mouse): todo target visual mapea a byte alineado...
+    const int totalW = starts.back();
+    for (int t = 0; t <= totalW + 1; ++t) {
+        const int byte = utf8::byteForColumn(line, t);
+        CHECK(byte == n || utf8::isCellStart(line, byte));
+        // ...cuya columna visual vuelve a ser inicio de celda.
+        cur.col = byte;
+        CHECK(isStart(cur.visualColumn(line)));
+    }
+    // El resolver del cursor GUI consume esta misma columna (+ gutter).
+    {
+        Document doc;
+        doc.restore({line});
+        FrameBuilder b;
+        Viewport vp = contentVp(0, 5);
+        const auto g = b.editorGeometry(doc, vp);
+        for (int byte = 0; byte <= n; ++byte) {
+            Cursor c;
+            c.line = 0;
+            c.col = byte;
+            CellPos cell;
+            if (!b.editorCursorPos(doc, c, vp, g, cell)) continue;
+            CHECK(isStart(cell.col - g.layout.content.col - g.gutterW));
+        }
     }
 }
 

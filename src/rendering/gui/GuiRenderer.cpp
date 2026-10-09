@@ -172,6 +172,194 @@ void snapshotFrameContent(const Frame& f,
 // La composición de las líneas de los modales vive en
 // rendering/ListLines.h (compartida con TTY): acá solo se snapshot/pinta.
 
+// Glifo bajo el cursor Block para inversión (paridad visual con el TTY,
+// que mantiene el carácter legible sobre el bloque). Puro, sin SDL: se
+// resuelve desde el Frame / líneas del modal + Layout, sin leer píxeles.
+//   hasGlyph=false -> celda vacía/espacio o fuera de contenido: solo fill.
+//   hasGlyph=true  -> `text` es la celda UTF-8 (1 col; 2 si ancha líder) a
+//                    repintar sobre el fondo del cursor, con fg según la
+//                    política de guichrome::cursorGlyphFg (inversión exacta
+//                    con el fondo efectivo o fallback de contraste).
+// `cellBg` es el fondo EFECTIVO de la celda (styleFor con rol + línea
+// actual en contenido; estilo de lista en modales). Sin fuente el caller
+// hace solo fill (modo degradado): el resolver igual devuelve glifo + bg.
+struct BlockGlyph {
+    std::string text;
+    int widthCols = 1;
+    bool hasGlyph = false;
+    GuiColor cellBg{};
+    bool hasCellBg = false;
+};
+
+// Celda visual encontrada por el recorrido compartido de abajo: `text`
+// con sus bytes UTF-8 y `widthCols` (2 si líder ancha). `empty=true`
+// significa "sin glifo que repintar, solo fill": espacio (el fill ya es el
+// fondo), segunda mitad de un carácter ancho (se deja solo fill para no
+// desalinear la textura de 2 celdas sobre 1; esa posición es inalcanzable
+// por el cursor: Cursor::visualColumn alinea a inicio de celda, ver test
+// cursor_visual_siempre_en_inicio_de_celda) o expansión de tab (defensiva,
+// ver contrato de scanSegmentCells).
+struct CellHit {
+    std::string text;
+    int widthCols = 1;
+    bool empty = true;
+};
+
+// ÚNICA implementación del recorrido de celdas visuales (la usan el
+// contenido por segmentos y las listas de a una línea: no duplicar).
+// Escanea UN segmento visual `sv` con `absCol` (in/out: columna visual del
+// inicio/fin del segmento, para encadenar piezas sin doble contabilidad de
+// anchos ni chrome::colCount en la localización). Si `relCol` cae en este
+// segmento describe la celda en `hit` y devuelve true (haya o no glifo);
+// si no, avanza `absCol` hasta el final del segmento y devuelve false.
+// Contrato de entrada: texto VISUAL (tabs ya expandidos, sin ANSI) con
+// celdas nunca partidas entre piezas. En contenido lo garantiza
+// FrameBuilder::buildContentRow (expandTabsInto antes de segmentar, cortes
+// vía utf8::range); en modales, la composición de ListLines.h ("  nombre",
+// "/", "  ~") nunca emite tabs. La rama de '\t' es solo defensiva ante
+// una violación de contrato (un tab crudo): su expansión se trata como
+// vacía (solo fill). Mide con utf8::cellWidth/cellLen, las mismas
+// primitivas de utf8::columnOf/range del FrameBuilder y el pintor.
+// Sin caché adicional a propósito: el cursor resuelve una sola celda por
+// frame y el trabajo está acotado al ancho de la fila.
+bool scanSegmentCells(std::string_view sv, int& absCol, int relCol,
+                      CellHit& hit) {
+    const int n = static_cast<int>(sv.size());
+    int i = 0;
+    while (i < n) {
+        if (sv[i] == '\t') {
+            const int w = utf8::TAB_WIDTH - (absCol % utf8::TAB_WIDTH);
+            if (relCol >= absCol && relCol < absCol + w) {
+                hit = CellHit{};
+                return true;
+            }
+            absCol += w;
+            ++i;
+            continue;
+        }
+        int len = utf8::cellLen(sv, i, n);
+        if (len <= 0) len = 1;
+        if (i + len > n) len = n - i;
+        int w = utf8::cellWidth(sv, i, n);
+        if (w <= 0) w = 1;
+        if (relCol >= absCol && relCol < absCol + w) {
+            if (w > 1 && relCol != absCol) {
+                hit = CellHit{};
+                return true;
+            }
+            hit.text.assign(sv.data() + i, static_cast<size_t>(len));
+            if (hit.text.empty() || hit.text == " ") {
+                hit = CellHit{};
+                return true;
+            }
+            hit.widthCols = (w == 2) ? 2 : 1;
+            hit.empty = false;
+            return true;
+        }
+        absCol += w;
+        i += len;
+    }
+    return false;
+}
+
+// Extrae la celda visual en `targetCol` sobre UNA línea (vía de modales).
+// Misma convención histórica: devuelve false si no hay glifo que repintar
+// (más allá del texto, espacio, 2ª mitad de ancho doble o tab).
+bool cellGlyphAt(const std::string& line, int targetCol, std::string& out,
+                 int& outW) {
+    if (targetCol < 0) return false;
+    int absCol = 0;
+    CellHit hit;
+    if (!scanSegmentCells(line, absCol, targetCol, hit)) return false;
+    if (hit.empty) return false;
+    out = hit.text;
+    outW = hit.widthCols;
+    return true;
+}
+
+// Resuelve el glifo bajo un cursor Block en contenido del editor
+// (filas del Frame: gutter + texto ya expandido + fillers CurrentLine).
+// Fuera del área de contenido o más allá de las celdas -> sin glifo.
+// El fondo efectivo sale de styleFor (rol + línea actual): es lo que
+// alimenta la inversión exacta de cursorGlyphFg.
+//
+// Recorrido de celdas sobre los segmentos en orden, con la misma
+// contabilidad visual que el pintor (paintFrameContent emite los segmentos
+// en orden y cada celda ocupa absCol creciente), a través del núcleo
+// compartido scanSegmentCells (el mismo que la vía de modales: una sola
+// implementación, sin chrome::colCount en la localización).
+//
+// Marco de coordenadas (sin doble conteo del gutter): relCol resta el
+// ORIGEN del contenido (layout.content.col) y los segmentos se recorren
+// desde ese mismo origen, con el gutter como primer segmento — igual que
+// el pintor (basePx = content.col). La celda ya trae el gutter incluido
+// (editorCursorPos suma gutterW a la columna visual), así que restar el
+// gutter además del origen desplazaría el glifo una celda. Ver test
+// gui_sdl_cursor_block_gutter_no_desplaza_glifo.
+//
+// Contratos de FrameBuilder::buildContentRow en los que se apoya (ver
+// scanSegmentCells): texto con tabs expandidos y segmentos que nunca
+// parten celdas.
+BlockGlyph blockGlyphInContent(const Frame& f, const FrameCursor& cursor,
+                               const Layout& layout, bool dark) {
+    BlockGlyph g;
+    if (!cursor.visible || !cursor.cell.valid()) return g;
+    const int relRow = cursor.cell.row - layout.content.row;
+    const int relCol = cursor.cell.col - layout.content.col;
+    if (relRow < 0 || relCol < 0) return g;
+    if (relRow >= static_cast<int>(f.contentRows.size())) return g;
+    if (relCol >= layout.content.width) return g;
+    const StyledRow& row = f.contentRows[static_cast<size_t>(relRow)];
+    int absCol = 0;
+    for (const auto& seg : row.segs) {
+        const GuiColor segBg =
+            guichrome::styleFor(seg.role, row.isCurrentLine, dark).bg;
+        const std::string_view sv(seg.text.data(), seg.text.size());
+        CellHit hit;
+        if (!scanSegmentCells(sv, absCol, relCol, hit)) continue;
+        g.cellBg = segBg;
+        g.hasCellBg = true;
+        if (hit.empty) return g;  // espacio, 2ª mitad o tab: solo fill
+        g.text = std::move(hit.text);
+        g.widthCols = hit.widthCols;
+        g.hasGlyph = true;
+        return g;
+    }
+    return g;
+}
+
+// Resuelve el glifo bajo un cursor Block en listas modales
+// (BufferSelector/FileBrowser: líneas "  nombre" + "~" de relleno).
+// El cursor de lista siempre cae en col 0 (espacio) en la práctica, pero
+// se resuelve genérico por si la geometría se mueve. El fondo efectivo es
+// el de la fila (ListSelected si es la destacada, base si no); el relleno
+// "~" no cambia el fondo, solo el fg tenue del texto.
+// `selectedRow` es relativo al contenido (igual que paintListContent).
+BlockGlyph blockGlyphInList(const std::vector<ListLine>& lines,
+                            const FrameCursor& cursor, const Layout& layout,
+                            bool dark, int selectedRow) {
+    BlockGlyph g;
+    if (!cursor.visible || !cursor.cell.valid()) return g;
+    const int relRow = cursor.cell.row - layout.content.row;
+    const int relCol = cursor.cell.col - layout.content.col;
+    if (relRow < 0 || relCol < 0) return g;
+    if (relRow >= static_cast<int>(lines.size())) return g;
+    if (relCol >= layout.content.width) return g;
+    const StyleRole role = (relRow == selectedRow) ? StyleRole::ListSelected
+                                                   : StyleRole::Default;
+    g.cellBg = guichrome::styleFor(role, false, dark).bg;
+    g.hasCellBg = true;
+    const std::string& text = lines[static_cast<size_t>(relRow)].text;
+    std::string glyph;
+    int w = 1;
+    if (cellGlyphAt(text, relCol, glyph, w)) {
+        g.text = std::move(glyph);
+        g.widthCols = (w == 2) ? 2 : 1;
+        g.hasGlyph = true;
+    }
+    return g;
+}
+
 #ifdef HAVE_SDL2
 // Pinta un texto en (px,py) con color fg; devuelve el ancho en celdas
 // consumido (para avanzar la grilla monoespaciada).
@@ -283,7 +471,9 @@ void paintListContent(SDL_Renderer* r, GuiFont& font, bool dark,
 void paintChromeAndCursor(SDL_Renderer* r, GuiFont& font, bool dark,
                           const Layout& layout, const ChromeData& chromeData,
                           StyleRole accent, const FrameCursor& cursor,
-                          bool cursorShown) {
+                          bool cursorShown, const Frame* contentFrame,
+                          const std::vector<ListLine>* listLines,
+                          int listSelectedRow) {
     // El accent (color de la etiqueta de estado) se recibe pero aún no se
     // usa: el StatusBar se pinta hoy en un solo color (StatusBase) y el
     // MessageBar en el color de su MessageKind. El pintado por fragmentos
@@ -350,23 +540,57 @@ void paintChromeAndCursor(SDL_Renderer* r, GuiFont& font, bool dark,
     // en prompts). Bar = barra fina de 2px (ok sobre el texto).
     // Bloque = fijo (navegación); Barra = parpadea (inserción): el caller ya
     // resolvió la fase en `cursorShown` (visible lógico AND blink).
-    // NOTA: el Block se pinta DESPUÉS del texto como rect opaco, así
-    // que tapa el carácter de la celda. Cuando el contenido ya se pinta
-    // (este patch), el Block sigue tapando el glifo: mejora futura =
-    // invertir colores o overlay semitransparente. Se deja opaco por ahora
-    // para paridad con el cursor en bloque del TTY.
+    // El Block invierte el glifo (paridad con el TTY, que lo mantiene
+    // legible): fill con cursorColor + repintado de la celda con el fg de
+    // la política cursorGlyphFg (inversión exacta con el fondo efectivo de
+    // la celda, o fondo base como fallback si ese no contrasta: ver
+    // GuiChrome.h). Sin fuente o en celda vacía/espacio se deja solo el
+    // fill. En chrome o fuera de contenido/lista no hay glifo que resolver
+    // y también se deja solo el fill.
     if (cursorShown && cursor.visible && cursor.cell.valid()) {
         const GuiColor cc = guichrome::cursorColor(dark);
-        SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
         const int px = cursor.cell.col * cw;
         const int py = cursor.cell.row * ch;
-        SDL_Rect crect;
         if (cursor.shape == FrameCursorShape::Bar) {
-            crect = SDL_Rect{px, py, 2, ch};
+            SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
+            SDL_Rect crect{px, py, 2, ch};
+            SDL_RenderFillRect(r, &crect);
         } else {
-            crect = SDL_Rect{px, py, cw, ch};
+            BlockGlyph glyph;
+            if (contentFrame) {
+                glyph =
+                    blockGlyphInContent(*contentFrame, cursor, layout, dark);
+            } else if (listLines) {
+                glyph = blockGlyphInList(*listLines, cursor, layout, dark,
+                                         listSelectedRow);
+            }
+            const int wpx = (glyph.hasGlyph && glyph.widthCols == 2)
+                                ? 2 * cw
+                                : cw;
+            SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
+            SDL_Rect crect{px, py, wpx, ch};
+            SDL_RenderFillRect(r, &crect);
+            if (glyph.hasGlyph && font.ok()) {
+                const GuiColor cellBg = glyph.hasCellBg
+                                            ? glyph.cellBg
+                                            : guichrome::background(dark);
+                const GuiColor fg =
+                    guichrome::cursorGlyphFg(cellBg, dark);
+                void* tex =
+                    font.textTexture(r, glyph.text, fg.r, fg.g, fg.b);
+                if (tex) {
+                    // Sin recorte a wpx×ch a propósito: por contrato de
+                    // textTexture (ver GuiFont.h) la textura mide la caja de
+                    // avance (1 col → cw×ch, ancha → 2×cw×ch) y cabe en el
+                    // fill; recortar solo ocultaría una fuente rota.
+                    SDL_Texture* t = static_cast<SDL_Texture*>(tex);
+                    int tw = 0, th = 0;
+                    SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+                    SDL_Rect dst{px, py, tw, th};
+                    SDL_RenderCopy(r, t, nullptr, &dst);
+                }
+            }
         }
-        SDL_RenderFillRect(r, &crect);
     }
 
     SDL_RenderPresent(r);
@@ -402,7 +626,7 @@ void GuiRenderer::renderScreenDiff(
     SDL_RenderClear(r);
     paintFrameContent(r, font_, dark_, f.layout, f);
     paintChromeAndCursor(r, font_, dark_, f.layout, f.chrome, f.statusAccent,
-                         f.cursor, shown);
+                         f.cursor, shown, &f, nullptr, -1);
 #else
     // Sin SDL2: no-op (el loop nunca llega acá, main avisa antes).
 #endif
@@ -448,7 +672,8 @@ void GuiRenderer::renderBufferList(const std::vector<std::string>& names,
     SDL_RenderClear(r);
     paintListContent(r, font_, dark_, layout, lastListLines_, selectedRow);
     paintChromeAndCursor(r, font_, dark_, layout, lastChrome_, lastAccent_,
-                         lastCursor_, shownBuf);
+                         lastCursor_, shownBuf, nullptr, &lastListLines_,
+                         selectedRow);
 #endif
 }
 
@@ -498,7 +723,8 @@ void GuiRenderer::renderFileList(const std::vector<FileListItem>& items,
     SDL_RenderClear(r);
     paintListContent(r, font_, dark_, layout, lastListLines_, selectedRow);
     paintChromeAndCursor(r, font_, dark_, layout, lastChrome_, lastAccent_,
-                         lastCursor_, shownFile);
+                         lastCursor_, shownFile, nullptr, &lastListLines_,
+                         selectedRow);
 #endif
 }
 
@@ -549,6 +775,6 @@ void GuiRenderer::renderSaveAsFileList(
     SDL_RenderClear(r);
     paintListContent(r, font_, dark_, layout, lastListLines_, selectedRow);
     paintChromeAndCursor(r, font_, dark_, layout, lastChrome_, lastAccent_,
-                         lastCursor_, shownSave);
+                         lastCursor_, shownSave, nullptr, nullptr, -1);
 #endif
 }

@@ -170,6 +170,69 @@ TEST(guifont_cambio_renderer_invalida_cache) {
     f.unload();
     CHECK(!f.ok());
 }
+
+// Dimensiones de textura == grilla de celdas: contrato que sostiene al
+// cursor Block (y a paintText). Ambos dibujan la textura tal cual con
+// dst = tw×th de SDL_QueryTexture, sin recorte: si una textura de 1
+// columna no midiera exactamente cw×ch invadiría celdas vecinas o se
+// desalinearía en Y. Se congela para ASCII (siempre) y para un carácter
+// ancho real (si la fuente lo avanza doble; si no, se skipea esa parte).
+TEST(guifont_textura_1col_mide_celda_exacta) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    SDL_Renderer* r = win.rA;
+    const int cw = f.cellW(), ch = f.cellH();
+    // Avance == celda (requisito monospace del producto, ver GuiFont.h).
+    CHECK_EQ(f.textWidth("h"), cw);
+    for (const char* s : {"h", "M", "~", "{", "b"}) {
+        void* t = f.textTexture(static_cast<void*>(r), s, 0xD4, 0xD4, 0xD4);
+        if (!t) SKIP("el renderer dummy no crea texturas");
+        int tw = 0, th = 0;
+        SDL_QueryTexture(static_cast<SDL_Texture*>(t), nullptr, nullptr, &tw,
+                         &th);
+        CHECK_EQ(tw, cw);
+        CHECK_EQ(th, ch);
+    }
+    f.unload();
+}
+
+TEST(guifont_textura_ancha_mide_doble_celda_exacta) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    SDL_Renderer* r = win.rA;
+    const int cw = f.cellW(), ch = f.cellH();
+    const char* kWide[] = {
+        u8"\u6F22",  // 漢 CJK
+        u8"\u1100",  // ᄀ jamo hangul
+        u8"\u2B1B",  // ⬛
+        u8"\u2B50",  // ⭐
+        u8"\u3002",  // 。
+        u8"\uFF21",  // Ａ fullwidth
+    };
+    std::string wide;
+    for (const char* cand : kWide) {
+        if (f.textWidth(cand) == 2 * cw) {
+            wide = cand;
+            break;
+        }
+    }
+    if (wide.empty()) SKIP("fuente sin avance doble para anchos");
+    void* t = f.textTexture(static_cast<void*>(r), wide, 0xD4, 0xD4, 0xD4);
+    if (!t) SKIP("el renderer dummy no crea texturas");
+    int tw = 0, th = 0;
+    SDL_QueryTexture(static_cast<SDL_Texture*>(t), nullptr, nullptr, &tw, &th);
+    CHECK_EQ(tw, 2 * cw);
+    CHECK_EQ(th, ch);
+    f.unload();
+}
 #endif  // HAVE_SDL2
 
 #endif  // HAVE_SDL2_TTF

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 
@@ -62,6 +63,59 @@ inline GuiColor messageBackground(bool dark) {
 }
 inline GuiColor cursorColor(bool dark) {
     return dark ? GuiColor{0xD4, 0xD4, 0xD4} : GuiColor{0x1E, 0x1E, 0x1E};
+}
+
+// ---------------------------------------------------------------------------
+// Política del cursor en bloque (inversión real, paridad con el TTY).
+//
+//   fondo del bloque = cursorColor(dark) (uniforme en toda la celda).
+//   fg del glifo    = fondo EFECTIVO de la celda (inversión: el carácter se
+//                     pinta del color de la superficie que tapa, como el
+//                     reverse del cursor del TTY, que lo mantiene legible).
+//
+// El fondo efectivo NO es siempre el fondo base: depende del rol del
+// segmento y de la línea actual (Selection, BracketMatch, CurrentLine /
+// sintaxis en línea actual, ListSelected en modales). El renderer lo
+// recupera vía styleFor (contenido) o el estilo de lista (modales); nunca
+// supone el fondo base.
+//
+// Garantía de contraste: el fg efectivo debe contrastar con el fondo del
+// bloque (>= kCursorGlyphMinContrast, WCAG). Si el fondo efectivo no
+// contrasta (p. ej. bracket amarillo sobre cursor claro en dark), se usa
+// el fondo base como fg, que por construcción contrasta al máximo con el
+// cursor. cursorGlyphFg() implementa esta decisión; los tests la congelan
+// para cada familia de fondo × tema.
+// ---------------------------------------------------------------------------
+inline constexpr double kCursorGlyphMinContrast = 3.0;
+
+inline double cursorLuminance(GuiColor c) {
+    const double r = c.r / 255.0;
+    const double g = c.g / 255.0;
+    const double b = c.b / 255.0;
+    const double rl =
+        (r <= 0.03928) ? r / 12.92 : std::pow((r + 0.055) / 1.055, 2.4);
+    const double gl =
+        (g <= 0.03928) ? g / 12.92 : std::pow((g + 0.055) / 1.055, 2.4);
+    const double bl =
+        (b <= 0.03928) ? b / 12.92 : std::pow((b + 0.055) / 1.055, 2.4);
+    return 0.2126 * rl + 0.7152 * gl + 0.0722 * bl;
+}
+
+inline double cursorContrastRatio(GuiColor a, GuiColor b) {
+    const double l1 = cursorLuminance(a);
+    const double l2 = cursorLuminance(b);
+    const double hi = l1 > l2 ? l1 : l2;
+    const double lo = l1 > l2 ? l2 : l1;
+    return (hi + 0.05) / (lo + 0.05);
+}
+
+// Fg del glifo sobre el bloque: inversión exacta (fondo efectivo) cuando
+// contrasta con el cursor; fondo base como fallback garantizado si no.
+inline GuiColor cursorGlyphFg(GuiColor cellBg, bool dark) {
+    if (cursorContrastRatio(cellBg, cursorColor(dark)) >=
+        kCursorGlyphMinContrast)
+        return cellBg;
+    return background(dark);
 }
 
 // Texto por rol (paridad con los ANSI de TtyTheme, aproximados a RGB).

@@ -59,6 +59,16 @@ public:
     // se vacía primero para no devolver jamás una textura de otro renderer.
     // El caché está acotado (flush total al llenarse, sin LRU): vale para
     // Fase 1, revisar antes del render real del Frame (ver GuiFont.cpp).
+    //
+    // DIMENSIONES (contrato que sostiene al pintado sin recorte): la
+    // superficie SDL_ttf blended mide la caja de AVANCE del texto (igual
+    // que TTF_SizeUTF8), no la caja de tinta. Con fuente monoespaciada
+    // (requisito de load()) un glifo de 1 columna produce textura de
+    // cw×ch exactos y uno ancho de 2×cw×ch: el caller dibuja con
+    // dst = tw×th de SDL_QueryTexture dentro de la celda sin invadir
+    // vecinas ni desalinearse en Y. Congelado en
+    // guifont_textura_1col/ancha_mide_*_exacta (la parte ancha se skipea
+    // sin fuente de avance doble).
     void* textTexture(void* sdlRenderer, const std::string& text,
                       uint8_t r, uint8_t g, uint8_t b, uint8_t a = 0xFF);
 

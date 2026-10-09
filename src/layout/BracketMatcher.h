@@ -10,6 +10,15 @@
 #include "syntax/SyntaxLanguage.h"
 #include "syntax/SyntaxSpan.h"
 
+// Par de paréntesis/corchetes apareados. Cada extremo identifica UN solo
+// carácter por su posición de inicio en BYTES (col = byte lead del
+// carácter, igual que Cursor/Selection). NO es un rango: el consumidor
+// (FrameBuilder::normalizeBracketPair) deriva el intervalo [col, col+1) y
+// lo traduce a columnas visuales con utf8::columnOf, que redondea por
+// celda (un carácter ancho se consume entero desde su lead). Un extremo en
+// mitad de secuencia (continuación UTF-8), en EOL o fuera de rango produce
+// un intervalo vacío y se descarta en silencio: el índice debe ser exacto
+// para que ese lado del par viva.
 struct BracketPair {
     Position open;
     Position close;
