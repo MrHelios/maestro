@@ -22,6 +22,78 @@ void GuiRenderer::initForRenderer(void* r, int fontPixels) {
     if (r) font_.load(fontPixels);
 }
 
+void GuiRenderer::setBlinkNow(
+    std::chrono::steady_clock::time_point now) {
+    blinkNow_ = now;
+    blinkNowSet_ = true;
+}
+
+void GuiRenderer::noteCursorForBlink(const FrameCursor& next) const {
+    const bool changed =
+        !blinkAnchorSet_ || next.visible != lastCursor_.visible ||
+        next.shape != lastCursor_.shape || !(next.cell == lastCursor_.cell);
+    if (!changed) return;
+    // CONTRATO: el reloj lo inyecta el propietario con setBlinkNow() antes
+    // de cada render; el renderer nunca consulta el reloj interno para el
+    // parpadeo. Sin tiempo inyectado aún no hay ancla (la fase queda ON);
+    // con tiempo inyectado el ancla es ese tiempo. Un reloj obsoleto
+    // (inyectar una vez y dejar de hacerlo) congela la fase a propósito:
+    // es bug del propietario, no se disimula con el reloj real.
+    if (!blinkNowSet_) return;
+    blinkAnchor_ = blinkNow_;
+    blinkAnchorSet_ = true;
+}
+
+bool GuiRenderer::blinkPhaseOn() const {
+    // Bloque (navegación y modales): fijo, sin parpadeo.
+    if (lastCursor_.shape == FrameCursorShape::Block) return true;
+    // Barra (inserción + prompts): parpadea 530ms ON / 530ms OFF.
+    if (!blinkAnchorSet_ || !blinkNowSet_) return true;
+    const auto ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(blinkNow_ -
+                                                              blinkAnchor_)
+            .count();
+    if (ms < 0) return true;
+    return (ms % kBlinkPeriodMs) < kBlinkOnMs;
+}
+
+bool GuiRenderer::cursorShown() const {
+    return lastCursor_.visible && blinkPhaseOn();
+}
+
+GuiPixelRect GuiRenderer::cursorPixelRect() const {
+    GuiPixelRect r;
+    // Geometría LÓGICA: solo depende del cursor lógico (visible + celda
+    // válida), no de la fase de blink. En OFF sigue siendo válida; el
+    // caller decide si pinta con cursorShown().
+    if (!lastCursor_.visible || !lastCursor_.cell.valid()) return r;
+    const int cw = font_.cellW();
+    const int ch = font_.cellH();
+    if (cw <= 0 || ch <= 0) return r;
+    r.x = lastCursor_.cell.col * cw;
+    r.y = lastCursor_.cell.row * ch;
+    r.w = (lastCursor_.shape == FrameCursorShape::Bar) ? 2 : cw;
+    r.h = ch;
+    r.valid = true;
+    return r;
+}
+
+GuiPixelRect GuiRenderer::imeRectPx() const {
+    GuiPixelRect r;
+    if (!lastCursor_.visible || !lastCursor_.cell.valid()) return r;
+    const int cw = font_.cellW();
+    const int ch = font_.cellH();
+    if (cw <= 0 || ch <= 0) return r;
+    // Ancla IME: celda completa (la ventana candidata del IME se posiciona
+    // en la celda del cursor lógico, haya o no fase visible de blink).
+    r.x = lastCursor_.cell.col * cw;
+    r.y = lastCursor_.cell.row * ch;
+    r.w = cw;
+    r.h = ch;
+    r.valid = true;
+    return r;
+}
+
 Frame GuiRenderer::buildFrame(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
     const std::string& filename, bool modified, const ChromeRequest& chrome,
@@ -210,7 +282,8 @@ void paintListContent(SDL_Renderer* r, GuiFont& font, bool dark,
 #ifdef HAVE_SDL2
 void paintChromeAndCursor(SDL_Renderer* r, GuiFont& font, bool dark,
                           const Layout& layout, const ChromeData& chromeData,
-                          StyleRole accent, const FrameCursor& cursor) {
+                          StyleRole accent, const FrameCursor& cursor,
+                          bool cursorShown) {
     // El accent (color de la etiqueta de estado) se recibe pero aún no se
     // usa: el StatusBar se pinta hoy en un solo color (StatusBase) y el
     // MessageBar en el color de su MessageKind. El pintado por fragmentos
@@ -275,12 +348,14 @@ void paintChromeAndCursor(SDL_Renderer* r, GuiFont& font, bool dark,
 
     // Cursor: el Frame ya trae la posicion resuelta (contenido o MessageBar
     // en prompts). Bar = barra fina de 2px (ok sobre el texto).
+    // Bloque = fijo (navegación); Barra = parpadea (inserción): el caller ya
+    // resolvió la fase en `cursorShown` (visible lógico AND blink).
     // NOTA: el Block se pinta DESPUÉS del texto como rect opaco, así
     // que tapa el carácter de la celda. Cuando el contenido ya se pinta
     // (este patch), el Block sigue tapando el glifo: mejora futura =
     // invertir colores o overlay semitransparente. Se deja opaco por ahora
     // para paridad con el cursor en bloque del TTY.
-    if (cursor.visible && cursor.cell.valid()) {
+    if (cursorShown && cursor.visible && cursor.cell.valid()) {
         const GuiColor cc = guichrome::cursorColor(dark);
         SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
         const int px = cursor.cell.col * cw;
@@ -311,12 +386,14 @@ void GuiRenderer::renderScreenDiff(
                          selection, searchHighlight, bracketPair);
     lastChrome_ = f.chrome;
     lastAccent_ = f.statusAccent;
+    noteCursorForBlink(f.cursor);
     lastCursor_ = f.cursor;
     lastLayout_ = f.layout;
     snapshotFrameContent(f, lastContentRows_);
     lastListLines_.clear();
     lastListSelected_ = -1;
     lastListScroll_ = 0;
+    const bool shown = cursorShown();
 #ifdef HAVE_SDL2
     if (!sdlRenderer_) return;
     SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
@@ -325,7 +402,7 @@ void GuiRenderer::renderScreenDiff(
     SDL_RenderClear(r);
     paintFrameContent(r, font_, dark_, f.layout, f);
     paintChromeAndCursor(r, font_, dark_, f.layout, f.chrome, f.statusAccent,
-                         f.cursor);
+                         f.cursor, shown);
 #else
     // Sin SDL2: no-op (el loop nunca llega acá, main avisa antes).
 #endif
@@ -351,15 +428,18 @@ void GuiRenderer::renderBufferList(const std::vector<std::string>& names,
                     selected < layout.content.height;
     lastListSelected_ = ok ? selected : -1;
     int selectedRow = ok ? selected : -1;
+    FrameCursor next;
     if (ok) {
-        lastCursor_.visible = true;
-        lastCursor_.shape = FrameCursorShape::Block;
-        lastCursor_.cell =
-            CellPos(layout.content.col, layout.content.row + selected);
+        next.visible = true;
+        next.shape = FrameCursorShape::Block;
+        next.cell = CellPos(layout.content.col, layout.content.row + selected);
     } else {
-        lastCursor_.visible = false;
-        lastCursor_.cell = CellPos{};
+        next.visible = false;
+        next.cell = CellPos{};
     }
+    noteCursorForBlink(next);
+    lastCursor_ = next;
+    const bool shownBuf = cursorShown();
 #ifdef HAVE_SDL2
     if (!sdlRenderer_) return;
     SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
@@ -368,7 +448,7 @@ void GuiRenderer::renderBufferList(const std::vector<std::string>& names,
     SDL_RenderClear(r);
     paintListContent(r, font_, dark_, layout, lastListLines_, selectedRow);
     paintChromeAndCursor(r, font_, dark_, layout, lastChrome_, lastAccent_,
-                         lastCursor_);
+                         lastCursor_, shownBuf);
 #endif
 }
 
@@ -398,15 +478,18 @@ void GuiRenderer::renderFileList(const std::vector<FileListItem>& items,
                     row < layout.content.height;
     lastListSelected_ = ok ? selected : -1;
     const int selectedRow = ok ? row : -1;
+    FrameCursor next;
     if (ok) {
-        lastCursor_.visible = true;
-        lastCursor_.shape = FrameCursorShape::Block;
-        lastCursor_.cell =
-            CellPos(layout.content.col, layout.content.row + row);
+        next.visible = true;
+        next.shape = FrameCursorShape::Block;
+        next.cell = CellPos(layout.content.col, layout.content.row + row);
     } else {
-        lastCursor_.visible = false;
-        lastCursor_.cell = CellPos{};
+        next.visible = false;
+        next.cell = CellPos{};
     }
+    noteCursorForBlink(next);
+    lastCursor_ = next;
+    const bool shownFile = cursorShown();
 #ifdef HAVE_SDL2
     if (!sdlRenderer_) return;
     SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
@@ -415,7 +498,7 @@ void GuiRenderer::renderFileList(const std::vector<FileListItem>& items,
     SDL_RenderClear(r);
     paintListContent(r, font_, dark_, layout, lastListLines_, selectedRow);
     paintChromeAndCursor(r, font_, dark_, layout, lastChrome_, lastAccent_,
-                         lastCursor_);
+                         lastCursor_, shownFile);
 #endif
 }
 
@@ -446,14 +529,18 @@ void GuiRenderer::renderSaveAsFileList(
     // Cursor DENTRO del input del MessageBar (igual que TTY: al final del
     // nombre, antes del sufijo decorativo via msg.cursor), nunca en la lista.
     const CellPos mbar = chrome::messageBarCursorCell(layout.chrome, message);
+    FrameCursor next;
     if (mbar.valid()) {
-        lastCursor_.visible = true;
-        lastCursor_.shape = FrameCursorShape::Bar;
-        lastCursor_.cell = mbar;
+        next.visible = true;
+        next.shape = FrameCursorShape::Bar;
+        next.cell = mbar;
     } else {
-        lastCursor_.visible = false;
-        lastCursor_.cell = CellPos{};
+        next.visible = false;
+        next.cell = CellPos{};
     }
+    noteCursorForBlink(next);
+    lastCursor_ = next;
+    const bool shownSave = cursorShown();
 #ifdef HAVE_SDL2
     if (!sdlRenderer_) return;
     SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
@@ -462,6 +549,6 @@ void GuiRenderer::renderSaveAsFileList(
     SDL_RenderClear(r);
     paintListContent(r, font_, dark_, layout, lastListLines_, selectedRow);
     paintChromeAndCursor(r, font_, dark_, layout, lastChrome_, lastAccent_,
-                         lastCursor_);
+                         lastCursor_, shownSave);
 #endif
 }

@@ -3,6 +3,11 @@
 #include <cstdlib>
 #include <utility>
 
+#ifdef HAVE_SDL2_TTF
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
+#endif
+
 #ifndef HAVE_SDL2_TTF
 
 // Sin SDL_ttf: stub total (el renderer pinta fondo sólido).
@@ -29,9 +34,6 @@ int GuiFont::textWidth(const std::string&) const { return 0; }
 void GuiFont::clearCache() {}
 
 #else
-
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
 
 #include <unordered_map>
 

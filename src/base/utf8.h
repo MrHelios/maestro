@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 #include <algorithm>
+#include <vector>
 #include "diagnostics/Instrument.h"
 
 // Utilitarios UTF-8 puros (sin dependencias del renderer): el renderer
@@ -337,6 +338,25 @@ inline int alignEnd(std::string_view line, int col) {
         ++end;
     }
     return end;
+}
+
+// Parte `s` en celdas (unidad mínima del modelo byte-safe: ver
+// isCellStart/cellLen). Un commit IME (SDL_TEXTINPUT) puede traer varios
+// caracteres confirmados; el Editor consume un InsertChar por celda, así
+// que el loop GUI trocea con esto. Nunca corta una celda por la mitad;
+// los bytes inválidos salen como celdas propias de 1 byte.
+inline std::vector<std::string> splitCells(std::string_view s) {
+    std::vector<std::string> out;
+    const int n = static_cast<int>(s.size());
+    for (int i = 0; i < n;) {
+        int len = cellLen(s, i, n);
+        if (len <= 0) len = 1;
+        if (i + len > n) len = n - i;
+        out.emplace_back(s.substr(static_cast<size_t>(i),
+                                  static_cast<size_t>(len)));
+        i += len;
+    }
+    return out;
 }
 
 inline bool isValid(std::string_view s) {

@@ -777,3 +777,41 @@ TEST(codepointWidth_eaw_gap_boundaries) {
     CHECK_EQ(utf8::codepointWidth(0x1FA00), 1);
 }
 
+
+// ---------------------------------------------------------------------------
+// splitCells: troceado de un commit IME en celdas (una por InsertChar)
+// ---------------------------------------------------------------------------
+
+TEST(splitCells_vacio) {
+    CHECK(utf8::splitCells("").empty());
+}
+
+TEST(splitCells_ascii_uno_por_byte) {
+    auto v = utf8::splitCells("abc");
+    CHECK_EQ(v.size(), 3u);
+    CHECK_EQ(v[0], "a");
+    CHECK_EQ(v[1], "b");
+    CHECK_EQ(v[2], "c");
+}
+
+TEST(splitCells_commit_ime_multicaracter) {
+    // Commit típico del IME: varios caracteres confirmados de una vez.
+    const std::string s = std::string("a") + U_E + U_EMOJI;
+    auto v = utf8::splitCells(s);
+    CHECK_EQ(v.size(), 3u);
+    CHECK_EQ(v[0], "a");
+    CHECK_EQ(v[1], U_E);
+    CHECK_EQ(v[2], U_EMOJI);
+    // Recomposición byte a byte exacta (nada se pierde ni se duplica).
+    std::string join;
+    for (const auto& c : v) join += c;
+    CHECK_EQ(join, s);
+}
+
+TEST(splitCells_bytes_invalidos_byte_safe) {
+    // Lead inválido / continuación huérfana: celdas propias de 1 byte.
+    const std::string s("\xff", 1);
+    auto v = utf8::splitCells(s);
+    CHECK_EQ(v.size(), 1u);
+    CHECK_EQ(v[0], s);
+}

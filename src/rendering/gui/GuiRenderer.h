@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <optional>
 #include <string>
 #include <vector>
@@ -60,6 +61,16 @@ struct GuiContentRow {
 
 // Las líneas visibles de los modales son rendering::ListLine
 // (ver rendering/ListLines.h: composición compartida con TTY).
+
+// Rectángulo en píxeles de la celda del cursor (para SDL + tests sin SDL).
+// `valid=false` si no hay cursor lógico (invisible o celda inválida).
+struct GuiPixelRect {
+    int x = 0;
+    int y = 0;
+    int w = 0;
+    int h = 0;
+    bool valid = false;
+};
 
 class GuiRenderer : public ScreenRenderer {
 public:
@@ -135,6 +146,33 @@ public:
     int lastListSelected() const { return lastListSelected_; }
     int lastListScroll() const { return lastListScroll_; }
 
+    // Cursor GUI: Bloque (navegación) fijo / Barra (inserción) con parpadeo.
+    // Política: shape Bar parpadea (Interacción + 4 prompts con input, que
+    // ya vienen como Bar desde cursorShapeFor); shape Block siempre visible.
+    // CONTRATO DE RELOJ: el propietario debe llamar setBlinkNow(now) antes
+    // de CADA render; el renderer nunca lee el reloj interno para la fase.
+    // Sin ninguna inyección la fase es ON. Tras la primera inyección la
+    // fase deriva solo del último tiempo inyectado: si el propietario deja
+    // de inyectar, el parpadeo queda congelado (bug del propietario).
+    // Reutilizar el renderer en otro contexto exige seguir inyectando.
+    void setBlinkNow(std::chrono::steady_clock::time_point now);
+    // Fase del parpadeo: true = pintar cursor. Block siempre true.
+    bool blinkPhaseOn() const;
+    // Visibilidad efectiva para pintar: visible lógico AND fase.
+    bool cursorShown() const;
+    // Geometría lógica del cursor (dónde se dibujaría: Bar = 2px de ancho,
+    // Block = celda). Independiente de la fase de blink: es válida aunque
+    // la fase esté OFF; la visibilidad efectiva para pintar la da
+    // cursorShown(). No confundir con imeRectPx() (celda completa lógica
+    // para la candidata IME).
+    GuiPixelRect cursorPixelRect() const;
+    // Ancla IME (SDL_SetTextInputRect): celda completa del cursor lógico,
+    // aunque el blink lo tenga apagado (la ventana candidata sigue al
+    // cursor lógico, no a la fase visible). Si no hay cursor válido
+    // devuelve valid=false y el caller (GuiRunLoop::updateImeRect)
+    // conserva a propósito el último rect de SDL (ver su política).
+    GuiPixelRect imeRectPx() const;
+
     void renderScreenDiff(const Document& doc,
                           const Cursor& cursor,
                           const Viewport& viewport,
@@ -188,4 +226,14 @@ private:
     mutable std::vector<ListLine> lastListLines_;
     mutable int lastListSelected_ = -1;
     mutable int lastListScroll_ = 0;
+    // Parpadeo del cursor (solo Bar): ancla = último cambio de celda/forma
+    // medido en el tiempo inyectado por el propietario (ver contrato en
+    // setBlinkNow). Sin inyección no hay ancla y la fase es ON.
+    mutable std::chrono::steady_clock::time_point blinkAnchor_{};
+    mutable std::chrono::steady_clock::time_point blinkNow_{};
+    mutable bool blinkAnchorSet_ = false;
+    mutable bool blinkNowSet_ = false;
+    static constexpr int kBlinkOnMs = 530;
+    static constexpr int kBlinkPeriodMs = 1060;
+    void noteCursorForBlink(const FrameCursor& next) const;
 };

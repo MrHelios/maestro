@@ -1162,3 +1162,193 @@ TEST(gui_runloop_idle_expira_mensaje) {
     loop.idleStep(later);
     CHECK(guiPtr->lastChrome().message.text.empty());
 }
+
+// Cursor GUI: Bloque (navegación) fijo, Barra (inserción) parpadea 530ms.
+// El blink sigue al shape (Bar), no al State nominal: cubre Interacción y
+// los 4 prompts con input (que ya llegan como Bar desde cursorShapeFor).
+TEST(gui_cursor_block_fijo_bar_parpadea) {
+    using clk = std::chrono::steady_clock;
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola"});
+    Viewport vp = makeVp();
+    Cursor cur;
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+    const auto t0 = clk::now();
+
+    // Bloque (navegación): siempre visible, en toda la fase.
+    {
+        GuiRenderer gui;
+        gui.setBlinkNow(t0);
+        gui.renderScreenDiff(doc, cur, vp, "t", false,
+                             makeChromeRequest(msg, State::Navegacion), sink,
+                             std::nullopt, std::nullopt, std::nullopt);
+        CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
+        for (int ms : {0, 200, 529, 530, 800, 1059, 1060, 2000}) {
+            gui.setBlinkNow(t0 + std::chrono::milliseconds(ms));
+            CHECK(gui.blinkPhaseOn());
+            CHECK(gui.cursorShown());
+        }
+    }
+    // Barra (inserción): 530ms ON / 530ms OFF (periodo 1060ms).
+    {
+        GuiRenderer gui;
+        gui.setBlinkNow(t0);
+        gui.renderScreenDiff(doc, cur, vp, "t", false,
+                             makeChromeRequest(msg, State::Interaccion), sink,
+                             std::nullopt, std::nullopt, std::nullopt);
+        CHECK(gui.lastCursor().shape == FrameCursorShape::Bar);
+        auto onOff = [&](int ms) {
+            gui.setBlinkNow(t0 + std::chrono::milliseconds(ms));
+            return gui.blinkPhaseOn();
+        };
+        CHECK(onOff(0));
+        CHECK(onOff(200));
+        CHECK(onOff(529));
+        CHECK(!onOff(530));
+        CHECK(!onOff(800));
+        CHECK(!onOff(1059));
+        CHECK(onOff(1060));
+        CHECK(!onOff(1590));
+        // cursorShown = visible lógico AND fase.
+        gui.setBlinkNow(t0 + std::chrono::milliseconds(800));
+        CHECK(gui.lastCursor().visible);
+        CHECK(!gui.cursorShown());
+    }
+}
+
+// El ancla del blink se resetea al mover el cursor o cambiar de forma:
+// tras moverse, la barra vuelve a ON aunque la fase anterior estuviera OFF.
+TEST(gui_cursor_blink_resetea_al_mover) {
+    using clk = std::chrono::steady_clock;
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola", "mundo"});
+    Viewport vp = makeVp();
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+    const auto t0 = clk::now();
+    GuiRenderer gui;
+    Cursor c0;
+    c0.line = 0;
+    c0.col = 0;
+    gui.setBlinkNow(t0);
+    gui.renderScreenDiff(doc, c0, vp, "t", false,
+                         makeChromeRequest(msg, State::Interaccion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    // Fase OFF a los 800ms.
+    gui.setBlinkNow(t0 + std::chrono::milliseconds(800));
+    CHECK(!gui.blinkPhaseOn());
+    // Mueve el cursor con el mismo "ahora": el ancla se resetea -> ON.
+    Cursor c1;
+    c1.line = 0;
+    c1.col = 1;
+    gui.renderScreenDiff(doc, c1, vp, "t", false,
+                         makeChromeRequest(msg, State::Interaccion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    CHECK(gui.blinkPhaseOn());
+    CHECK(gui.cursorShown());
+    // Y vuelve a apagarse 530ms después del movimiento.
+    gui.setBlinkNow(t0 + std::chrono::milliseconds(800 + 530));
+    CHECK(!gui.blinkPhaseOn());
+}
+
+// Rects del cursor + ancla IME: celda * tamaño de celda; la barra se pinta
+// de 2px pero el IME ancla la celda completa; el IME sigue al cursor
+// lógico aunque el blink esté OFF.
+TEST(gui_cursor_rects_e_ime_en_celda) {
+    using clk = std::chrono::steady_clock;
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola"});
+    Viewport vp = makeVp();
+    Cursor cur;
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+    const auto t0 = clk::now();
+    const int cw = 9, ch = 18;  // fallbacks de GuiFont sin fuente
+
+    // Bloque: rect de celda completa.
+    {
+        GuiRenderer gui;
+        gui.setBlinkNow(t0);
+        gui.renderScreenDiff(doc, cur, vp, "t", false,
+                             makeChromeRequest(msg, State::Navegacion), sink,
+                             std::nullopt, std::nullopt, std::nullopt);
+        const CellPos cell = gui.lastCursor().cell;
+        CHECK(cell.valid());
+        const GuiPixelRect pr = gui.cursorPixelRect();
+        CHECK(pr.valid);
+        CHECK_EQ(pr.x, cell.col * cw);
+        CHECK_EQ(pr.y, cell.row * ch);
+        CHECK_EQ(pr.w, cw);
+        CHECK_EQ(pr.h, ch);
+        const GuiPixelRect ime = gui.imeRectPx();
+        CHECK(ime.valid);
+        CHECK_EQ(ime.x, cell.col * cw);
+        CHECK_EQ(ime.y, cell.row * ch);
+        CHECK_EQ(ime.w, cw);
+        CHECK_EQ(ime.h, ch);
+    }
+    // Barra: pintado fino de 2px, IME en celda completa, válido en OFF.
+    {
+        GuiRenderer gui;
+        gui.setBlinkNow(t0);
+        gui.renderScreenDiff(doc, cur, vp, "t", false,
+                             makeChromeRequest(msg, State::Interaccion), sink,
+                             std::nullopt, std::nullopt, std::nullopt);
+        const CellPos cell = gui.lastCursor().cell;
+        const GuiPixelRect pr = gui.cursorPixelRect();
+        CHECK(pr.valid);
+        CHECK_EQ(pr.w, 2);
+        CHECK_EQ(pr.h, ch);
+        // Fase OFF: no se pinta, pero la geometría lógica sigue válida y el
+        // IME sigue anclado.
+        gui.setBlinkNow(t0 + std::chrono::milliseconds(800));
+        CHECK(!gui.cursorShown());
+        const GuiPixelRect off = gui.cursorPixelRect();
+        CHECK(off.valid);
+        CHECK_EQ(off.x, cell.col * cw);
+        CHECK_EQ(off.y, cell.row * ch);
+        CHECK_EQ(off.w, 2);
+        CHECK_EQ(off.h, ch);
+        const GuiPixelRect ime = gui.imeRectPx();
+        CHECK(ime.valid);
+        CHECK_EQ(ime.x, cell.col * cw);
+        CHECK_EQ(ime.y, cell.row * ch);
+        CHECK_EQ(ime.w, cw);
+        CHECK_EQ(ime.h, ch);
+    }
+}
+
+// El idle del loop inyecta el tiempo de blink: la barra (Interacción)
+// se apaga sola tras 530ms sin eventos, el bloque nunca.
+TEST(gui_runloop_idle_anima_blink_bar) {
+    using clk = std::chrono::steady_clock;
+    auto clipboard = std::make_unique<FakeClipboard>();
+    auto watcher = std::make_unique<NullFileWatcher>();
+    Editor ed(std::move(clipboard), std::move(watcher));
+    auto gui = std::make_unique<GuiRenderer>();
+    GuiRenderer* guiPtr = gui.get();
+    ed.setRenderer(std::move(gui));
+    NullTestSink sink;
+    ed.setSink(sink);
+    GuiRunLoop loop(ed);
+    loop.setGuiRenderer(guiPtr);
+
+    // Navegación -> Interacción (barra en contenido).
+    InputEvent ie;
+    ie.type = InputEventType::InsertChar;
+    ie.text = "i";
+    ed.handleEvent(ie);
+    const auto t0 = clk::now();
+    loop.idleStep(t0);
+    CHECK(guiPtr->lastCursor().shape == FrameCursorShape::Bar);
+    CHECK(guiPtr->cursorShown());
+    // 800ms después sin eventos: fase OFF (el loop repinta cada ≤30ms en
+    // producción, acá se ejercita el mismo idleStep con tiempo controlado).
+    loop.idleStep(t0 + std::chrono::milliseconds(800));
+    CHECK(guiPtr->lastCursor().visible);
+    CHECK(!guiPtr->blinkPhaseOn());
+    CHECK(!guiPtr->cursorShown());
+    // El ancla IME sigue válida en OFF (la candidata no pierde posición).
+    CHECK(guiPtr->imeRectPx().valid);
+}
