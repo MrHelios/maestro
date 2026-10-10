@@ -22,6 +22,18 @@ void GuiRenderer::initForRenderer(void* r, int fontPixels) {
     if (r) font_.load(fontPixels);
 }
 
+void GuiRenderer::toggleTheme() {
+    dark_ = !dark_;
+    // Solo ahorro de memoria (el color va en la clave del caché): sin esto
+    // el toggle seguiría siendo correcto, solo conservaría texturas viejas
+    // hasta el flush de 512. No se tocan los snapshots last*: se regeneran
+    // en el próximo render* y ningún camino los usa para saltear pintado
+    // (los 4 render* hacen RenderClear + repintado completo con dark_
+    // actual; probado en gui_toggle_pantalla_quieta_repinta_todo con la
+    // pantalla quieta, en editor y en lista modal).
+    font_.clearCache();
+}
+
 void GuiRenderer::setBlinkNow(
     std::chrono::steady_clock::time_point now) {
     blinkNow_ = now;
@@ -474,11 +486,10 @@ void paintChromeAndCursor(SDL_Renderer* r, GuiFont& font, bool dark,
                           bool cursorShown, const Frame* contentFrame,
                           const std::vector<ListLine>* listLines,
                           int listSelectedRow) {
-    // El accent (color de la etiqueta de estado) se recibe pero aún no se
-    // usa: el StatusBar se pinta hoy en un solo color (StatusBase) y el
-    // MessageBar en el color de su MessageKind. El pintado por fragmentos
-    // (nombre/ruta/[*]/etiqueta con su rol) llega después.
-    (void)accent;
+    // Pintado por fragmentos: cada segmento de statusSegments/messageSegments
+    // lleva su StyleRole (nombre/ruta/[*]/etiqueta con su rol, igual que
+    // TtyChrome). El fondo se limpió con un fill uniforme; los segmentos de
+    // solo-espacios (pads/fill) no crean textura, solo avanzan la grilla.
     const int cw = font.cellW();
     const int ch = font.cellH();
     if (cw <= 0 || ch <= 0) {
@@ -495,18 +506,31 @@ void paintChromeAndCursor(SDL_Renderer* r, GuiFont& font, bool dark,
         SDL_SetRenderDrawColor(r, sbg.r, sbg.g, sbg.b, sbg.a);
         SDL_RenderFillRect(r, &srect);
         if (font.ok()) {
-            const std::string line =
-                guichrome::statusLine(chromeData.statusBar, layout.chrome.width);
-            const GuiColor fg =
-                guichrome::colorFor(StyleRole::StatusBase, dark);
-            void* tex = font.textTexture(r, line, fg.r, fg.g, fg.b);
-            if (tex) {
-                SDL_Texture* t = static_cast<SDL_Texture*>(tex);
-                int tw = 0, th = 0;
-                SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-                SDL_Rect dst{layout.chrome.col * cw, layout.chrome.row * ch, tw,
-                             th};
-                SDL_RenderCopy(r, t, nullptr, &dst);
+            const std::vector<guichrome::GuiChromeSeg> segs =
+                guichrome::statusSegments(chromeData.statusBar, accent,
+                                          layout.chrome.width);
+            int consumed = 0;
+            const int baseX = layout.chrome.col * cw;
+            const int y = layout.chrome.row * ch;
+            for (const auto& sg : segs) {
+                if (sg.text.empty()) continue;
+                const int cols = chrome::colCount(sg.text);
+                const bool onlySpaces =
+                    sg.text.find_first_not_of(' ') == std::string::npos;
+                if (!onlySpaces) {
+                    const GuiColor fg =
+                        guichrome::colorFor(sg.role, dark);
+                    void* tex =
+                        font.textTexture(r, sg.text, fg.r, fg.g, fg.b);
+                    if (tex) {
+                        SDL_Texture* t = static_cast<SDL_Texture*>(tex);
+                        int tw = 0, th = 0;
+                        SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+                        SDL_Rect dst{baseX + consumed * cw, y, tw, th};
+                        SDL_RenderCopy(r, t, nullptr, &dst);
+                    }
+                }
+                consumed += cols;
             }
         }
     }
@@ -519,19 +543,32 @@ void paintChromeAndCursor(SDL_Renderer* r, GuiFont& font, bool dark,
                        totalWpx, ch};
         SDL_SetRenderDrawColor(r, mbg.r, mbg.g, mbg.b, mbg.a);
         SDL_RenderFillRect(r, &mrect);
-        if (font.ok() && !chromeData.message.text.empty()) {
-            const std::string line = guichrome::messageLine(
-                chromeData.message, layout.chrome.width);
-            const GuiColor fg =
-                guichrome::messageColor(chromeData.message.kind, dark);
-            void* tex = font.textTexture(r, line, fg.r, fg.g, fg.b);
-            if (tex) {
-                SDL_Texture* t = static_cast<SDL_Texture*>(tex);
-                int tw = 0, th = 0;
-                SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-                SDL_Rect dst{layout.chrome.col * cw,
-                             (layout.chrome.row + 1) * ch, tw, th};
-                SDL_RenderCopy(r, t, nullptr, &dst);
+        if (font.ok()) {
+            const std::vector<guichrome::GuiChromeSeg> segs =
+                guichrome::messageSegments(chromeData.message,
+                                           layout.chrome.width);
+            int consumed = 0;
+            const int baseX = layout.chrome.col * cw;
+            const int y = (layout.chrome.row + 1) * ch;
+            for (const auto& sg : segs) {
+                if (sg.text.empty()) continue;
+                const int cols = chrome::colCount(sg.text);
+                const bool onlySpaces =
+                    sg.text.find_first_not_of(' ') == std::string::npos;
+                if (!onlySpaces) {
+                    const GuiColor fg =
+                        guichrome::colorFor(sg.role, dark);
+                    void* tex =
+                        font.textTexture(r, sg.text, fg.r, fg.g, fg.b);
+                    if (tex) {
+                        SDL_Texture* t = static_cast<SDL_Texture*>(tex);
+                        int tw = 0, th = 0;
+                        SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+                        SDL_Rect dst{baseX + consumed * cw, y, tw, th};
+                        SDL_RenderCopy(r, t, nullptr, &dst);
+                    }
+                }
+                consumed += cols;
             }
         }
     }

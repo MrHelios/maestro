@@ -77,12 +77,22 @@ public:
     GuiRenderer();
     ~GuiRenderer() override;
 
+    // No-op: la GUI no tiene caché diferencial (cada render* repinta
+    // completo tras SDL_RenderClear), a diferencia de TtyDiff en TTY.
     void invalidateCache() override {}
     void setExternalSyntaxCache(SyntaxCache* c) override {
         frameBuilder_.setExternalSyntaxCache(c);
     }
 
-    void toggleTheme() override { dark_ = !dark_; }
+    // Tema claro/oscuro: conmuta `dark_` y libera el caché de texturas
+    // (ahorro de memoria, no corrección: el color ya va en la clave de
+    // GuiFont, ver GuiFont.h). GARANTÍA DE REPINTADO: la GUI no tiene caché
+    // diferencial (a diferencia de TtyDiff en TTY): cada render* hace
+    // SDL_RenderClear + repintado completo, así que el próximo frame tras
+    // el toggle ya pinta todo con el tema nuevo sin invalidación adicional.
+    // Los snapshots last* solo son observabilidad para tests, nunca deciden
+    // qué pintar.
+    void toggleTheme() override;
     bool isDarkTheme() const override { return dark_; }
 
     // Frame puro del editor (mismo que TTY: geometria + chrome + cursor).

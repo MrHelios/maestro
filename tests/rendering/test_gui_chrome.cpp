@@ -2335,6 +2335,292 @@ TEST(gui_cursor_rects_e_ime_en_celda) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Tema claro/oscuro GUI: invariantes por familia (no regla universal).
+//
+// No se exige `dark != light` por rol: hay colapsos y excepciones
+// intencionales. Se congelan las invariantes que importan:
+//   - fondos/primarios que deben adaptarse cambian de tema;
+//   - excepciones fijas (bracket, StatusModified) NO cambian;
+//   - accents colapsan dentro del tema; mensajes base colapsan por diseño;
+//   - fondos resuelven vía rowBgKindFor (contrato compartido con TTY).
+// ---------------------------------------------------------------------------
+TEST(gui_tema_invariantes_por_familia) {
+    // 1. Lo que debe adaptarse al tema cambia.
+    CHECK(guichrome::background(true) != guichrome::background(false));
+    CHECK(guichrome::statusBackground(true) !=
+          guichrome::statusBackground(false));
+    CHECK(guichrome::messageBackground(true) !=
+          guichrome::messageBackground(false));
+    CHECK(guichrome::cursorColor(true) != guichrome::cursorColor(false));
+    CHECK(guichrome::currentLineBackground(true) !=
+          guichrome::currentLineBackground(false));
+    CHECK(guichrome::selectionBackground(true) !=
+          guichrome::selectionBackground(false));
+    CHECK(guichrome::colorFor(StyleRole::Default, true) !=
+          guichrome::colorFor(StyleRole::Default, false));
+    CHECK(guichrome::colorFor(StyleRole::Gutter, true) !=
+          guichrome::colorFor(StyleRole::Gutter, false));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxKeyword, true) !=
+          guichrome::colorFor(StyleRole::SyntaxKeyword, false));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxString, true) !=
+          guichrome::colorFor(StyleRole::SyntaxString, false));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxNumber, true) !=
+          guichrome::colorFor(StyleRole::SyntaxNumber, false));
+    // 2. Excepciones fijas documentadas: NO cambian de tema.
+    CHECK(guichrome::bracketBackground() ==
+          guichrome::bracketBackground());
+    CHECK(guichrome::colorFor(StyleRole::StatusModified, true) ==
+          guichrome::colorFor(StyleRole::StatusModified, false));
+    CHECK(guichrome::styleFor(StyleRole::BracketMatch, false, true).bg ==
+          guichrome::styleFor(StyleRole::BracketMatch, false, false).bg);
+    // 3. Colapsos intencionales dentro del mismo tema.
+    CHECK(guichrome::colorFor(StyleRole::AccentNavegacion, true) ==
+          guichrome::colorFor(StyleRole::AccentGuardar, true));
+    CHECK(guichrome::colorFor(StyleRole::AccentNavegacion, false) ==
+          guichrome::colorFor(StyleRole::AccentGuardar, false));
+    // Mensajes base sin color propio (README v0.9): mismo tono que base.
+    CHECK(guichrome::colorFor(StyleRole::MsgInfo, true) ==
+          guichrome::colorFor(StyleRole::Default, true));
+    CHECK(guichrome::colorFor(StyleRole::MsgSuccess, true) ==
+          guichrome::colorFor(StyleRole::MsgInfo, true));
+    CHECK(guichrome::colorFor(StyleRole::MsgWarning, true) ==
+          guichrome::colorFor(StyleRole::MsgInfo, true));
+    CHECK(guichrome::colorFor(StyleRole::MsgError, true) ==
+          guichrome::colorFor(StyleRole::MsgInfo, true));
+    // Prompt sí se distingue.
+    CHECK(guichrome::messageColor(MessageKind::Prompt, true) ==
+          guichrome::colorFor(StyleRole::MsgPrompt, true));
+    // 4. Fondos vía política compartida.
+    for (bool dark : {true, false}) {
+        CHECK(guichrome::styleFor(StyleRole::Default, false, dark).bg ==
+              guichrome::background(dark));
+        CHECK(guichrome::styleFor(StyleRole::Selection, false, dark).bg ==
+              guichrome::selectionBackground(dark));
+        CHECK(guichrome::styleFor(StyleRole::ListSelected, false, dark).bg ==
+              guichrome::currentLineBackground(dark));
+        CHECK(guichrome::styleFor(StyleRole::SyntaxKeyword, true, dark).bg ==
+              guichrome::currentLineBackground(dark));
+    }
+    // 5. Toggle invierte el estado opaco y la tabla lo refleja.
+    GuiRenderer gui;
+    CHECK(gui.isDarkTheme());
+    const GuiColor bgDark = guichrome::background(gui.isDarkTheme());
+    gui.toggleTheme();
+    CHECK(!gui.isDarkTheme());
+    CHECK(guichrome::background(gui.isDarkTheme()) != bgDark);
+    gui.toggleTheme();
+    CHECK(gui.isDarkTheme());
+    CHECK(guichrome::background(gui.isDarkTheme()) == bgDark);
+}
+
+// Segmentos del chrome: anotación sin duplicar layout.
+// concat(segmentos) == línea plana, con roles de paridad TTY. El ancho se
+// mide en columnas visuales (colCount/truncate), nunca en bytes.
+TEST(gui_chrome_segments_concat_y_roles) {
+    auto concat = [](const std::vector<guichrome::GuiChromeSeg>& segs) {
+        std::string out;
+        for (const auto& s : segs) out += s.text;
+        return out;
+    };
+    auto hasRole = [](const std::vector<guichrome::GuiChromeSeg>& segs,
+                      const std::string& needle, StyleRole role) {
+        for (const auto& s : segs)
+            if (s.role == role && contains(s.text, needle)) return true;
+        return false;
+    };
+    std::vector<StatusBarData> cases;
+    {
+        StatusBarData d;
+        d.name = "archivo.txt";
+        d.path = "/home/usuario";
+        d.estado = "NAVEGACION";
+        d.totalLines = 10;
+        cases.push_back(d);
+    }
+    {
+        StatusBarData d;
+        d.name = "x.cc";
+        d.path = "/home/a";
+        d.estado = "NAVEGACION";
+        d.modified = true;
+        d.totalLines = 10;
+        cases.push_back(d);
+    }
+    {
+        StatusBarData d;
+        d.name = std::string(80, 'n');
+        d.path = "/" + std::string(80, 'p');
+        d.estado = std::string(40, 'e');
+        d.right = std::string(40, 'r');
+        cases.push_back(d);
+    }
+    {
+        StatusBarData d;
+        d.name = "áéí.txt";
+        d.path = "/casa/niño";
+        d.estado = "NAVEGACION";
+        d.right = "2/5";
+        cases.push_back(d);
+    }
+    {
+        StatusBarData d;
+        d.name = "";
+        d.path = "";
+        d.estado = "SELECCIONAR";
+        d.modified = true;
+        d.right = "1/1";
+        cases.push_back(d);
+    }
+    {
+        // Ancho visual != bytes: CJK (2 cols) + acentos. Fuerza truncados
+        // por columnas, no por bytes.
+        StatusBarData d;
+        d.name = "漢字archivo.txt";
+        d.path = "/casa/漢字/ruta/larga";
+        d.estado = "NAVEGACION";
+        d.modified = true;
+        d.totalLines = 100;
+        d.cursorLine = 10;
+        d.cursorCol = 5;
+        cases.push_back(d);
+    }
+    for (const auto& st : cases) {
+        for (int w = 1; w <= 100; ++w) {
+            for (StyleRole accent :
+                 {StyleRole::AccentNavegacion, StyleRole::AccentGuardar,
+                  StyleRole::StatusAccentDefault}) {
+                const std::vector<guichrome::GuiChromeSeg> segs =
+                    guichrome::statusSegments(st, accent, w);
+                const std::string cat = concat(segs);
+                // 1. La concatenación es la línea plana (sin ocultar desvíos
+                //    en el fill: el fill se calcula con plainW de leftText,
+                //    no con los segmentos).
+                CHECK_EQ(cat, guichrome::statusLine(st, w));
+                // 2. Garantía de ancho exacto en columnas visuales.
+                CHECK_EQ(colWidth(cat), w);
+                // 3. La suma de anchos por segmento es exactamente width
+                //    (la distribución pad/fill/contenido no pierde ni agrega
+                //    columnas, incluso con truncados de nombre/ruta/estado).
+                int sumCols = 0;
+                for (const auto& s : segs) sumCols += colWidth(s.text);
+                CHECK_EQ(sumCols, w);
+                CHECK(testutil::validUtf8(cat));
+            }
+        }
+    }
+    // Roles en un caso típico con [*].
+    {
+        StatusBarData st;
+        st.name = "x.cc";
+        st.path = "/home/a";
+        st.estado = "NAVEGACION";
+        st.modified = true;
+        st.totalLines = 10;
+        const auto segs = guichrome::statusSegments(
+            st, StyleRole::AccentNavegacion, 80);
+        CHECK(hasRole(segs, "x.cc", StyleRole::StatusName));
+        CHECK(hasRole(segs, "[*]", StyleRole::StatusModified));
+        CHECK(hasRole(segs, "/home/a", StyleRole::StatusPath));
+        CHECK(hasRole(segs, "NAVEGACION", StyleRole::AccentNavegacion));
+    }
+    // modified && nombre recortado al extremo: sin marker, nombre con rol
+    // StatusModified (paridad con TtyChrome).
+    {
+        StatusBarData st;
+        st.name = std::string(80, 'n');
+        st.path = "/p";
+        st.estado = "E";
+        st.modified = true;
+        const auto segs =
+            guichrome::statusSegments(st, StyleRole::AccentNavegacion, 12);
+        CHECK_EQ(concat(segs), guichrome::statusLine(st, 12));
+    }
+    // MessageBar: concat + roles + boldPrefix (misma excepción que TTY:
+    // sufijo de Prompt con prefijo va con MsgInfo).
+    for (int w : {1, 5, 16, 20, 40, 80}) {
+        for (MessageKind k :
+             {MessageKind::Info, MessageKind::Success, MessageKind::Warning,
+              MessageKind::Error, MessageKind::Prompt}) {
+            MessageBarData m{std::string("hola mundo"), k};
+            CHECK_EQ(concat(guichrome::messageSegments(m, w)),
+                     guichrome::messageLine(m, w));
+        }
+        MessageBarData prompt{std::string("Find: ho (1/2)"), MessageKind::Prompt};
+        prompt.boldPrefix = 6;
+        prompt.cursor = 7;
+        CHECK_EQ(concat(guichrome::messageSegments(prompt, w)),
+                 guichrome::messageLine(prompt, w));
+        MessageBarData utf8{std::string("Nombre: áé漢字.txt"), MessageKind::Prompt};
+        utf8.boldPrefix = 8;
+        CHECK_EQ(concat(guichrome::messageSegments(utf8, w)),
+                 guichrome::messageLine(utf8, w));
+        CHECK(testutil::validUtf8(concat(guichrome::messageSegments(utf8, w))));
+    }
+    {
+        MessageBarData m{std::string("Find: ho (1/2)"), MessageKind::Prompt};
+        m.boldPrefix = 6;
+        const auto segs = guichrome::messageSegments(m, 80);
+        CHECK(hasRole(segs, "Find: ", StyleRole::MsgPrompt));
+        CHECK(hasRole(segs, "ho (1/2)", StyleRole::MsgInfo));
+    }
+    {
+        MessageBarData m{std::string("Error grave"), MessageKind::Error};
+        const auto segs = guichrome::messageSegments(m, 80);
+        CHECK(hasRole(segs, "Error grave", StyleRole::MsgError));
+    }
+    CHECK(guichrome::statusSegments(StatusBarData{}, StyleRole::Default, 0)
+              .empty());
+    CHECK(guichrome::messageSegments(MessageBarData{}, 0).empty());
+}
+
+// boldPrefix a mitad de celda UTF-8: nunca se emiten mitades inválidas.
+// Contrato vigente (ChromeData.h): los productores solo generan límites
+// válidos (etiquetas ASCII); esto es defensa en profundidad ante un futuro
+// productor roto. El corte retrocede al inicio de celda; el concat sigue
+// siendo messageLine.
+TEST(gui_chrome_segments_boldprefix_no_parte_utf8) {
+    // "ab" + á (2B) + "cd": bytes [a b C3 A1 c d], la mitad de á es offset 3.
+    const std::string text = std::string("ab") + "\xC3\xA1" + "cd";
+    for (int bad : {3}) {
+        MessageBarData m{text, MessageKind::Prompt};
+        m.boldPrefix = bad;
+        const auto segs = guichrome::messageSegments(m, 80);
+        std::string concat;
+        for (const auto& s : segs) {
+            // Pads de espacios: se excluyen del chequeo UTF-8 por segmento
+            // (son ASCII); lo que importa es que pre/suf sean válidos.
+            if (s.text.find_first_not_of(' ') == std::string::npos) {
+                concat += s.text;
+                continue;
+            }
+            CHECK(testutil::validUtf8(s.text));
+            concat += s.text;
+        }
+        CHECK_EQ(concat, guichrome::messageLine(m, 80));
+        // El prefijo en negrita no contiene la mitad de á: retrocedió a "ab".
+        bool foundPrompt = false;
+        for (const auto& s : segs)
+            if (s.role == StyleRole::MsgPrompt) {
+                foundPrompt = true;
+                CHECK_EQ(s.text, "ab");
+            }
+        CHECK(foundPrompt);
+    }
+    // Límite válido (tras á, offset 4) sigue exacto: no-op del snap.
+    {
+        MessageBarData m{text, MessageKind::Prompt};
+        m.boldPrefix = 4;
+        const auto segs = guichrome::messageSegments(m, 80);
+        for (const auto& s : segs)
+            if (s.text.find_first_not_of(' ') != std::string::npos)
+                CHECK(testutil::validUtf8(s.text));
+        std::string concat;
+        for (const auto& s : segs) concat += s.text;
+        CHECK_EQ(concat, guichrome::messageLine(m, 80));
+    }
+}
+
 // El idle del loop inyecta el tiempo de blink: la barra (Interacción)
 // se apaga sola tras 530ms sin eventos, el bloque nunca.
 TEST(gui_runloop_idle_anima_blink_bar) {
@@ -2367,4 +2653,94 @@ TEST(gui_runloop_idle_anima_blink_bar) {
     CHECK(!guiPtr->cursorShown());
     // El ancla IME sigue válida en OFF (la candidata no pierde posición).
     CHECK(guiPtr->imeRectPx().valid);
+}
+
+// Integración SDL: toggle con pantalla quieta repinta todo.
+// Renderiza, cambia de tema SIN tocar documento/cursor/viewport y vuelve a
+// renderizar: las zonas afectadas deben adoptar los colores del tema nuevo.
+// Sin fuente a propósito (fills exactos, sin tinta): fondos puros por píxel.
+// Caza una invalidación incorrecta (p. ej. un futuro early-out que compare
+// snapshots y deje píxeles del tema anterior).
+TEST(gui_toggle_pantalla_quieta_repinta_todo) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;  // sin fuente: fills exactos.
+    gui.setSdlRenderer(sdl.ren);
+    CHECK(!gui.hasFont());
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola", "mundo"});
+    Viewport vp = makeVp(10, 40);
+    Cursor cur;  // (0,0): fila 0 = línea actual
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+    const ChromeRequest cr = makeChromeRequest(msg, State::Navegacion);
+    // Primer render (dark de arranque).
+    CHECK(gui.isDarkTheme());
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false, cr, sink, std::nullopt,
+                         std::nullopt, std::nullopt);
+    const Layout lo = gui.lastLayout();
+    const int cw = gui.cellW(), ch = gui.cellH();
+    auto pxAt = [&](int col, int row, GuiColor& out) {
+        return readPixel(sdl.ren, col * cw + cw / 2, row * ch + ch / 2, out);
+    };
+    GuiColor got{};
+    // Contenido: línea actual vs base, en dark.
+    CHECK(pxAt(lo.content.col + 20, lo.content.row + 0, got));
+    CHECK(got == guichrome::currentLineBackground(true));
+    CHECK(pxAt(lo.content.col + 20, lo.content.row + 2, got));
+    CHECK(got == guichrome::background(true));
+    // Chrome: StatusBar y MessageBar en dark.
+    CHECK(pxAt(lo.chrome.col + 20, lo.chrome.row + 0, got));
+    CHECK(got == guichrome::statusBackground(true));
+    CHECK(pxAt(lo.chrome.col + 5, lo.chrome.row + 1, got));
+    CHECK(got == guichrome::messageBackground(true));
+    // Toggle SIN mover nada y re-render: todo debe ser light.
+    gui.toggleTheme();
+    CHECK(!gui.isDarkTheme());
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false, cr, sink, std::nullopt,
+                         std::nullopt, std::nullopt);
+    CHECK(pxAt(lo.content.col + 20, lo.content.row + 0, got));
+    CHECK(got == guichrome::currentLineBackground(false));
+    CHECK(pxAt(lo.content.col + 20, lo.content.row + 2, got));
+    CHECK(got == guichrome::background(false));
+    CHECK(pxAt(lo.chrome.col + 20, lo.chrome.row + 0, got));
+    CHECK(got == guichrome::statusBackground(false));
+    CHECK(pxAt(lo.chrome.col + 5, lo.chrome.row + 1, got));
+    CHECK(got == guichrome::messageBackground(false));
+    // Y de vuelta a dark, misma pantalla quieta.
+    gui.toggleTheme();
+    CHECK(gui.isDarkTheme());
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false, cr, sink, std::nullopt,
+                         std::nullopt, std::nullopt);
+    CHECK(pxAt(lo.content.col + 20, lo.content.row + 0, got));
+    CHECK(got == guichrome::currentLineBackground(true));
+    CHECK(pxAt(lo.chrome.col + 20, lo.chrome.row + 0, got));
+    CHECK(got == guichrome::statusBackground(true));
+    // Listas: mismo contrato en la ruta modal (RenderClear + repintado
+    // completo con dark_ actual, sin early-out por snapshots).
+    {
+        std::vector<std::string> names = {"a.txt", "b.txt"};
+        CHECK(gui.isDarkTheme());
+        gui.renderBufferList(names, 0, 40, 5, sink);
+        const Layout llo = gui.lastLayout();
+        CHECK(pxAt(llo.content.col + 5, llo.content.row + 0, got));
+        CHECK(got == guichrome::currentLineBackground(true));
+        CHECK(pxAt(llo.chrome.col + 20, llo.chrome.row + 0, got));
+        CHECK(got == guichrome::statusBackground(true));
+        gui.toggleTheme();  // a light, pantalla quieta
+        CHECK(!gui.isDarkTheme());
+        gui.renderBufferList(names, 0, 40, 5, sink);
+        CHECK(pxAt(llo.content.col + 5, llo.content.row + 0, got));
+        CHECK(got == guichrome::currentLineBackground(false));
+        CHECK(pxAt(llo.chrome.col + 20, llo.chrome.row + 0, got));
+        CHECK(got == guichrome::statusBackground(false));
+        gui.toggleTheme();
+        CHECK(gui.isDarkTheme());
+    }
+#endif
 }

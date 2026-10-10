@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "base/utf8.h"
 #include "rendering/ChromeData.h"
@@ -249,6 +251,155 @@ inline GuiColor messageColor(MessageKind kind, bool dark) {
 // conocen guichrome::.
 inline std::string rightBlock(const StatusBarData& st) {
     return chrome::statusRightBlock(st);
+}
+
+// ---------------------------------------------------------------------------
+// Segmentos con rol para pintado fragmentado (anotación, no layout).
+//
+// REGLA: estas funciones NO implementan truncado, relleno, presupuestos ni
+// composición: reutilizan `ChromeLayout.h` (layoutStatusLeft /
+// statusRightBlock / statusLeftPlainText) y `chrome::colCount` /
+// `utf8::truncate`, las mismas primitivas de `statusLine()` / `messageLine()`
+// y de `TtyChrome`. Solo etiquetan con `StyleRole` los fragmentos ya
+// recortados. El ancho se mide en columnas visuales, nunca en bytes
+// (`std::string::size()` rompería UTF-8 ancho).
+//
+//   statusSegments(st, accent, width): concat(textos) == statusLine(st,width)
+//   messageSegments(msg, width):      concat(textos) == messageLine(msg,width)
+//
+// Roles (paridad con TtyChrome::appendStatusBar/appendMessageBar):
+//   nombre -> StatusName (o StatusModified si modified && !showMarker, igual
+//   que TTY que pinta el nombre con statusBarModified en ese caso),
+//   marker [*] -> StatusModified, sep+path -> StatusPath,
+//   sep+estado -> accent, pads/fill/right -> StatusBase.
+//   MessageBar: prefijo negrita -> MsgPrompt, resto -> rol de `kind`
+//   (con la misma excepción que TTY: sufijo de un Prompt con boldPrefix va
+//   con MsgInfo, no con MsgPrompt; sin boldPrefix todo va con el rol de kind).
+// ---------------------------------------------------------------------------
+struct GuiChromeSeg {
+    std::string text;
+    StyleRole role = StyleRole::Default;
+};
+
+inline StyleRole messageKindRole(MessageKind kind) {
+    switch (kind) {
+        case MessageKind::Prompt:
+            return StyleRole::MsgPrompt;
+        case MessageKind::Success:
+            return StyleRole::MsgSuccess;
+        case MessageKind::Warning:
+            return StyleRole::MsgWarning;
+        case MessageKind::Error:
+            return StyleRole::MsgError;
+        case MessageKind::Info:
+        default:
+            return StyleRole::MsgInfo;
+    }
+}
+
+inline std::vector<GuiChromeSeg> statusSegments(
+    const StatusBarData& st, StyleRole accent, int width) {
+    std::vector<GuiChromeSeg> segs;
+    if (width <= 0) return segs;
+    using namespace chrome;
+    std::string rightVis = statusRightBlock(st);
+    const int padL = std::min(kMessageBarPadLeft, width);
+    const int padR =
+        std::min(kMessageBarPadRight, std::max(0, width - padL));
+    const int rightBudget = std::max(0, width - padL - padR);
+    if (colCount(rightVis) > rightBudget)
+        rightVis = utf8::truncate(rightVis, rightBudget);
+    const int rightVisW = colCount(rightVis);
+    const int leftBudget = std::max(0, width - padL - padR - rightVisW);
+
+    const StatusLeft left =
+        layoutStatusLeft(st.name, st.path, st.estado, st.modified, leftBudget);
+    const std::string leftText = statusLeftPlainText(left);
+    const int plainW = colCount(leftText);
+
+    if (padL > 0)
+        segs.push_back({std::string(static_cast<size_t>(padL), ' '),
+                        StyleRole::StatusBase});
+    if (left.statusOnly) {
+        if (!left.status.empty())
+            segs.push_back({left.status, accent});
+    } else {
+        if (left.modified && !left.showMarker) {
+            segs.push_back({left.name, StyleRole::StatusModified});
+        } else {
+            segs.push_back({left.name, StyleRole::StatusName});
+            if (left.showMarker) {
+                segs.push_back({std::string(kStatusModifiedMarker.data(),
+                                            kStatusModifiedMarker.size()),
+                                StyleRole::StatusModified});
+            }
+        }
+        if (!left.path.empty()) {
+            std::string pp(kStatusSeparator.data(), kStatusSeparator.size());
+            pp += left.path;
+            segs.push_back({std::move(pp), StyleRole::StatusPath});
+        }
+        {
+            std::string s(kStatusSeparator.data(), kStatusSeparator.size());
+            s += left.status;
+            segs.push_back({std::move(s), accent});
+        }
+    }
+    const int fill = std::max(0, width - padL - plainW - padR - rightVisW);
+    if (fill > 0)
+        segs.push_back({std::string(static_cast<size_t>(fill), ' '),
+                        StyleRole::StatusBase});
+    if (padR > 0)
+        segs.push_back({std::string(static_cast<size_t>(padR), ' '),
+                        StyleRole::StatusBase});
+    if (!rightVis.empty())
+        segs.push_back({std::move(rightVis), StyleRole::StatusBase});
+    return segs;
+}
+
+inline std::vector<GuiChromeSeg> messageSegments(const MessageBarData& msg,
+                                                int width) {
+    std::vector<GuiChromeSeg> segs;
+    if (width <= 0) return segs;
+    const int padL = std::min(kMessageBarPadLeft, width);
+    const int padR =
+        std::min(kMessageBarPadRight, std::max(0, width - padL));
+    const int avail = std::max(0, width - padL - padR);
+    const std::string vis = utf8::truncate(msg.text, avail);
+    if (padL > 0)
+        segs.push_back({std::string(static_cast<size_t>(padL), ' '),
+                        StyleRole::Default});
+    if (msg.boldPrefix.has_value() && *msg.boldPrefix > 0) {
+        // Contrato (ChromeData.h): bytes >= 0 sobre límite UTF-8 válido
+        // (las etiquetas son ASCII, se cumple por construcción). El assert
+        // caza al productor en debug, igual que TtyChrome.
+        assert(*msg.boldPrefix >= 0);
+        int preBytes = *msg.boldPrefix;
+        if (preBytes > static_cast<int>(vis.size()))
+            preBytes = static_cast<int>(vis.size());
+        // Defensa en profundidad: si un productor futuro violara el contrato
+        // con un corte a mitad de celda, retrocede al inicio de celda para
+        // no emitir nunca mitades inválidas a medición/texturas. Con el
+        // contrato vigente es no-op (ya cae en límite válido).
+        preBytes = utf8::alignStart(vis, preBytes);
+        const std::string pre = vis.substr(0, static_cast<size_t>(preBytes));
+        const std::string suf = vis.substr(static_cast<size_t>(preBytes));
+        if (!pre.empty())
+            segs.push_back({pre, StyleRole::MsgPrompt});
+        if (!suf.empty()) {
+            const StyleRole sufRole = (msg.kind == MessageKind::Prompt)
+                                          ? StyleRole::MsgInfo
+                                          : messageKindRole(msg.kind);
+            segs.push_back({std::move(suf), sufRole});
+        }
+    } else {
+        if (!vis.empty())
+            segs.push_back({std::move(vis), messageKindRole(msg.kind)});
+    }
+    if (padR > 0)
+        segs.push_back({std::string(static_cast<size_t>(padR), ' '),
+                        StyleRole::Default});
+    return segs;
 }
 
 // Línea PLANA del StatusBar (" <izquierda>  <right>", EXACTO `width`
