@@ -2,6 +2,9 @@
 
 #include <chrono>
 
+#include "platform/gui/GuiKeymap.h"
+#include "platform/gui/IGuiKeymap.h"
+
 class Editor;
 
 // GuiRunLoop: dueño del loop SDL2 (ventana + fondo + cerrar; fuente SDL_ttf
@@ -31,17 +34,25 @@ class Editor;
 // SDL_PollEvent hacia la fachada neutra del Editor
 // (resize/handleEvent/tick/renderFrame). Sin friend: solo usa API pública.
 //
-// El teclado/mouse completos (GuiKeymap) siguen pendientes: hoy solo ESC,
-// texto confirmado (SDL_TEXTINPUT → InsertChar por celda) y cerrar/resize
-// llegan al Editor. La composición provisional (SDL_TEXTEDITING) se
-// descarta a propósito hasta tener superficie de pintado (nunca se inserta
-// en el Document).
+// El teclado completo vive en GuiKeymap (SDL_Keycode/SDL_Keymod ->
+// GuiKeyPress en el límite SDL del .cpp -> InputEvent): flechas, Home/End,
+// PgUp/PgDn, Enter (incl. keypad), Backspace/Delete, Escape, Ctrl+K/S/Q/U/
+// Y/Z. El texto confirmado (incl. UTF-8 y AltGr) llega por SDL_TEXTINPUT →
+// InsertChar por celda (utf8::splitCells); KEYDOWN nunca lleva texto
+// imprimible (sin doble inserción). La composición provisional
+// (SDL_TEXTEDITING) se descarta a propósito hasta tener superficie de
+// pintado (nunca se inserta en el Document).
 class GuiRenderer;
 
 class GuiRunLoop {
 public:
     explicit GuiRunLoop(Editor& editor);
     void setGuiRenderer(GuiRenderer* r) { gui_ = r; }
+    // Tabla tecla -> Evento que el SDL_KEYDOWN consulta (remapeable en
+    // tiempo de ejecución). Única vía pública: la interfaz GUI; el tipo
+    // concreto GuiKeymap es detalle privado, nunca se expone.
+    IGuiKeymap& keymapIface() { return keymap_; }
+    const IGuiKeymap& keymapIface() const { return keymap_; }
     // Devuelve código de salida (0 ok, 1 sin SDL2).
     int run();
 
@@ -59,6 +70,9 @@ public:
 private:
     Editor& editor_;
     GuiRenderer* gui_ = nullptr;
+    // Significado de cada tecla. Se consulta en cada SDL_KEYDOWN;
+    // remapeable en tiempo de ejecución vía keymapIface().
+    GuiKeymap keymap_;
     // Posiciona la ventana candidata del IME en la celda del cursor lógico
     // (no-op sin SDL2). Si no hay cursor válido conserva el último rect de
     // SDL a propósito (ver política en el comentario de clase): la

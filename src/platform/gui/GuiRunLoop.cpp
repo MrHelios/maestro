@@ -11,6 +11,8 @@
 
 #ifdef HAVE_SDL2
 #include <SDL2/SDL.h>
+
+#include "platform/gui/GuiSdlMapper.h"
 #endif
 
 GuiRunLoop::GuiRunLoop(Editor& editor) : editor_(editor) {}
@@ -66,6 +68,10 @@ int GuiRunLoop::run() {
 #else
 
 namespace {
+// Adaptador SDL -> vocabulario propio GUI: vive en GuiSdlMapper.h (límite
+// SDL testeable, único lugar que nombra SDL_Keycode/KMOD_*); acá solo se
+// usa. Ver las reglas (Caps/Num pelados, AltGr como Alt, keypad mínimo) en
+// ese header y en tests/unit/test_guisdlmapper.cpp.
 // Celda de respaldo si la fuente no cargó (GuiFont usa la misma).
 constexpr int kFallbackCellW = 9;
 constexpr int kFallbackCellH = 18;
@@ -182,12 +188,21 @@ int GuiRunLoop::run() {
                     }
                     break;
                 case SDL_KEYDOWN: {
-                    // FASE 0: mínimo viable. El mapa completo
-                    // (GuiKeymap SDL_Keycode -> InputEvent) llega después.
+                    // Teclado completo vía GuiKeymap: SDL_Keysym se adapta
+                    // a vocabulario propio (GuiKey.h, sin SDL) en el límite
+                    // SDL y el keymap traduce a InputEvent semántico. La
+                    // política de repetición vive en el keymap (flechas,
+                    // Home/End, PgUp/PgDn y borrado repiten; Enter, Escape,
+                    // Prefix/Save/Quit/Undo/Redo no).
+                    // KEYDOWN nunca lleva texto imprimible (sin doble
+                    // inserción: el texto viene por SDL_TEXTINPUT).
                     InputEvent ie;
                     bool send = false;
-                    if (ev.key.keysym.sym == SDLK_ESCAPE) {
-                        ie.type = InputEventType::Escape;
+                    const GuiKeyPress press = guiKeyFromSdl(
+                        ev.key.keysym.sym, ev.key.keysym.mod,
+                        ev.key.repeat != 0);
+                    if (auto t = keymap_.mapKey(press)) {
+                        ie.type = *t;
                         send = true;
                     }
                     if (send) {
@@ -199,14 +214,19 @@ int GuiRunLoop::run() {
                     break;
                 }
                 case SDL_TEXTINPUT: {
-                    // Texto CONFIRMADO (teclado o commit IME): UTF-8 que
+                    // Texto CONFIRMADO (teclado o commit IME): fuente única
+                    // del texto, se acepta SIEMPRE sin filtrar por
+                    // modificadores. El evento SDL_TEXTINPUT no trae mods y
+                    // los combos de control (Ctrl+S/Ctrl+Q/...) no generan
+                    // texto en SDL, así que no hay doble inserción; en
+                    // cambio AltGr (p.ej. @/|/\) SÍ llega por aquí y un
+                    // filtro global de Ctrl/Alt lo rompería. UTF-8 que
                     // puede traer varios caracteres en un solo commit.
                     // Cada celda entra como InsertChar, la operación
                     // semántica que el Editor ya usa (el handling por modo
                     // decide: inserta, completa prompts o interpreta
-                    // 'i'/'s'/... en Navegación). KEYDOWN nunca lleva
-                    // texto imprimible (solo control como ESC): sin doble
-                    // inserción.
+                    // 'i'/'s'/... en Navegación; tras Prefix, 'n'/'t'/...
+                    // deciden el comando y lo desconocido cancela).
                     const char* t = ev.text.text;
                     if (t && *t) {
                         for (const std::string& cell :
