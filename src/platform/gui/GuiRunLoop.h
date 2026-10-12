@@ -34,14 +34,32 @@ class Editor;
 // SDL_PollEvent hacia la fachada neutra del Editor
 // (resize/handleEvent/tick/renderFrame). Sin friend: solo usa API pública.
 //
-// El teclado completo vive en GuiKeymap (SDL_Keycode/SDL_Keymod ->
-// GuiKeyPress en el límite SDL del .cpp -> InputEvent): flechas, Home/End,
+// El teclado completo vive en GuiKeymap (SDL_Keysym se adapta
+// a vocabulario propio (GuiKey.h, sin SDL) en el límite SDL del .cpp -> InputEvent): flechas, Home/End,
 // PgUp/PgDn, Enter (incl. keypad), Backspace/Delete, Escape, Ctrl+K/S/Q/U/
 // Y/Z. El texto confirmado (incl. UTF-8 y AltGr) llega por SDL_TEXTINPUT →
 // InsertChar por celda (utf8::splitCells); KEYDOWN nunca lleva texto
 // imprimible (sin doble inserción). La composición provisional
 // (SDL_TEXTEDITING) se descarta a propósito hasta tener superficie de
 // pintado (nunca se inserta en el Document).
+// El mouse vive en el mismo límite (GuiSdlMapper.h, único que nombra
+// SDL_BUTTON_*/SDL_MOUSEWHEEL_*/SDL_WINDOWEVENT_FOCUS_LOST): puntos de
+// evento -> píxeles de drawable (guiScaleCoord, obligatorio con
+// ALLOW_HIGHDPI: a escala N los puntos son N× menores) -> CellPos 0-based
+// (división por la celda real o fallback 9x18) -> MousePress/Drag/Release
+// (solo botón izquierdo; medio/derecho se ignoran, paridad TTY) y rueda ->
+// ScrollUp/Down (discreta con acumulación: preciseY se junta hasta la unidad
+// y cada unidad emite un evento; el Editor ya aplica ±3 líneas
+// solo-viewport). El Motion solo emite drag con LMask (sin tráfico
+// de hover). El resize también usa el drawable (no SDL_GetWindowSize): con
+// HiDPI la grilla cols/filas = drawable/celda, que es el espacio donde el
+// renderer dibuja (sin logical size/scale) y donde vive la celda TTF.
+// Anti-release-perdido en 3 capas: captura explícita en el press (el up
+// fuera igual llega; el auto-capture ≥2.0.22 no se da por sentado),
+// release sintético en FOCUS_LOST (la captura cae sola y el up puede ir a
+// otra ventana) y oráculo SDL_GetGlobalMouseState como respaldo del tick
+// (consulta al OS, no el caché del último pump). El idle (tick+render, tope
+// 30ms) ya avanza el autoscroll sin mover el mouse.
 class GuiRenderer;
 
 class GuiRunLoop {
@@ -73,6 +91,13 @@ private:
     // Significado de cada tecla. Se consulta en cada SDL_KEYDOWN;
     // remapeable en tiempo de ejecución vía keymapIface().
     GuiKeymap keymap_;
+    // Handles SDL vivos durante run() (opacos para no meter SDL en el
+    // header): los necesita updateImeRect para devolver el rect a puntos de
+    // ventana (SDL_SetTextInputRect habla en puntos, no en píxeles del
+    // drawable). Se fijan tras crear ventana/renderer y se limpian en el
+    // teardown; fuera de run() son nullptr y updateImeRect es no-op.
+    void* sdlWin_ = nullptr;
+    void* sdlRen_ = nullptr;
     // Posiciona la ventana candidata del IME en la celda del cursor lógico
     // (no-op sin SDL2). Si no hay cursor válido conserva el último rect de
     // SDL a propósito (ver política en el comentario de clase): la
