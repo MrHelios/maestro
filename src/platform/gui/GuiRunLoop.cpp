@@ -52,21 +52,24 @@ void GuiRunLoop::updateImeRect() const {
     // última celda válida hasta el próximo cursor válido. No es un olvido:
     // es la posición de respaldo durante estados sin cursor.
     if (!r.valid) return;
-    // UNIDADES: imeRectPx viene en píxeles del drawable (celda TTF × celda),
-    // pero SDL_SetTextInputRect habla en puntos de ventana. Con
-    // ALLOW_HIGHDPI a escala N hay que bajar N× (guiScaleCoord por eje); a
-    // escala 1 es identidad. Sin handles o con medidas inválidas se pasa tal
-    // cual (comportamiento pre-HiDPI).
-    int x = r.x, y = r.y, w = r.w, h = r.h;
+    // UNIDADES (P2-IME): imeRectPx viene en píxeles del drawable (celda TTF ×
+    // celda), pero SDL_SetTextInputRect habla en puntos de ventana (supuesto
+    // documentado en guiImeRectToWindow: SDL3 lo explicita, SDL2 se infiere
+    // del uso junto a eventos en puntos). Con ALLOW_HIGHDPI a escala N hay
+    // que bajar N× por eje; a escala 1 es identidad. Sin handles o con
+    // medidas inválidas se pasa tal cual (comportamiento pre-HiDPI).
+    GuiImeRectPx pr{r.x, r.y, r.w, r.h};
+    int x = pr.x, y = pr.y, w = pr.w, h = pr.h;
     if (sdlWin_ && sdlRen_) {
         int winW = 0, winH = 0, outW = 0, outH = 0;
         SDL_GetWindowSize(static_cast<SDL_Window*>(sdlWin_), &winW, &winH);
         SDL_GetRendererOutputSize(static_cast<SDL_Renderer*>(sdlRen_), &outW,
                                   &outH);
-        x = guiScaleCoord(x, outW, winW);
-        y = guiScaleCoord(y, outH, winH);
-        w = guiScaleCoord(w, outW, winW);
-        h = guiScaleCoord(h, outH, winH);
+        const GuiImeRectPx o = guiImeRectToWindow(pr, winW, winH, outW, outH);
+        x = o.x;
+        y = o.y;
+        w = o.w;
+        h = o.h;
     }
     SDL_Rect sr;
     sr.x = x;
@@ -93,9 +96,14 @@ namespace {
 // SDL testeable, único lugar que nombra SDL_Keycode/KMOD_*); acá solo se
 // usa. Ver las reglas (Caps/Num pelados, AltGr como Alt, keypad mínimo) en
 // ese header y en tests/unit/test_guisdlmapper.cpp.
-// Celda de respaldo si la fuente no cargó (GuiFont usa la misma).
-constexpr int kFallbackCellW = 9;
-constexpr int kFallbackCellH = 18;
+// El cálculo de grilla rows/cols = píxeles/celda vive en GuiSdlMapper.h
+// (guiGridSize, pura y testeada sin SDL): acá solo se usa.
+// La celda de respaldo es la canónica (platform::kFallbackCellW/H, ver
+// WindowSize.h): con HiDPI se escala por eje con guiScaleSize, ver
+// currentSize/mouseCell.
+// Talla base a escala 1 (puntos == píxeles del drawable). El tamaño real se
+// escala por eje vertical con guiScaledFontPixels (contrato visual-estable).
+constexpr int kBaseFontPixels = 16;
 
 #ifdef HAVE_SDL2
 // Guard RAII del estado TextInput de SDL: garantiza SDL_StopTextInput()
@@ -112,21 +120,6 @@ public:
     SdlTextInputGuard& operator=(const SdlTextInputGuard&) = delete;
 };
 #endif
-
-platform::WindowSize sizeFor(int pxW, int pxH, int cellW, int cellH) {
-    if (cellW <= 0) cellW = kFallbackCellW;
-    if (cellH <= 0) cellH = kFallbackCellH;
-    platform::WindowSize s;
-    s.pixelW = pxW;
-    s.pixelH = pxH;
-    s.cellW = cellW;
-    s.cellH = cellH;
-    s.cols = pxW / cellW;
-    s.rows = pxH / cellH;
-    if (s.cols < 1) s.cols = 1;
-    if (s.rows < 1) s.rows = 1;
-    return s;
-}
 }  // namespace
 
 int GuiRunLoop::run() {
@@ -202,16 +195,29 @@ int GuiRunLoop::run() {
         // el espacio donde el renderer dibuja (sin logical size/scale) y
         // donde mide la celda TTF. Con SDL_GetWindowSize a escala N la
         // grilla quedaría N× chica. Fallback a ventana si el output falla.
-        int outW = 0, outH = 0;
+        // CONTRATO VISUAL-ESTABLE (P1): la fuente se escala con el drawable
+        // ANTES de dividir (16 -> 32 a 2×): la celda TTF crece N× y la grilla
+        // se mantiene (~106×33 en vez de duplicarse a 213×66 con texto
+        // diminuto). Sin fuente, el fallback 9×18 se escala por eje igual.
+        int winW = 0, winH = 0, outW = 0, outH = 0;
+        SDL_GetWindowSize(win, &winW, &winH);
         SDL_GetRendererOutputSize(ren, &outW, &outH);
         if (outW <= 0 || outH <= 0) {
-            outW = 960;
-            outH = 600;
-            SDL_GetWindowSize(win, &outW, &outH);
+            outW = winW > 0 ? winW : 960;
+            outH = winH > 0 ? winH : 600;
         }
-        const int cw = gui_ ? gui_->cellW() : kFallbackCellW;
-        const int ch = gui_ ? gui_->cellH() : kFallbackCellH;
-        return sizeFor(outW, outH, cw, ch);
+        if (gui_)
+            gui_->ensureFontPixels(
+                guiScaledFontPixels(kBaseFontPixels, winH, outH));
+        int cw = 0, ch = 0;
+        if (gui_ && gui_->hasFont()) {
+            cw = gui_->cellW();
+            ch = gui_->cellH();
+        } else {
+            cw = guiScaleSize(platform::kFallbackCellW, winW, outW);
+            ch = guiScaleSize(platform::kFallbackCellH, winH, outH);
+        }
+        return guiGridSize(outW, outH, cw, ch);
     };
     auto renderWithBlink = [&] {
         if (gui_) gui_->setBlinkNow(std::chrono::steady_clock::now());
@@ -219,8 +225,8 @@ int GuiRunLoop::run() {
         updateImeRect();
     };
     // Puntos de evento SDL -> celda 0-based (dominio neutro CellPos): la
-    // MISMA métrica que el resize (fuente real o fallback 9x18) y el MISMO
-    // espacio (drawable). Los eventos llegan en puntos de ventana: con
+    // MISMA métrica que el resize (fuente escalada o fallback escalado) y el
+    // MISMO espacio (drawable). Los eventos llegan en puntos de ventana: con
     // ALLOW_HIGHDPI a escala N hay que subir N× ANTES de dividir por la
     // celda (guiScaleCoord por eje); dividir puntos por celda TTF da la
     // celda N× chica. Medidas frescas por evento (barato): la escala puede
@@ -228,11 +234,17 @@ int GuiRunLoop::run() {
     // resuelve chrome/gutter/EOL (screenToCursor) y el autoscroll por
     // bordes; acá solo se convierte, sin offsets propios.
     auto mouseCell = [&](int ptX, int ptY) {
-        const int cw = gui_ ? gui_->cellW() : kFallbackCellW;
-        const int ch = gui_ ? gui_->cellH() : kFallbackCellH;
         int winW = 0, winH = 0, outW = 0, outH = 0;
         SDL_GetWindowSize(win, &winW, &winH);
         SDL_GetRendererOutputSize(ren, &outW, &outH);
+        int cw = 0, ch = 0;
+        if (gui_ && gui_->hasFont()) {
+            cw = gui_->cellW();
+            ch = gui_->cellH();
+        } else {
+            cw = guiScaleSize(platform::kFallbackCellW, winW, outW);
+            ch = guiScaleSize(platform::kFallbackCellH, winH, outH);
+        }
         const int pxX = guiScaleCoord(ptX, winW, outW);
         const int pxY = guiScaleCoord(ptY, winH, outH);
         return guiCellFromPixels(pxX, pxY, cw, ch);
@@ -267,12 +279,13 @@ int GuiRunLoop::run() {
                     }
                     break;
                 case SDL_WINDOWEVENT:
-                    if (ev.window.event == SDL_WINDOWEVENT_RESIZED ||
-                        ev.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
-                        ev.window.event == SDL_WINDOWEVENT_DISPLAY_CHANGED) {
-                        // DISPLAY_CHANGED: la ventana cruzó de monitor; el
-                        // tamaño en puntos puede no moverse pero la escala
-                        // HiDPI (y el drawable) sí. Re-medimos igual.
+                    if (guiResizeNeedsRemeasure(ev.window.event)) {
+                        // RESIZED / SIZE_CHANGED / DISPLAY_CHANGED (decisión
+                        // testeada en GuiSdlMapper.h): DISPLAY_CHANGED es el
+                        // caso 1×->2× sin cambio de tamaño en puntos (la
+                        // ventana lógica no se mueve pero el drawable y la
+                        // escala sí). currentSize() re-consulta el drawable,
+                        // re-escala la fuente y recalcula la grilla.
                         editor_.resize(currentSize());
                         renderWithBlink();
                     } else if (guiFocusLossEndsGesture(ev.window.event)) {

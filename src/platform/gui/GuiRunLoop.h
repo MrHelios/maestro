@@ -46,14 +46,18 @@ class Editor;
 // SDL_BUTTON_*/SDL_MOUSEWHEEL_*/SDL_WINDOWEVENT_FOCUS_LOST): puntos de
 // evento -> píxeles de drawable (guiScaleCoord, obligatorio con
 // ALLOW_HIGHDPI: a escala N los puntos son N× menores) -> CellPos 0-based
-// (división por la celda real o fallback 9x18) -> MousePress/Drag/Release
+// (división por la celda escalada o fallback escalado) -> MousePress/Drag/Release
 // (solo botón izquierdo; medio/derecho se ignoran, paridad TTY) y rueda ->
 // ScrollUp/Down (discreta con acumulación: preciseY se junta hasta la unidad
 // y cada unidad emite un evento; el Editor ya aplica ±3 líneas
 // solo-viewport). El Motion solo emite drag con LMask (sin tráfico
 // de hover). El resize también usa el drawable (no SDL_GetWindowSize): con
-// HiDPI la grilla cols/filas = drawable/celda, que es el espacio donde el
+// HiDPI la grilla cols/filas = drawable/celda (guiGridSize en GuiSdlMapper.h,
+// pura y testeada: fallback canónico, clamp >=1), que es el espacio donde el
 // renderer dibuja (sin logical size/scale) y donde vive la celda TTF.
+// CONTRATO VISUAL-ESTABLE (P1): la fuente se escala con el drawable
+// (guiScaledFontPixels: 16 -> 32 a 2×) y el fallback por eje (guiScaleSize),
+// así la grilla se mantiene (~106×33) en vez de duplicarse con texto diminuto.
 // Anti-release-perdido en 3 capas: captura explícita en el press (el up
 // fuera igual llega; el auto-capture ≥2.0.22 no se da por sentado),
 // release sintético en FOCUS_LOST (la captura cae sola y el up puede ir a

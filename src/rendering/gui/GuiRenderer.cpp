@@ -22,6 +22,14 @@ void GuiRenderer::initForRenderer(void* r, int fontPixels) {
     if (r) font_.load(fontPixels);
 }
 
+void GuiRenderer::ensureFontPixels(int desiredPixels) {
+    if (desiredPixels <= 0) return;
+    // Sin cambio de talla y con fuente válida: no se toca nada (el reload
+    // vaciaría el caché de texturas en cada resize sin necesidad).
+    if (font_.ok() && font_.pixelSize() == desiredPixels) return;
+    font_.load(desiredPixels);
+}
+
 void GuiRenderer::toggleTheme() {
     dark_ = !dark_;
     // Solo ahorro de memoria (el color va en la clave del caché): sin esto

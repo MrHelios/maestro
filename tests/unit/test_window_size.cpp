@@ -84,3 +84,19 @@ TEST(terminal_get_window_size_pixels_does_not_break) {
     CHECK_EQ(r2, rows);
     CHECK_EQ(c2, cols);
 }
+
+TEST(editor_resize_negative_metrics_become_unknown) {
+    // HiDPI: una métrica negativa nunca se guarda tal cual (contaminaría
+    // el escalado puntos<->drawable); se normaliza a 0 = desconocido.
+    // Filas/cols válidas igual aplican viewport.
+    Editor ed;
+    ed.resize(platform::WindowSize{30, 100, -9, -18, -900, -540});
+    CHECK_EQ(ed.currentRows_, 30);
+    CHECK_EQ(ed.currentCols_, 100);
+    CHECK_EQ(ed.currentCellW_, 0);
+    CHECK_EQ(ed.currentCellH_, 0);
+    CHECK_EQ(ed.currentPixelW_, 0);
+    CHECK_EQ(ed.currentPixelH_, 0);
+    CHECK_EQ(ed.getActiveBufferForTesting().viewport.width, 100);
+    CHECK_EQ(ed.getActiveBufferForTesting().viewport.height, 28);
+}

@@ -15,4 +15,11 @@ struct WindowSize {
     int pixelH = 0;  // alto total en píxeles (0 = desconocido)
 };
 
+// Celda de respaldo cuando no hay fuente (única definición canónica: P3).
+// La usan GuiFont (métricas sin fuente), GuiSdlMapper (fallback de
+// guiGridSize y base de guiScaleSize) y GuiRunLoop (fallback escalado).
+// Cambiarla acá la cambia en todos lados; no duplicar literales 9/18.
+constexpr int kFallbackCellW = 9;
+constexpr int kFallbackCellH = 18;
+
 }  // namespace platform

@@ -123,8 +123,16 @@ public:
     // Variante completa: inyecta renderer + abre la fuente y mide la celda.
     // Debe llamarse tras crear el SDL_Renderer y antes del primer resize.
     void initForRenderer(void* r, int fontPixels = 16);
+    // Asegura la talla de fuente escalada por HiDPI (contrato visual-estable:
+    // ver guiScaledFontPixels en GuiSdlMapper.h). Reabre SOLO si la talla
+    // deseada difiere de la actual (o si no hay fuente): los resizes que no
+    // cambian de escala no pagan recarga ni vacían el caché de texturas.
+    // `desiredPixels <= 0` es no-op. Sin fuente disponible (load falla) es
+    // no-op seguro: el loop usa el fallback escalado por eje.
+    void ensureFontPixels(int desiredPixels);
+    int fontPixels() const { return font_.pixelSize(); }
 
-    // Métricas de celda en píxeles (de la fuente; 9x18 estimados si no hay).
+    // Métricas de celda en píxeles (de la fuente; fallback canónico si no hay).
     // El loop las usa para rows/cols = píxeles/celda.
     int cellW() const { return font_.cellW(); }
     int cellH() const { return font_.cellH(); }

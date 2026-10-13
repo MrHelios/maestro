@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string>
 
+#include "platform/WindowSize.h"
+
 // ---------------------------------------------------------------------------
 // GuiFont (Fase GUI-1): fuente monoespaciada vía SDL_ttf + caché de texturas.
 //
@@ -37,6 +39,13 @@ public:
     // `pixelSize <= 0` se rechaza con false sin alterar el estado actual.
     // La fuente debe ser monoespaciada (MAESTRO_FONT también): la celda
     // se mide con el avance de 'M' y solo vale para todas si lo es.
+    // UNIDADES HiDPI (contrato visual-estable): `pixelSize` son píxeles del
+    // DRAWABLE, no puntos de ventana. El loop lo escala con
+    // guiScaledFontPixels (base 16 × drawable/ventana) antes de llamar: a 2×
+    // pide 32 y la celda resultante (~18×36) mantiene la grilla estable. Se
+    // escala la talla en vez de usar TTF_OpenFontDPI a propósito: es
+    // equivalente en raster y funciona con cualquier SDL_ttf (sin exigir
+    // >=2.0.18).
     bool load(int pixelSize = 16);
     void unload();
 
@@ -45,7 +54,7 @@ public:
     const std::string& path() const { return path_; }
     int pixelSize() const { return pixelSize_; }
 
-    // Métricas de celda en píxeles (válidas solo si ok()). Fallbacks 9x18
+    // Métricas de celda en píxeles (válidas solo si ok()). Fallback canónico
     // si se consultan sin fuente (el renderer los usa igual para resize).
     // cellW() es el avance de 'M': solo representa la celda si la fuente
     // es monoespaciada (requisito de load(), ver arriba).
@@ -88,6 +97,8 @@ private:
                                 // nullptr si el caché está vacío/desconocido)
     std::string path_;
     int pixelSize_ = 16;
-    int cellW_ = 9;
-    int cellH_ = 18;
+    // Fallback canónico (ver platform::kFallbackCellW/H en WindowSize.h, P3):
+    // no duplicar literales.
+    int cellW_ = platform::kFallbackCellW;
+    int cellH_ = platform::kFallbackCellH;
 };

@@ -51,6 +51,47 @@ TEST(guimouse_scale_coord_hidpi) {
     CHECK_EQ(c.row, 4);
 }
 
+TEST(guiime_rect_to_window_units) {
+    // P2-IME: el rect del cursor vive en píxeles del drawable pero
+    // SDL_SetTextInputRect habla en puntos de ventana. A escala 1 es
+    // identidad; a 2× baja a la mitad por eje (pasarlo tal cual dejaría la
+    // candidata N× desplazada/agigantada).
+    const GuiImeRectPx id = guiImeRectToWindow({36, 72, 9, 18}, 960, 600,
+                                               960, 600);
+    CHECK_EQ(id.x, 36);
+    CHECK_EQ(id.y, 72);
+    CHECK_EQ(id.w, 9);
+    CHECK_EQ(id.h, 18);
+    // Celda (2,2) con celda escalada 18×36 a 2×: drawable (36,72,18,36) ->
+    // ventana (18,36,9,18).
+    const GuiImeRectPx half = guiImeRectToWindow({36, 72, 18, 36}, 960, 600,
+                                                 1920, 1200);
+    CHECK_EQ(half.x, 18);
+    CHECK_EQ(half.y, 36);
+    CHECK_EQ(half.w, 9);
+    CHECK_EQ(half.h, 18);
+    // Ida y vuelta por eje: ventana -> drawable -> ventana es identidad en
+    // múltiplos exactos (el truncado <1px nunca cambia la celda).
+    const int px = guiScaleCoord(19, 960, 1920);
+    const int py = guiScaleCoord(37, 600, 1200);
+    CHECK_EQ(guiScaleCoord(px, 1920, 960), 19);
+    CHECK_EQ(guiScaleCoord(py, 1200, 600), 37);
+    // Medidas inválidas: identidad por eje (comportamiento pre-HiDPI).
+    // Los ejes son independientes: si solo falla el ancho, Y sigue bajando.
+    const GuiImeRectPx inv = guiImeRectToWindow({36, 72, 18, 36}, 0, 600,
+                                                1920, 1200);
+    CHECK_EQ(inv.x, 36);
+    CHECK_EQ(inv.y, 36);
+    CHECK_EQ(inv.w, 18);
+    CHECK_EQ(inv.h, 18);
+    const GuiImeRectPx inv2 = guiImeRectToWindow({36, 72, 18, 36}, 960, 600,
+                                                 0, 0);
+    CHECK_EQ(inv2.x, 36);
+    CHECK_EQ(inv2.y, 72);
+    CHECK_EQ(inv2.w, 18);
+    CHECK_EQ(inv2.h, 36);
+}
+
 TEST(guimouse_press_release_factories_carry_cell) {
     // Las fábricas son el camino canónico CellPos -> InputEvent del loop.
     InputEvent p = makeMousePressEvent(CellPos{3, 4});
@@ -310,4 +351,159 @@ TEST(guimouse_sdl_focus_loss_ends_gesture) {
     CHECK(!guiFocusLossEndsGesture(SDL_WINDOWEVENT_MINIMIZED));
     CHECK(!guiFocusLossEndsGesture(SDL_WINDOWEVENT_CLOSE));
 #endif
+}
+
+TEST(guimouse_sdl_resize_needs_remeasure) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    // P2 (cambio de monitor): RESIZED + SIZE_CHANGED + DISPLAY_CHANGED
+    // re-miden el drawable y recalculan grilla + fuente. DISPLAY_CHANGED es
+    // el caso 1×->2× sin cambio de tamaño en puntos (sin él, la grilla y la
+    // fuente quedarían clavadas en la escala del monitor anterior).
+    CHECK(guiResizeNeedsRemeasure(SDL_WINDOWEVENT_RESIZED));
+    CHECK(guiResizeNeedsRemeasure(SDL_WINDOWEVENT_SIZE_CHANGED));
+    CHECK(guiResizeNeedsRemeasure(SDL_WINDOWEVENT_DISPLAY_CHANGED));
+    // El resto no re-mide (FOCUS_LOST tiene su propio camino sintético).
+    CHECK(!guiResizeNeedsRemeasure(SDL_WINDOWEVENT_FOCUS_LOST));
+    CHECK(!guiResizeNeedsRemeasure(SDL_WINDOWEVENT_FOCUS_GAINED));
+    CHECK(!guiResizeNeedsRemeasure(SDL_WINDOWEVENT_MOVED));
+    CHECK(!guiResizeNeedsRemeasure(SDL_WINDOWEVENT_ENTER));
+    CHECK(!guiResizeNeedsRemeasure(SDL_WINDOWEVENT_LEAVE));
+    CHECK(!guiResizeNeedsRemeasure(SDL_WINDOWEVENT_SHOWN));
+    CHECK(!guiResizeNeedsRemeasure(SDL_WINDOWEVENT_HIDDEN));
+    CHECK(!guiResizeNeedsRemeasure(SDL_WINDOWEVENT_MINIMIZED));
+    CHECK(!guiResizeNeedsRemeasure(SDL_WINDOWEVENT_MAXIMIZED));
+    CHECK(!guiResizeNeedsRemeasure(SDL_WINDOWEVENT_CLOSE));
+#endif
+}
+
+TEST(guigrid_size_scale_1x) {
+    // Sin SDL (pura): drawable 960x600, celda real 9x18 -> 106x33.
+    // Es el camino del loop tras SDL_GetRendererOutputSize.
+    const platform::WindowSize s = guiGridSize(960, 600, 9, 18);
+    CHECK_EQ(s.cols, 106);
+    CHECK_EQ(s.rows, 33);
+    CHECK_EQ(s.cellW, 9);
+    CHECK_EQ(s.cellH, 18);
+    CHECK_EQ(s.pixelW, 960);
+    CHECK_EQ(s.pixelH, 600);
+}
+
+TEST(guigrid_size_hidpi_2x_uses_drawable) {
+    // HiDPI 2x, división FÍSICA: drawable 1920x1200 / celda sin escalar 9x18
+    // = 213x66 (frente a 106x33 con drawable 960x600). Es lo que daría NO
+    // escalar la fuente: grilla duplicada con texto diminuto (bug P1).
+    // El contrato visual-estable escala la celda antes de dividir (ver
+    // guigrid_stable_visual_size_hidpi): este test solo congela la división.
+    const platform::WindowSize s = guiGridSize(1920, 1200, 9, 18);
+    CHECK_EQ(s.cols, 213);
+    CHECK_EQ(s.rows, 66);
+    // Cadena completa evento->celda a 2x (paridad con guimouse_scale_coord):
+    // punto (19,37) -> drawable (38,74) -> celda (4,4).
+    const int px = guiScaleCoord(19, 960, 1920);
+    const int py = guiScaleCoord(37, 600, 1200);
+    const CellPos c = guiCellFromPixels(px, py, s.cellW, s.cellH);
+    CHECK_EQ(c.col, 4);
+    CHECK_EQ(c.row, 4);
+    // Sin escalar (bug HiDPI: puntos / celda) daría (2,2).
+    const CellPos wrong = guiCellFromPixels(19, 37, s.cellW, s.cellH);
+    CHECK_EQ(wrong.col, 2);
+    CHECK_EQ(wrong.row, 2);
+}
+
+TEST(guigrid_size_fallback_and_clamp) {
+    // Sin fuente (celda <=0): fallback canónico, igual que GuiFont y el loop.
+    const platform::WindowSize f = guiGridSize(960, 600, 0, 0);
+    CHECK_EQ(f.cellW, platform::kFallbackCellW);
+    CHECK_EQ(f.cellH, platform::kFallbackCellH);
+    CHECK_EQ(f.cols, 106);
+    CHECK_EQ(f.rows, 33);
+    const platform::WindowSize f2 = guiGridSize(960, 600, -3, -5);
+    CHECK_EQ(f2.cellW, platform::kFallbackCellW);
+    CHECK_EQ(f2.cellH, platform::kFallbackCellH);
+    // Ventana minimizada / drawable diminuto: nunca 0x0 al Editor.
+    const platform::WindowSize m = guiGridSize(1, 1, 9, 18);
+    CHECK_EQ(m.cols, 1);
+    CHECK_EQ(m.rows, 1);
+    const platform::WindowSize z = guiGridSize(0, 0, 9, 18);
+    CHECK_EQ(z.cols, 1);
+    CHECK_EQ(z.rows, 1);
+    // Fraccionaria 1.5x: 300px / 9 = 33 cols (truncado, sin redondeo).
+    const platform::WindowSize fr = guiGridSize(300, 300, 9, 18);
+    CHECK_EQ(fr.cols, 33);
+    CHECK_EQ(fr.rows, 16);
+}
+
+TEST(guigrid_size_negative_pixels_normalized) {
+    // P3: sin precondiciones; píxeles negativos -> 0 (desconocido, igual que
+    // Editor::resize), nunca negativos guardados. La grilla se clampea a 1x1.
+    const platform::WindowSize s = guiGridSize(-100, -50, 9, 18);
+    CHECK_EQ(s.pixelW, 0);
+    CHECK_EQ(s.pixelH, 0);
+    CHECK_EQ(s.cols, 1);
+    CHECK_EQ(s.rows, 1);
+    // Mixto: un eje negativo no contamina al otro.
+    const platform::WindowSize m = guiGridSize(-100, 600, 9, 18);
+    CHECK_EQ(m.pixelW, 0);
+    CHECK_EQ(m.pixelH, 600);
+    CHECK_EQ(m.cols, 1);
+    CHECK_EQ(m.rows, 33);
+    // Negativos en todo: celdas al fallback, píxeles a 0, grilla 1x1.
+    const platform::WindowSize a = guiGridSize(-100, -50, -9, -18);
+    CHECK_EQ(a.pixelW, 0);
+    CHECK_EQ(a.pixelH, 0);
+    CHECK_EQ(a.cellW, platform::kFallbackCellW);
+    CHECK_EQ(a.cellH, platform::kFallbackCellH);
+    CHECK_EQ(a.cols, 1);
+    CHECK_EQ(a.rows, 1);
+}
+
+TEST(guiscale_size_font_and_fallback) {
+    // Puro y sin SDL: escalado con redondeo entre espacios.
+    // Fuente: 16 a 1x queda 16; a 2x (600pts->1200px) pasa a 32.
+    CHECK_EQ(guiScaledFontPixels(16, 600, 600), 16);
+    CHECK_EQ(guiScaledFontPixels(16, 600, 1200), 32);
+    CHECK_EQ(guiScaledFontPixels(16, 960, 960), 16);
+    // Fraccionaria 1.5x: 16 -> 24 (redondeo, no truncado).
+    CHECK_EQ(guiScaledFontPixels(16, 200, 300), 24);
+    // Escala desconocida (<=0): identidad = comportamiento pre-HiDPI.
+    CHECK_EQ(guiScaledFontPixels(16, 0, 1200), 16);
+    CHECK_EQ(guiScaledFontPixels(16, 600, 0), 16);
+    CHECK_EQ(guiScaledFontPixels(16, -5, 1200), 16);
+    // Fallback por eje: 9x18 a 2x -> 18x36 (misma proporción que la fuente).
+    CHECK_EQ(guiScaleSize(9, 960, 1920), 18);
+    CHECK_EQ(guiScaleSize(18, 600, 1200), 36);
+    CHECK_EQ(guiScaleSize(9, 960, 960), 9);
+    CHECK_EQ(guiScaleSize(18, 600, 600), 18);
+    // Base inválida o escala desconocida: identidad.
+    CHECK_EQ(guiScaleSize(0, 960, 1920), 0);
+    CHECK_EQ(guiScaleSize(9, 0, 1920), 9);
+    CHECK_EQ(guiScaleSize(9, 960, 0), 9);
+}
+
+TEST(guigrid_stable_visual_size_hidpi) {
+    // Contrato visual-estable (P1): a 2x la celda SE ESCALA antes de dividir
+    // y la grilla se mantiene (~106x33) en vez de duplicarse (213x66).
+    // Ventana 960x600 pts, drawable 1920x1200 px, base 16px/9x18:
+    const int fontPx = guiScaledFontPixels(16, 600, 1200);
+    CHECK_EQ(fontPx, 32);
+    const int cw = guiScaleSize(9, 960, 1920);
+    const int ch = guiScaleSize(18, 600, 1200);
+    CHECK_EQ(cw, 18);
+    CHECK_EQ(ch, 36);
+    const platform::WindowSize s2 = guiGridSize(1920, 1200, cw, ch);
+    const platform::WindowSize s1 = guiGridSize(960, 600, 9, 18);
+    CHECK_EQ(s2.cols, s1.cols);
+    CHECK_EQ(s2.rows, s1.rows);
+    CHECK_EQ(s2.cols, 106);
+    CHECK_EQ(s2.rows, 33);
+    // El mouse sigue la misma celda escalada: punto (19,37) -> drawable
+    // (38,74) -> celda (2,2) con celda 18x36 (era (4,4) con 9x18 sin
+    // escalar: el índice acompaña al tamaño visual, no al físico).
+    const int px = guiScaleCoord(19, 960, 1920);
+    const int py = guiScaleCoord(37, 600, 1200);
+    const CellPos c = guiCellFromPixels(px, py, cw, ch);
+    CHECK_EQ(c.col, 2);
+    CHECK_EQ(c.row, 2);
 }
