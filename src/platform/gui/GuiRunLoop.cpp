@@ -230,13 +230,23 @@ int GuiRunLoop::run() {
     // ALLOW_HIGHDPI a escala N hay que subir N× ANTES de dividir por la
     // celda (guiScaleCoord por eje); dividir puntos por celda TTF da la
     // celda N× chica. Medidas frescas por evento (barato): la escala puede
-    // cambiar al mover la ventana entre monitores sin resize. El Editor ya
-    // resuelve chrome/gutter/EOL (screenToCursor) y el autoscroll por
-    // bordes; acá solo se convierte, sin offsets propios.
+    // cambiar al mover la ventana entre monitores sin resize. La celda se
+    // ACOTA a la grilla del drawable (guiCellFromPixelsBounded con los
+    // cols/rows de guiGridSize): el borde exterior queda FUERA (inválida,
+    // el Editor la trata como fuera de contenido) en vez de clamparse a la
+    // última columna; el pasado-EOL DENTRO de la grilla lo sigue resolviendo
+    // screenToCursor a EOL. Sin offsets propios.
     auto mouseCell = [&](int ptX, int ptY) {
         int winW = 0, winH = 0, outW = 0, outH = 0;
         SDL_GetWindowSize(win, &winW, &winH);
         SDL_GetRendererOutputSize(ren, &outW, &outH);
+        // Mismo fallback que currentSize: sin drawable se usa la ventana (o
+        // 960×600 si tampoco hay ventana), para que grilla y mouse sigan en
+        // el mismo espacio también en el camino degenerado.
+        if (outW <= 0 || outH <= 0) {
+            outW = winW > 0 ? winW : 960;
+            outH = winH > 0 ? winH : 600;
+        }
         int cw = 0, ch = 0;
         if (gui_ && gui_->hasFont()) {
             cw = gui_->cellW();
@@ -247,7 +257,8 @@ int GuiRunLoop::run() {
         }
         const int pxX = guiScaleCoord(ptX, winW, outW);
         const int pxY = guiScaleCoord(ptY, winH, outH);
-        return guiCellFromPixels(pxX, pxY, cw, ch);
+        const platform::WindowSize g = guiGridSize(outW, outH, cw, ch);
+        return guiCellFromPixelsBounded(pxX, pxY, cw, ch, g.cols, g.rows);
     };
     editor_.resize(currentSize());
     renderWithBlink();

@@ -6,6 +6,17 @@
 // SDL_Keysym -> GuiKeyPress vive en el límite SDL (GuiRunLoop.cpp,
 // guiKeyFromSdl) y se verifica por compilación con SDL2 + checklist manual.
 //
+// AISLAMIENTO HEADLESS (condición de aceptación): este TU es 100% puro.
+//   - Compilación: cero includes de SDL2 y cero símbolos SDL en código
+//     (SDL solo aparece en comentarios). Verificable con:
+//     `grep "SDL" test_guikeymap.cpp | grep -v "//"` vacío.
+//     Compila con WITH_SDL2=0.
+//   - Ejecución: ningún TEST llama `GuiRunLoop::run()` (el único camino que
+//     crea ventana e inicializa vídeo) ni `SDL_Init`; todo pasa por
+//     `GuiKeyPress` directo + `Editor::handleEvent` (lógica, sin renderer).
+//   - Build: entra en la suite vía `tests/unit/*.cpp` (TEST_SRC) y `make
+//     test-one` lo compila solo (`Compilando solo: test_guikeymap.cpp`).
+//
 // Convenciones bajo prueba:
 //   - Navegación/edición ignoran mods (paridad TTY simpleEscapeForm).
 //   - Letras sin Ctrl/Alt NUNCA mapean (el texto viene por SDL_TEXTINPUT).
@@ -19,6 +30,7 @@
 #include "platform/InputEvent.h"
 #include "base/utf8.h"
 #include "test_framework.h"
+#include <vector>
 #define private public
 #include "app/Editor.h"
 #undef private
@@ -539,4 +551,300 @@ TEST(guitext_enter_is_keydown_not_textinput) {
     e.type = InputEventType::InsertNewline;
     CHECK(ed.isRunning());
     (void)e;
+}
+
+// --- Headless extra (GUI sin ventana): política de repetición exhaustiva ---
+// P2-3: lista CENTRALIZADA de los 26 InputEventType + comprobación de
+// cantidad. Si se agrega un valor al enum sin actualizar kAllEventTypes, el
+// CHECK_EQ(size, 26) falla; si se actualiza la lista pero no se decide su
+// repetibilidad, falla la partición (todo valor debe estar exactamente en un
+// lado: repetible o no). Solo navegación/borrado repiten; TODO lo demás
+// (incluidos eventos que el keymap nunca produce pero isRepeatable debe negar
+// por contrato) no.
+namespace {
+const std::vector<InputEventType>& allEventTypes() {
+    static const std::vector<InputEventType> v = {
+        InputEventType::None,        InputEventType::InsertChar,
+        InputEventType::InsertNewline, InputEventType::MoveLeft,
+        InputEventType::MoveRight,   InputEventType::MoveUp,
+        InputEventType::MoveDown,    InputEventType::MoveHome,
+        InputEventType::MoveEnd,     InputEventType::PageUp,
+        InputEventType::PageDown,    InputEventType::Backspace,
+        InputEventType::Delete,      InputEventType::Undo,
+        InputEventType::Redo,        InputEventType::Quit,
+        InputEventType::Prefix,      InputEventType::Save,
+        InputEventType::Suspend,     InputEventType::Escape,
+        InputEventType::ScrollUp,    InputEventType::ScrollDown,
+        InputEventType::MousePress,  InputEventType::MouseDrag,
+        InputEventType::MouseRelease, InputEventType::Resize,
+    };
+    return v;
+}
+const std::vector<InputEventType>& repeatableEventTypes() {
+    static const std::vector<InputEventType> v = {
+        InputEventType::MoveLeft,  InputEventType::MoveRight,
+        InputEventType::MoveUp,    InputEventType::MoveDown,
+        InputEventType::MoveHome,  InputEventType::MoveEnd,
+        InputEventType::PageUp,    InputEventType::PageDown,
+        InputEventType::Backspace, InputEventType::Delete,
+    };
+    return v;
+}
+// P2-3: vocabulario completo de GuiKeySym (41 valores: 1 Unknown + 14
+// no-textuales + 26 letras) + cantidad. Misma idea: agregar un sym sin
+// actualizar la lista rompe el conteo; actualizarla sin decidir su familia
+// rompe la partición de bindable().
+const std::vector<GuiKeySym>& allKeySyms() {
+    static const std::vector<GuiKeySym> v = {
+        GuiKeySym::Unknown, GuiKeySym::Escape, GuiKeySym::Enter,
+        GuiKeySym::KeyPadEnter, GuiKeySym::Tab, GuiKeySym::Backspace,
+        GuiKeySym::Delete, GuiKeySym::Left, GuiKeySym::Right, GuiKeySym::Up,
+        GuiKeySym::Down, GuiKeySym::Home, GuiKeySym::End, GuiKeySym::PageUp,
+        GuiKeySym::PageDown, GuiKeySym::KeyA, GuiKeySym::KeyB, GuiKeySym::KeyC,
+        GuiKeySym::KeyD, GuiKeySym::KeyE, GuiKeySym::KeyF, GuiKeySym::KeyG,
+        GuiKeySym::KeyH, GuiKeySym::KeyI, GuiKeySym::KeyJ, GuiKeySym::KeyK,
+        GuiKeySym::KeyL, GuiKeySym::KeyM, GuiKeySym::KeyN, GuiKeySym::KeyO,
+        GuiKeySym::KeyP, GuiKeySym::KeyQ, GuiKeySym::KeyR, GuiKeySym::KeyS,
+        GuiKeySym::KeyT, GuiKeySym::KeyU, GuiKeySym::KeyV, GuiKeySym::KeyW,
+        GuiKeySym::KeyX, GuiKeySym::KeyY, GuiKeySym::KeyZ,
+    };
+    return v;
+}
+const std::vector<GuiKeySym>& nonTextKeySyms() {
+    static const std::vector<GuiKeySym> v = {
+        GuiKeySym::Escape, GuiKeySym::Enter, GuiKeySym::KeyPadEnter,
+        GuiKeySym::Tab, GuiKeySym::Backspace, GuiKeySym::Delete,
+        GuiKeySym::Left, GuiKeySym::Right, GuiKeySym::Up, GuiKeySym::Down,
+        GuiKeySym::Home, GuiKeySym::End, GuiKeySym::PageUp, GuiKeySym::PageDown,
+    };
+    return v;
+}
+bool containsType(const std::vector<InputEventType>& v, InputEventType t) {
+    for (auto x : v)
+        if (x == t) return true;
+    return false;
+}
+bool containsSym(const std::vector<GuiKeySym>& v, GuiKeySym s) {
+    for (auto x : v)
+        if (x == s) return true;
+    return false;
+}
+}  // namespace
+
+TEST(guikeymap_listas_centralizadas_cantidad_headless) {
+    // Candados de cantidad: el enum no es contable por reflexión; si alguien
+    // agrega un valor y no actualiza la lista central, esto falla a propósito.
+    CHECK_EQ(allEventTypes().size(), size_t(26));
+    CHECK_EQ(repeatableEventTypes().size(), size_t(10));
+    CHECK_EQ(allKeySyms().size(), size_t(41));
+    CHECK_EQ(nonTextKeySyms().size(), size_t(14));
+    // Partición exacta: todo evento está en un solo lado (repetible o no).
+    for (InputEventType t : allEventTypes()) {
+        const bool rep = containsType(repeatableEventTypes(), t);
+        int inAll = 0;
+        for (auto x : allEventTypes())
+            if (x == t) ++inAll;
+        CHECK_EQ(inAll, 1);  // sin duplicados en la lista central
+        (void)rep;
+    }
+    // Partición exacta de syms: Unknown(1) + no-textuales(14) + letras(26).
+    int nUnknown = 0, nNonText = 0, nLetters = 0;
+    for (GuiKeySym s : allKeySyms()) {
+        if (s == GuiKeySym::Unknown) ++nUnknown;
+        else if (containsSym(nonTextKeySyms(), s)) ++nNonText;
+        else if (s >= GuiKeySym::KeyA && s <= GuiKeySym::KeyZ) ++nLetters;
+        else CHECK(false);  // sym sin familia: decidir regla antes de seguir
+    }
+    CHECK_EQ(nUnknown, 1);
+    CHECK_EQ(nNonText, 14);
+    CHECK_EQ(nLetters, 26);
+}
+
+TEST(guikeymap_no_repeat_exhaustivo_headless) {
+    GuiKeymap km;
+    // Partición verificada contra la lista central: cada uno de los 26 tipos
+    // repite exactamente si está en repeatableEventTypes(). Un valor nuevo
+    // del enum sin clasificar rompe el conteo de la lista (test anterior) o
+    // cae aquí como no-clasificado.
+    CHECK_EQ(allEventTypes().size(), size_t(26));
+    for (InputEventType t : allEventTypes()) {
+        CHECK(km.isRepeatable(t) == containsType(repeatableEventTypes(), t));
+    }
+    // Negados por contrato (default): ni repiten ni deben empezar a hacerlo
+    // en silencio si alguien enlaza una letra a ellos.
+    for (InputEventType t : allEventTypes()) {
+        if (!containsType(repeatableEventTypes(), t)) CHECK(!km.isRepeatable(t));
+    }
+    // mapKey con repeat suprime aunque el enlace exista (evita ráfagas de
+    // guardar/salir/deshacer al mantener la tecla).
+    CHECK(!km.mapKey(key(GuiKeySym::KeyU, true, false, false, true)).has_value());
+    CHECK(!km.mapKey(key(GuiKeySym::KeyZ, true, false, false, true)).has_value());
+    CHECK(!km.mapKey(key(GuiKeySym::KeyY, true, false, false, true)).has_value());
+    CHECK(!km.mapKey(key(GuiKeySym::KeyQ, true, false, false, true)).has_value());
+    CHECK(!km.mapKey(key(GuiKeySym::KeyPadEnter, false, false, false, true))
+               .has_value());
+    CHECK(!km.mapKey(key(GuiKeySym::Unknown, false, false, false, true))
+               .has_value());
+    // ...y los repetibles sí pasan con repeat ( Delete/Home/End incluidos ).
+    CHECK(km.mapKey(key(GuiKeySym::Delete, false, false, false, true)).has_value());
+    CHECK(km.mapKey(key(GuiKeySym::Home, false, false, false, true)).has_value());
+    CHECK(km.mapKey(key(GuiKeySym::End, false, false, false, true)).has_value());
+}
+
+// --- Headless extra: Tab enlazable + KeyPadEnter normaliza mods + Unknown ---
+// Tab va sin enlazar por defecto (paridad TTY) pero ES enlazable (no genera
+// TEXTINPUT en ninguna plataforma); KeyPadEnter es no-textual (normaliza).
+TEST(guikeymap_tab_y_keypad_headless) {
+    GuiKeymap km;
+    CHECK(!km.mapKey(key(GuiKeySym::Tab)).has_value());
+    CHECK(km.bindKey({GuiKeySym::Tab, false, false}, InputEventType::InsertNewline));
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Tab))),
+             static_cast<int>(InputEventType::InsertNewline));
+    // Con mods también resuelve (normalización no-textual), igual que flechas.
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Tab, true, true, true))),
+             static_cast<int>(InputEventType::InsertNewline));
+    km.resetDefaults();
+    CHECK(!km.mapKey(key(GuiKeySym::Tab)).has_value());
+    // KeyPadEnter con Ctrl/Alt/Shift sigue siendo InsertNewline por defecto.
+    checkMaps(GuiKeySym::KeyPadEnter, InputEventType::InsertNewline, true);
+    checkMaps(GuiKeySym::KeyPadEnter, InputEventType::InsertNewline, false, true);
+    GuiKeymap km2;
+    CHECK(km2.bindKey({GuiKeySym::KeyPadEnter, true, false},
+                      InputEventType::MoveDown));
+    CHECK_EQ(static_cast<int>(*km2.mapKey(key(GuiKeySym::KeyPadEnter))),
+             static_cast<int>(InputEventType::MoveDown));
+    // Unknown nunca resuelve, con o sin mods/repeat, ni se puede enlazar.
+    GuiKeymap km3;
+    CHECK(!km3.mapKey(key(GuiKeySym::Unknown, true, true, true, true)).has_value());
+    CHECK(!km3.bindKey({GuiKeySym::Unknown, false, false},
+                       InputEventType::MoveDown));
+}
+
+// --- Headless extra: boundKey aplica la misma normalización que mapKey ---
+TEST(guikeymap_boundkey_normaliza_headless) {
+    GuiKeymap km;
+    // No-textual: boundKey ignora mods igual que mapKey (un solo enlace).
+    CHECK_EQ(static_cast<int>(*km.boundKey({GuiKeySym::Left, false, false})),
+             static_cast<int>(InputEventType::MoveLeft));
+    CHECK_EQ(static_cast<int>(*km.boundKey({GuiKeySym::Left, true, true})),
+             static_cast<int>(InputEventType::MoveLeft));
+    // Letras: coincidencia exacta (Ctrl sin Alt); con Alt no hay enlace.
+    CHECK_EQ(static_cast<int>(*km.boundKey({GuiKeySym::KeyK, true, false})),
+             static_cast<int>(InputEventType::Prefix));
+    CHECK(!km.boundKey({GuiKeySym::KeyK, true, true}).has_value());
+    CHECK(!km.boundKey({GuiKeySym::KeyK, false, false}).has_value());
+    // Tras unbind, mapKey y boundKey caen juntos (misma tabla).
+    km.unbindKey({GuiKeySym::KeyK, true, false});
+    CHECK(!km.boundKey({GuiKeySym::KeyK, true, false}).has_value());
+    CHECK(!km.mapKey(key(GuiKeySym::KeyK, true)).has_value());
+    km.resetDefaults();
+    CHECK_EQ(static_cast<int>(*km.boundKey({GuiKeySym::KeyK, true, false})),
+             static_cast<int>(InputEventType::Prefix));
+}
+
+// P2-3: DOS reglas de normalización, fijadas por separado (no generalizar).
+// Regla 1 (no-textual: Escape/Enter/KeyPadEnter/Tab/Backspace/Delete/flechas/
+// Home/End/PgUp/PgDn): IGNORA ctrl/alt/shift en mapKey y boundKey (paridad
+// TTY simpleEscapeForm; un solo enlace por tecla). Regla 2 (textual: letras
+// A-Z): exige coincidencia EXACTA en (ctrl,alt) —Ctrl sin Alt— y solo ignora
+// shift (el Binding ni lo nombra). Unknown nunca resuelve ni se enlaza.
+TEST(guikeymap_normalizacion_dos_reglas_headless) {
+    GuiKeymap km;
+    // Tab no trae default (paridad TTY) pero sigue la regla 1 una vez
+    // enlazado: se enlaza acá para que las 14 resuelvan y la uniformidad sea
+    // comparable (sin enlace, la regla 1 para Tab es "las 8 dan nullopt").
+    CHECK(km.bindKey({GuiKeySym::Tab, false, false},
+                     InputEventType::InsertNewline));
+    // Regla 1: las 14 no-textuales resuelven igual con las 8 combinaciones de
+    // mods (misma tabla, mismo evento que sin mods).
+    for (GuiKeySym s : nonTextKeySyms()) {
+        auto base = km.mapKey(key(s));
+        CHECK(base.has_value());
+        for (bool ctrl : {false, true})
+            for (bool alt : {false, true})
+                for (bool shift : {false, true}) {
+                    auto t = km.mapKey(key(s, ctrl, alt, shift));
+                    CHECK(t.has_value());
+                    CHECK_EQ(static_cast<int>(*t), static_cast<int>(*base));
+                    auto b = km.boundKey({s, ctrl, alt});
+                    CHECK(b.has_value());
+                    CHECK_EQ(static_cast<int>(*b), static_cast<int>(*base));
+                }
+    }
+    // Regla 2: las letras exigen (Ctrl=true, Alt=false); shift se ignora pero
+    // ctrl/alt no se normalizan. Se verifica sobre una enlazada (KeyK=Prefix),
+    // una enlazable sin default (KeyJ) y los bordes del rango (KeyA/KeyZ).
+    for (GuiKeySym s :
+         {GuiKeySym::KeyK, GuiKeySym::KeyJ, GuiKeySym::KeyA, GuiKeySym::KeyZ}) {
+        GuiKeymap fresh;
+        if (s != GuiKeySym::KeyK) {
+            // KeyJ/A/Z sin default: se enlazan para probar la regla exacta.
+            CHECK(fresh.bindKey({s, true, false}, InputEventType::MoveDown));
+        }
+        const auto base = fresh.mapKey(key(s, true, false));
+        CHECK(base.has_value());
+        // Shift no rompe (se ignora en ambas reglas).
+        CHECK_EQ(static_cast<int>(*fresh.mapKey(key(s, true, false, true))),
+                 static_cast<int>(*base));
+        CHECK_EQ(static_cast<int>(*fresh.boundKey({s, true, false})),
+                 static_cast<int>(*base));
+        // Pero ctrl/alt SÍ deciden: sin Ctrl, con Alt o con Ctrl+Alt no hay
+        // enlace (el texto llegaría por SDL_TEXTINPUT; enlazarlo duplicaría).
+        CHECK(!fresh.mapKey(key(s, false, false)).has_value());
+        CHECK(!fresh.mapKey(key(s, false, true)).has_value());
+        CHECK(!fresh.mapKey(key(s, true, true)).has_value());
+        CHECK(!fresh.mapKey(key(s, false, false, true)).has_value());
+        CHECK(!fresh.boundKey({s, false, false}).has_value());
+        CHECK(!fresh.boundKey({s, false, true}).has_value());
+        CHECK(!fresh.boundKey({s, true, true}).has_value());
+    }
+    // Unknown: ninguna regla lo rescata (sin enlace posible).
+    for (bool ctrl : {false, true})
+        for (bool alt : {false, true})
+            for (bool shift : {false, true})
+                for (bool repeat : {false, true}) {
+                    CHECK(!km.mapKey(key(GuiKeySym::Unknown, ctrl, alt, shift,
+                                         repeat))
+                               .has_value());
+                    CHECK(!km.boundKey({GuiKeySym::Unknown, ctrl, alt})
+                               .has_value());
+                }
+    GuiKeymap m2;
+    CHECK(!m2.bindKey({GuiKeySym::Unknown, false, false},
+                      InputEventType::MoveDown));
+    CHECK(!m2.bindKey({GuiKeySym::Unknown, true, false},
+                      InputEventType::MoveDown));
+}
+
+// P2-3: política bindable() particionada por familia (41 syms, lista central).
+// No-textuales: enlazables con cualquier mods (se normaliza al guardar).
+// Letras: solo con Ctrl sin Alt (invariante anti-doble-acción KEYDOWN +
+// TEXTINPUT). Unknown: nunca. Un sym nuevo sin clasificar rompe el conteo.
+TEST(guikeymap_bindable_particion_por_familia_headless) {
+    CHECK_EQ(allKeySyms().size(), size_t(41));
+    for (GuiKeySym s : allKeySyms()) {
+        GuiKeymap km;
+        if (s == GuiKeySym::Unknown) {
+            CHECK(!km.bindKey({s, false, false}, InputEventType::MoveDown));
+            CHECK(!km.bindKey({s, true, false}, InputEventType::MoveDown));
+            CHECK(!km.bindKey({s, true, true}, InputEventType::MoveDown));
+        } else if (containsSym(nonTextKeySyms(), s)) {
+            CHECK(km.bindKey({s, false, false}, InputEventType::MoveDown));
+            CHECK(km.bindKey({s, true, true}, InputEventType::MoveDown));
+        } else {
+            CHECK(s >= GuiKeySym::KeyA && s <= GuiKeySym::KeyZ);
+            CHECK(!km.bindKey({s, false, false}, InputEventType::MoveDown));
+            CHECK(!km.bindKey({s, false, true}, InputEventType::MoveDown));
+            CHECK(!km.bindKey({s, true, true}, InputEventType::MoveDown));
+            CHECK(km.bindKey({s, true, false}, InputEventType::MoveDown));
+        }
+    }
+    // Tab, caso que motiva el test: sin default pero enlazable (no genera
+    // TEXTINPUT); tras reset vuelve a sin-enlazar.
+    GuiKeymap km;
+    CHECK(!km.mapKey(key(GuiKeySym::Tab)).has_value());
+    CHECK(km.bindKey({GuiKeySym::Tab, false, false},
+                     InputEventType::InsertNewline));
+    km.resetDefaults();
+    CHECK(!km.mapKey(key(GuiKeySym::Tab)).has_value());
 }

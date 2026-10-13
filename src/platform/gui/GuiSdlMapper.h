@@ -107,6 +107,13 @@ inline int guiScaledFontPixels(int basePixels, int winH, int outH) {
 // {-1,-1}: el Editor la trata como fuera de contenido (click que cancela
 // selección / drag ignorado), nunca como {0,0} espurio.
 //
+// CONTRATO DE ESPACIO (P2-1): NO escala. El caller (GuiRunLoop::mouseCell)
+// debe traer AMBOS lados al mismo espacio antes de llamar: evento en puntos
+// de ventana -> píxeles de drawable vía guiScaleCoord(pt, win, out), y celda
+// base -> celda física vía guiScaleSize(base, win, out). Dividir puntos por
+// celda física (o píxeles por celda sin escalar) da la celda N× chica/grande.
+// La grilla sigue el mismo par: guiGridSize(outW, outH, celdaFísica).
+//
 // UNIDADES (HiDPI): la ventana se crea con SDL_WINDOW_ALLOW_HIGHDPI, así que
 // hay DOS espacios: puntos de ventana (SDL_GetWindowSize, coordenadas de los
 // eventos de mouse) y píxeles del drawable (SDL_GetRendererOutputSize,
@@ -119,6 +126,30 @@ inline CellPos guiCellFromPixels(int pxX, int pxY, int cellW, int cellH) {
     if (cellW <= 0 || cellH <= 0) return CellPos{};
     if (pxX < 0 || pxY < 0) return CellPos{};
     return CellPos{pxX / cellW, pxY / cellH};
+}
+
+// Variante ACOTADA por grilla (P2-2): píxeles del drawable -> celda solo si
+// cae DENTRO de la grilla de `cols`×`rows` (las mismas que guiGridSize
+// devolvió para este drawable/celda). Fuera de la grilla devuelve inválida,
+// NUNCA clampeada a la última columna/fila: el borde exacto ENTRE celdas
+// pertenece a la siguiente (9px con celda 9 -> col 1), pero el borde
+// EXTERIOR queda fuera (x == cols*cellW -> inválida, aunque la división pura
+// daría col == cols "válida"). Son dos condiciones distintas y esta función
+// es la que las separa; screenToCursor sigue clampeaando el pasado-EOL
+// DENTRO de la grilla a EOL (conducta histórica, ver mouse_map_past_eol_clamps).
+// Pura y sin SDL: compara ÍNDICES (col >= cols), nunca anchos en píxeles
+// (cols*cellW desbordaría con valores grandes); la división px/celda con
+// int es segura (sin overflow). Con celda o grilla inválida (<=0) devuelve
+// inválida. El loop la usa en mouseCell con la grilla del currentSize.
+inline CellPos guiCellFromPixelsBounded(int pxX, int pxY, int cellW, int cellH,
+                                        int cols, int rows) {
+    if (cellW <= 0 || cellH <= 0) return CellPos{};
+    if (cols <= 0 || rows <= 0) return CellPos{};
+    if (pxX < 0 || pxY < 0) return CellPos{};
+    const int col = pxX / cellW;
+    const int row = pxY / cellH;
+    if (col >= cols || row >= rows) return CellPos{};
+    return CellPos{col, row};
 }
 
 // Escala lineal de una coordenada entre espacios (puntos <-> drawable).

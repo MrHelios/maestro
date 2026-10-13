@@ -3,13 +3,29 @@
 // solo usan constantes (SDLK_*/KMOD_*), sin inicializar video ni ventana.
 // Sin SDL2 cada caso hace SKIP, no falla.
 //
+// AISLAMIENTO HEADLESS (condición de aceptación): dos secciones separadas.
+//   SECCIÓN PURA (sin SDL, corre con WITH_SDL2=0): grilla (guiGridSize),
+//   coordenadas (guiScaleCoord/guiCellFromPixels/guiCellFromPixelsBounded),
+//   rueda (guiWheelDelta/guiConsumeWheelDelta), IME (guiImeRectToWindow) e
+//   integración HiDPI/Editor. Está ANTES del include SDL2 y no usa ningún
+//   símbolo de SDL en código: cero llamadas de init/creación de vídeo en
+//   todo el TU (verificable excluyendo comentarios y guards SKIP).
+//   SECCIÓN SDL (solo constantes, nunca vídeo): cada TEST empieza con
+//   guard de SKIP sin SDL2; solo nombra keycodes/mods/botones por valor,
+//   jamás inicializa el subsistema de vídeo ni crea ventanas.
+//   Build: `tests/unit/*.cpp` (TEST_SRC); `make test-one` lo compila solo.
+//
 // Cubren la costura que los tests del keymap no ven: Ctrl+Shift, AltGr,
 // Caps/Num y keypad, más la composición adaptador -> GuiKeymap.
 
 #include "test_framework.h"
 
 #include "platform/gui/GuiSdlMapper.h"
+#include "platform/InputEvent.h"
 #include "platform/MouseEvent.h"
+#define private public
+#include "app/Editor.h"
+#undef private
 
 TEST(guimouse_pixels_to_cell) {
     // Puro y sin SDL: división entera píxeles/celda -> CellPos 0-based.
@@ -506,4 +522,292 @@ TEST(guigrid_stable_visual_size_hidpi) {
     const CellPos c = guiCellFromPixels(px, py, cw, ch);
     CHECK_EQ(c.col, 2);
     CHECK_EQ(c.row, 2);
+}
+
+// --- Headless extra (sin ventana): bordes exactos + valores grandes ---
+// División PURA en un solo espacio (no es prueba HiDPI: acá píxel y celda ya
+// están en el mismo espacio; el caso HiDPI real —puntos vs drawable— vive en
+// gui_hidpi_integracion_mismo_espacio_headless). El borde pertenece a la celda
+// siguiente y los valores grandes no desbordan.
+TEST(guimouse_pixels_bordes_y_grandes_headless) {
+    // Borde exacto: 9px con celda 9 -> col 1 (no 0); último px de la celda
+    // anterior sigue en 0.
+    CHECK((guiCellFromPixels(9, 18, 9, 18) == CellPos{1, 1}));
+    CHECK((guiCellFromPixels(8, 17, 9, 18) == CellPos{0, 0}));
+    CHECK((guiCellFromPixels(18, 36, 9, 18) == CellPos{2, 2}));
+    CHECK((guiCellFromPixels(17, 35, 9, 18) == CellPos{1, 1}));
+    // Origen siempre (0,0) con cualquier celda válida.
+    CHECK((guiCellFromPixels(0, 0, 1, 1) == CellPos{0, 0}));
+    CHECK((guiCellFromPixels(0, 0, 18, 36) == CellPos{0, 0}));
+    // Valores grandes (4K): 3840/9=426, 2160/18=120, sin desborde.
+    // NOTA P2-1: es división pura con celda sin escalar, NO el camino HiDPI
+    // real (a 2× la celda se escala a 18×36 y la grilla queda 213×60; ver
+    // gui_hidpi_integracion_mismo_espacio_headless).
+    const CellPos big = guiCellFromPixels(3840, 2160, 9, 18);
+    CHECK_EQ(big.col, 426);
+    CHECK_EQ(big.row, 120);
+    CHECK(big.valid());
+    // Celda 1x1: identidad píxel->celda.
+    CHECK((guiCellFromPixels(123, 456, 1, 1) == CellPos{123, 456}));
+    // Negativos parciales: un eje inválido invalida toda la celda.
+    CHECK(!guiCellFromPixels(-1000000, 5, 9, 18).valid());
+    CHECK(!guiCellFromPixels(5, -1000000, 9, 18).valid());
+}
+
+// --- Headless extra: grilla grande (4K) + drawable diminuto ---
+// División PURA (mismo espacio en ambos lados). El camino HiDPI real con
+// celda escalada vive en gui_hidpi_integracion_mismo_espacio_headless.
+TEST(guigrid_grande_y_minimo_headless) {
+    const platform::WindowSize k4 =
+        guiGridSize(3840, 2160, 9, 18);
+    CHECK_EQ(k4.cols, 426);
+    CHECK_EQ(k4.rows, 120);
+    CHECK_EQ(k4.cellW, 9);
+    CHECK_EQ(k4.cellH, 18);
+    // 1px de drawable: clamp a 1x1, nunca 0x0 al Editor::resize.
+    const platform::WindowSize tiny = guiGridSize(1, 1, 18, 36);
+    CHECK_EQ(tiny.cols, 1);
+    CHECK_EQ(tiny.rows, 1);
+    // Celda gigante (ventana menor que una celda): también 1x1.
+    const platform::WindowSize huge = guiGridSize(100, 100, 1000, 1000);
+    CHECK_EQ(huge.cols, 1);
+    CHECK_EQ(huge.rows, 1);
+}
+
+// --- Headless extra: celda inválida -> Editor no arma gesto ---
+// El píxel fuera de métrica da CellPos inválida (nunca {0,0} espurio) y el
+// Editor la trata como fuera de contenido: cancela selección si la había y
+// no arma gesto (el drag posterior sin press se ignora).
+TEST(guimouse_celda_invalida_no_arma_gesto_headless) {
+    // Fábrica: la celda inválida viaja tal cual (release sintético de
+    // FOCUS_LOST usa este mismo camino con CellPos{}).
+    InputEvent pressInv = makeMousePressEvent(CellPos{});
+    CHECK(!pressInv.cell.valid());
+    CHECK_EQ(static_cast<int>(pressInv.type),
+             static_cast<int>(InputEventType::MousePress));
+    // Editor: press inválido desde Navegación no mueve el cursor ni arma.
+    {
+        Editor ed;
+        ed.getActiveBufferForTesting().document.restore({"hola", "mundo"});
+        InputEvent press = makeMousePressEvent(CellPos{});
+        ed.handleEvent(press);
+        CHECK_EQ(static_cast<int>(ed.state_),
+                 static_cast<int>(State::Navegacion));
+        CHECK_EQ(ed.getActiveBufferForTesting().cursor.line, 0);
+        CHECK_EQ(ed.getActiveBufferForTesting().cursor.col, 0);
+        // Drag sin press previo: ignorado (sin selección, sin crash).
+        InputEvent drag = makeMouseDragEvent(CellPos{5, 0});
+        ed.handleEvent(drag);
+        CHECK(!ed.hasSelection());
+        CHECK_EQ(static_cast<int>(ed.state_),
+                 static_cast<int>(State::Navegacion));
+    }
+    // Editor: press inválido desde Selección cancela a Navegación (igual que
+    // click en el chrome), sin dejar gesto armado.
+    {
+        Editor ed;
+        ed.getActiveBufferForTesting().document.restore({"hola mundo"});
+        InputEvent s;
+        s.type = InputEventType::InsertChar;
+        s.text = "s";
+        ed.handleEvent(s);
+        CHECK_EQ(static_cast<int>(ed.state_),
+                 static_cast<int>(State::Seleccion));
+        ed.handleEvent(makeMousePressEvent(CellPos{}));
+        CHECK_EQ(static_cast<int>(ed.state_),
+                 static_cast<int>(State::Navegacion));
+        CHECK(!ed.hasSelection());
+        ed.handleEvent(makeMouseDragEvent(CellPos{5, 0}));
+        CHECK(!ed.hasSelection());
+    }
+}
+
+// P2-1: integración HiDPI en el MISMO espacio, sin SDL ni ventana.
+// Replica EXACTAMENTE la cadena del loop (GuiRunLoop::currentSize +
+// mouseCell) solo con helpers puros: la grilla divide píxeles REALES del
+// drawable por celda FÍSICA escalada, y el evento en PUNTOS de ventana sube
+// a drawable antes de dividirse por esa misma celda. Si un lado quedara sin
+// escalar, los tests puros de división seguirían pasando pero el clic real
+// caería en otra celda (el bug que este test caza: ambas variantes rotas dan
+// una celda distinta de la estable).
+TEST(gui_hidpi_integracion_mismo_espacio_headless) {
+    // Marco 1×: ventana 960×600 pts == drawable 960×600 px, celda 9×18.
+    const int winW = 960, winH = 600;
+    const int out1W = 960, out1H = 600;
+    const int cw1 = guiScaleSize(9, winW, out1W);
+    const int ch1 = guiScaleSize(18, winH, out1H);
+    CHECK_EQ(cw1, 9);
+    CHECK_EQ(ch1, 18);
+    const platform::WindowSize g1 = guiGridSize(out1W, out1H, cw1, ch1);
+    CHECK_EQ(g1.cols, 106);
+    CHECK_EQ(g1.rows, 33);
+    // Marco 2×: misma ventana lógica, drawable 1920×1200, celda 18×36.
+    const int out2W = 1920, out2H = 1200;
+    const int cw2 = guiScaleSize(9, winW, out2W);
+    const int ch2 = guiScaleSize(18, winH, out2H);
+    CHECK_EQ(cw2, 18);
+    CHECK_EQ(ch2, 36);
+    const platform::WindowSize g2 = guiGridSize(out2W, out2H, cw2, ch2);
+    // La grilla usa el DRAWABLE: con puntos de ventana daría 53×16.
+    const platform::WindowSize wrongGrid = guiGridSize(winW, winH, cw2, ch2);
+    CHECK_EQ(wrongGrid.cols, 53);
+    CHECK_EQ(wrongGrid.rows, 16);
+    CHECK(g2.cols == g1.cols);
+    CHECK(g2.rows == g1.rows);
+    // Mismo clic lógico (19,37) pts en ambos marcos -> misma celda visual.
+    const CellPos c1 = guiCellFromPixels(
+        guiScaleCoord(19, winW, out1W), guiScaleCoord(37, winH, out1H), cw1,
+        ch1);
+    const CellPos c2 = guiCellFromPixels(
+        guiScaleCoord(19, winW, out2W), guiScaleCoord(37, winH, out2H), cw2,
+        ch2);
+    CHECK_EQ(c1.col, 2);
+    CHECK_EQ(c1.row, 2);
+    CHECK(c2 == c1);
+    // Sin escalar el evento (puntos / celda física): celda chica (1,1).
+    const CellPos noEventScale = guiCellFromPixels(19, 37, cw2, ch2);
+    CHECK_EQ(noEventScale.col, 1);
+    CHECK_EQ(noEventScale.row, 1);
+    CHECK(!(noEventScale == c1));
+    // Sin escalar la celda (drawable / celda base): celda grande (4,4).
+    const int px2 = guiScaleCoord(19, winW, out2W);
+    const int py2 = guiScaleCoord(37, winH, out2H);
+    const CellPos noCellScale = guiCellFromPixels(px2, py2, 9, 18);
+    CHECK_EQ(noCellScale.col, 4);
+    CHECK_EQ(noCellScale.row, 4);
+    CHECK(!(noCellScale == c1));
+    // 4K real: ventana 1920×1080 pts, drawable 3840×2160, celda 18×36 ->
+    // 213×60, igual que 1× (1920×1080 / 9×18). Sin escalar daría 426×120.
+    const int w4 = 1920, h4 = 1080, o4W = 3840, o4H = 2160;
+    const int cw4 = guiScaleSize(9, w4, o4W);
+    const int ch4 = guiScaleSize(18, h4, o4H);
+    CHECK_EQ(cw4, 18);
+    CHECK_EQ(ch4, 36);
+    const platform::WindowSize g4 = guiGridSize(o4W, o4H, cw4, ch4);
+    const platform::WindowSize g4base = guiGridSize(w4, h4, 9, 18);
+    CHECK_EQ(g4.cols, g4base.cols);
+    CHECK_EQ(g4.rows, g4base.rows);
+    CHECK_EQ(g4.cols, 213);
+    CHECK_EQ(g4.rows, 60);
+}
+
+// P2-2: límites de la grilla en el MISMO espacio, sin SDL ni ventana.
+// Con drawable 3840×2160 y celda 9×18 la grilla es 426×120 y ocupa
+// 426*9=3834 px horizontales (6 px sobran a la derecha): el borde exacto
+// ENTRE celdas pertenece a la siguiente, pero el borde EXTERIOR queda fuera
+// (inválida, nunca clamp a la última columna). La variante acotada es la que
+// separa ambas condiciones; la pura seguiría dando col==cols "válida".
+TEST(gui_bordes_grilla_limites_headless) {
+    const int cw = 9, ch = 18;
+    const platform::WindowSize g = guiGridSize(3840, 2160, cw, ch);
+    CHECK_EQ(g.cols, 426);
+    CHECK_EQ(g.rows, 120);
+    const int gridW = 426 * 9;    // 3834 px ocupados
+    const int gridH = 120 * 18;   // 2160 px ocupados (exacto en vertical)
+    CHECK_EQ(gridW, 3834);
+    CHECK_EQ(gridH, 2160);
+    // x == cellW: primera celda de la segunda columna (borde inter -> sigue).
+    CHECK((guiCellFromPixelsBounded(cw, 0, cw, ch, g.cols, g.rows) ==
+           CellPos{1, 0}));
+    CHECK((guiCellFromPixelsBounded(0, ch, cw, ch, g.cols, g.rows) ==
+           CellPos{0, 1}));
+    // x == gridWidth-1: último píxel de la última columna (dentro).
+    const CellPos last =
+        guiCellFromPixelsBounded(gridW - 1, gridH - 1, cw, ch, g.cols, g.rows);
+    CHECK(last.valid());
+    CHECK_EQ(last.col, 425);
+    CHECK_EQ(last.row, 119);
+    // x == gridWidth: fuera de la grilla (no clamp a la última columna).
+    CHECK(!guiCellFromPixelsBounded(gridW, 0, cw, ch, g.cols, g.rows).valid());
+    CHECK(!guiCellFromPixelsBounded(0, gridH, cw, ch, g.cols, g.rows).valid());
+    CHECK(!guiCellFromPixelsBounded(gridW, gridH, cw, ch, g.cols, g.rows)
+               .valid());
+    // Más allá del drawable también es inválida (franja sobrante incluida).
+    CHECK(!guiCellFromPixelsBounded(3839, 0, cw, ch, g.cols, g.rows).valid());
+    CHECK(!guiCellFromPixelsBounded(3840, 2160, cw, ch, g.cols, g.rows)
+               .valid());
+    // La pura, en cambio, daría col==cols "válida": es lo que la acotada evita.
+    const CellPos pure =
+        guiCellFromPixels(gridW, 0, cw, ch);
+    CHECK(pure.valid());
+    CHECK_EQ(pure.col, 426);
+}
+
+// P2-2: el exterior no se reconvierte en clic válido por el clamp.
+// La acotada devuelve inválida donde la pura devolvería la última columna;
+// el Editor ya trata la inválida como fuera de contenido (cancela selección,
+// no arma gesto: ver guimouse_celda_invalida_no_arma_gesto_headless).
+TEST(gui_borde_exterior_no_clampea_a_ultima_headless) {
+    const int cw = 9, ch = 18;
+    const platform::WindowSize g = guiGridSize(3840, 2160, cw, ch);
+    const int gridW = 426 * 9;
+    // Dentro: ambas vías coinciden en la última columna.
+    CHECK((guiCellFromPixelsBounded(gridW - 1, 0, cw, ch, g.cols, g.rows) ==
+           CellPos{425, 0}));
+    CHECK((guiCellFromPixels(gridW - 1, 0, cw, ch) == CellPos{425, 0}));
+    // Fuera: solo la acotada es inválida; la pura "ve" col 426.
+    CHECK(!guiCellFromPixelsBounded(gridW, 0, cw, ch, g.cols, g.rows).valid());
+    CHECK(guiCellFromPixels(gridW, 0, cw, ch).valid());
+    // Grilla 1×1 (drawable de 1 px, celda 9×18): la única celda cubre los
+    // píxeles 0..8; el borde exterior está en 9 px, no en 1 px.
+    const platform::WindowSize tiny = guiGridSize(1, 1, cw, ch);
+    CHECK_EQ(tiny.cols, 1);
+    CHECK_EQ(tiny.rows, 1);
+    CHECK((guiCellFromPixelsBounded(0, 0, cw, ch, tiny.cols, tiny.rows) ==
+           CellPos{0, 0}));
+    CHECK((guiCellFromPixelsBounded(8, 17, cw, ch, tiny.cols, tiny.rows) ==
+           CellPos{0, 0}));
+    CHECK(!guiCellFromPixelsBounded(9, 0, cw, ch, tiny.cols, tiny.rows)
+               .valid());
+    CHECK(!guiCellFromPixelsBounded(0, 18, cw, ch, tiny.cols, tiny.rows)
+               .valid());
+    // Con celda de 1 px la grilla 1×1 sí mide 1 px: (1,0) ya es exterior.
+    const platform::WindowSize one = guiGridSize(1, 1, 1, 1);
+    CHECK_EQ(one.cols, 1);
+    CHECK_EQ(one.rows, 1);
+    CHECK((guiCellFromPixelsBounded(0, 0, 1, 1, one.cols, one.rows) ==
+           CellPos{0, 0}));
+    CHECK(!guiCellFromPixelsBounded(1, 0, 1, 1, one.cols, one.rows).valid());
+    CHECK(!guiCellFromPixelsBounded(0, 1, 1, 1, one.cols, one.rows).valid());
+    // x<0 o y<0: inválida en ambas vías, nunca {0,0} espurio.
+    CHECK(!guiCellFromPixelsBounded(-1, 0, cw, ch, g.cols, g.rows).valid());
+    CHECK(!guiCellFromPixelsBounded(0, -1, cw, ch, g.cols, g.rows).valid());
+    CHECK(!guiCellFromPixelsBounded(-1, -1, cw, ch, g.cols, g.rows).valid());
+    // Grilla/celda degenerada: inválida (el clamp de guiGridSize a 1×1 no
+    // convierte un píxel en clic: la validez la decide la acotada).
+    CHECK(!guiCellFromPixelsBounded(0, 0, 0, ch, g.cols, g.rows).valid());
+    CHECK(!guiCellFromPixelsBounded(0, 0, cw, 0, g.cols, g.rows).valid());
+    CHECK(!guiCellFromPixelsBounded(0, 0, cw, ch, 0, g.rows).valid());
+    CHECK(!guiCellFromPixelsBounded(0, 0, cw, ch, g.cols, 0).valid());
+}
+
+// P2-2: sin desbordes ante coordenadas muy grandes y sin validar inválidos.
+// Se compara por ÍNDICES (col >= cols), nunca por anchos (cols*cellW), así
+// que ni INT_MAX desborda: la división int es segura y el clamp a 1×1 jamás
+// fabrica un {0,0} a partir de un píxel fuera de rango.
+TEST(gui_sin_desborde_coordenadas_grandes_headless) {
+    const int cw = 9, ch = 18;
+    // División pura con valores grandes: no hay overflow ni crash.
+    const CellPos big = guiCellFromPixels(1000000, 2000000, cw, ch);
+    CHECK_EQ(big.col, 1000000 / 9);
+    CHECK_EQ(big.row, 2000000 / 18);
+    CHECK(big.valid());
+    // Acotada con la grilla 426×120: esos mismos píxeles quedan fuera.
+    const platform::WindowSize g = guiGridSize(3840, 2160, cw, ch);
+    CHECK(!guiCellFromPixelsBounded(1000000, 2000000, cw, ch, g.cols, g.rows)
+               .valid());
+    // INT_MAX con celda 1×1: índice exacto, sin overflow (col == INT_MAX).
+    const CellPos maxCell = guiCellFromPixels(2147483647, 2147483647, 1, 1);
+    CHECK_EQ(maxCell.col, 2147483647);
+    CHECK_EQ(maxCell.row, 2147483647);
+    // ...y con grilla finita queda fuera, no clamp a la última.
+    CHECK(!guiCellFromPixelsBounded(2147483647, 0, 1, 1, 426, 120).valid());
+    CHECK(!guiCellFromPixelsBounded(0, 2147483647, 1, 1, 426, 120).valid());
+    // Grilla gigante sin multiplicar: guiGridSize no computa cols*cellW.
+    const platform::WindowSize huge = guiGridSize(2147483647, 2147483647, 1, 1);
+    CHECK_EQ(huge.cols, 2147483647);
+    CHECK_EQ(huge.rows, 2147483647);
+    // Escala con valores grandes: long long intermedio, resultado exacto.
+    CHECK_EQ(guiScaleCoord(1000000, 960, 1920), 2000000);
+    CHECK_EQ(guiScaleCoord(2000000, 1920, 960), 1000000);
 }

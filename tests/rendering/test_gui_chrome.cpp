@@ -4,12 +4,25 @@
 //   - Pura (sin ventana): guichrome::statusLine/messageLine, buildFrame,
 //     snapshots lastContentRows_/lastListLines_ (SaveAs en MessageBar,
 //     abrir en la lista).
-//   - Pintado SDL real (sección final, driver de video "dummy" headless +
+//   - Pintado SDL real (driver de video "dummy" headless +
 //     renderer por software + SDL_RenderReadPixels): verifica que lo que se
 //     pinta en píxeles reproduce el snapshot (fondos de selección/listas,
 //     cursor en bloque con glifo invertido, MessageBar, sin cajas negras
 //     del blended). Sin SDL2
 //     compilado o sin video dummy se skipean, no fallan.
+//
+// AISLAMIENTO HEADLESS (condición de aceptación): los TEST `*_headless` de
+// este archivo prueban tablas y composición sin renderer ni ventana:
+// solo usan funciones puras `guichrome::` (+ `utf8::`/`chrome::`) o un
+// `GuiRenderer` desnudo (sin inyectar renderer SDL, camino no-op seguro).
+// Nunca construyen `SdlDummy` ni llaman a init de vídeo/creación de
+// ventana o renderer (todo eso vive solo en los TEST `gui_sdl_*`, cada uno
+// tras guard de SKIP sin SDL2). La distinción compilación vs ejecución
+// importa: que un TEST no cree ventanas no prueba por sí solo la ausencia
+// de dependencia SDL en compilación/enlace — por eso los headless evitan
+// también el include y los símbolos SDL en su camino (el único include de
+// SDL2 del TU está tras `ifdef HAVE_SDL2`, y el enlace global `-lSDL2` del
+// Makefile queda vacío con WITH_SDL2=0). Build: `tests/rendering/*.cpp`.
 
 #include <chrono>
 #include <memory>
@@ -2646,6 +2659,107 @@ TEST(gui_chrome_segments_boldprefix_no_parte_utf8) {
     }
 }
 
+// P3-5: el concat NO basta; el ancho visual por segmento también debe cerrar.
+// Con áé漢字 (bytes != columnas, anchos 1 y 2) se verifica: ancho total
+// dentro del límite, recorte sin partir UTF-8, ancho doble bien contado,
+// suma por segmento == ancho del concat, cada segmento UTF-8 válido (un ancho
+// doble partido entre segmentos daría mitades inválidas) y ancho<=0 vacío
+// sin accesos fuera de rango.
+TEST(gui_chrome_ancho_visual_utf8_headless) {
+    auto segWidth = [](const std::vector<guichrome::GuiChromeSeg>& segs) {
+        int sum = 0;
+        for (const auto& s : segs) {
+            CHECK(testutil::validUtf8(s.text));
+            sum += colWidth(s.text);
+        }
+        return sum;
+    };
+    // 1. Métrica: bytes != columnas con á(2B/1C) é(2B/1C) 漢(3B/2C) 字(3B/2C).
+    const std::string mixed = "áé漢字";
+    CHECK_EQ(static_cast<int>(mixed.size()), 2 + 2 + 3 + 3);
+    CHECK_EQ(colWidth(mixed), 1 + 1 + 2 + 2);
+    CHECK(colWidth(mixed) < static_cast<int>(mixed.size()));
+    // 2. Status angosto con CJK: exacto w, suma == w, UTF-8 intacto.
+    {
+        StatusBarData st;
+        st.name = "漢字名.txt";
+        st.path = "/casa/niño/漢字";
+        st.estado = "NAVEGACION";
+        st.modified = true;
+        st.totalLines = 50;
+        for (int w = 1; w <= 40; ++w) {
+            const auto segs = guichrome::statusSegments(
+                st, StyleRole::AccentNavegacion, w);
+            const std::string line = guichrome::statusLine(st, w);
+            std::string cat;
+            for (const auto& s : segs) cat += s.text;
+            CHECK_EQ(cat, line);
+            CHECK_EQ(colWidth(cat), w);
+            CHECK_EQ(segWidth(segs), w);
+            CHECK(testutil::validUtf8(cat));
+        }
+    }
+    // 3. Message angosto con anchos mixtos: a lo sumo w, suma == ancho real.
+    {
+        const MessageBarData m{std::string("Nombre: áé漢字.txt"),
+                               MessageKind::Prompt};
+        for (int w = 1; w <= 40; ++w) {
+            const auto segs = guichrome::messageSegments(m, w);
+            const std::string line = guichrome::messageLine(m, w);
+            std::string cat;
+            for (const auto& s : segs) cat += s.text;
+            CHECK_EQ(cat, line);
+            CHECK(colWidth(cat) <= w);
+            CHECK_EQ(segWidth(segs), colWidth(cat));
+            CHECK(testutil::validUtf8(cat));
+        }
+    }
+    // 4. Frontera de ancho doble: "ab漢cd" = 1+1+2+1+1 = 6 columnas.
+    // avail=3 no admite 漢 (quedaría 1 columna suelta): se excluye entero.
+    // avail=4 lo admite justo. Nunca hay mitades UTF-8 ni exceso de ancho.
+    {
+        CHECK_EQ(colWidth("ab漢cd"), 6);
+        const std::string t3 = utf8::truncate("ab漢cd", 3);
+        CHECK_EQ(t3, "ab");
+        CHECK(colWidth(t3) <= 3);
+        CHECK(testutil::validUtf8(t3));
+        CHECK(t3.find("漢") == std::string::npos);
+        const std::string t4 = utf8::truncate("ab漢cd", 4);
+        CHECK_EQ(colWidth(t4), 4);
+        CHECK(testutil::validUtf8(t4));
+        // El mismo recorte vía MessageBar (padL=1, padR=3: avail=w-4).
+        // w=7 -> avail=3 -> visible "ab"; w=8 -> avail=4 -> visible "ab漢".
+        const MessageBarData m{std::string("ab漢cd"), MessageKind::Info};
+        CHECK_EQ(guichrome::messageLine(m, 7), " ab   ");
+        CHECK_EQ(guichrome::messageLine(m, 8), " ab漢   ");
+        for (int w : {7, 8}) {
+            const auto segs = guichrome::messageSegments(m, w);
+            std::string cat;
+            for (const auto& s : segs) cat += s.text;
+            CHECK_EQ(cat, guichrome::messageLine(m, w));
+            CHECK(colWidth(cat) <= w);
+            CHECK_EQ(segWidth(segs), colWidth(cat));
+        }
+    }
+    // 5. Ancho cero y negativo: vacío, sin OOB (status exacto 0, message <=0).
+    {
+        StatusBarData st;
+        st.name = "漢字.txt";
+        st.path = "/áé";
+        st.estado = "NAVEGACION";
+        for (int w : {0, -1, -100}) {
+            CHECK(guichrome::statusSegments(st, StyleRole::AccentNavegacion, w)
+                      .empty());
+            CHECK(guichrome::messageSegments(
+                      {std::string("ab漢cd"), MessageKind::Info}, w)
+                      .empty());
+            CHECK_EQ(colWidth(guichrome::statusLine(st, w)), 0);
+            CHECK(colWidth(guichrome::messageLine(
+                      {std::string("ab漢cd"), MessageKind::Info}, w)) <= 0);
+        }
+    }
+}
+
 // El idle del loop inyecta el tiempo de blink: la barra (Interacción)
 // se apaga sola tras 530ms sin eventos, el bloque nunca.
 TEST(gui_runloop_idle_anima_blink_bar) {
@@ -2768,4 +2882,360 @@ TEST(gui_toggle_pantalla_quieta_repinta_todo) {
         CHECK(gui.isDarkTheme());
     }
 #endif
+}
+
+// --- Headless extra (sin ventana): paleta exhaustiva por rol ---
+// colorFor cubre TODOS los StyleRole sin caer en el default por accidente:
+// cada familia clave se distingue del texto base y messageColor mapea cada
+// MessageKind a su rol. Sin SDL: solo tablas RGB puras.
+TEST(gui_paleta_exhaustiva_todos_los_roles_headless) {
+    const StyleRole all[] = {
+        StyleRole::Default, StyleRole::Gutter, StyleRole::GutterCurrent,
+        StyleRole::GutterBlank, StyleRole::Marker, StyleRole::CurrentLine,
+        StyleRole::Selection, StyleRole::BracketMatch, StyleRole::ListSelected,
+        StyleRole::StatusBase, StyleRole::StatusName, StyleRole::StatusPath,
+        StyleRole::StatusModified, StyleRole::StatusAccentDefault,
+        StyleRole::AccentNavegacion, StyleRole::AccentInteraccion,
+        StyleRole::AccentSeleccion, StyleRole::AccentComando,
+        StyleRole::AccentBuffers, StyleRole::AccentGuardar,
+        StyleRole::AccentAbrir, StyleRole::MsgInfo, StyleRole::MsgSuccess,
+        StyleRole::MsgWarning, StyleRole::MsgError, StyleRole::MsgPrompt,
+        StyleRole::SyntaxKeyword, StyleRole::SyntaxType,
+        StyleRole::SyntaxPreprocessor, StyleRole::SyntaxString,
+        StyleRole::SyntaxCharacter, StyleRole::SyntaxNumber,
+        StyleRole::SyntaxComment,
+    };
+    for (bool dark : {true, false}) {
+        const GuiColor base = guichrome::colorFor(StyleRole::Default, dark);
+        // Alfa siempre opaco (sin transparencias accidentales en texto).
+        for (StyleRole r : all) {
+            CHECK(guichrome::colorFor(r, dark).a == 0xFF);
+        }
+        // Familias que deben distinguirse del texto base.
+        CHECK(guichrome::colorFor(StyleRole::Gutter, dark) != base);
+        CHECK(guichrome::colorFor(StyleRole::SyntaxKeyword, dark) != base);
+        CHECK(guichrome::colorFor(StyleRole::SyntaxType, dark) != base);
+        CHECK(guichrome::colorFor(StyleRole::SyntaxPreprocessor, dark) != base);
+        CHECK(guichrome::colorFor(StyleRole::SyntaxString, dark) != base);
+        CHECK(guichrome::colorFor(StyleRole::SyntaxNumber, dark) != base);
+        CHECK(guichrome::colorFor(StyleRole::SyntaxComment, dark) != base);
+        CHECK(guichrome::colorFor(StyleRole::GutterCurrent, dark) !=
+              guichrome::colorFor(StyleRole::Gutter, dark));
+        // Fondos destacados distintos del fondo de contenido.
+        const GuiColor bg = guichrome::background(dark);
+        CHECK(bg.a == 0xFF);
+        CHECK(guichrome::currentLineBackground(dark) != bg);
+        CHECK(guichrome::selectionBackground(dark) != bg);
+        CHECK(guichrome::statusBackground(dark) != bg);
+    }
+    // messageColor cubre cada MessageKind (sin default silencioso).
+    CHECK(guichrome::messageColor(MessageKind::Prompt, true) ==
+          guichrome::colorFor(StyleRole::MsgPrompt, true));
+    CHECK(guichrome::messageColor(MessageKind::Success, true) ==
+          guichrome::colorFor(StyleRole::MsgSuccess, true));
+    CHECK(guichrome::messageColor(MessageKind::Warning, true) ==
+          guichrome::colorFor(StyleRole::MsgWarning, true));
+    CHECK(guichrome::messageColor(MessageKind::Error, true) ==
+          guichrome::colorFor(StyleRole::MsgError, true));
+    CHECK(guichrome::messageColor(MessageKind::Info, true) ==
+          guichrome::colorFor(StyleRole::MsgInfo, true));
+    CHECK(guichrome::messageColor(MessageKind::Info, true) !=
+          guichrome::messageColor(MessageKind::Info, false));
+}
+
+// --- Headless extra: styleFor implementa rowBgKindFor para cada rol ---
+// El bg resuelto es exactamente guiBgFor(rowBgKindFor(rol, línea), tema):
+// si el pintor y el resolver del cursor usan la misma llamada, no divergen.
+TEST(gui_stylefor_sigue_rowbgkind_headless) {
+    const StyleRole all[] = {
+        StyleRole::Default, StyleRole::Gutter, StyleRole::GutterCurrent,
+        StyleRole::GutterBlank, StyleRole::Marker, StyleRole::CurrentLine,
+        StyleRole::Selection, StyleRole::BracketMatch, StyleRole::ListSelected,
+        StyleRole::StatusBase, StyleRole::StatusName, StyleRole::StatusPath,
+        StyleRole::StatusModified, StyleRole::StatusAccentDefault,
+        StyleRole::AccentNavegacion, StyleRole::AccentInteraccion,
+        StyleRole::AccentSeleccion, StyleRole::AccentComando,
+        StyleRole::AccentBuffers, StyleRole::AccentGuardar,
+        StyleRole::AccentAbrir, StyleRole::MsgInfo, StyleRole::MsgSuccess,
+        StyleRole::MsgWarning, StyleRole::MsgError, StyleRole::MsgPrompt,
+        StyleRole::SyntaxKeyword, StyleRole::SyntaxType,
+        StyleRole::SyntaxPreprocessor, StyleRole::SyntaxString,
+        StyleRole::SyntaxCharacter, StyleRole::SyntaxNumber,
+        StyleRole::SyntaxComment,
+    };
+    for (bool dark : {true, false}) {
+        for (StyleRole r : all) {
+            for (bool cur : {false, true}) {
+                const auto st = guichrome::styleFor(r, cur, dark);
+                const RowBgKind k = rowBgKindFor(r, cur);
+                CHECK(st.bg == guichrome::guiBgFor(k, dark));
+                CHECK(st.fg == guichrome::colorFor(r, dark));
+            }
+        }
+    }
+    // Foco: sintaxis en línea actual va envuelta (fondo CurrentLine), fuera
+    // no; Selection/Bracket/List mandan sobre la línea actual.
+    for (bool dark : {true, false}) {
+        CHECK(guichrome::styleFor(StyleRole::SyntaxKeyword, true, dark).bg ==
+              guichrome::currentLineBackground(dark));
+        CHECK(guichrome::styleFor(StyleRole::SyntaxKeyword, false, dark).bg ==
+              guichrome::background(dark));
+        CHECK(guichrome::styleFor(StyleRole::Selection, true, dark).bg ==
+              guichrome::selectionBackground(dark));
+        CHECK(guichrome::styleFor(StyleRole::BracketMatch, true, dark).bg ==
+              guichrome::bracketBackground());
+    }
+}
+
+// --- Headless extra: segmentos concatenan la línea plana (UTF-8 incl.) ---
+TEST(gui_chrome_segmentos_concatenan_linea_headless) {
+    auto concat = [](const std::vector<guichrome::GuiChromeSeg>& segs) {
+        std::string out;
+        for (const auto& s : segs) out += s.text;
+        return out;
+    };
+    std::vector<StatusBarData> cases;
+    {
+        StatusBarData d;
+        d.name = "áéí.txt";
+        d.path = "/casa/niño/largo";
+        d.estado = "NAVEGACION";
+        d.modified = true;
+        d.totalLines = 10;
+        d.cursorLine = 3;
+        d.cursorCol = 5;
+        cases.push_back(d);
+    }
+    {
+        StatusBarData d;
+        d.name = std::string(60, 'n');
+        d.path = "/" + std::string(60, 'p');
+        d.estado = std::string(20, 'e');
+        d.right = "99/100";
+        d.modified = true;
+        d.totalLines = 1000;
+        cases.push_back(d);
+    }
+    for (const auto& st : cases) {
+        for (int w : {1, 5, 20, 40, 80}) {
+            const auto segs = guichrome::statusSegments(
+                st, StyleRole::AccentNavegacion, w);
+            CHECK_EQ(concat(segs), guichrome::statusLine(st, w));
+            CHECK(testutil::validUtf8(concat(segs)));
+        }
+    }
+    const MessageBarData msgs[] = {
+        {std::string("hi"), MessageKind::Info},
+        {std::string("Nombre: áé漢字.txt"), MessageKind::Prompt},
+        {std::string(""), MessageKind::Error},
+    };
+    for (const auto& m : msgs) {
+        for (int w : {1, 8, 16, 40, 80}) {
+            const auto segs = guichrome::messageSegments(m, w);
+            CHECK_EQ(concat(segs), guichrome::messageLine(m, w));
+            CHECK(testutil::validUtf8(concat(segs)));
+        }
+    }
+    // Ancho 0: ambos vacíos (sin crash, sin pads).
+    StatusBarData st;
+    st.name = "a";
+    CHECK(guichrome::statusSegments(st, StyleRole::AccentNavegacion, 0).empty());
+    CHECK(guichrome::messageSegments({std::string("x"), MessageKind::Info}, 0)
+              .empty());
+}
+
+// P2-4: paleta con EXPECTATIVAS ABSOLUTAS (anti-tautología).
+// gui_stylefor_sigue_rowbgkind_headless solo prueba consistencia interna
+// (styleFor == guiBgFor(rowBgKindFor)): si ambas leyeran la misma tabla
+// equivocada, pasaría igual. Este test congela los RGB reales de GuiChrome.h
+// para los 33 StyleRole × 2 temas + fondos/cursor: un case faltante (que
+// caería al default) o un valor movido falla aquí aunque la consistencia
+// siga intacta. Los colapsos intencionales quedan congelados explícitamente
+// (String==Character; Number==Preprocessor en light; Comment==Gutter;
+// StatusName/Path==StatusBase en dark; Msg*==Default salvo Prompt) para que
+// nadie los "arregle" por accidente ni se confundan base/sintaxis/gutter.
+TEST(gui_paleta_valores_congelados_headless) {
+    auto rgb = [](uint8_t r, uint8_t g, uint8_t b) {
+        return GuiColor{r, g, b, 0xFF};
+    };
+    // Fondos y cursor por tema.
+    CHECK(guichrome::background(true) == rgb(0x12, 0x13, 0x14));
+    CHECK(guichrome::background(false) == rgb(0xFF, 0xFF, 0xFF));
+    CHECK(guichrome::statusBackground(true) == rgb(0x19, 0x1A, 0x1B));
+    CHECK(guichrome::statusBackground(false) == rgb(0xEC, 0xEC, 0xEC));
+    CHECK(guichrome::messageBackground(true) == rgb(0x12, 0x13, 0x14));
+    CHECK(guichrome::messageBackground(false) == rgb(0xFF, 0xFF, 0xFF));
+    CHECK(guichrome::cursorColor(true) == rgb(0xD4, 0xD4, 0xD4));
+    CHECK(guichrome::cursorColor(false) == rgb(0x1E, 0x1E, 0x1E));
+    CHECK(guichrome::currentLineBackground(true) == rgb(0x3A, 0x3A, 0x3A));
+    CHECK(guichrome::currentLineBackground(false) == rgb(0xE4, 0xE4, 0xE4));
+    CHECK(guichrome::selectionBackground(true) == rgb(0x5F, 0x5F, 0x87));
+    CHECK(guichrome::selectionBackground(false) == rgb(0xBD, 0xBD, 0xFF));
+    CHECK(guichrome::bracketBackground() == rgb(0xFF, 0xD7, 0x5F));
+    // Texto base y gutter: Gutter != Default en ambos temas.
+    CHECK(guichrome::colorFor(StyleRole::Default, true) == rgb(0xD4, 0xD4, 0xD4));
+    CHECK(guichrome::colorFor(StyleRole::Default, false) == rgb(0x1E, 0x1E, 0x1E));
+    CHECK(guichrome::colorFor(StyleRole::Gutter, true) == rgb(0x6C, 0x6C, 0x6C));
+    CHECK(guichrome::colorFor(StyleRole::Gutter, false) == rgb(0x94, 0x94, 0x94));
+    CHECK(guichrome::colorFor(StyleRole::GutterCurrent, true) ==
+          rgb(0x51, 0xAF, 0xEF));
+    CHECK(guichrome::colorFor(StyleRole::GutterCurrent, false) ==
+          rgb(0x00, 0x5F, 0xA0));
+    CHECK(guichrome::colorFor(StyleRole::GutterBlank, true) ==
+          rgb(0x12, 0x13, 0x14));
+    CHECK(guichrome::colorFor(StyleRole::GutterBlank, false) ==
+          rgb(0xFF, 0xFF, 0xFF));
+    CHECK(guichrome::colorFor(StyleRole::Marker, true) == rgb(0x5F, 0x87, 0x5F));
+    CHECK(guichrome::colorFor(StyleRole::Marker, false) == rgb(0x6E, 0x6E, 0x6E));
+    // Contenido destacado.
+    CHECK(guichrome::colorFor(StyleRole::CurrentLine, true) ==
+          rgb(0xD4, 0xD4, 0xD4));
+    CHECK(guichrome::colorFor(StyleRole::CurrentLine, false) ==
+          rgb(0x1E, 0x1E, 0x1E));
+    CHECK(guichrome::colorFor(StyleRole::Selection, true) ==
+          rgb(0xFF, 0xFF, 0xFF));
+    CHECK(guichrome::colorFor(StyleRole::Selection, false) ==
+          rgb(0x1E, 0x1E, 0x1E));
+    CHECK(guichrome::colorFor(StyleRole::BracketMatch, true) ==
+          rgb(0x1E, 0x1E, 0x1E));
+    CHECK(guichrome::colorFor(StyleRole::BracketMatch, false) ==
+          rgb(0x1E, 0x1E, 0x1E));
+    CHECK(guichrome::colorFor(StyleRole::ListSelected, true) ==
+          rgb(0xFF, 0xFF, 0xFF));
+    CHECK(guichrome::colorFor(StyleRole::ListSelected, false) ==
+          rgb(0x1E, 0x1E, 0x1E));
+    // Chrome.
+    CHECK(guichrome::colorFor(StyleRole::StatusBase, true) ==
+          rgb(0x8C, 0x8C, 0x8C));
+    CHECK(guichrome::colorFor(StyleRole::StatusBase, false) ==
+          rgb(0xEB, 0xEB, 0xEB));
+    CHECK(guichrome::colorFor(StyleRole::StatusName, true) ==
+          rgb(0x8C, 0x8C, 0x8C));
+    CHECK(guichrome::colorFor(StyleRole::StatusName, false) ==
+          rgb(0x1E, 0x1E, 0x1E));
+    CHECK(guichrome::colorFor(StyleRole::StatusPath, true) ==
+          rgb(0x8C, 0x8C, 0x8C));
+    CHECK(guichrome::colorFor(StyleRole::StatusPath, false) ==
+          rgb(0x6E, 0x6E, 0x6E));
+    CHECK(guichrome::colorFor(StyleRole::StatusModified, true) ==
+          rgb(0xDD, 0xDD, 0x00));
+    CHECK(guichrome::colorFor(StyleRole::StatusModified, false) ==
+          rgb(0xDD, 0xDD, 0x00));
+    for (StyleRole a :
+         {StyleRole::StatusAccentDefault, StyleRole::AccentNavegacion,
+          StyleRole::AccentInteraccion, StyleRole::AccentSeleccion,
+          StyleRole::AccentComando, StyleRole::AccentBuffers,
+          StyleRole::AccentGuardar, StyleRole::AccentAbrir}) {
+        CHECK(guichrome::colorFor(a, true) == rgb(0x51, 0xAF, 0xEF));
+        CHECK(guichrome::colorFor(a, false) == rgb(0x00, 0x5F, 0xA0));
+    }
+    // Mensajes: Prompt distinguido; el resto, tono base por diseño.
+    CHECK(guichrome::colorFor(StyleRole::MsgPrompt, true) ==
+          rgb(0xFF, 0xFF, 0xFF));
+    CHECK(guichrome::colorFor(StyleRole::MsgPrompt, false) ==
+          rgb(0x1E, 0x1E, 0x1E));
+    for (StyleRole m : {StyleRole::MsgInfo, StyleRole::MsgSuccess,
+                        StyleRole::MsgWarning, StyleRole::MsgError}) {
+        CHECK(guichrome::colorFor(m, true) == rgb(0xD4, 0xD4, 0xD4));
+        CHECK(guichrome::colorFor(m, false) == rgb(0x1E, 0x1E, 0x1E));
+    }
+    // Sintaxis: valores absolutos + colapsos congelados.
+    CHECK(guichrome::colorFor(StyleRole::SyntaxKeyword, true) ==
+          rgb(0x51, 0xAF, 0xEF));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxKeyword, false) ==
+          rgb(0x00, 0x5F, 0xA0));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxType, true) ==
+          rgb(0xAF, 0x87, 0xFF));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxType, false) ==
+          rgb(0x5F, 0x00, 0x87));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxPreprocessor, true) ==
+          rgb(0xFF, 0x87, 0x00));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxPreprocessor, false) ==
+          rgb(0x8A, 0x4B, 0x00));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxString, true) ==
+          rgb(0x87, 0xD7, 0x87));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxString, false) ==
+          rgb(0x00, 0x5F, 0x00));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxCharacter, true) ==
+          guichrome::colorFor(StyleRole::SyntaxString, true));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxCharacter, false) ==
+          guichrome::colorFor(StyleRole::SyntaxString, false));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxNumber, true) ==
+          rgb(0xFF, 0xAF, 0x00));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxNumber, false) ==
+          rgb(0x8A, 0x4B, 0x00));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxNumber, false) ==
+          guichrome::colorFor(StyleRole::SyntaxPreprocessor, false));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxComment, true) ==
+          rgb(0x6C, 0x6C, 0x6C));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxComment, false) ==
+          rgb(0x94, 0x94, 0x94));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxComment, true) ==
+          guichrome::colorFor(StyleRole::Gutter, true));
+    CHECK(guichrome::colorFor(StyleRole::SyntaxComment, false) ==
+          guichrome::colorFor(StyleRole::Gutter, false));
+    // styleFor representativo con pares fg/bg absolutos (no solo bg): si la
+    // tabla de fg o la de fondos se mueve, esto cae aunque el bg coincida.
+    {
+        const auto s =
+            guichrome::styleFor(StyleRole::SyntaxKeyword, true, true);
+        CHECK(s.fg == rgb(0x51, 0xAF, 0xEF));
+        CHECK(s.bg == rgb(0x3A, 0x3A, 0x3A));
+    }
+    {
+        const auto s = guichrome::styleFor(StyleRole::Selection, false, true);
+        CHECK(s.fg == rgb(0xFF, 0xFF, 0xFF));
+        CHECK(s.bg == rgb(0x5F, 0x5F, 0x87));
+    }
+    {
+        const auto s =
+            guichrome::styleFor(StyleRole::BracketMatch, false, false);
+        CHECK(s.fg == rgb(0x1E, 0x1E, 0x1E));
+        CHECK(s.bg == rgb(0xFF, 0xD7, 0x5F));
+    }
+    {
+        const auto s = guichrome::styleFor(StyleRole::Default, false, false);
+        CHECK(s.fg == rgb(0x1E, 0x1E, 0x1E));
+        CHECK(s.bg == rgb(0xFF, 0xFF, 0xFF));
+    }
+}
+
+// P2-4: contraste texto/fondo con umbral absoluto (no basta la opacidad ni el
+// mapeo MessageKind->rol). Usa la misma matemática WCAG del cursor
+// (cursorContrastRatio) pero con expectativas independientes (>= 3.0, el
+// mínimo del glifo del cursor): base, sintaxis, gutter y fondos destacados
+// deben ser legibles en ambos temas.
+TEST(gui_contraste_texto_fondo_headless) {
+    constexpr double kMin = 3.0;
+    auto ratio = [](GuiColor fg, GuiColor bg) {
+        return guichrome::cursorContrastRatio(fg, bg);
+    };
+    for (bool dark : {true, false}) {
+        const GuiColor bg = guichrome::background(dark);
+        CHECK(ratio(guichrome::colorFor(StyleRole::Default, dark), bg) >= kMin);
+        CHECK(ratio(guichrome::colorFor(StyleRole::SyntaxKeyword, dark), bg) >=
+              kMin);
+        CHECK(ratio(guichrome::colorFor(StyleRole::SyntaxType, dark), bg) >=
+              kMin);
+        CHECK(ratio(guichrome::colorFor(StyleRole::SyntaxPreprocessor, dark),
+                    bg) >= kMin);
+        CHECK(ratio(guichrome::colorFor(StyleRole::SyntaxString, dark), bg) >=
+              kMin);
+        CHECK(ratio(guichrome::colorFor(StyleRole::SyntaxNumber, dark), bg) >=
+              kMin);
+        CHECK(ratio(guichrome::colorFor(StyleRole::SyntaxComment, dark), bg) >=
+              kMin);
+        CHECK(ratio(guichrome::colorFor(StyleRole::Gutter, dark), bg) >= kMin);
+        CHECK(ratio(guichrome::colorFor(StyleRole::GutterCurrent, dark), bg) >=
+              kMin);
+        // Fondos destacados con su fg efectivo.
+        CHECK(ratio(guichrome::colorFor(StyleRole::Selection, dark),
+                    guichrome::selectionBackground(dark)) >= kMin);
+        CHECK(ratio(guichrome::colorFor(StyleRole::BracketMatch, dark),
+                    guichrome::bracketBackground()) >= kMin);
+        CHECK(ratio(guichrome::colorFor(StyleRole::ListSelected, dark),
+                    guichrome::currentLineBackground(dark)) >= kMin);
+        CHECK(ratio(guichrome::colorFor(StyleRole::Default, dark),
+                    guichrome::currentLineBackground(dark)) >= kMin);
+    }
 }
