@@ -8,6 +8,9 @@ edit_tests
 *.obj
 *.temp
 
+# Dump local de diffs (archivo de volcado, no versionar)
+data.temp
+
 # Dependencias generadas
 *.d
 *.gcda

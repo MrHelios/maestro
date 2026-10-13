@@ -1,5 +1,8 @@
 #include "rendering/gui/GuiRenderer.h"
 
+#include <algorithm>
+#include <utility>
+
 #include "rendering/RenderUtil.h"
 
 #ifdef HAVE_SDL2
@@ -7,19 +10,106 @@
 #endif
 
 GuiRenderer::GuiRenderer() = default;
-GuiRenderer::~GuiRenderer() = default;
+GuiRenderer::~GuiRenderer() { destroyFramebuf(); }
+
+void GuiRenderer::destroyFb(FrameSurface& s) {
+#ifdef HAVE_SDL2
+    if (s.tex) {
+        SDL_DestroyTexture(static_cast<SDL_Texture*>(s.tex));
+        s.tex = nullptr;
+    }
+#else
+    s.tex = nullptr;
+#endif
+    s.w = 0;
+    s.h = 0;
+}
+
+void GuiRenderer::destroyFramebuf() {
+    destroyFb(contentFb_);
+    destroyFb(listFb_);
+}
+
+void* GuiRenderer::acquireFb(FrameSurface& s, void* sdlRenderer, int wPx,
+                             int hPx, bool& fresh) {
+    fresh = false;
+#ifdef HAVE_SDL2
+    if (!sdlRenderer || wPx <= 0 || hPx <= 0) return nullptr;
+    SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer);
+    if (framebufTarget_ == 0)
+        framebufTarget_ = SDL_RenderTargetSupported(r) ? 1 : -1;
+    if (framebufTarget_ < 0) return nullptr;
+    if (s.tex && (s.w != wPx || s.h != hPx)) destroyFb(s);
+    if (!s.tex) {
+        SDL_Texture* t = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888,
+                                           SDL_TEXTUREACCESS_TARGET, wPx, hPx);
+        if (!t) return nullptr;
+        SDL_SetTextureBlendMode(t, SDL_BLENDMODE_NONE);
+        s.tex = static_cast<void*>(t);
+        s.w = wPx;
+        s.h = hPx;
+        fresh = true;
+    }
+    return s.tex;
+#else
+    (void)sdlRenderer;
+    (void)wPx;
+    (void)hPx;
+    return nullptr;
+#endif
+}
 
 void GuiRenderer::setSdlRenderer(void* r) {
     // Las texturas del caché pertenecen al renderer anterior: liberación
     // ansiosa al cambiar. (Defensa en profundidad: GuiFont también vacía
     // el caché solo si textTexture() recibe un renderer distinto al activo.)
-    if (sdlRenderer_ != r) font_.clearCache();
+    // El framebuffer también muere con el renderer (y se re-prueba el
+    // soporte de render targets, que puede diferir entre renderers).
+    if (sdlRenderer_ != r) {
+        font_.clearCache();
+        destroyFramebuf();
+        framebufTarget_ = 0;
+    }
     sdlRenderer_ = r;
 }
 
 void GuiRenderer::initForRenderer(void* r, int fontPixels) {
     setSdlRenderer(r);
     if (r) font_.load(fontPixels);
+}
+
+bool GuiRenderer::readLastSurfacePixels(std::vector<GuiColor>& out, int& wPx,
+                                        int& hPx) {
+    out.clear();
+    wPx = 0;
+    hPx = 0;
+#ifdef HAVE_SDL2
+    if (!sdlRenderer_) return false;
+    SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
+    const FrameSurface& s = lastIsList_ ? listFb_ : contentFb_;
+    SDL_Texture* fb = static_cast<SDL_Texture*>(s.tex);
+    if (!fb || s.w <= 0 || s.h <= 0) return false;
+    // Guarda/restaura el destino activo: la lectura no perturba al loop.
+    SDL_Texture* prev = SDL_GetRenderTarget(r);
+    if (SDL_SetRenderTarget(r, fb) != 0) return false;
+    std::vector<Uint32> raw(static_cast<size_t>(s.w) *
+                            static_cast<size_t>(s.h));
+    const bool ok =
+        SDL_RenderReadPixels(r, nullptr, SDL_PIXELFORMAT_ARGB8888, raw.data(),
+                             s.w * static_cast<int>(sizeof(Uint32))) == 0;
+    SDL_SetRenderTarget(r, prev);
+    if (!ok) return false;
+    out.reserve(raw.size());
+    for (Uint32 v : raw)
+        out.push_back(GuiColor{static_cast<uint8_t>((v >> 16) & 0xFF),
+                               static_cast<uint8_t>((v >> 8) & 0xFF),
+                               static_cast<uint8_t>(v & 0xFF), 0xFF});
+    wPx = s.w;
+    hPx = s.h;
+    return true;
+#else
+    return false;
+#endif
 }
 
 void GuiRenderer::ensureFontPixels(int desiredPixels) {
@@ -34,12 +124,53 @@ void GuiRenderer::toggleTheme() {
     dark_ = !dark_;
     // Solo ahorro de memoria (el color va en la clave del caché): sin esto
     // el toggle seguiría siendo correcto, solo conservaría texturas viejas
-    // hasta el flush de 512. No se tocan los snapshots last*: se regeneran
-    // en el próximo render* y ningún camino los usa para saltear pintado
-    // (los 4 render* hacen RenderClear + repintado completo con dark_
-    // actual; probado en gui_toggle_pantalla_quieta_repinta_todo con la
+    // hasta el flush de 512. Se invalidan ADEMÁS los cachés diferenciales:
+    // todos los fondos RGB cambian y ninguna fila cacheada sigue válida.
+    // El próximo render* es completo. No se tocan los snapshots last*: se
+    // regeneran en el próximo render* y ningún camino los usa para saltear
+    // pintado (probado en gui_toggle_pantalla_quieta_repinta_todo con la
     // pantalla quieta, en editor y en lista modal).
     font_.clearCache();
+    contentHasCache_ = false;
+    listHasCache_ = false;
+}
+
+void GuiRenderer::invalidateCache() {
+    contentHasCache_ = false;
+    listHasCache_ = false;
+}
+
+bool GuiRenderer::sameLayout(const Layout& a, const Layout& b) {
+    return a.content.row == b.content.row && a.content.col == b.content.col &&
+           a.content.width == b.content.width &&
+           a.content.height == b.content.height &&
+           a.chrome.row == b.chrome.row && a.chrome.col == b.chrome.col &&
+           a.chrome.width == b.chrome.width &&
+           a.chrome.height == b.chrome.height;
+}
+
+void GuiRenderer::noteStats(bool full, int repainted, int skipped,
+                            bool chromeDirty) const {
+    lastWasFull_ = full;
+    lastRepainted_ = repainted;
+    lastSkipped_ = skipped;
+    lastChromeDirty_ = chromeDirty;
+    ++totalFrames_;
+    if (full) ++totalFull_;
+    totalRepainted_ += repainted;
+    totalSkipped_ += skipped;
+}
+
+void GuiRenderer::markCursorRow(std::vector<char>& dirty, const Layout& layout,
+                                const FrameCursor& c) {
+    if (!c.visible || !c.cell.valid()) return;
+    const int rel = c.cell.row - layout.content.row;
+    if (rel < 0 || rel >= static_cast<int>(dirty.size())) return;
+    // Solo filas de contenido: un cursor en el chrome (prompts con input)
+    // no invalida contenido (el chrome se decide por chromeDirty).
+    const int relCol = c.cell.col - layout.content.col;
+    if (relCol < 0 || relCol >= layout.content.width) return;
+    dirty[static_cast<size_t>(rel)] = 1;
 }
 
 void GuiRenderer::setBlinkNow(
@@ -187,6 +318,17 @@ void snapshotFrameContent(const Frame& f,
         }
         out.push_back(std::move(gr));
     }
+}
+
+// ¿Vive este cursor como barra visible dentro del chrome? Solo esas barras
+// ensucian el chrome al dibujarse/borrarse (las de contenido ensucian su
+// fila vía markCursorRow; los bloques fijos se deciden por cambio de celda).
+// P2: el caller la evalúa con el cursor ANTERIOR y el nuevo.
+bool isChromeBar(const FrameCursor& c, const Layout& layout) {
+    if (!c.visible || c.shape != FrameCursorShape::Bar || !c.cell.valid())
+        return false;
+    const int r0 = layout.chrome.row, r1 = r0 + layout.chrome.height;
+    return c.cell.row >= r0 && c.cell.row < r1;
 }
 
 // La composición de las líneas de los modales vive en
@@ -482,10 +624,229 @@ void paintListContent(SDL_Renderer* r, GuiFont& font, bool dark,
         }
     }
 }
+// Repintado parcial (caché por línea): pinta UNA fila de contenido desde el
+// snapshot (texto+rol+línea actual, la misma fuente que el full). El fondo
+// de la fila se limpia primero con el fondo efectivo (styleFor por
+// segmento, igual que paintSegmentRow) así que no hace falta RenderClear:
+// las filas limpias del backbuffer se conservan intactas entre Presents.
+void paintSnapshotRow(SDL_Renderer* r, GuiFont& font, bool dark,
+                      const Layout& layout, int relRow,
+                      const GuiContentRow& row) {
+    const int cw = font.cellW();
+    const int ch = font.cellH();
+    if (cw <= 0 || ch <= 0) return;
+    const int py = (layout.content.row + relRow) * ch;
+    const int basePx = layout.content.col * cw;
+    // Fondo de la fila ANTES de los segmentos: sin el RenderClear del full,
+    // una fila que se acorta (texto largo -> corto) dejaría píxeles
+    // obsoletos a la derecha. Las filas CurrentLine ya traen su pad como
+    // segmento; el resto muestra el fondo base (igual que el clear).
+    {
+        const GuiColor bg = guichrome::background(dark);
+        SDL_Rect fill{basePx, py, layout.content.width * cw, ch};
+        SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
+        SDL_RenderFillRect(r, &fill);
+    }
+    int colCells = 0;
+    for (const auto& seg : row.segs) {
+        paintSegmentRow(r, font, dark, basePx, py, cw, ch, seg.text.data(),
+                        seg.text.size(), seg.role, row.isCurrentLine,
+                        colCells);
+    }
+}
+
+// Una fila de modal (fondo de fila completa + texto o "~" tenue).
+// Misma composición que paintListContent pero para una sola fila.
+void paintSnapshotListRow(SDL_Renderer* r, GuiFont& font, bool dark,
+                          const Layout& layout, int relRow, const ListLine& line,
+                          bool selected) {
+    const int cw = font.cellW();
+    const int ch = font.cellH();
+    if (cw <= 0 || ch <= 0) return;
+    const StyleRole role =
+        selected ? StyleRole::ListSelected : StyleRole::Default;
+    const guichrome::GuiStyle st = guichrome::styleFor(role, false, dark);
+    const int py = (layout.content.row + relRow) * ch;
+    const int px = layout.content.col * cw;
+    const std::string& text = line.text;
+    const int cols = chrome::colCount(text);
+    SDL_Rect bg{px, py, layout.content.width * cw, ch};
+    SDL_SetRenderDrawColor(r, st.bg.r, st.bg.g, st.bg.b, st.bg.a);
+    SDL_RenderFillRect(r, &bg);
+    if (!line.filler) {
+        paintText(r, font, text, st.fg, px, py);
+    } else if (cols > 0) {
+        const GuiColor mfg = guichrome::colorFor(StyleRole::Marker, dark);
+        paintText(r, font, text, mfg, px, py);
+    }
+}
+
+// Solo el chrome (StatusBar + MessageBar), sin cursor ni Present. Extraído
+// del cuerpo de paintChromeAndCursor para el camino parcial: si el chrome
+// está limpio se salta entero; si cambió se repintan sus 2 filas (barato).
+void paintChromeOnly(SDL_Renderer* r, GuiFont& font, bool dark,
+                     const Layout& layout, const ChromeData& chromeData,
+                     StyleRole accent) {
+    const int cw = font.cellW();
+    const int ch = font.cellH();
+    if (cw <= 0 || ch <= 0) return;
+    const int totalWpx = layout.chrome.width * cw;
+    if (layout.chrome.height >= 1 && layout.chrome.width > 0) {
+        const GuiColor sbg = guichrome::statusBackground(dark);
+        SDL_Rect srect{layout.chrome.col * cw, layout.chrome.row * ch, totalWpx,
+                       ch};
+        SDL_SetRenderDrawColor(r, sbg.r, sbg.g, sbg.b, sbg.a);
+        SDL_RenderFillRect(r, &srect);
+        if (font.ok()) {
+            const std::vector<guichrome::GuiChromeSeg> segs =
+                guichrome::statusSegments(chromeData.statusBar, accent,
+                                          layout.chrome.width);
+            int consumed = 0;
+            const int baseX = layout.chrome.col * cw;
+            const int y = layout.chrome.row * ch;
+            for (const auto& sg : segs) {
+                if (sg.text.empty()) continue;
+                const int cols = chrome::colCount(sg.text);
+                const bool onlySpaces =
+                    sg.text.find_first_not_of(' ') == std::string::npos;
+                if (!onlySpaces) {
+                    const GuiColor fg =
+                        guichrome::colorFor(sg.role, dark);
+                    void* tex =
+                        font.textTexture(r, sg.text, fg.r, fg.g, fg.b);
+                    if (tex) {
+                        SDL_Texture* t = static_cast<SDL_Texture*>(tex);
+                        int tw = 0, th = 0;
+                        SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+                        SDL_Rect dst{baseX + consumed * cw, y, tw, th};
+                        SDL_RenderCopy(r, t, nullptr, &dst);
+                    }
+                }
+                consumed += cols;
+            }
+        }
+    }
+    if (layout.chrome.height >= 2 && layout.chrome.width > 0) {
+        const GuiColor mbg = guichrome::messageBackground(dark);
+        SDL_Rect mrect{layout.chrome.col * cw, (layout.chrome.row + 1) * ch,
+                       totalWpx, ch};
+        SDL_SetRenderDrawColor(r, mbg.r, mbg.g, mbg.b, mbg.a);
+        SDL_RenderFillRect(r, &mrect);
+        if (font.ok()) {
+            const std::vector<guichrome::GuiChromeSeg> segs =
+                guichrome::messageSegments(chromeData.message,
+                                           layout.chrome.width);
+            int consumed = 0;
+            const int baseX = layout.chrome.col * cw;
+            const int y = (layout.chrome.row + 1) * ch;
+            for (const auto& sg : segs) {
+                if (sg.text.empty()) continue;
+                const int cols = chrome::colCount(sg.text);
+                const bool onlySpaces =
+                    sg.text.find_first_not_of(' ') == std::string::npos;
+                if (!onlySpaces) {
+                    const GuiColor fg =
+                        guichrome::colorFor(sg.role, dark);
+                    void* tex =
+                        font.textTexture(r, sg.text, fg.r, fg.g, fg.b);
+                    if (tex) {
+                        SDL_Texture* t = static_cast<SDL_Texture*>(tex);
+                        int tw = 0, th = 0;
+                        SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+                        SDL_Rect dst{baseX + consumed * cw, y, tw, th};
+                        SDL_RenderCopy(r, t, nullptr, &dst);
+                    }
+                }
+                consumed += cols;
+            }
+        }
+    }
+}
+
+// Solo el cursor (bloque con glifo invertido / barra 2px), sin Present.
+// Mismo código que la cola de paintChromeAndCursor.
+void paintCursorOnly(SDL_Renderer* r, GuiFont& font, bool dark,
+                     const Layout& layout, const FrameCursor& cursor,
+                     bool cursorShown, const Frame* contentFrame,
+                     const std::vector<ListLine>* listLines,
+                     int listSelectedRow) {
+    if (!cursorShown || !cursor.visible || !cursor.cell.valid()) return;
+    const int cw = font.cellW();
+    const int ch = font.cellH();
+    if (cw <= 0 || ch <= 0) return;
+    const GuiColor cc = guichrome::cursorColor(dark);
+    const int px = cursor.cell.col * cw;
+    const int py = cursor.cell.row * ch;
+    if (cursor.shape == FrameCursorShape::Bar) {
+        SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
+        SDL_Rect crect{px, py, 2, ch};
+        SDL_RenderFillRect(r, &crect);
+        return;
+    }
+    BlockGlyph glyph;
+    if (contentFrame) {
+        glyph = blockGlyphInContent(*contentFrame, cursor, layout, dark);
+    } else if (listLines) {
+        glyph = blockGlyphInList(*listLines, cursor, layout, dark,
+                                 listSelectedRow);
+    }
+    const int wpx =
+        (glyph.hasGlyph && glyph.widthCols == 2) ? 2 * cw : cw;
+    SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
+    SDL_Rect crect{px, py, wpx, ch};
+    SDL_RenderFillRect(r, &crect);
+    if (glyph.hasGlyph && font.ok()) {
+        const GuiColor cellBg = glyph.hasCellBg
+                                    ? glyph.cellBg
+                                    : guichrome::background(dark);
+        const GuiColor fg = guichrome::cursorGlyphFg(cellBg, dark);
+        void* tex = font.textTexture(r, glyph.text, fg.r, fg.g, fg.b);
+        if (tex) {
+            SDL_Texture* t = static_cast<SDL_Texture*>(tex);
+            int tw = 0, th = 0;
+            SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+            SDL_Rect dst{px, py, tw, th};
+            SDL_RenderCopy(r, t, nullptr, &dst);
+        }
+    }
+}
+
+// Tamaño en píxeles del frame completo (contenido + chrome) para dimensionar
+// el framebuffer persistente. false si no hay celda válida o geometría
+// degenerada (el caller usa el fallback directo).
+bool framePxSize(const Layout& layout, int cw, int ch, int& wPx, int& hPx) {
+    if (cw <= 0 || ch <= 0) return false;
+    const int rows = layout.content.height + layout.chrome.height;
+    if (layout.chrome.width <= 0 || rows <= 0) return false;
+    wPx = layout.chrome.width * cw;
+    hPx = rows * ch;
+    return true;
+}
+
+// Vuelca el framebuffer a la ventana: vuelve al destino por defecto, limpia
+// el backbuffer, copia la textura completa y presenta. El backbuffer se
+// trata como invalidado en cada Present (contrato SDL2): nunca se lee de
+// él, así el parcial no depende de que conserve píxeles.
+// La copia es 1:1 en la esquina superior izquierda (el framebuffer mide la
+// grilla, no la ventana): el resto queda con el fondo del clear, igual que
+// el pintado directo anterior (un stretch a ventana rompería las
+// coordenadas de celda).
+void presentFramebuf(SDL_Renderer* r, SDL_Texture* fb, const GuiColor& bg) {
+    SDL_SetRenderTarget(r, nullptr);
+    SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
+    SDL_RenderClear(r);
+    int w = 0, h = 0;
+    SDL_QueryTexture(fb, nullptr, nullptr, &w, &h);
+    SDL_Rect dst{0, 0, w, h};
+    SDL_RenderCopy(r, fb, nullptr, &dst);
+    SDL_RenderPresent(r);
+}
 #endif
 
-// Dibuja el chrome (StatusBar + MessageBar) y el cursor sobre el
-// SDL_Renderer real. Solo existe bajo HAVE_SDL2 (sin SDL el caller ya
+// Dibuja el chrome (StatusBar + MessageBar) y el cursor sobre el destino
+// actual del SDL_Renderer (framebuffer persistente o backbuffer en el
+// fallback). NO presenta: el caller compone/presenta después (P1).
+// Solo existe bajo HAVE_SDL2 (sin SDL el caller ya
 // guardo last* para tests y no hay nada que pintar).
 #ifdef HAVE_SDL2
 void paintChromeAndCursor(SDL_Renderer* r, GuiFont& font, bool dark,
@@ -500,10 +861,10 @@ void paintChromeAndCursor(SDL_Renderer* r, GuiFont& font, bool dark,
     // solo-espacios (pads/fill) no crean textura, solo avanzan la grilla.
     const int cw = font.cellW();
     const int ch = font.cellH();
-    if (cw <= 0 || ch <= 0) {
-        SDL_RenderPresent(r);
-        return;
-    }
+    // Sin celda válida no hay nada que pintar (el caller presenta).
+    // P1: esta función ya no presenta (el Present vive en el caller tras el
+    // composite del framebuffer, o en el fallback directo).
+    if (cw <= 0 || ch <= 0) return;
 
     const int totalWpx = layout.chrome.width * cw;
     // StatusBar: fila superior del chrome.
@@ -637,8 +998,6 @@ void paintChromeAndCursor(SDL_Renderer* r, GuiFont& font, bool dark,
             }
         }
     }
-
-    SDL_RenderPresent(r);
 }
 #endif
 
@@ -653,28 +1012,297 @@ void GuiRenderer::renderScreenDiff(
     (void)sink;  // la GUI pinta en el SDL_Renderer, no en el Sink de bytes.
     Frame f = buildFrame(doc, cursor, viewport, filename, modified, chrome,
                          selection, searchHighlight, bracketPair);
+    const bool havePrevContent = contentHasCache_;
+    const FrameCursor prevContent = contentCursor_;
     lastChrome_ = f.chrome;
     lastAccent_ = f.statusAccent;
     noteCursorForBlink(f.cursor);
     lastCursor_ = f.cursor;
     lastLayout_ = f.layout;
-    snapshotFrameContent(f, lastContentRows_);
+    std::vector<GuiContentRow> fresh;
+    snapshotFrameContent(f, fresh);
+    // P2-copias: `fresh` se conserva local hasta terminar el pintado; al
+    // final se publica el snapshot (una copia) y se transfiere al caché por
+    // movimiento, sin segunda copia profunda.
     lastListLines_.clear();
     lastListSelected_ = -1;
     lastListScroll_ = 0;
     const bool shown = cursorShown();
+
+    // --- Diff por línea contra el caché de contenido ---
+    const int contentH = static_cast<int>(fresh.size());
+    const int cw = font_.cellW();
+    const int ch = font_.cellH();
+    const bool chromeSame = contentHasCache_ && contentChrome_ == f.chrome &&
+                            contentAccent_ == f.statusAccent;
+    const bool layoutSame =
+        contentHasCache_ && sameLayout(contentLayout_, f.layout);
+    // P2-resize: la celda física forma parte de la validez (ver header).
+    const bool metricsSame = contentHasCache_ && contentCellW_ == cw &&
+                             contentCellH_ == ch;
+    const bool full = !contentHasCache_ || !layoutSame ||
+                      contentDark_ != dark_ || !metricsSame;
+    bool chromeDirty = full || !chromeSame;
+    std::vector<char> dirty(static_cast<size_t>(std::max(0, contentH)), 0);
+    int repainted = 0, skipped = 0;
+    if (full) {
+        std::fill(dirty.begin(), dirty.end(), 1);
+        repainted = contentH;
+    } else {
+        for (int i = 0; i < contentH; ++i) {
+            bool same = i < static_cast<int>(contentRows_.size()) &&
+                        contentRows_[static_cast<size_t>(i)] == fresh[static_cast<size_t>(i)];
+            dirty[static_cast<size_t>(i)] = same ? 0 : 1;
+        }
+        // Cursor: borrar la vieja + dibujar la nueva, siempre dentro de la
+        // MISMA superficie (prevContent, no el cursor global que puede ser
+        // del modal). Block fijo: solo si cambió; Bar (parpadeo): su fila
+        // siempre (1 fila/frame en inserción vs N del full). En chrome no
+        // marca contenido (lo cubre paintChrome).
+        const bool cursorChanged =
+            !havePrevContent || prevContent.visible != f.cursor.visible ||
+            prevContent.shape != f.cursor.shape ||
+            !(prevContent.cell == f.cursor.cell);
+        if (cursorChanged) {
+            if (havePrevContent) markCursorRow(dirty, f.layout, prevContent);
+            markCursorRow(dirty, f.layout, f.cursor);
+        } else if (f.cursor.visible &&
+                   f.cursor.shape == FrameCursorShape::Bar &&
+                   f.cursor.cell.valid()) {
+            markCursorRow(dirty, f.layout, f.cursor);
+        }
+        for (char d : dirty) (d ? repainted : skipped) += 1;
+    }
+    // Blink en el chrome (prompts con input: el Bar vive en el MessageBar):
+    // el chrome estructural puede estar limpio pero hay que repintarlo para
+    // animar/borrar la barra. No contamina lastChromeDirty_ (estructural).
+    // P2: el chrome se repinta si CAMBIÓ (chromeDirty) o si hay que
+    // dibujar/borrar una barra en él, mirando AMBOS cursores. Si el anterior
+    // era barra visible en el chrome y algo cambió (posición, forma o
+    // visibilidad), hay que restaurar fondo+texto aunque el nuevo ya no sea
+    // barra (si no, queda una barra residual). Si el nuevo sigue siendo
+    // barra en el chrome se repinta cada frame para animarla.
+    bool paintChrome = chromeDirty;
+    if (!full) {
+        const bool newBar = isChromeBar(f.cursor, f.layout);
+        const bool oldBar =
+            havePrevContent && isChromeBar(prevContent, f.layout);
+        const bool cursorChanged =
+            !havePrevContent || prevContent.visible != f.cursor.visible ||
+            prevContent.shape != f.cursor.shape ||
+            !(prevContent.cell == f.cursor.cell);
+        if (newBar || (oldBar && cursorChanged)) paintChrome = true;
+    }
+    noteStats(full, repainted, skipped, chromeDirty);
+    contentChrome_ = f.chrome;
+    contentAccent_ = f.statusAccent;
+    contentLayout_ = f.layout;
+    contentDark_ = dark_;
+    contentCellW_ = cw;
+    contentCellH_ = ch;
+    contentCursor_ = f.cursor;
+    contentHasCache_ = true;
+    lastIsList_ = false;
 #ifdef HAVE_SDL2
-    if (!sdlRenderer_) return;
-    SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
-    const GuiColor bg = guichrome::background(dark_);
-    SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
-    SDL_RenderClear(r);
-    paintFrameContent(r, font_, dark_, f.layout, f);
-    paintChromeAndCursor(r, font_, dark_, f.layout, f.chrome, f.statusAccent,
-                         f.cursor, shown, &f, nullptr, -1);
+    if (sdlRenderer_) {
+        SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
+        const GuiColor bg = guichrome::background(dark_);
+        // P1: el parcial pinta sobre el framebuffer persistente (las filas
+        // limpias conservan sus píxeles AHÍ, no en el backbuffer). Después se
+        // compone a ventana con clear+copia+Present: el backbuffer nunca se lee.
+        int wPx = 0, hPx = 0;
+        bool fbFresh = false;
+        SDL_Texture* fb = nullptr;
+        if (framePxSize(f.layout, font_.cellW(), font_.cellH(), wPx, hPx)) {
+            bool fr = false;
+            fb = static_cast<SDL_Texture*>(
+                acquireFb(contentFb_, sdlRenderer_, wPx, hPx, fr));
+            fbFresh = (fb != nullptr) && fr;
+        }
+        if (!fb) {
+            // Fallback sin render targets: repintado COMPLETO directo en
+            // ventana (el parcial no es seguro sin superficie persistente).
+            SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
+            SDL_RenderClear(r);
+            paintFrameContent(r, font_, dark_, f.layout, f);
+            paintChromeAndCursor(r, font_, dark_, f.layout, f.chrome,
+                                 f.statusAccent, f.cursor, shown, &f, nullptr,
+                                 -1);
+            SDL_RenderPresent(r);
+        } else {
+            SDL_SetRenderTarget(r, fb);
+            if (full || fbFresh) {
+                SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
+                SDL_RenderClear(r);
+                paintFrameContent(r, font_, dark_, f.layout, f);
+                paintChromeAndCursor(r, font_, dark_, f.layout, f.chrome,
+                                     f.statusAccent, f.cursor, shown, &f,
+                                     nullptr, -1);
+            } else {
+                // Parcial sobre la textura: sin RenderClear; solo filas dirty
+                // + chrome si toca + cursor. Lee `fresh` (aún no movido).
+                for (int i = 0; i < contentH; ++i)
+                    if (dirty[static_cast<size_t>(i)])
+                        paintSnapshotRow(r, font_, dark_, f.layout, i,
+                                         fresh[static_cast<size_t>(i)]);
+                if (paintChrome)
+                    paintChromeOnly(r, font_, dark_, f.layout, f.chrome,
+                                    f.statusAccent);
+                paintCursorOnly(r, font_, dark_, f.layout, f.cursor, shown,
+                                &f, nullptr, -1);
+            }
+            presentFramebuf(r, fb, bg);
+        }
+    }
 #else
     // Sin SDL2: no-op (el loop nunca llega acá, main avisa antes).
 #endif
+    // P2-copias: `fresh` sirvió al diff y al pintado; recién acá se publica
+    // el snapshot de observabilidad (ÚNICA copia profunda) y se transfiere
+    // al caché por movimiento. Todos los caminos lo guardan (con/sin SDL).
+    lastContentRows_ = fresh;
+    contentRows_ = std::move(fresh);
+}
+
+void GuiRenderer::renderListCommon(std::vector<ListLine> lines,
+                                       const ChromeData& chrome,
+                                       StyleRole accent, const Layout& layout,
+                                       const FrameCursor& next, int selectedRow,
+                                       int selSnapshot, int scrollSnapshot) {
+    const bool havePrevList = listHasCache_;
+    const FrameCursor prevList = listCursor_;
+    lastChrome_ = chrome;
+    lastAccent_ = accent;
+    lastLayout_ = layout;
+    lastContentRows_.clear();
+    // P2-copias: `lines` (parámetro por valor) se conserva hasta terminar el
+    // pintado; el snapshot y el move al caché van al final (ver abajo).
+    lastListSelected_ = selSnapshot;
+    lastListScroll_ = scrollSnapshot;
+    noteCursorForBlink(next);
+    lastCursor_ = next;
+    const bool shown = cursorShown();
+
+    const int listH = static_cast<int>(lines.size());
+    const int lcw = font_.cellW();
+    const int lch = font_.cellH();
+    const bool chromeSame = listHasCache_ && listChrome_ == chrome &&
+                            listAccent_ == accent;
+    const bool layoutSame =
+        listHasCache_ && sameLayout(listLayout_, layout);
+    // P2-resize: igual que en el contenido (ver renderScreenDiff).
+    const bool listMetricsSame = listHasCache_ && listCellW_ == lcw &&
+                                 listCellH_ == lch;
+    const bool full = !listHasCache_ || !layoutSame || listDark_ != dark_ ||
+                      !listMetricsSame;
+    bool chromeDirty = full || !chromeSame;
+    std::vector<char> dirty(static_cast<size_t>(std::max(0, listH)), 0);
+    int repainted = 0, skipped = 0;
+    if (full) {
+        std::fill(dirty.begin(), dirty.end(), 1);
+        repainted = listH;
+    } else {
+        for (int i = 0; i < listH; ++i) {
+            bool same = i < static_cast<int>(listLines_.size()) &&
+                        listLines_[static_cast<size_t>(i)] == lines[static_cast<size_t>(i)];
+            if (same && i != listSelectedRow_ && i != selectedRow)
+                continue;  // ni texto ni destacado cambiaron
+            if (same && i == listSelectedRow_ && i == selectedRow) continue;
+            dirty[static_cast<size_t>(i)] = 1;
+        }
+        // Cursor Block fijo (abrir/buffers): borrar la vieja + dibujar la
+        // nueva dentro de la MISMA superficie (prevList). Bar (SaveAs, en el
+        // chrome): su animación la cubre paintChrome de abajo.
+        const bool listCursorChanged =
+            !havePrevList || prevList.visible != next.visible ||
+            prevList.shape != next.shape || !(prevList.cell == next.cell);
+        if (next.shape == FrameCursorShape::Block && listCursorChanged) {
+            if (havePrevList) markCursorRow(dirty, layout, prevList);
+            markCursorRow(dirty, layout, next);
+        }
+        for (char d : dirty) (d ? repainted : skipped) += 1;
+    }
+    // P2: igual que en el contenido (ver renderScreenDiff): con el cursor
+    // ANTERIOR y el nuevo. Vale para SaveAs, cuya barra vive en el chrome.
+    bool paintChrome = chromeDirty;
+    if (!full) {
+        const bool newBar = isChromeBar(next, layout);
+        const bool oldBar =
+            havePrevList && isChromeBar(prevList, layout);
+        const bool listCursorMoved =
+            !havePrevList || prevList.visible != next.visible ||
+            prevList.shape != next.shape || !(prevList.cell == next.cell);
+        if (newBar || (oldBar && listCursorMoved)) paintChrome = true;
+    }
+    noteStats(full, repainted, skipped, chromeDirty);
+    listChrome_ = chrome;
+    listAccent_ = accent;
+    listLayout_ = layout;
+    listDark_ = dark_;
+    listCellW_ = lcw;
+    listCellH_ = lch;
+    listSelectedRow_ = selectedRow;
+    listCursor_ = next;
+    listHasCache_ = true;
+    lastIsList_ = true;
+#ifdef HAVE_SDL2
+    if (sdlRenderer_) {
+        SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
+        const GuiColor bg = guichrome::background(dark_);
+        // P1: igual que el contenido (ver renderScreenDiff): el parcial pinta
+        // sobre el framebuffer persistente y compone con clear+copia+Present.
+        // Lee `lines` (aún no movido).
+        int wPx = 0, hPx = 0;
+        bool fbFresh = false;
+        SDL_Texture* fb = nullptr;
+        if (framePxSize(layout, font_.cellW(), font_.cellH(), wPx, hPx)) {
+            bool fr = false;
+            fb = static_cast<SDL_Texture*>(
+                acquireFb(listFb_, sdlRenderer_, wPx, hPx, fr));
+            fbFresh = (fb != nullptr) && fr;
+        }
+        if (!fb) {
+            // Fallback sin render targets: repintado COMPLETO directo en
+            // ventana (el parcial no es seguro sin superficie persistente).
+            SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
+            SDL_RenderClear(r);
+            paintListContent(r, font_, dark_, layout, lines, selectedRow);
+            paintChromeAndCursor(r, font_, dark_, layout, lastChrome_,
+                                 lastAccent_, lastCursor_, shown, nullptr,
+                                 &lines, selectedRow);
+            SDL_RenderPresent(r);
+        } else {
+            SDL_SetRenderTarget(r, fb);
+            if (full || fbFresh) {
+                SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
+                SDL_RenderClear(r);
+                paintListContent(r, font_, dark_, layout, lines, selectedRow);
+                paintChromeAndCursor(r, font_, dark_, layout, lastChrome_,
+                                     lastAccent_, lastCursor_, shown, nullptr,
+                                     &lines, selectedRow);
+            } else {
+                for (int i = 0; i < listH; ++i)
+                    if (dirty[static_cast<size_t>(i)])
+                        paintSnapshotListRow(r, font_, dark_, layout, i,
+                                             lines[static_cast<size_t>(i)],
+                                             i == selectedRow);
+                if (paintChrome)
+                    paintChromeOnly(r, font_, dark_, layout, lastChrome_,
+                                    lastAccent_);
+                paintCursorOnly(r, font_, dark_, layout, lastCursor_, shown,
+                                nullptr, &lines, selectedRow);
+            }
+            presentFramebuf(r, fb, bg);
+        }
+    }
+#else
+    // Sin SDL2: no-op.
+#endif
+    // P2-copias: `lines` sirvió al diff y al pintado; recién acá se publica
+    // el snapshot de observabilidad (ÚNICA copia profunda) y se transfiere
+    // al caché por movimiento. Todos los caminos lo guardan (con/sin SDL).
+    lastListLines_ = lines;
+    listLines_ = std::move(lines);
 }
 
 void GuiRenderer::renderBufferList(const std::vector<std::string>& names,
@@ -682,12 +1310,6 @@ void GuiRenderer::renderBufferList(const std::vector<std::string>& names,
                                    Sink& sink) {
     (void)sink;
     const Layout layout = frameBuilder_.calculateLayout(height, width);
-    lastChrome_ = bufferListChrome(names, selected);
-    lastAccent_ = StyleRole::AccentBuffers;
-    lastLayout_ = layout;
-    lastContentRows_.clear();
-    lastListLines_ = buildBufferListLines(names, layout.content.height);
-    lastListScroll_ = 0;
     // Cursor en la lista (igual que TTY: fila selected, col 0).
     // Defensivo: ante args fuera de contrato no se pinta un cursor
     // arbitrario (se oculta). En rango válido es idéntico a TTY.
@@ -695,8 +1317,7 @@ void GuiRenderer::renderBufferList(const std::vector<std::string>& names,
     const int total = static_cast<int>(names.size());
     const bool ok = total > 0 && selected >= 0 && selected < total &&
                     selected < layout.content.height;
-    lastListSelected_ = ok ? selected : -1;
-    int selectedRow = ok ? selected : -1;
+    const int selectedRow = ok ? selected : -1;
     FrameCursor next;
     if (ok) {
         next.visible = true;
@@ -706,20 +1327,10 @@ void GuiRenderer::renderBufferList(const std::vector<std::string>& names,
         next.visible = false;
         next.cell = CellPos{};
     }
-    noteCursorForBlink(next);
-    lastCursor_ = next;
-    const bool shownBuf = cursorShown();
-#ifdef HAVE_SDL2
-    if (!sdlRenderer_) return;
-    SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
-    const GuiColor bg = guichrome::background(dark_);
-    SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
-    SDL_RenderClear(r);
-    paintListContent(r, font_, dark_, layout, lastListLines_, selectedRow);
-    paintChromeAndCursor(r, font_, dark_, layout, lastChrome_, lastAccent_,
-                         lastCursor_, shownBuf, nullptr, &lastListLines_,
-                         selectedRow);
-#endif
+    renderListCommon(buildBufferListLines(names, layout.content.height),
+                     bufferListChrome(names, selected),
+                     StyleRole::AccentBuffers, layout, next, selectedRow,
+                     ok ? selected : -1, 0);
 }
 
 void GuiRenderer::renderFileList(const std::vector<FileListItem>& items,
@@ -729,13 +1340,6 @@ void GuiRenderer::renderFileList(const std::vector<FileListItem>& items,
                                  int height, Sink& sink) {
     (void)sink;
     const Layout layout = frameBuilder_.calculateLayout(height, width);
-    lastChrome_ =
-        fileListChrome(path, message, items, selected, scroll, "ABRIR ARCHIVO");
-    lastAccent_ = StyleRole::AccentAbrir;
-    lastLayout_ = layout;
-    lastContentRows_.clear();
-    lastListLines_ = buildFileListLines(items, scroll, layout.content.height);
-    lastListScroll_ = scroll;
     // Cursor en la lista (abrir), nunca en el MessageBar.
     // Defensivo: ante args fuera de contrato (selected < scroll o
     // selected-scroll >= viewport) no se pinta un cursor arbitrario
@@ -746,7 +1350,6 @@ void GuiRenderer::renderFileList(const std::vector<FileListItem>& items,
     const bool ok = total > 0 && selected >= 0 && selected < total &&
                     scroll >= 0 && scroll <= total && row >= 0 &&
                     row < layout.content.height;
-    lastListSelected_ = ok ? selected : -1;
     const int selectedRow = ok ? row : -1;
     FrameCursor next;
     if (ok) {
@@ -757,20 +1360,11 @@ void GuiRenderer::renderFileList(const std::vector<FileListItem>& items,
         next.visible = false;
         next.cell = CellPos{};
     }
-    noteCursorForBlink(next);
-    lastCursor_ = next;
-    const bool shownFile = cursorShown();
-#ifdef HAVE_SDL2
-    if (!sdlRenderer_) return;
-    SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
-    const GuiColor bg = guichrome::background(dark_);
-    SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
-    SDL_RenderClear(r);
-    paintListContent(r, font_, dark_, layout, lastListLines_, selectedRow);
-    paintChromeAndCursor(r, font_, dark_, layout, lastChrome_, lastAccent_,
-                         lastCursor_, shownFile, nullptr, &lastListLines_,
-                         selectedRow);
-#endif
+    renderListCommon(
+        buildFileListLines(items, scroll, layout.content.height),
+        fileListChrome(path, message, items, selected, scroll, "ABRIR ARCHIVO"),
+        StyleRole::AccentAbrir, layout, next, selectedRow, ok ? selected : -1,
+        scroll);
 }
 
 void GuiRenderer::renderSaveAsFileList(
@@ -779,23 +1373,15 @@ void GuiRenderer::renderSaveAsFileList(
     int height, Sink& sink) {
     (void)sink;
     const Layout layout = frameBuilder_.calculateLayout(height, width);
-    lastChrome_ =
-        fileListChrome(path, message, items, selected, scroll, "GUARDAR COMO");
-    lastAccent_ = StyleRole::AccentGuardar;
-    lastLayout_ = layout;
-    lastContentRows_.clear();
     // SaveAs pinta la MISMA lista que abrir (solo cambian etiqueta/accent
     // y el cursor al MessageBar): el snapshot comparte constructor.
     // La fila destacada sigue siendo la navegada (selected-scroll), aunque
     // el cursor parpadee en el input: igual que TTY (fondo ListSelected).
-    lastListLines_ = buildFileListLines(items, scroll, layout.content.height);
-    lastListScroll_ = scroll;
     const int total = static_cast<int>(items.size());
     const int row = selected - scroll;
     const bool okRow = total > 0 && selected >= 0 && selected < total &&
                        scroll >= 0 && scroll <= total && row >= 0 &&
                        row < layout.content.height;
-    lastListSelected_ = okRow ? selected : -1;
     const int selectedRow = okRow ? row : -1;
     // Cursor DENTRO del input del MessageBar (igual que TTY: al final del
     // nombre, antes del sufijo decorativo via msg.cursor), nunca en la lista.
@@ -809,17 +1395,9 @@ void GuiRenderer::renderSaveAsFileList(
         next.visible = false;
         next.cell = CellPos{};
     }
-    noteCursorForBlink(next);
-    lastCursor_ = next;
-    const bool shownSave = cursorShown();
-#ifdef HAVE_SDL2
-    if (!sdlRenderer_) return;
-    SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
-    const GuiColor bg = guichrome::background(dark_);
-    SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
-    SDL_RenderClear(r);
-    paintListContent(r, font_, dark_, layout, lastListLines_, selectedRow);
-    paintChromeAndCursor(r, font_, dark_, layout, lastChrome_, lastAccent_,
-                         lastCursor_, shownSave, nullptr, nullptr, -1);
-#endif
+    renderListCommon(
+        buildFileListLines(items, scroll, layout.content.height),
+        fileListChrome(path, message, items, selected, scroll, "GUARDAR COMO"),
+        StyleRole::AccentGuardar, layout, next, selectedRow,
+        okRow ? selected : -1, scroll);
 }

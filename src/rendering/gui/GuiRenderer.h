@@ -43,10 +43,18 @@
 struct GuiContentSeg {
     std::string text;
     StyleRole role = StyleRole::Default;
+    bool operator==(const GuiContentSeg& o) const {
+        return role == o.role && text == o.text;
+    }
+    bool operator!=(const GuiContentSeg& o) const { return !(*this == o); }
 };
 struct GuiContentRow {
     std::vector<GuiContentSeg> segs;
     bool isCurrentLine = false;
+    bool operator==(const GuiContentRow& o) const {
+        return isCurrentLine == o.isCurrentLine && segs == o.segs;
+    }
+    bool operator!=(const GuiContentRow& o) const { return !(*this == o); }
     std::string plain() const {
         std::string out;
         for (const auto& s : segs) out += s.text;
@@ -77,19 +85,54 @@ public:
     GuiRenderer();
     ~GuiRenderer() override;
 
-    // No-op: la GUI no tiene caché diferencial (cada render* repinta
-    // completo tras SDL_RenderClear), a diferencia de TtyDiff en TTY.
-    void invalidateCache() override {}
+    // Caché diferencial por línea (paridad conceptual con TtyDiff en TTY,
+    // adaptada a SDL inmediato): cada render* compara el Frame fresco contra
+    // el último pintado y repinta solo las filas que cambiaron, sin
+    // SDL_RenderClear. El próximo render tras invalidateCache/toggleTheme/
+    // cambio de geometría es completo. Sin SDL el pintado se salta pero la
+    // comparación y las stats se calculan igual (tests sin ventana).
+    void invalidateCache() override;
+    bool hasCache() const { return contentHasCache_ || listHasCache_; }
+    bool hasContentCache() const { return contentHasCache_; }
+    bool hasListCache() const { return listHasCache_; }
+
+    // Observabilidad del diferencial (para tests/benchmarks, solo lectura):
+    //   lastWasFull      -> el último render* fue completo (sin caché válida
+    //                       o cambio de geometría/tema).
+    //   lastRepainted    -> filas de contenido/modal repintadas en el último
+    //                       render* (0 en steady sin cambios).
+    //   lastSkipped      -> filas reutilizadas del caché en el último render*.
+    //   lastChromeDirty  -> el chrome cambió en el último render*.
+    //   Totales acumulados + frames para benchmarks GUI vs TTY.
+    bool lastWasFull() const { return lastWasFull_; }
+    int lastRepainted() const { return lastRepainted_; }
+    int lastSkipped() const { return lastSkipped_; }
+    bool lastChromeDirty() const { return lastChromeDirty_; }
+    long long totalFrames() const { return totalFrames_; }
+    long long totalFull() const { return totalFull_; }
+    long long totalRepainted() const { return totalRepainted_; }
+    long long totalSkipped() const { return totalSkipped_; }
+
+    // Solo tests/debug: píxeles del framebuffer persistente de la ÚLTIMA
+    // superficie renderizada (contenido o modal, según el último render*).
+    // A diferencia de leer el backbuffer tras Present (no portable: SDL2 lo
+    // declara invalidado y nada garantiza su contenido), la textura de
+    // destino SÍ persiste, así que esta lectura no depende del backbuffer.
+    // No altera el destino activo del renderer (lo guarda y restaura).
+    // Devuelve false sin SDL/renderer, sin framebuffer (p. ej. fallback sin
+    // render targets o sin ningún render previo) o si ReadPixels falla.
+    bool readLastSurfacePixels(std::vector<GuiColor>& out, int& wPx,
+                               int& hPx);
     void setExternalSyntaxCache(SyntaxCache* c) override {
         frameBuilder_.setExternalSyntaxCache(c);
     }
 
     // Tema claro/oscuro: conmuta `dark_` y libera el caché de texturas
     // (ahorro de memoria, no corrección: el color ya va en la clave de
-    // GuiFont, ver GuiFont.h). GARANTÍA DE REPINTADO: la GUI no tiene caché
-    // diferencial (a diferencia de TtyDiff en TTY): cada render* hace
-    // SDL_RenderClear + repintado completo, así que el próximo frame tras
-    // el toggle ya pinta todo con el tema nuevo sin invalidación adicional.
+    // GuiFont, ver GuiFont.h). ADEMÁS invalida el caché diferencial (los
+    // fondos RGB cambian: ninguna fila cacheada sigue válida). El próximo
+    // frame tras el toggle es completo (RenderClear + todo), igual que tras
+    // invalidateCache().
     // Los snapshots last* solo son observabilidad para tests, nunca deciden
     // qué pintar.
     void toggleTheme() override;
@@ -260,4 +303,107 @@ private:
     static constexpr int kBlinkOnMs = 530;
     static constexpr int kBlinkPeriodMs = 1060;
     void noteCursorForBlink(const FrameCursor& next) const;
+
+    // --- Caché diferencial por línea (ver invalidateCache) ---
+    // Contenido del editor y modales tienen cachés SEPARADOS: el Editor
+    // intercala editor <-> modal y una sola entrada haría thrash (cada
+    // cambio de pantalla invalidaría a la otra). Cada caché guarda lo que
+    // decide el repintado: filas + chrome + accent + geometría + tema.
+    // La igualdad de filas es estructural (texto+rol+línea actual): el DTO
+    // solo lleva estado visual, igual que ChromeData::operator== en TTY.
+    // NOTA DE SCROLL (honesta): un scroll vertical desplaza todas las filas
+    // y el diff por índice las marca todas dirty (repinta N filas, con hits
+    // en el caché de texturas de GuiFont). TTY gana ahí con su scroll de
+    // región (TtyScroll.h); el blit GPU del backbuffer queda como trabajo
+    // futuro (medido en test_gui_perf scrolltop1).
+    mutable bool contentHasCache_ = false;
+    mutable std::vector<GuiContentRow> contentRows_;
+    mutable ChromeData contentChrome_;
+    mutable StyleRole contentAccent_ = StyleRole::StatusAccentDefault;
+    mutable Layout contentLayout_{};
+    mutable bool contentDark_ = true;
+    // Métricas físicas (píxeles por celda) con las que se pintó el caché.
+    // P2-resize: la validez NO es solo la grilla en celdas (sameLayout). Un
+    // resize o cambio de escala HiDPI puede dejar las mismas filas/columnas
+    // con otra superficie en píxeles; Editor::resize no invalida a propósito
+    // (conserva el fast path TTY al mismo tamaño) y el loop solo re-escala
+    // la fuente, así que el renderer lo detecta solo: si la celda cambió, el
+    // frame es completo aunque la grilla coincida. (El framebuffer también
+    // se recrea por tamaño, pero la decisión del diff debe ser explícita.)
+    mutable int contentCellW_ = 0;
+    mutable int contentCellH_ = 0;
+    mutable bool listHasCache_ = false;
+    mutable std::vector<ListLine> listLines_;
+    mutable ChromeData listChrome_;
+    mutable StyleRole listAccent_ = StyleRole::StatusAccentDefault;
+    mutable Layout listLayout_{};
+    mutable bool listDark_ = true;
+    mutable int listCellW_ = 0;
+    mutable int listCellH_ = 0;
+    mutable int listSelectedRow_ = -1;
+    // Cursor por superficie (contenido vs modal): el cursor viejo solo
+    // invalida filas si pertenece a la MISMA superficie (al volver de un
+    // modal al editor, el cursor del modal nunca se pintó sobre el contenido
+    // y remarcar su fila sería un repintado espurio). lastCursor_ sigue
+    // siendo el último global (snapshots + blink + pintado).
+    mutable FrameCursor contentCursor_;
+    mutable FrameCursor listCursor_;
+    mutable bool lastIsList_ = false;
+    // Stats del diferencial (ver getters públicos).
+    mutable bool lastWasFull_ = true;
+    mutable int lastRepainted_ = 0;
+    mutable int lastSkipped_ = 0;
+    mutable bool lastChromeDirty_ = true;
+    mutable long long totalFrames_ = 0;
+    mutable long long totalFull_ = 0;
+    mutable long long totalRepainted_ = 0;
+    mutable long long totalSkipped_ = 0;
+    static bool sameLayout(const Layout& a, const Layout& b);
+    void noteStats(bool full, int repainted, int skipped,
+                   bool chromeDirty) const;
+    // relRow: fila relativa al contenido; fuera de rango = no marca.
+    static void markCursorRow(std::vector<char>& dirty, const Layout& layout,
+                              const FrameCursor& c);
+    // Camino común de los 3 modales: snapshots + diff por línea + pintado
+    // full/parcial. `lines` ya viene compuesto (ListLines.h), `next` es el
+    // cursor resuelto por el caller, `selectedRow` la fila destacada
+    // relativa (-1 = ninguna), `selSnapshot/scrollSnapshot` lo que publica
+    // el snapshot (lastListSelected_/lastListScroll_).
+    void renderListCommon(std::vector<ListLine> lines, const ChromeData& chrome,
+                          StyleRole accent, const Layout& layout,
+                          const FrameCursor& next, int selectedRow,
+                          int selSnapshot, int scrollSnapshot);
+
+    // --- Framebuffers persistentes para el repintado parcial (P1) ---
+    // El camino parcial NO puede apoyarse en que el backbuffer conserve sus
+    // píxeles entre Presents: el contrato SDL2 lo declara invalidado tras
+    // cada SDL_RenderPresent (funciona con el renderer software de los tests
+    // pero puede fallar con otro backend/driver). Por eso el parcial pinta
+    // sobre texturas de destino (SDL_TEXTUREACCESS_TARGET), que SÍ
+    // persisten; después se vuelve al destino de ventana, se limpia el
+    // backbuffer, se copia la textura completa y se presenta. El backbuffer
+    // nunca se lee, solo se escribe: el ahorro de las filas sucias se
+    // mantiene sin depender de comportamiento accidental.
+    // Hay UNA textura por superficie lógica (contenido y modal): con una sola
+    // compartida, volver del modal al editor con caché válida y 0 filas
+    // dirty presentaría la imagen del modal (las cachés separadas guardan
+    // snapshots lógicos, no imágenes). Cada superficie compone la suya y el
+    // cambio de pantalla no repinta nada.
+    // Si el renderer no soporta render targets (verificado una vez por
+    // renderer con SDL_RenderTargetSupported) o la textura no se puede
+    // crear, el pintado cae al repintado completo directo en ventana.
+    // La textura se recrea al cambiar de renderer o de tamaño en píxeles
+    // (fresh=true: contenido indefinido, el caller pinta todo).
+    struct FrameSurface {
+        void* tex = nullptr;  // SDL_Texture* opaco (solo .cpp + HAVE_SDL2)
+        int w = 0;
+        int h = 0;
+    };
+    FrameSurface contentFb_;
+    FrameSurface listFb_;
+    int framebufTarget_ = 0;  // 0 = sin probar, 1 = soportado, -1 = no
+    void destroyFb(FrameSurface& s);
+    void destroyFramebuf();
+    void* acquireFb(FrameSurface& s, void* sdlRenderer, int wPx, int hPx,
+                     bool& fresh);
 };

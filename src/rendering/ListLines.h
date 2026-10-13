@@ -26,6 +26,10 @@ struct FileListItem;  // rendering/ScreenRenderer.h (se evita el include)
 struct ListLine {
     std::string text;
     bool filler = false;
+    bool operator==(const ListLine& o) const {
+        return filler == o.filler && text == o.text;
+    }
+    bool operator!=(const ListLine& o) const { return !(*this == o); }
 };
 
 // Exactamente `contentH` entradas (contentH < 0 se trata como 0):
