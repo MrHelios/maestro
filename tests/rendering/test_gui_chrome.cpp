@@ -703,7 +703,24 @@ struct SdlDummy {
     SDL_Window* win = nullptr;
     SDL_Renderer* ren = nullptr;
     bool ok = false;
+    std::string prevVideo;
+    std::string prevAudio;
+    bool hadVideo = false;
+    bool hadAudio = false;
     SdlDummy(int w = 800, int h = 600) {
+        // Hermético como DummyVideo (test_guifont.cpp): SDL_VIDEODRIVER /
+        // SDL_AUDIODRIVER se restauran al salir. Sin esto, el "dummy"
+        // quedaba fijo en el environ del proceso y cambiaba el driver de
+        // cualquier test posterior que inicie video (p.ej. la integración
+        // del clipboard SDL pasaba a SKIP por orden de ejecución).
+        if (const char* p = std::getenv("SDL_VIDEODRIVER")) {
+            prevVideo = p;
+            hadVideo = true;
+        }
+        if (const char* p = std::getenv("SDL_AUDIODRIVER")) {
+            prevAudio = p;
+            hadAudio = true;
+        }
         ::setenv("SDL_VIDEODRIVER", "dummy", 1);
         ::setenv("SDL_AUDIODRIVER", "dummy", 1);
         if (SDL_Init(SDL_INIT_VIDEO) != 0) return;
@@ -717,6 +734,14 @@ struct SdlDummy {
         if (ren) SDL_DestroyRenderer(ren);
         if (win) SDL_DestroyWindow(win);
         SDL_Quit();
+        if (hadVideo)
+            ::setenv("SDL_VIDEODRIVER", prevVideo.c_str(), 1);
+        else
+            ::unsetenv("SDL_VIDEODRIVER");
+        if (hadAudio)
+            ::setenv("SDL_AUDIODRIVER", prevAudio.c_str(), 1);
+        else
+            ::unsetenv("SDL_AUDIODRIVER");
     }
 };
 

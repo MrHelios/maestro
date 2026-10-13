@@ -1,12 +1,17 @@
 #include "platform/clipboard/ClipboardFactory.h"
 
 #include "platform/clipboard/NullClipboard.h"
+#include "platform/clipboard/SdlClipboard.h"
 #ifdef HAVE_X11
 #include "platform/clipboard/X11Clipboard.h"
 #endif
 
 std::unique_ptr<SystemClipboard> makeNullClipboard() {
     return std::make_unique<NullClipboard>();
+}
+
+std::unique_ptr<SystemClipboard> makeSdlClipboard() {
+    return std::make_unique<SdlClipboard>();
 }
 
 std::unique_ptr<SystemClipboard> makeSystemClipboard() {

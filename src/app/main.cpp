@@ -3,7 +3,9 @@
 #include <string>
 #include <vector>
 #include "app/Editor.h"
+#include "filesystem/FileWatcherFactory.h"
 #include "platform/MouseButton.h"
+#include "platform/clipboard/ClipboardFactory.h"
 #include "platform/gui/GuiRunLoop.h"
 #include "platform/tty/TtyRunLoop.h"
 #include "rendering/gui/GuiRenderer.h"
@@ -80,9 +82,12 @@ int main(int argc, char* argv[]) {
     if (args.gui) {
         // Rama GUI: backend SDL2 + loop de ventana. Sin tocar src/app/
         // más allá de este archivo (el Editor solo ve ScreenRenderer).
+        // Clipboard SDL (reemplaza X11: SDL_Get/SetClipboardText, síncrono
+        // sin INCR); watcher inotify reusado tal cual (vía makeFileWatcher,
+        // el GuiRunLoop lo bombea con pollEvents, sin fd).
         auto guiRenderer = std::make_unique<GuiRenderer>();
         GuiRenderer* raw = guiRenderer.get();
-        Editor editor(std::move(guiRenderer));
+        Editor editor(std::move(guiRenderer), makeSdlClipboard(), makeFileWatcher());
         if (int rc = openFile(editor)) return rc;
         GuiRunLoop loop(editor);
         loop.setGuiRenderer(raw);

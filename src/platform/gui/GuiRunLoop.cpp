@@ -22,6 +22,10 @@ void GuiRunLoop::idleStep(std::chrono::steady_clock::time_point now) {
     // Inyecta el tiempo de blink antes de pintar: la fase ON/OFF sale de
     // GuiRenderer (Bar parpadea, Block fijo; el ancla se resetea al mover el
     // cursor). Sin gui_ es solo tick+render (tests del Editor).
+    // Sin bombeo externo a propósito: run() lo hace UNA vez al tope de cada
+    // vuelta (antes de drenar SDL), así el camino idle no lo repite. Quien
+    // llame idleStep() directo (tests) bombea antes vía
+    // editor_.pollExternalEvents(), igual que run().
     if (gui_) gui_->setBlinkNow(now);
     editor_.tick(now);
     editor_.renderFrame();
@@ -243,6 +247,13 @@ int GuiRunLoop::run() {
     double wheelAcc = 0.0;
 
     while (editor_.isRunning()) {
+        // ÚNICO bombeo externo por vuelta (paridad con el pollExternalEvents
+        // del TtyRunLoop en readiness): inotify vía pollEvents(), sin fd. El
+        // clipboard SDL es síncrono (no-op). Va ANTES de drenar SDL para que
+        // una recarga por cambio externo quede visible en los renders de
+        // eventos de este mismo frame; la rama sin eventos reutiliza este
+        // bombeo (idleStep ya no lo repite: solo tick+render).
+        editor_.pollExternalEvents();
         SDL_Event ev;
         bool hadEvent = false;
         while (SDL_PollEvent(&ev)) {

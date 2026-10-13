@@ -76,8 +76,12 @@ public:
 
     // Camino idle (vuelta sin eventos) extraído para tests: EXACTAMENTE lo
     // que run() hace sin eventos, menos el SDL_Delay (propio del loop real
-    // con ventana). tick(now) expira mensajes con timeout y avanza el
-    // autoscroll; renderFrame repinta. Sin SDL: solo toca Editor + GuiRenderer.
+    // con ventana) y menos el bombeo externo (run() lo hace una vez al tope
+    // de cada vuelta; idleStep es solo tick+render). tick(now) expira
+    // mensajes con timeout y avanza el autoscroll; renderFrame repinta.
+    // Quien lo llame directo (tests) bombea antes vía
+    // editor_.pollExternalEvents(), igual que run(). Sin SDL: solo toca
+    // Editor + GuiRenderer.
     void idleStep(std::chrono::steady_clock::time_point now);
     // Delay del idle derivado del Editor (clamp 0..30ms; indefinido → 30).
     // Puro y sin SDL: la misma fórmula que run() pasa a SDL_Delay. Solo
