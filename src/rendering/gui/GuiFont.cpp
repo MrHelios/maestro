@@ -38,18 +38,22 @@ void* GuiFont::textTexture(void*, const std::string&, uint8_t, uint8_t, uint8_t,
 }
 int GuiFont::textWidth(const std::string&) const { return 0; }
 void GuiFont::clearCache() {}
+size_t GuiFont::cacheSize() const { return 0; }
+size_t GuiFont::maxCacheSize() const { return 512; }
+unsigned long long GuiFont::cacheHits() const { return 0; }
+unsigned long long GuiFont::cacheMisses() const { return 0; }
+unsigned long long GuiFont::cacheEvictions() const { return 0; }
 
 #else
 
+#include <list>
 #include <unordered_map>
 
 namespace {
-// Tope del caché de líneas: al superarlo se vacía ENTERO (sin LRU, FIFO ni
-// distinción por uso: la entrada 513 distinta invalida las 512 anteriores).
-// Deliberadamente tosco pero válido para Fase 1 (unas pocas líneas de prueba).
-// TODO(Fase 2): revisar antes del render real del Frame. Con viewport +
-// gutter + status + selección las entradas por frame pueden superar 512 y
-// entrar en ciclos de vaciado/render que tiran el caché en cada frame.
+// Tope del caché de texturas con política LRU acotada: al superar el límite
+// se destruye ÚNICAMENTE la entrada menos recientemente usada (una por
+// inserción), nunca flush total. El límite se mantiene en 512 a propósito:
+// no se aumenta a ciegas como sustituto de la evicción.
 constexpr size_t kMaxCachedLines = 512;
 
 struct CacheKey {
@@ -66,11 +70,25 @@ struct CacheKeyHash {
         return h;
     }
 };
-using TextCache = std::unordered_map<CacheKey, SDL_Texture*, CacheKeyHash>;
+// Caché LRU: map clave -> {textura, posición en lista} + lista de claves en
+// orden MRU->LRU (front = más reciente). En hit se promociona con splice O(1);
+// al insertar sobre el límite se evicta solo el back. Toda textura viva está
+// exactamente una vez en map y su clave una vez en la lista (invariante).
+struct TextCache {
+    struct Entry {
+        SDL_Texture* tex = nullptr;
+        std::list<CacheKey>::iterator lruIt;
+    };
+    std::unordered_map<CacheKey, Entry, CacheKeyHash> map;
+    std::list<CacheKey> lru;
+    unsigned long long hits = 0;
+    unsigned long long misses = 0;
+    unsigned long long evictions = 0;
+};
 
 void destroyCache(TextCache* c) {
     if (!c) return;
-    for (auto& kv : *c) SDL_DestroyTexture(kv.second);
+    for (auto& kv : c->map) SDL_DestroyTexture(kv.second.tex);
     delete c;
 }
 
@@ -211,18 +229,29 @@ void* GuiFont::textTexture(void* sdlRenderer, const std::string& text,
         renderer_ = sdlRenderer;
     }
     CacheKey key{text, static_cast<uint32_t>(r | (g << 8) | (b << 16) | (a << 24))};
-    auto it = cache->find(key);
-    if (it != cache->end()) return static_cast<void*>(it->second);
+    auto it = cache->map.find(key);
+    if (it != cache->map.end()) {
+        // Hit: promociona a MRU y devuelve la textura viva. Nunca se devuelve
+        // una textura destruida: la evicción borra del map y de la lista a la
+        // vez, así que todo lo que sigue en el map está vivo.
+        cache->lru.splice(cache->lru.begin(), cache->lru, it->second.lruIt);
+        ++cache->hits;
+        return static_cast<void*>(it->second.tex);
+    }
+    ++cache->misses;
 
-    if (cache->size() >= kMaxCachedLines) {
-        // Invariante: cache_ existe desde construcción hasta destrucción;
-        // la evicción vacía en el lugar (sin delete/new) para no dejar
-        // nunca un puntero colgando si `new` lanzara.
-        // Política deliberadamente tosca (flush total, sin LRU): vale para
-        // Fase 1, pero TODO(Fase 2) revisarla antes del render real del
-        // Frame (ver kMaxCachedLines).
-        for (auto& kv : *cache) SDL_DestroyTexture(kv.second);
-        cache->clear();
+    if (cache->map.size() >= kMaxCachedLines && !cache->lru.empty()) {
+        // Evicción LRU de UNA sola entrada (la menos usada): se destruye su
+        // textura y se borra del map y de la lista. El resto del caché sigue
+        // válido (sin flush total ni ciclos de vaciado/render).
+        const CacheKey& victim = cache->lru.back();
+        auto vit = cache->map.find(victim);
+        if (vit != cache->map.end()) {
+            SDL_DestroyTexture(vit->second.tex);
+            cache->map.erase(vit);
+            ++cache->evictions;
+        }
+        cache->lru.pop_back();
     }
     SDL_Color c{r, g, b, a};
     SDL_Surface* surf = TTF_RenderUTF8_Blended(static_cast<TTF_Font*>(font_),
@@ -238,7 +267,12 @@ void* GuiFont::textTexture(void* sdlRenderer, const std::string& text,
     // lo garantizan; sin blend el RenderCopy pegaría cajas negras opacas).
     // Se fija una vez al crear (el caché conserva el modo por textura).
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-    (*cache)[std::move(key)] = tex;
+    // Publica como MRU: la clave vive en la lista y el map guarda su iterador.
+    cache->lru.push_front(key);
+    TextCache::Entry e;
+    e.tex = tex;
+    e.lruIt = cache->lru.begin();
+    cache->map.emplace(std::move(key), e);
     return static_cast<void*>(tex);
 }
 
@@ -252,14 +286,37 @@ int GuiFont::textWidth(const std::string& text) const {
 
 void GuiFont::clearCache() {
     // Invariante (HAVE_SDL2_TTF): cache_ siempre existe desde construcción
-    // hasta destrucción; solo se vacía en el lugar. Además olvida el
-    // renderer activo (ver invariante en el header).
+    // hasta destrucción; solo se vacía en el lugar (una sola liberación por
+    // textura). Además olvida el renderer activo (ver invariante en el header).
     auto* cache = static_cast<TextCache*>(cache_);
     if (cache) {
-        for (auto& kv : *cache) SDL_DestroyTexture(kv.second);
-        cache->clear();
+        for (auto& kv : cache->map) SDL_DestroyTexture(kv.second.tex);
+        cache->map.clear();
+        cache->lru.clear();
     }
     renderer_ = nullptr;
+}
+
+size_t GuiFont::cacheSize() const {
+    const auto* cache = static_cast<const TextCache*>(cache_);
+    return cache ? cache->map.size() : 0;
+}
+
+size_t GuiFont::maxCacheSize() const { return kMaxCachedLines; }
+
+unsigned long long GuiFont::cacheHits() const {
+    const auto* cache = static_cast<const TextCache*>(cache_);
+    return cache ? cache->hits : 0;
+}
+
+unsigned long long GuiFont::cacheMisses() const {
+    const auto* cache = static_cast<const TextCache*>(cache_);
+    return cache ? cache->misses : 0;
+}
+
+unsigned long long GuiFont::cacheEvictions() const {
+    const auto* cache = static_cast<const TextCache*>(cache_);
+    return cache ? cache->evictions : 0;
 }
 
 #endif

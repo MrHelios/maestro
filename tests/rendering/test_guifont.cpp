@@ -235,4 +235,142 @@ TEST(guifont_textura_ancha_mide_doble_celda_exacta) {
 }
 #endif  // HAVE_SDL2
 
+#ifdef HAVE_SDL2
+// LRU acotada: hit devuelve la misma textura viva y cuenta recencia.
+TEST(guifont_lru_hit_misma_textura_y_contadores) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    SDL_Renderer* r = win.rA;
+    void* t1 = f.textTexture(static_cast<void*>(r), "lru-hit", 0xD4, 0xD4, 0xD4);
+    if (!t1) SKIP("el renderer dummy no crea texturas");
+    CHECK_EQ(f.cacheSize(), 1u);
+    void* t2 = f.textTexture(static_cast<void*>(r), "lru-hit", 0xD4, 0xD4, 0xD4);
+    CHECK(t1 == t2);
+    CHECK(f.cacheHits() >= 1);
+    CHECK(f.cacheMisses() >= 1);
+    CHECK_EQ(f.cacheSize(), 1u);
+    CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(t2), nullptr, nullptr) == 0);
+    f.unload();
+}
+
+// LRU acotada: superar el tope evicta de a una (sin flush total).
+// Con flush-total, tras 600 distintas el tamaño sería 600-512=88;
+// con LRU debe quedar clavado en el tope y las recientes deben seguir en hit.
+TEST(guifont_lru_eviccion_acotada_sin_flush) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    SDL_Renderer* r = win.rA;
+    const size_t max = f.maxCacheSize();
+    CHECK(max == 512u);
+    for (size_t i = 0; i < max + 80; ++i) {
+        void* t = f.textTexture(static_cast<void*>(r),
+                                "lru-fill-" + std::to_string(i), 0xD4, 0xD4, 0xD4);
+        if (!t) SKIP("el renderer dummy no crea texturas");
+    }
+    CHECK_EQ(f.cacheSize(), max);
+    CHECK(f.cacheEvictions() >= 80);
+    // La última insertada sigue viva (hit, mismo puntero, usable).
+    void* last1 = f.textTexture(static_cast<void*>(r), "lru-fill-591", 0xD4, 0xD4, 0xD4);
+    void* last2 = f.textTexture(static_cast<void*>(r), "lru-fill-591", 0xD4, 0xD4, 0xD4);
+    CHECK(last1 == last2);
+    CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(last2), nullptr, nullptr) == 0);
+    f.unload();
+}
+
+// Promoción LRU: el hit sube a MRU y sobrevive a la siguiente evicción,
+// mientras la verdadera LRU cae. Verifica además que no se devuelve una
+// textura ya destruida (la re-creada es usable y distinta).
+TEST(guifont_lru_promocion_sobrevive_eviccion) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    SDL_Renderer* r = win.rA;
+    const size_t max = f.maxCacheSize();
+    void* t0 = f.textTexture(static_cast<void*>(r), "lru-prom-0", 0xD4, 0xD4, 0xD4);
+    if (!t0) SKIP("el renderer dummy no crea texturas");
+    void* t1 = f.textTexture(static_cast<void*>(r), "lru-prom-1", 0xD4, 0xD4, 0xD4);
+    if (!t1) SKIP("el renderer dummy no crea texturas");
+    for (size_t i = 2; i < max; ++i) {
+        void* t = f.textTexture(static_cast<void*>(r),
+                                "lru-prom-" + std::to_string(i), 0xD4, 0xD4, 0xD4);
+        if (!t) SKIP("el renderer dummy no crea texturas");
+    }
+    CHECK_EQ(f.cacheSize(), max);
+    // Promociona k0 a MRU; k1 queda como LRU.
+    CHECK(f.textTexture(static_cast<void*>(r), "lru-prom-0", 0xD4, 0xD4, 0xD4) == t0);
+    // Una inserción nueva debe evictar k1, no k0.
+    void* tn = f.textTexture(static_cast<void*>(r), "lru-prom-nueva", 0xD4, 0xD4, 0xD4);
+    CHECK(tn != nullptr);
+    CHECK_EQ(f.cacheSize(), max);
+    // k0 sigue viva (mismo puntero, usable): no fue evictada.
+    void* t0b = f.textTexture(static_cast<void*>(r), "lru-prom-0", 0xD4, 0xD4, 0xD4);
+    CHECK(t0b == t0);
+    CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(t0b), nullptr, nullptr) == 0);
+    // k1 fue evictada: se re-crea (puntero distinto al destruido) y es usable.
+    // No se toca el puntero viejo t1 (destruido): solo se compara desigualdad.
+    void* t1b = f.textTexture(static_cast<void*>(r), "lru-prom-1", 0xD4, 0xD4, 0xD4);
+    CHECK(t1b != nullptr);
+    CHECK(t1b != t1);
+    CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(t1b), nullptr, nullptr) == 0);
+    f.unload();
+}
+
+// Cambio de renderer y clear: liberan una sola vez y nunca devuelven texturas viejas.
+TEST(guifont_lru_renderer_distinto_y_clear) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    void* tA = f.textTexture(static_cast<void*>(win.rA), "lru-ctx", 0xD4, 0xD4, 0xD4);
+    if (!tA) SKIP("el renderer dummy no crea texturas");
+    CHECK_EQ(f.cacheSize(), 1u);
+    void* tB = f.textTexture(static_cast<void*>(win.rB), "lru-ctx", 0xD4, 0xD4, 0xD4);
+    CHECK(tB != nullptr);
+    CHECK(tB != tA);  // nunca se devuelve la textura del otro renderer
+    CHECK_EQ(f.cacheSize(), 1u);
+    CHECK(SDL_RenderCopy(win.rB, static_cast<SDL_Texture*>(tB), nullptr, nullptr) == 0);
+    f.clearCache();
+    CHECK_EQ(f.cacheSize(), 0u);
+    f.clearCache();  // repetible, sin doble-free
+    void* tB2 = f.textTexture(static_cast<void*>(win.rB), "lru-ctx", 0xD4, 0xD4, 0xD4);
+    CHECK(tB2 != nullptr);
+    CHECK(SDL_RenderCopy(win.rB, static_cast<SDL_Texture*>(tB2), nullptr, nullptr) == 0);
+    f.unload();
+    CHECK_EQ(f.cacheSize(), 0u);
+}
+
+// Destructor con entradas vivas: no debe hacer doble-free ni crashear.
+// Si hubiera doble liberación, ASan/lo vería; acá al menos no cuelga ni aborta.
+TEST(guifont_lru_destructor_con_entradas_vivas_no_crashea) {
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    {
+        GuiFont f;
+        if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+        for (int i = 0; i < 16; ++i) {
+            void* t = f.textTexture(static_cast<void*>(win.rA),
+                                    "lru-dtor-" + std::to_string(i), 0xD4, 0xD4, 0xD4);
+            if (!t) SKIP("el renderer dummy no crea texturas");
+        }
+        CHECK_EQ(f.cacheSize(), 16u);
+        // Sale de scope sin unload()/clearCache(): el destructor libera una vez.
+    }
+}
+#endif  // HAVE_SDL2
+
 #endif  // HAVE_SDL2_TTF

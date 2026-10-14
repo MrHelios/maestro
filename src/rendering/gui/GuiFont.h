@@ -69,8 +69,8 @@ public:
     // `sdlRenderer` es SDL_Renderer* opaco. El color va en la clave del caché;
     // el renderer NO: si `sdlRenderer` difiere del renderer activo, el caché
     // se vacía primero para no devolver jamás una textura de otro renderer.
-    // El caché está acotado (flush total al llenarse, sin LRU): vale para
-    // Fase 1, revisar antes del render real del Frame (ver GuiFont.cpp).
+    // El caché está acotado con política LRU (evicción de una sola entrada
+    // al superar el tope, con promoción en cada hit).
     //
     // DIMENSIONES (contrato que sostiene al pintado sin recorte): la
     // superficie SDL_ttf blended mide la caja de AVANCE del texto (igual
@@ -92,6 +92,19 @@ public:
     // También olvida el renderer activo: la próxima textTexture() adoptará
     // el que reciba.
     void clearCache();
+
+    // Observabilidad del caché (solo lectura, para tests/métricas):
+    //   cacheSize()     -> entradas vivas (<= maxCacheSize()).
+    //   cacheHits()     -> aciertos acumulados de textTexture().
+    //   cacheMisses()   -> misses acumulados (intentos de raster).
+    //   cacheEvictions()-> evicciones LRU acumuladas (una por inserción
+    //                      sobre el límite, nunca flush total).
+    // Sin TTF siempre 0. No alteran el pintado.
+    size_t cacheSize() const;
+    size_t maxCacheSize() const;
+    unsigned long long cacheHits() const;
+    unsigned long long cacheMisses() const;
+    unsigned long long cacheEvictions() const;
 
 private:
     void* font_ = nullptr;     // TTF_Font* opaco (solo el .cpp conoce SDL_ttf)
