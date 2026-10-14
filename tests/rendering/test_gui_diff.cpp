@@ -654,7 +654,7 @@ TEST(gui_diff_cursor_move_con_seleccion_cae_a_completo_pero_correcto) {
     instrument::enable(false);
     // Construyó todo el viewport (fallback), pero el pintado sigue siendo
     // diferencial (caché válido) y el highlight quedó aplicado.
-    CHECK_EQ(m.renderEditorRow, 10);
+    CHECK_EQ(m.renderEditorRow, 10u);
     CHECK(!gui.lastWasFull());
     CHECK(gui.lastContentRows()[5].hasRole(StyleRole::Selection));
 }
@@ -863,7 +863,7 @@ TEST(gui_diff_scroll_con_seleccion_cambiada_fallback_completo) {
                          std::nullopt, std::nullopt);
     auto m = instrument::snapshotAndReset();
     instrument::enable(false);
-    CHECK_EQ(m.renderEditorRow, 10);  // camino completo
+    CHECK_EQ(m.renderEditorRow, 10u);  // camino completo
     CHECK(!gui.lastWasFull());        // ...pero pintado diferencial válido
     CHECK(gui.lastContentRows()[2].hasRole(StyleRole::Selection));
 }
@@ -891,7 +891,7 @@ TEST(gui_diff_scroll_delta_grande_fallback_completo) {
     renderDoc(gui, sink, doc, cur, vp, navChrome());
     auto m = instrument::snapshotAndReset();
     instrument::enable(false);
-    CHECK_EQ(m.renderEditorRow, 10);
+    CHECK_EQ(m.renderEditorRow, 10u);
     CHECK(contains(gui.lastContentRows()[0].plain(), "linea numero 15"));
 }
 
