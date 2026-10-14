@@ -47,6 +47,9 @@ public:
     // equivalente en raster y funciona con cualquier SDL_ttf (sin exigir
     // >=2.0.18).
     bool load(int pixelSize = 16);
+    // Variante que usa una ruta explícita (p. ej. --font). Si falla, no
+    // intenta fallbacks del sistema.
+    bool loadWithPath(int pixelSize, const std::string& path);
     void unload();
 
     bool ok() const { return font_ != nullptr; }

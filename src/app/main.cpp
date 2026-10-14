@@ -2,10 +2,12 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "app/CliArgs.h"
 #include "app/Editor.h"
 #include "filesystem/FileWatcherFactory.h"
 #include "platform/MouseButton.h"
 #include "platform/clipboard/ClipboardFactory.h"
+#include "platform/gui/GuiOptions.h"
 #include "platform/gui/GuiRunLoop.h"
 #include "platform/tty/TtyRunLoop.h"
 #include "rendering/gui/GuiRenderer.h"
@@ -14,39 +16,20 @@
 
 namespace {
 void printHelp(const char* prog) {
-    std::printf("Uso: %s [--gui] [archivo]\n", prog);
+    std::printf("Uso: %s [--gui] [opciones-gui] [archivo]\n", prog);
     std::printf("\n");
-    std::printf("  sin flags      modo terminal (TTY)\n");
-    std::printf("  --gui          modo ventana SDL2 (mismo binario)\n");
-    std::printf("  -h, --help     esta ayuda\n");
+    std::printf("  sin flags           modo terminal (TTY)\n");
+    std::printf("  --gui               modo ventana SDL2 (mismo binario)\n");
+    std::printf("  -h, --help          esta ayuda\n");
+    std::printf("\n");
+    std::printf("Opciones GUI (requieren --gui):\n");
+    std::printf("  --font <ruta>       fuente TTF monoespaciada (override MAESTRO_FONT)\n");
+    std::printf("  --font-size <pt>    tamaño base en puntos (default 16, escala HiDPI)\n");
+    std::printf("  --theme dark|light  tema inicial (default dark)\n");
+    std::printf("  --no-hidpi          desactiva SDL_WINDOW_ALLOW_HIGHDPI\n");
+    std::printf("  --geometry WxH      tamaño inicial ventana en puntos (ej. 1200x800)\n");
 }
 
-struct Args {
-    bool gui = false;
-    bool help = false;
-    std::string file;
-    bool bad = false;
-};
-
-Args parseArgs(int argc, char* argv[]) {
-    Args a;
-    for (int i = 1; i < argc; ++i) {
-        std::string s = argv[i];
-        if (s == "--gui") {
-            a.gui = true;
-        } else if (s == "-h" || s == "--help") {
-            a.help = true;
-        } else if (!s.empty() && s[0] == '-' && a.file.empty()) {
-            // Flag desconocido: error claro en vez de tratarlo como archivo.
-            a.bad = true;
-        } else if (a.file.empty()) {
-            a.file = s;
-        } else {
-            a.bad = true;
-        }
-    }
-    return a;
-}
 }  // namespace
 
 // main es el composition root: acá se cablean los backends concretos
@@ -85,11 +68,11 @@ int main(int argc, char* argv[]) {
         // Clipboard SDL (reemplaza X11: SDL_Get/SetClipboardText, síncrono
         // sin INCR); watcher inotify reusado tal cual (vía makeFileWatcher,
         // el GuiRunLoop lo bombea con pollEvents, sin fd).
-        auto guiRenderer = std::make_unique<GuiRenderer>();
+        auto guiRenderer = std::make_unique<GuiRenderer>(args.guiOptions);
         GuiRenderer* raw = guiRenderer.get();
         Editor editor(std::move(guiRenderer), makeSdlClipboard(), makeFileWatcher());
         if (int rc = openFile(editor)) return rc;
-        GuiRunLoop loop(editor);
+        GuiRunLoop loop(editor, args.guiOptions);
         loop.setGuiRenderer(raw);
         return loop.run();
     }

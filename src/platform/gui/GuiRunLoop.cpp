@@ -16,7 +16,8 @@
 #include "platform/gui/GuiSdlMapper.h"
 #endif
 
-GuiRunLoop::GuiRunLoop(Editor& editor) : editor_(editor) {}
+GuiRunLoop::GuiRunLoop(Editor& editor, const GuiOptions& opts)
+    : editor_(editor), options_(opts) {}
 
 void GuiRunLoop::idleStep(std::chrono::steady_clock::time_point now) {
     // Inyecta el tiempo de blink antes de pintar: la fase ON/OFF sale de
@@ -101,9 +102,10 @@ namespace {
 // La celda de respaldo es la canónica (platform::kFallbackCellW/H, ver
 // WindowSize.h): con HiDPI se escala por eje con guiScaleSize, ver
 // currentSize/mouseCell.
-// Talla base a escala 1 (puntos == píxeles del drawable). El tamaño real se
-// escala por eje vertical con guiScaledFontPixels (contrato visual-estable).
-constexpr int kBaseFontPixels = 16;
+// Talla base a escala 1 (puntos de fuente, no píxeles del drawable). El
+// tamaño real se escala por eje vertical con guiScaledFontPixels (contrato
+// visual-estable). El valor por defecto es 16 pt; se puede cambiar con
+// --font-size.
 
 #ifdef HAVE_SDL2
 // Guard RAII del estado TextInput de SDL: garantiza SDL_StopTextInput()
@@ -148,9 +150,15 @@ int GuiRunLoop::run() {
         return (st & SDL_BUTTON_LMASK) != 0;
     });
 
+    Uint32 windowFlags = SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE;
+    if (options_.enableHiDpi) windowFlags |= SDL_WINDOW_ALLOW_HIGHDPI;
+
+    int winW = options_.windowWidth.value_or(960);
+    int winH = options_.windowHeight.value_or(600);
+
     SDL_Window* win = SDL_CreateWindow(
-        "Maestro", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 960, 600,
-        SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+        "Maestro", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, winW, winH,
+        windowFlags);
     if (!win) {
         std::fprintf(stderr, "maestro: SDL_CreateWindow falló: %s\n",
                      SDL_GetError());
@@ -180,7 +188,20 @@ int GuiRunLoop::run() {
     sdlRen_ = static_cast<void*>(ren);
     // Abre la fuente y mide la celda real ANTES del primer resize: de acá
     // salen cols/filas = píxeles/celda (ya no estimados).
-    if (gui_) gui_->initForRenderer(static_cast<void*>(ren));
+    // En puntos de fuente (pt), no píxeles: el escalado HiDPI a píxeles
+    // ocurre en currentSize vía guiScaledFontPixels.
+    const int baseFontPt = options_.fontSize.value_or(16);
+    if (gui_ && !gui_->initForRenderer(static_cast<void*>(ren), baseFontPt)) {
+        std::fprintf(stderr, "maestro: error al abrir la fuente '%s' especificada con --font\n",
+                     options_.fontPath.value_or("").c_str());
+        if (gui_) gui_->setSdlRenderer(nullptr);
+        sdlWin_ = nullptr;
+        sdlRen_ = nullptr;
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+        return 1;
+    }
     // POLÍTICA TEXT INPUT (explícita): habilitado durante TODO el run,
     // también en navegación. SDL gestiona la composición de forma continua
     // y alternar Start/Stop por modo la interrumpiría al cambiar entre
@@ -206,9 +227,10 @@ int GuiRunLoop::run() {
             outW = winW > 0 ? winW : 960;
             outH = winH > 0 ? winH : 600;
         }
-        if (gui_)
+        if (gui_) {
             gui_->ensureFontPixels(
-                guiScaledFontPixels(kBaseFontPixels, winH, outH));
+                guiScaledFontPixels(baseFontPt, winH, outH));
+        }
         int cw = 0, ch = 0;
         if (gui_ && gui_->hasFont()) {
             cw = gui_->cellW();
@@ -261,6 +283,7 @@ int GuiRunLoop::run() {
         return guiCellFromPixelsBounded(pxX, pxY, cw, ch, g.cols, g.rows);
     };
     editor_.resize(currentSize());
+    // Tema inicial ya establecido en GuiRenderer constructor
     renderWithBlink();
 
     // Resto fraccionario de rueda sin emitir (ver SDL_MOUSEWHEEL): un táctil

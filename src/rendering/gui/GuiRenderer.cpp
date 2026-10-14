@@ -9,7 +9,9 @@
 #include <SDL2/SDL.h>
 #endif
 
-GuiRenderer::GuiRenderer() = default;
+GuiRenderer::GuiRenderer(const GuiOptions& opts) : options_(opts) {
+    if (opts.theme == GuiTheme::Light) dark_ = false;
+}
 GuiRenderer::~GuiRenderer() { destroyFramebuf(); }
 
 void GuiRenderer::destroyFb(FrameSurface& s) {
@@ -73,9 +75,17 @@ void GuiRenderer::setSdlRenderer(void* r) {
     sdlRenderer_ = r;
 }
 
-void GuiRenderer::initForRenderer(void* r, int fontPixels) {
+bool GuiRenderer::initForRenderer(void* r, int fontPixels) {
     setSdlRenderer(r);
-    if (r) font_.load(fontPixels);
+    if (!r) return true;
+    if (options_.fontPath.has_value()) {
+        if (!font_.loadWithPath(fontPixels, *options_.fontPath)) {
+            return false;
+        }
+    } else {
+        font_.load(fontPixels);
+    }
+    return true;
 }
 
 bool GuiRenderer::readLastSurfacePixels(std::vector<GuiColor>& out, int& wPx,
@@ -117,7 +127,14 @@ void GuiRenderer::ensureFontPixels(int desiredPixels) {
     // Sin cambio de talla y con fuente válida: no se toca nada (el reload
     // vaciaría el caché de texturas en cada resize sin necesidad).
     if (font_.ok() && font_.pixelSize() == desiredPixels) return;
-    font_.load(desiredPixels);
+    // Respeta --font: la talla escalada por HiDPI se reabre desde la ruta
+    // explícita, no desde los candidatos del sistema (si no, el primer
+    // resize perdería la fuente custom).
+    if (options_.fontPath.has_value()) {
+        font_.loadWithPath(desiredPixels, *options_.fontPath);
+    } else {
+        font_.load(desiredPixels);
+    }
 }
 
 void GuiRenderer::toggleTheme() {

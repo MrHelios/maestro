@@ -20,6 +20,12 @@ bool GuiFont::load(int pixelSize) {
     pixelSize_ = pixelSize;
     return false;
 }
+
+bool GuiFont::loadWithPath(int pixelSize, const std::string&) {
+    if (pixelSize <= 0) return false;
+    pixelSize_ = pixelSize;
+    return false;
+}
 void GuiFont::unload() {
     font_ = nullptr;
     path_.clear();
@@ -135,6 +141,36 @@ bool GuiFont::load(int pixelSize) {
     // Celda: avance horizontal de 'M' (vale para todos los glifos solo
     // si la fuente es monoespaciada, requisito documentado en el header) y
     // alto de línea de la fuente.
+    int advance = 0;
+    int minx = 0, maxx = 0, miny = 0, maxy = 0;
+    if (TTF_GlyphMetrics(f, 'M', &minx, &maxx, &miny, &maxy, &advance) == 0 &&
+        advance > 0) {
+        cellW_ = advance;
+    } else {
+        int w = 0, h = 0;
+        if (TTF_SizeUTF8(f, "M", &w, &h) == 0 && w > 0) cellW_ = w;
+    }
+    cellH_ = TTF_FontHeight(f);
+    if (cellH_ <= 0) cellH_ = pixelSize_;
+    return true;
+}
+
+bool GuiFont::loadWithPath(int pixelSize, const std::string& path) {
+    if (pixelSize <= 0) return false;
+    unload();
+    pixelSize_ = pixelSize;
+
+    if (g_tffInitCount == 0 && TTF_Init() != 0) return false;
+    ++g_tffInitCount;
+
+    TTF_Font* f = TTF_OpenFont(path.c_str(), pixelSize_);
+    if (!f) {
+        if (--g_tffInitCount == 0) TTF_Quit();
+        return false;
+    }
+    font_ = static_cast<void*>(f);
+    path_ = path;
+
     int advance = 0;
     int minx = 0, maxx = 0, miny = 0, maxy = 0;
     if (TTF_GlyphMetrics(f, 'M', &minx, &maxx, &miny, &maxy, &advance) == 0 &&

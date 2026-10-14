@@ -18,6 +18,7 @@
 #include "rendering/frame/Frame.h"
 #include "rendering/frame/FrameBuilder.h"
 #include "rendering/gui/GuiChrome.h"
+#include "platform/gui/GuiOptions.h"
 #include "rendering/gui/GuiFont.h"
 #include "syntax/SyntaxCache.h"
 
@@ -82,7 +83,7 @@ struct GuiPixelRect {
 
 class GuiRenderer : public ScreenRenderer {
 public:
-    GuiRenderer();
+    explicit GuiRenderer(const GuiOptions& opts = GuiOptions{});
     ~GuiRenderer() override;
 
     // Caché diferencial por línea (paridad conceptual con TtyDiff en TTY,
@@ -165,13 +166,17 @@ public:
     void setSdlRenderer(void* r);
     // Variante completa: inyecta renderer + abre la fuente y mide la celda.
     // Debe llamarse tras crear el SDL_Renderer y antes del primer resize.
-    void initForRenderer(void* r, int fontPixels = 16);
+    // Devuelve true si la inicialización fue exitosa (fuente cargada o fallback).
+    // Devuelve false si se solicitó una fuente explícita (--font) y falló al abrirla.
+    bool initForRenderer(void* r, int fontPixels = 16);
     // Asegura la talla de fuente escalada por HiDPI (contrato visual-estable:
     // ver guiScaledFontPixels en GuiSdlMapper.h). Reabre SOLO si la talla
     // deseada difiere de la actual (o si no hay fuente): los resizes que no
     // cambian de escala no pagan recarga ni vacían el caché de texturas.
-    // `desiredPixels <= 0` es no-op. Sin fuente disponible (load falla) es
-    // no-op seguro: el loop usa el fallback escalado por eje.
+    // Respeta --font (loadWithPath) cuando hay ruta explícita; si no, usa
+    // los candidatos del sistema. `desiredPixels <= 0` es no-op. Sin fuente
+    // disponible (load falla) es no-op seguro: el loop usa el fallback
+    // escalado por eje.
     void ensureFontPixels(int desiredPixels);
     int fontPixels() const { return font_.pixelSize(); }
 
@@ -276,6 +281,7 @@ public:
                               Sink& sink) override;
 
 private:
+    GuiOptions options_;
     bool dark_ = true;
     FrameBuilder frameBuilder_;
     // SDL_Renderer* opaco (solo se toca en el .cpp bajo HAVE_SDL2).

@@ -3,6 +3,7 @@
 #include <chrono>
 
 #include "platform/gui/GuiKeymap.h"
+#include "platform/gui/GuiOptions.h"
 #include "platform/gui/IGuiKeymap.h"
 
 class Editor;
@@ -68,7 +69,7 @@ class GuiRenderer;
 
 class GuiRunLoop {
 public:
-    explicit GuiRunLoop(Editor& editor);
+    GuiRunLoop(Editor& editor, const GuiOptions& opts = GuiOptions{});
     void setGuiRenderer(GuiRenderer* r) { gui_ = r; }
     // Tabla tecla -> Evento que el SDL_KEYDOWN consulta (remapeable en
     // tiempo de ejecución). Única vía pública: la interfaz GUI; el tipo
@@ -95,6 +96,7 @@ public:
 
 private:
     Editor& editor_;
+    GuiOptions options_;
     GuiRenderer* gui_ = nullptr;
     // Significado de cada tecla. Se consulta en cada SDL_KEYDOWN;
     // remapeable en tiempo de ejecución vía keymapIface().

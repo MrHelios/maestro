@@ -57,6 +57,16 @@ make
 
 Genera `build/maestro`. Requiere `g++` C++17, `libX11` y `pthread`.
 
+### Compilación con GUI
+
+```bash
+make WITH_SDL2=1              # Habilita GUI (requiere libsdl2-dev)
+make WITH_SDL2=1 WITH_SDL2_TTF=1  # Con texto (recomendado, requiere libsdl2-ttf-dev)
+make WITH_SDL2=0              # Solo TTY (binario menor, sin dependencia SDL)
+```
+
+Sin `libsdl2-ttf-dev` la GUI compila en **modo degradado**: fondo sólido sin renderizado de texto.
+
 ## Ejecutar
 
 ```bash
@@ -67,6 +77,46 @@ Genera `build/maestro`. Requiere `g++` C++17, `libX11` y `pthread`.
 
 Si el archivo no existe se crea en memoria (guardar con `Ctrl+K s`). Las carpetas no se abren como archivo.
 Wrapper opcional `./maestro` (si existe en la raíz) delega en `make`/`build/maestro`.
+
+### Modo GUI (--gui)
+
+```bash
+./build/maestro --gui [opciones-gui] [archivo]
+```
+
+#### Opciones GUI
+
+| Opción | Descripción |
+|--------|-------------|
+| `--font <ruta>` | Fuente TTF monoespaciada (override `MAESTRO_FONT`) |
+| `--font-size <pt>` | Tamaño base en puntos (default 16, escala HiDPI) |
+| `--theme dark\|light` | Tema inicial (default `dark`) |
+| `--no-hidpi` | Desactiva `SDL_WINDOW_ALLOW_HIGHDPI` |
+| `--geometry WxH` | Tamaño inicial ventana en puntos (ej. `1200x800`) |
+
+#### Variables de entorno
+
+- `MAESTRO_FONT` — Ruta a fuente TTF monoespaciada (prioridad sobre candidatos del sistema)
+- `SDL_VIDEODRIVER` — Fuerza driver SDL (`x11`, `wayland`, `dummy` para tests)
+
+#### Atajos GUI adicionales
+
+| Tecla | Acción |
+|-------|--------|
+| Click izq | Posicionar cursor / Seleccionar (drag) |
+| Rueda | Scroll ±3 líneas |
+| Doble click | Seleccionar palabra |
+| `Ctrl+K l` | Toggle tema (dark/light) |
+
+#### Ejemplos
+
+```bash
+# Ventana 1200x800 con tema claro y fuente personalizada
+./build/maestro --gui --theme light --font /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf --geometry 1200x800 archivo.cpp
+
+# Sin HiDPI (útil en algunos entornos Wayland/XWayland)
+./build/maestro --gui --no-hidpi archivo.txt
+```
 
 ## Instalación
 
