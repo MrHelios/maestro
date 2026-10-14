@@ -7,37 +7,14 @@ Mayoritariamente *vibecode* con supervisión del creador.
 
 ## Estado actual
 
-- **Versión:** `v0.10` (alpha)
-- **Estado:** en desarrollo activo
+- **Versión:** `v0.11` (alpha)
+- **Estado:** Activo
 - **Plataforma:** Linux/Ubuntu X11
 
-## Cambios: v0.10
+## Cambios: v0.11
 
-- auto-scroll en los limites superior o inferior
-- se puede hacer click y scroll con el mouse
-- se puede marcar texto con el mouse
-- mejorado de optimizacion
-- se muestra texto para .cpp , .c y .h coloreado
-- se marcan los [](){} y tambien se puede usar comando para saltar
-- se mejoraron los test de performance, para que el output se simple o verborragico
-
-## Cambios: v0.9
-
-- se corrigieron todos los test: documetnacion, nombres y Bugs
-- hay muchos test que glitchean feo cuando se los ejecuta (problema menor)
-- falta optimizar utf-8 (critico)
-- entender mejor como se renderiza, para proponer mejoras (ha mejorado pero aun no es top)
-- agregar el comando g: para ir a determinada fila (solo util en navegacion)
-- poder hacer sangria o quitar sangria en navegacion , solo afectaria a fila (mas practico)
-- cuando inicias el editor muestra un mensaje para los comando. 
-- los mensajes no deben tener colores
-- mediante el comando: contro+k l, se puede alternar tema oscuro y tema claro
-- control+k b, no funciona como se espera, hay que revisar
-- se optimizo parcialmente el metodo de guardado de archivos.
-- hay dos carpetas de testing, una en raiz y otra en test, remover la que esta en raiz y verificar que todo los test funcionan
-- nuevo comando: control+k b y vuelve al anterior archivo (si es que se abrio uno nuevo)
-- cursor: cuando estas en modo navegacion, debe permanecer fijo, pero si estas en modo interaccion, debe parpadear.
-- cuando usas comando para abrir un nuevo archivo, te debe poner donde en la direccion del actual archivo. actualmente se utiliza la direccion donde se ejecuta el editor.
+- se implemento la gui
+- ahora se puede hacer ~/.local/bin/maestro --gui
 
 ## Características
 
