@@ -28,7 +28,8 @@ void GuiRenderer::destroyFb(FrameSurface& s) {
 }
 
 void GuiRenderer::destroyFramebuf() {
-    destroyFb(contentFb_);
+    destroyFb(contentFb_[0]);
+    destroyFb(contentFb_[1]);
     destroyFb(listFb_);
 }
 
@@ -71,6 +72,7 @@ void GuiRenderer::setSdlRenderer(void* r) {
         font_.clearCache();
         destroyFramebuf();
         framebufTarget_ = 0;
+        contentFbActive_ = 0;
     }
     sdlRenderer_ = r;
 }
@@ -96,7 +98,8 @@ bool GuiRenderer::readLastSurfacePixels(std::vector<GuiColor>& out, int& wPx,
 #ifdef HAVE_SDL2
     if (!sdlRenderer_) return false;
     SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
-    const FrameSurface& s = lastIsList_ ? listFb_ : contentFb_;
+    const FrameSurface& s =
+        lastIsList_ ? listFb_ : contentFb_[contentFbActive_];
     SDL_Texture* fb = static_cast<SDL_Texture*>(s.tex);
     if (!fb || s.w <= 0 || s.h <= 0) return false;
     // Guarda/restaura el destino activo: la lectura no perturba al loop.
@@ -925,6 +928,49 @@ void presentFramebuf(SDL_Renderer* r, SDL_Texture* fb, const GuiColor& bg) {
     SDL_RenderCopy(r, fb, nullptr, &dst);
     SDL_RenderPresent(r);
 }
+
+// Cursor del contenido resuelto desde el SNAPSHOT (GuiContentRow), sin Frame.
+// Espejo de la rama de contenido de paintCursorOnly (Bar 2px / Block con
+// glifo invertido vía blockGlyphInSnapshot): la usan los caminos rápidos,
+// que no construyen el Frame. Paridad congelada en tests de píxeles SDL.
+void paintContentCursorFromSnapshot(SDL_Renderer* r, GuiFont& font, bool dark,
+                                    const Layout& layout,
+                                    const std::vector<GuiContentRow>& rows,
+                                    const FrameCursor& cursor, bool shown) {
+    if (!shown || !cursor.visible || !cursor.cell.valid()) return;
+    const int cw = font.cellW();
+    const int ch = font.cellH();
+    if (cw <= 0 || ch <= 0) return;
+    const GuiColor cc = guichrome::cursorColor(dark);
+    const int px = cursor.cell.col * cw;
+    const int py = cursor.cell.row * ch;
+    if (cursor.shape == FrameCursorShape::Bar) {
+        SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
+        SDL_Rect crect{px, py, 2, ch};
+        SDL_RenderFillRect(r, &crect);
+        return;
+    }
+    const BlockGlyph glyph = blockGlyphInSnapshot(rows, layout, cursor, dark);
+    const int wpx =
+        (glyph.hasGlyph && glyph.widthCols == 2) ? 2 * cw : cw;
+    SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
+    SDL_Rect crect{px, py, wpx, ch};
+    SDL_RenderFillRect(r, &crect);
+    if (glyph.hasGlyph && font.ok()) {
+        const GuiColor cellBg = glyph.hasCellBg
+                                    ? glyph.cellBg
+                                    : guichrome::background(dark);
+        const GuiColor fg = guichrome::cursorGlyphFg(cellBg, dark);
+        void* tex = font.textTexture(r, glyph.text, fg.r, fg.g, fg.b);
+        if (tex) {
+            SDL_Texture* t = static_cast<SDL_Texture*>(tex);
+            int tw = 0, th = 0;
+            SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+            SDL_Rect dst{px, py, tw, th};
+            SDL_RenderCopy(r, t, nullptr, &dst);
+        }
+    }
+}
 #endif
 
 // Dibuja el chrome (StatusBar + MessageBar) y el cursor sobre el destino
@@ -1142,7 +1188,9 @@ bool GuiRenderer::tryFastCursorMove(
     // el fallback pinta TODO directo, pero acá no hay Frame completo con que
     // hacerlo). Caer al camino completo, que sí lo tiene. Sin SDL no hay
     // pintado y el camino rápido sigue valiendo (ahorro de CPU puro).
-    if (sdlRenderer_ && contentFb_.tex == nullptr) return false;
+    if (sdlRenderer_ && contentFb_[contentFbActive_].tex == nullptr) {
+        return false;
+    }
 #endif
     // Chrome barato (sin filas): si cambió se repinta aunque el contenido no.
     const FrameBuilder::ChromePayload payload =
@@ -1265,8 +1313,8 @@ bool GuiRenderer::tryFastCursorMove(
         SDL_Texture* fb = nullptr;
         if (framePxSize(g.layout, font_.cellW(), font_.cellH(), wPx, hPx)) {
             bool fr = false;
-            fb = static_cast<SDL_Texture*>(
-                acquireFb(contentFb_, sdlRenderer_, wPx, hPx, fr));
+            fb = static_cast<SDL_Texture*>(acquireFb(
+                contentFb_[contentFbActive_], sdlRenderer_, wPx, hPx, fr));
             fbFresh = (fb != nullptr) && fr;
         }
         // Pre-chequeado arriba: fb existe y no es fresco (misma geometría).
@@ -1304,48 +1352,9 @@ bool GuiRenderer::tryFastCursorMove(
         if (paintChrome)
             paintChromeOnly(r, font_, dark_, g.layout, payload.data,
                             payload.statusAccent);
-        // Cursor (espejo de paintCursorOnly, glifo desde el snapshot: el
-        // camino rápido no tiene Frame para blockGlyphInContent).
-        if (shown && next.visible && next.cell.valid()) {
-            const int ccw = font_.cellW();
-            const int cch = font_.cellH();
-            if (ccw > 0 && cch > 0) {
-                const GuiColor cc = guichrome::cursorColor(dark_);
-                const int px = next.cell.col * ccw;
-                const int py = next.cell.row * cch;
-                if (next.shape == FrameCursorShape::Bar) {
-                    SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
-                    SDL_Rect crect{px, py, 2, cch};
-                    SDL_RenderFillRect(r, &crect);
-                } else {
-                    const BlockGlyph glyph = blockGlyphInSnapshot(
-                        contentRows_, g.layout, next, dark_);
-                    const int wpx =
-                        (glyph.hasGlyph && glyph.widthCols == 2) ? 2 * ccw
-                                                                : ccw;
-                    SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
-                    SDL_Rect crect{px, py, wpx, cch};
-                    SDL_RenderFillRect(r, &crect);
-                    if (glyph.hasGlyph && font_.ok()) {
-                        const GuiColor cellBg =
-                            glyph.hasCellBg
-                                ? glyph.cellBg
-                                : guichrome::background(dark_);
-                        const GuiColor fg =
-                            guichrome::cursorGlyphFg(cellBg, dark_);
-                        void* tex = font_.textTexture(r, glyph.text, fg.r,
-                                                      fg.g, fg.b);
-                        if (tex) {
-                            SDL_Texture* t = static_cast<SDL_Texture*>(tex);
-                            int tw = 0, th = 0;
-                            SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-                            SDL_Rect dst{px, py, tw, th};
-                            SDL_RenderCopy(r, t, nullptr, &dst);
-                        }
-                    }
-                }
-            }
-        }
+        // Cursor desde el snapshot (sin Frame en el camino rápido).
+        paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
+                                       contentRows_, next, shown);
         presentFramebuf(r, fb, bg);
     }
 #else
@@ -1406,7 +1415,9 @@ bool GuiRenderer::tryFastScrollLine(
 #ifdef HAVE_SDL2
     // Igual que el camino de cursor-move: sin superficie persistente no hay
     // parcial seguro y acá no hay Frame completo con que pintar el fallback.
-    if (sdlRenderer_ && contentFb_.tex == nullptr) return false;
+    if (sdlRenderer_ && contentFb_[contentFbActive_].tex == nullptr) {
+        return false;
+    }
 #endif
     const FrameBuilder::ChromePayload payload =
         frameBuilder_.buildChrome(filename, modified, cursor,
@@ -1479,23 +1490,36 @@ bool GuiRenderer::tryFastScrollLine(
     lastContentRows_[static_cast<size_t>(enteringRel)] =
         contentRows_[static_cast<size_t>(enteringRel)];
     const int lines[2] = {contentCursorLine_, cursor.line};
+    // dirty físico (para el pintado con blit): entrante + extras que
+    // cambiaron + filas del cursor (el blit arrastra píxeles viejos del
+    // cursor: hay que repintar su borrado y su dibujado desde el snapshot).
+    std::vector<char> dirty(static_cast<size_t>(std::max(0, H)), 0);
+    dirty[static_cast<size_t>(enteringRel)] = 1;
     for (int li = 0; li < 2; ++li) {
         const int rel = lines[li] - viewport.top;
         if (rel < 0 || rel >= H || rel == enteringRel) continue;
         GuiContentRow gr = buildSnap(viewport.top + rel);
-        contentRows_[static_cast<size_t>(rel)] = gr;
-        lastContentRows_[static_cast<size_t>(rel)] = gr;
+        if (gr != contentRows_[static_cast<size_t>(rel)]) {
+            contentRows_[static_cast<size_t>(rel)] = gr;
+            lastContentRows_[static_cast<size_t>(rel)] = gr;
+            dirty[static_cast<size_t>(rel)] = 1;
+        }
     }
-    // Sin blit GPU (etapa siguiente), todas las filas físicas cambian de
-    // píxeles: se repintan desde el caché (hits de texturas, sin TTF). El
-    // ahorro de esta etapa es CPU (construcción O(1)) + allocs, no pintado.
-    const int repainted = H;
-    const int skipped = 0;
     const FrameCursor prevContent = contentCursor_;
     const bool cursorChanged =
         prevContent.visible != next.visible ||
         prevContent.shape != next.shape ||
         !(prevContent.cell == next.cell);
+    if (cursorChanged) {
+        markCursorRow(dirty, g.layout, prevContent);
+        markCursorRow(dirty, g.layout, next);
+    } else if (next.visible &&
+               next.shape == FrameCursorShape::Bar &&
+               next.cell.valid()) {
+        markCursorRow(dirty, g.layout, next);
+    }
+    int repainted = 0, skipped = 0;
+    for (char d : dirty) (d ? repainted : skipped) += 1;
     bool paintChrome = chromeDirty;
     {
         const bool newBar = isChromeBar(next, g.layout);
@@ -1531,68 +1555,80 @@ bool GuiRenderer::tryFastScrollLine(
     if (sdlRenderer_) {
         SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
         const GuiColor bg = guichrome::background(dark_);
+        const int ccw = font_.cellW();
+        const int cch = font_.cellH();
         int wPx = 0, hPx = 0;
-        bool fbFresh = false;
-        SDL_Texture* fb = nullptr;
-        if (framePxSize(g.layout, font_.cellW(), font_.cellH(), wPx, hPx)) {
-            bool fr = false;
-            fb = static_cast<SDL_Texture*>(
-                acquireFb(contentFb_, sdlRenderer_, wPx, hPx, fr));
-            fbFresh = (fb != nullptr) && fr;
-        }
-        if (!fb || fbFresh) {
+        if (!framePxSize(g.layout, ccw, cch, wPx, hPx) || ccw <= 0 ||
+            cch <= 0) {
             invalidateCache();
             return true;
         }
-        SDL_SetRenderTarget(r, fb);
+        // Activa (imagen vigente) y destino del ping-pong. Nunca se copia
+        // una textura sobre sí misma (SDL lo deja indefinido): el blit va de
+        // la activa a la inactiva y se conmuta al presentar.
+        const int srcIdx = contentFbActive_;
+        const int dstIdx = 1 - contentFbActive_;
+        bool srcFresh = false, dstFresh = false;
+        SDL_Texture* srcFb = static_cast<SDL_Texture*>(
+            acquireFb(contentFb_[srcIdx], sdlRenderer_, wPx, hPx, srcFresh));
+        SDL_Texture* dstFb = static_cast<SDL_Texture*>(
+            acquireFb(contentFb_[dstIdx], sdlRenderer_, wPx, hPx, dstFresh));
+        if (!srcFb || !dstFb || srcFresh) {
+            // Sin destino (OOM) o sin origen válido: se invalida y el próximo
+            // frame será completo. El destino fresco NO invalida: el blit lo
+            // cubre entero (contenido desplazado + entrante) más chrome.
+            if (!dstFb || srcFresh) {
+                invalidateCache();
+                return true;
+            }
+            // Fallback sin blit (solo si el destino falló pero el origen
+            // vale): repintado desde caché sobre la activa, como la etapa
+            // anterior. No conmuta.
+            SDL_SetRenderTarget(r, srcFb);
+            for (int i = 0; i < H; ++i) {
+                paintSnapshotRow(r, font_, dark_, g.layout, i,
+                                 contentRows_[static_cast<size_t>(i)]);
+            }
+            if (paintChrome)
+                paintChromeOnly(r, font_, dark_, g.layout, payload.data,
+                                payload.statusAccent);
+            paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
+                                           contentRows_, next, shown);
+            presentFramebuf(r, srcFb, bg);
+            return true;
+        }
+        // Scroll-blit: desplaza la región de contenido ±1 fila hacia el
+        // destino. El chrome NO se desplaza (posición fija): se repinta
+        // siempre sobre el destino (2 filas baratas; su región en el destino
+        // puede estar obsoleta y el blit no la cubre).
+        SDL_SetRenderTarget(r, dstFb);
+        if (H > 1) {
+            const int x0 = g.layout.content.col * ccw;
+            const int y0 = g.layout.content.row * cch;
+            const int wRow = g.layout.content.width * ccw;
+            SDL_Rect src{0, 0, 0, 0}, dst{0, 0, 0, 0};
+            if (delta == 1) {
+                // El contenido sube: destino[i] <- origen[i+1].
+                src = SDL_Rect{x0, y0 + cch, wRow, (H - 1) * cch};
+                dst = SDL_Rect{x0, y0, wRow, (H - 1) * cch};
+            } else {
+                // El contenido baja: destino[i] <- origen[i-1].
+                src = SDL_Rect{x0, y0, wRow, (H - 1) * cch};
+                dst = SDL_Rect{x0, y0 + cch, wRow, (H - 1) * cch};
+            }
+            SDL_RenderCopy(r, srcFb, &src, &dst);
+        }
         for (int i = 0; i < H; ++i) {
+            if (!dirty[static_cast<size_t>(i)]) continue;
             paintSnapshotRow(r, font_, dark_, g.layout, i,
                              contentRows_[static_cast<size_t>(i)]);
         }
-        if (paintChrome)
-            paintChromeOnly(r, font_, dark_, g.layout, payload.data,
-                            payload.statusAccent);
-        if (shown && next.visible && next.cell.valid()) {
-            const int ccw = font_.cellW();
-            const int cch = font_.cellH();
-            if (ccw > 0 && cch > 0) {
-                const GuiColor cc = guichrome::cursorColor(dark_);
-                const int px = next.cell.col * ccw;
-                const int py = next.cell.row * cch;
-                if (next.shape == FrameCursorShape::Bar) {
-                    SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
-                    SDL_Rect crect{px, py, 2, cch};
-                    SDL_RenderFillRect(r, &crect);
-                } else {
-                    const BlockGlyph glyph = blockGlyphInSnapshot(
-                        contentRows_, g.layout, next, dark_);
-                    const int wpx =
-                        (glyph.hasGlyph && glyph.widthCols == 2) ? 2 * ccw
-                                                                : ccw;
-                    SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
-                    SDL_Rect crect{px, py, wpx, cch};
-                    SDL_RenderFillRect(r, &crect);
-                    if (glyph.hasGlyph && font_.ok()) {
-                        const GuiColor cellBg =
-                            glyph.hasCellBg
-                                ? glyph.cellBg
-                                : guichrome::background(dark_);
-                        const GuiColor fg =
-                            guichrome::cursorGlyphFg(cellBg, dark_);
-                        void* tex = font_.textTexture(r, glyph.text, fg.r,
-                                                      fg.g, fg.b);
-                        if (tex) {
-                            SDL_Texture* t = static_cast<SDL_Texture*>(tex);
-                            int tw = 0, th = 0;
-                            SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-                            SDL_Rect dst{px, py, tw, th};
-                            SDL_RenderCopy(r, t, nullptr, &dst);
-                        }
-                    }
-                }
-            }
-        }
-        presentFramebuf(r, fb, bg);
+        paintChromeOnly(r, font_, dark_, g.layout, payload.data,
+                        payload.statusAccent);
+        paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
+                                       contentRows_, next, shown);
+        presentFramebuf(r, dstFb, bg);
+        contentFbActive_ = dstIdx;
     }
 #else
     // Sin SDL2: no-op (el loop nunca llega acá).
@@ -1744,8 +1780,8 @@ void GuiRenderer::renderScreenDiff(
         SDL_Texture* fb = nullptr;
         if (framePxSize(f.layout, font_.cellW(), font_.cellH(), wPx, hPx)) {
             bool fr = false;
-            fb = static_cast<SDL_Texture*>(
-                acquireFb(contentFb_, sdlRenderer_, wPx, hPx, fr));
+            fb = static_cast<SDL_Texture*>(acquireFb(
+                contentFb_[contentFbActive_], sdlRenderer_, wPx, hPx, fr));
             fbFresh = (fb != nullptr) && fr;
         }
         if (!fb) {

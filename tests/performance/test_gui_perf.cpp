@@ -132,7 +132,7 @@ TEST(bench_perf_gui_cache_cursor_move_checked) {
 }
 
 TEST(bench_perf_gui_cache_scroll_checked) {
-    perf_arch::reportVerbose("\n== perf_gui: scroll 1 linea (gap documentado) ==\n");
+    perf_arch::reportVerbose("\n== perf_gui: scroll 1 linea (blit) ==\n");
     GuiPerfFixture fx(300);
     fx.guiFrame();
     (void)fx.ttyDiff();  // prima el caché del TTY (full) antes del cambio
@@ -140,13 +140,17 @@ TEST(bench_perf_gui_cache_scroll_checked) {
     fx.cursor.line += 1;
     fx.guiFrame();
     const int contentH = static_cast<int>(fx.gui.lastContentRows().size());
-    // GAP HONESTO: el diff por índice marca todas dirty (sin blit de región
-    // como TtyScroll.h). El ahorro real hoy es el caché de texturas (las
-    // cadenas ya existen como texturas y no pagan TTF_Render). Si un día se
-    // implementa el blit, este CHECK debe ajustarse a ~1-2 filas.
+    (void)contentH;
+    // Con scroll-blit (ping-pong + filas dirty), el scroll ±1 es O(1):
+    // entrante + CurrentLine vieja/nueva (+ cursor, que suele coincidir).
+    // El diff por índice ingenuo quedó solo como fallback (saltos grandes,
+    // edición, selección/búsqueda cambiante). Sin SDL no hay blit de
+    // píxeles, pero las stats del diferencial son las mismas (O(1)).
     perf_arch::reportVerbose("%-46s %6d repintadas / %6d totales\n",
-                             "gui scroll-top+1", fx.gui.lastRepainted(), contentH);
-    CHECK_EQ(fx.gui.lastRepainted(), contentH);
+                             "gui scroll-top+1", fx.gui.lastRepainted(),
+                             contentH);
+    CHECK(fx.gui.lastRepainted() <= 5);
+    CHECK(fx.gui.lastRepainted() >= 1);
     // TTY sí lo optimiza: scroll de región + filas entrantes.
     const std::string scrollBytes = fx.ttyDiff();
     const std::string fullBytes = fx.ttyFrame();

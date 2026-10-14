@@ -199,6 +199,78 @@ TEST(bench_perf_gui_sdl_cursor_move_checked) {
 #endif
 }
 
+// Scroll típico ↑/↓ en borde: viewport.top ±1 con el cursor acompañando.
+// Camino SDL real con scroll-blit (ping-pong: copia desplazada + O(1) filas
+// dirty + chrome + cursor). Los tiempos son informativos; los gates son
+// estructurales: sin fulls en la sesión, repintadas O(1) por frame, caché
+// acotado sin flush total, y misses/evicciones acotados por frame (puñado de
+// rasters de la fila entrante + gutter, no cientos).
+TEST(bench_perf_gui_sdl_scroll_checked) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlBench sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    SdlPerfFixture fx;
+    fx.gui.initForRenderer(sdl.ren);
+    perf_arch::reportVerbose("\n== perf_gui_sdl: scroll +-1 con cursor ==\n");
+    perf_arch::reportVerbose("font: %s\n",
+                             fx.gui.hasFont() ? fx.gui.fontPath().c_str()
+                                              : "(degradado, solo fills)");
+    fx.frame();
+    fx.frame();
+    // Prima cachés (sintaxis + texturas) fuera de la medición.
+    // Rango amplio (top 20..240, ~220 líneas × segmentos únicos) para superar
+    // las 512 entradas y ejercitar la evicción LRU, no solo los hits.
+    int dir = 1;
+    fx.viewport.top = 20;
+    fx.cursor.line = 25;
+    for (int i = 0; i < 250; ++i) {
+        fx.viewport.top += dir;
+        fx.cursor.line += dir;
+        if (fx.viewport.top > 240 || fx.viewport.top < 20) {
+            dir = -dir;
+            fx.viewport.top += 2 * dir;
+            fx.cursor.line += 2 * dir;
+        }
+        fx.frame();
+    }
+    CHECK_EQ(fx.gui.totalFull(), 1);  // ningún full en la sesión
+    CHECK_EQ(fx.gui.fontCacheSize(), fx.gui.fontMaxCacheSize());
+    const unsigned long long m0 = fx.gui.fontCacheMisses();
+    const unsigned long long e0 = fx.gui.fontCacheEvictions();
+    perf_time::bench_ns("sdl scroll +-1 (blit O1 + chrome)", 400, [&] {
+        fx.viewport.top += dir;
+        fx.cursor.line += dir;
+        if (fx.viewport.top > 240 || fx.viewport.top < 20) {
+            dir = -dir;
+            fx.viewport.top += 2 * dir;
+            fx.cursor.line += 2 * dir;
+        }
+        const int r = fx.frame();
+        if (r > 5) {
+            std::printf("repaint inesperado: %d\n", r);
+            CHECK(r <= 5);
+        }
+    });
+    const double missPerFrame =
+        static_cast<double>(fx.gui.fontCacheMisses() - m0) / 400.0;
+    const double evictPerFrame =
+        static_cast<double>(fx.gui.fontCacheEvictions() - e0) / 400.0;
+    perf_arch::reportVerbose(
+        "%-46s %6.1f misses/frame %6.1f evict/frame (cache %zu/%zu)\n",
+        "sdl scroll raster", missPerFrame, evictPerFrame,
+        fx.gui.fontCacheSize(), fx.gui.fontMaxCacheSize());
+    CHECK_EQ(fx.gui.totalFull(), 1);
+    CHECK_EQ(fx.gui.fontCacheSize(), fx.gui.fontMaxCacheSize());
+    // Entrante + gutter + chrome de posición: puñado de rasters, no cientos
+    // (con el viejo flush total habría picos de 512+misses por frame).
+    CHECK(missPerFrame <= 12.0);
+    CHECK(evictPerFrame <= 12.0);
+    CHECK(g_sink > 0);
+#endif
+}
+
 // Prompt con input (Bar en el MessageBar): 0 filas de contenido pero chrome
 // por frame (animación/borrado de la barra, ver P2). Mide el coste del
 // chrome solo en el camino SDL real.

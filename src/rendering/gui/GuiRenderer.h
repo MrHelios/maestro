@@ -187,6 +187,16 @@ public:
     int cellH() const { return font_.cellH(); }
     bool hasFont() const { return font_.ok(); }
     const std::string& fontPath() const { return font_.path(); }
+    // Observabilidad del caché de texturas (passthrough a GuiFont, ver
+    // GuiFont.h): entradas vivas, tope, hits/misses/evicciones acumulados.
+    // Sirve para medir el raster de texto por frame (misses) sin profiler.
+    size_t fontCacheSize() const { return font_.cacheSize(); }
+    size_t fontMaxCacheSize() const { return font_.maxCacheSize(); }
+    unsigned long long fontCacheHits() const { return font_.cacheHits(); }
+    unsigned long long fontCacheMisses() const { return font_.cacheMisses(); }
+    unsigned long long fontCacheEvictions() const {
+        return font_.cacheEvictions();
+    }
     // Ancho en píxeles de `text` con la fuente actual (0 sin fuente).
     // Expone GuiFont::textWidth para tests (p. ej. verificar que la fuente
     // avanza un carácter ancho 2 celdas antes de afirmar su pintado).
@@ -320,11 +330,12 @@ private:
     // solo lleva estado visual, igual que ChromeData::operator== en TTY.
     // NOTA DE SCROLL (honesta): sin blit GPU, un scroll vertical debe
     // repintar las N filas físicas (los píxeles no se desplazan solos).
-    // Lo que SÍ es incremental desde la etapa scroll ±1: la CONSTRUCCIÓN
-    // (tryFastScrollLine rota snapshots y construye O(1) filas: entrante +
-    // CurrentLine; el resto sale del caché con hits de texturas, sin TTF).
-    // TTY además evita el repintado con scroll de región (TtyScroll.h); el
-    // blit GPU del framebuffer queda como trabajo futuro (etapa scroll-blit).
+    // Con render targets, el scroll ±1 usa scroll-blit (ping-pong entre las
+    // dos superficies de contenido: copia desplazada + filas dirty), con lo
+    // que el repintado también es O(1). Sin render targets cae al repintado
+    // desde caché (todas las filas, con hits de texturas). La CONSTRUCCIÓN
+    // es O(1) en ambos casos (tryFastScrollLine). TTY evita además el
+    // repintado con scroll de región (TtyScroll.h).
     mutable bool contentHasCache_ = false;
     mutable std::vector<GuiContentRow> contentRows_;
     mutable ChromeData contentChrome_;
@@ -414,9 +425,10 @@ private:
     // Rota los snapshots cacheados (la fila de docLine L sigue representando
     // a L: solo cambia su índice) y construye únicamente la fila entrante +
     // las extras por CurrentLine; no reconstruye las filas que siguen
-    // visibles. El repintado sale del caché (todas las filas físicas cambian
-    // de píxeles sin blit GPU: eso es la etapa siguiente). Mismas garantías
-    // de equivalencia visual que el camino completo; false = fallback.
+    // visibles. El repintado usa scroll-blit GPU (ping-pong, ver contentFb_)
+    // cuando hay render targets; sin ellos cae al repintado desde caché.
+    // Mismas garantías de equivalencia visual que el camino completo;
+    // false = fallback.
     bool tryFastScrollLine(const Document& doc, const Cursor& cursor,
                            const Viewport& viewport,
                            const std::string& filename, bool modified,
@@ -459,7 +471,17 @@ private:
         int w = 0;
         int h = 0;
     };
-    FrameSurface contentFb_;
+    // Contenido con ping-pong para el scroll-blit (etapa scroll-blit):
+    // contentFb_[contentFbActive_] guarda la imagen vigente; el blit copia la
+    // región de contenido desplazada a la otra superficie (nunca una textura
+    // sobre sí misma: SDL lo deja indefinido), pinta encima entrante + dirty
+    // + chrome + cursor, presenta y conmuta el índice. La superficie inactiva
+    // puede estar obsoleta: el blit siempre la regenera desde la activa (la
+    // región de contenido queda cubierta entera y el chrome se repinta
+    // siempre sobre el target). Sin render targets ambas quedan nulas y todo
+    // cae al repintado completo directo (ver acquireFb/fallbacks).
+    FrameSurface contentFb_[2];
+    int contentFbActive_ = 0;
     FrameSurface listFb_;
     int framebufTarget_ = 0;  // 0 = sin probar, 1 = soportado, -1 = no
     void destroyFb(FrameSurface& s);
