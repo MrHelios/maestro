@@ -150,11 +150,30 @@ void GuiRenderer::toggleTheme() {
     font_.clearCache();
     contentHasCache_ = false;
     listHasCache_ = false;
+    resetIncrementalState();
 }
 
 void GuiRenderer::invalidateCache() {
     contentHasCache_ = false;
     listHasCache_ = false;
+    resetIncrementalState();
+}
+
+void GuiRenderer::resetIncrementalState() const {
+    contentTop_ = -1;
+    contentLeft_ = -1;
+    contentVpWidth_ = -1;
+    contentVpHeight_ = -1;
+    contentLineCount_ = -1;
+    contentFilename_.clear();
+    contentModified_ = false;
+    contentDocVersion_ = 0;
+    contentDocInstance_ = 0;
+    contentCursorLine_ = -1;
+    contentHadSelection_ = false;
+    contentHadSearch_ = false;
+    contentBracket_.reset();
+    contentCursorInMsg_ = false;
 }
 
 bool GuiRenderer::sameLayout(const Layout& a, const Layout& b) {
@@ -535,6 +554,44 @@ BlockGlyph blockGlyphInList(const std::vector<ListLine>& lines,
         g.text = std::move(glyph);
         g.widthCols = (w == 2) ? 2 : 1;
         g.hasGlyph = true;
+    }
+    return g;
+}
+
+// Resuelve el glifo bajo un cursor Block sobre el SNAPSHOT de contenido
+// (GuiContentRow: texto propio + rol + línea actual), sin Frame.
+// Espejo exacto de blockGlyphInContent pero sobre el DTO cacheado: mismo
+// recorrido (scanSegmentCells compartido), mismo fondo efectivo
+// (styleFor por segmento) y mismo marco de coordenadas (origen del
+// contenido, gutter incluido como primer segmento, igual que el pintor).
+// La usa el camino rápido de cursor-move, que no construye el Frame y por
+// tanto no puede resolver vía blockGlyphInContent; la paridad visual con el
+// camino completo se congela en tests de píxeles (SDL dummy) y de DTO.
+BlockGlyph blockGlyphInSnapshot(const std::vector<GuiContentRow>& rows,
+                                const Layout& layout,
+                                const FrameCursor& cursor, bool dark) {
+    BlockGlyph g;
+    if (!cursor.visible || !cursor.cell.valid()) return g;
+    const int relRow = cursor.cell.row - layout.content.row;
+    const int relCol = cursor.cell.col - layout.content.col;
+    if (relRow < 0 || relCol < 0) return g;
+    if (relRow >= static_cast<int>(rows.size())) return g;
+    if (relCol >= layout.content.width) return g;
+    const GuiContentRow& row = rows[static_cast<size_t>(relRow)];
+    int absCol = 0;
+    for (const auto& seg : row.segs) {
+        const GuiColor segBg =
+            guichrome::styleFor(seg.role, row.isCurrentLine, dark).bg;
+        const std::string_view sv(seg.text.data(), seg.text.size());
+        CellHit hit;
+        if (!scanSegmentCells(sv, absCol, relCol, hit)) continue;
+        g.cellBg = segBg;
+        g.hasCellBg = true;
+        if (hit.empty) return g;  // espacio, 2ª mitad o tab: solo fill
+        g.text = std::move(hit.text);
+        g.widthCols = hit.widthCols;
+        g.hasGlyph = true;
+        return g;
     }
     return g;
 }
@@ -1020,6 +1077,273 @@ void paintChromeAndCursor(SDL_Renderer* r, GuiFont& font, bool dark,
 
 }  // namespace
 
+bool GuiRenderer::tryFastCursorMove(
+    const Document& doc, const Cursor& cursor, const Viewport& viewport,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    const std::optional<Selection>& selection,
+    const std::optional<Selection>& searchHighlight,
+    const std::optional<BracketPair>& bracketPair) {
+    // Precondiciones probadas (etapa ↑/↓ sin scroll). Si alguna no se cumple,
+    // false SIN mutar nada: el caller cae al camino completo existente.
+    // No basta con pintar menos filas después de buildFrame(): este camino
+    // tampoco CONSTRUYE ni copia los segmentos de las filas que no cambiaron.
+    if (!contentHasCache_) return false;
+    if (selection.has_value() || searchHighlight.has_value() ||
+        contentHadSelection_ || contentHadSearch_) {
+        return false;  // el highlight de selección/búsqueda cubre N filas
+    }
+    // Etapa 2 (conservadora): cualquier bracket presente o cacheado invalida
+    // el camino rápido; su overlay puede cubrir filas fuera de CurrentLine.
+    if (bracketPair.has_value() || contentBracket_.has_value()) return false;
+    if (chrome.cursorInMessageBar || contentCursorInMsg_) return false;
+    // Idioma: si cambió, el caché de sintaxis se invalidó y hay que rebuild.
+    // (Idempotente: el camino completo lo llamaría de nuevo como no-op.)
+    if (frameBuilder_.updateSyntaxLanguage(filename)) return false;
+    if (filename != contentFilename_) return false;
+    if (doc.instanceId() != contentDocInstance_ ||
+        doc.version() != contentDocVersion_) {
+        return false;  // edición o cambio de buffer
+    }
+    if (doc.lineCount() != contentLineCount_) return false;
+    // Mismo viewport.top (sin scroll; el scroll ±1 es la etapa siguiente) y
+    // mismo left/ancho/alto (un scroll horizontal o resize cambia todas).
+    if (viewport.top != contentTop_ || viewport.left != contentLeft_ ||
+        viewport.width != contentVpWidth_ ||
+        viewport.height != contentVpHeight_) {
+        return false;
+    }
+    const FrameBuilder::EditorGeometry g =
+        frameBuilder_.editorGeometry(doc, viewport);
+    if (!sameLayout(g.layout, contentLayout_)) return false;
+    const int cw = font_.cellW();
+    const int ch = font_.cellH();
+    if (cw != contentCellW_ || ch != contentCellH_ ||
+        dark_ != contentDark_) {
+        return false;  // tema o métricas HiDPI: frame completo
+    }
+    const int H = g.layout.content.height;
+    if (H <= 0 ||
+        static_cast<int>(contentRows_.size()) != H ||
+        static_cast<int>(lastContentRows_.size()) != H) {
+        return false;
+    }
+#ifdef HAVE_SDL2
+    // Sin superficie persistente no hay parcial seguro (ver camino completo:
+    // el fallback pinta TODO directo, pero acá no hay Frame completo con que
+    // hacerlo). Caer al camino completo, que sí lo tiene. Sin SDL no hay
+    // pintado y el camino rápido sigue valiendo (ahorro de CPU puro).
+    if (sdlRenderer_ && contentFb_.tex == nullptr) return false;
+#endif
+    // Chrome barato (sin filas): si cambió se repinta aunque el contenido no.
+    const FrameBuilder::ChromePayload payload =
+        frameBuilder_.buildChrome(filename, modified, cursor,
+                                  doc.lineCount(), chrome);
+    const bool chromeSame = (payload.data == contentChrome_) &&
+                            (payload.statusAccent == contentAccent_);
+    const bool chromeDirty = !chromeSame;
+    // Cursor como buildFrame (contenido; el caso MessageBar ya se excluyó).
+    FrameCursor next;
+    next.shape = chrome.cursorShape;
+    CellPos pos;
+    const bool inViewport =
+        frameBuilder_.editorCursorPos(doc, cursor, viewport, g, pos);
+    const bool visible = chrome.cursorVisibleByMode && inViewport;
+    next.visible = visible;
+    next.cell = visible ? pos : CellPos{};
+    // Filas afectadas por CurrentLine (vieja y nueva, si están visibles).
+    // El cursor siempre vive en su CurrentLine, así que su fila también queda
+    // cubierta para el repintado de borrado/dibujado de abajo.
+    const int gutterW = g.gutterW;
+    const int textWidth =
+        std::max(0, g.layout.content.width - gutterW);
+    const int relOld = contentCursorLine_ - viewport.top;
+    const int relNew = cursor.line - viewport.top;
+    int rels[2];
+    int nRels = 0;
+    if (relOld >= 0 && relOld < H) rels[nRels++] = relOld;
+    if (relNew >= 0 && relNew < H && relNew != relOld) rels[nRels++] = relNew;
+    // Reconstruye SOLO esas filas (O(1), no O(H)): ninguna otra fila se
+    // construye ni se copia. buildContentRow asegura el SyntaxCache que
+    // necesite (ya válido hasta top+H por el frame anterior: no reparsea).
+    const std::optional<Normalized> noSel, noSearch, noBrOpen, noBrClose;
+    struct Rebuilt {
+        int rel = -1;
+        StyledRow styled;
+        GuiContentRow snap;
+        bool changed = false;
+    };
+    Rebuilt rb[2];
+    for (int k = 0; k < nRels; ++k) {
+        const int rel = rels[k];
+        const int docLine = viewport.top + rel;
+        rb[k].rel = rel;
+        rb[k].styled = frameBuilder_.buildContentRow(
+            doc, cursor, viewport, noSel, noSearch, noBrOpen, noBrClose,
+            docLine, gutterW, textWidth);
+        GuiContentRow gr;
+        gr.isCurrentLine = rb[k].styled.isCurrentLine;
+        gr.segs.reserve(rb[k].styled.segs.size());
+        for (const auto& s : rb[k].styled.segs) {
+            GuiContentSeg gs;
+            gs.text.assign(s.text.data(), s.text.size());
+            gs.role = s.role;
+            gr.segs.push_back(std::move(gs));
+        }
+        rb[k].snap = std::move(gr);
+        rb[k].changed =
+            (rb[k].snap != contentRows_[static_cast<size_t>(rel)]);
+    }
+    std::vector<char> dirty(static_cast<size_t>(H), 0);
+    for (int k = 0; k < nRels; ++k) {
+        if (rb[k].changed) dirty[static_cast<size_t>(rb[k].rel)] = 1;
+    }
+    // Cursor: borrar la vieja + dibujar la nueva (misma regla que el camino
+    // completo). Bar visible: su fila siempre (parpadeo, 1 fila/frame).
+    const FrameCursor prevContent = contentCursor_;
+    const bool cursorChanged =
+        prevContent.visible != next.visible ||
+        prevContent.shape != next.shape ||
+        !(prevContent.cell == next.cell);
+    if (cursorChanged) {
+        markCursorRow(dirty, g.layout, prevContent);
+        markCursorRow(dirty, g.layout, next);
+    } else if (next.visible &&
+               next.shape == FrameCursorShape::Bar &&
+               next.cell.valid()) {
+        markCursorRow(dirty, g.layout, next);
+    }
+    int repainted = 0, skipped = 0;
+    for (char d : dirty) (d ? repainted : skipped) += 1;
+    bool paintChrome = chromeDirty;
+    if (true) {
+        const bool newBar = isChromeBar(next, g.layout);
+        const bool oldBar = isChromeBar(prevContent, g.layout);
+        if (newBar || (oldBar && cursorChanged)) paintChrome = true;
+    }
+    noteStats(false, repainted, skipped, chromeDirty);
+    // Publica snapshots y caché (solo las filas reconstruidas).
+    lastChrome_ = payload.data;
+    lastAccent_ = payload.statusAccent;
+    noteCursorForBlink(next);
+    lastCursor_ = next;
+    lastLayout_ = g.layout;
+    lastListLines_.clear();
+    lastListSelected_ = -1;
+    lastListScroll_ = 0;
+    const bool shown = cursorShown();
+    for (int k = 0; k < nRels; ++k) {
+        contentRows_[static_cast<size_t>(rb[k].rel)] = rb[k].snap;
+        lastContentRows_[static_cast<size_t>(rb[k].rel)] = rb[k].snap;
+    }
+    contentChrome_ = payload.data;
+    contentAccent_ = payload.statusAccent;
+    contentLayout_ = g.layout;
+    contentDark_ = dark_;
+    contentCellW_ = cw;
+    contentCellH_ = ch;
+    contentCursor_ = next;
+    contentHasCache_ = true;
+    lastIsList_ = false;
+    contentModified_ = modified;
+    contentCursorLine_ = cursor.line;
+#ifdef HAVE_SDL2
+    if (sdlRenderer_) {
+        SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
+        const GuiColor bg = guichrome::background(dark_);
+        int wPx = 0, hPx = 0;
+        bool fbFresh = false;
+        SDL_Texture* fb = nullptr;
+        if (framePxSize(g.layout, font_.cellW(), font_.cellH(), wPx, hPx)) {
+            bool fr = false;
+            fb = static_cast<SDL_Texture*>(
+                acquireFb(contentFb_, sdlRenderer_, wPx, hPx, fr));
+            fbFresh = (fb != nullptr) && fr;
+        }
+        // Pre-chequeado arriba: fb existe y no es fresco (misma geometría).
+        // Si algo cambió bajo los pies (reserva de textura fallida), el
+        // parcial no es seguro; se invalida y se deja el frame sin pintar:
+        // el próximo renderFrame será completo. No se puede caer al camino
+        // completo desde acá (ya se publicaron snapshots parciales válidos,
+        // pero faltaría el pintado de este frame).
+        if (!fb || fbFresh) {
+            invalidateCache();
+            return true;
+        }
+        SDL_SetRenderTarget(r, fb);
+        for (int k = 0; k < nRels; ++k) {
+            if (!dirty[static_cast<size_t>(rb[k].rel)]) continue;
+            paintSnapshotRow(r, font_, dark_, g.layout, rb[k].rel,
+                             contentRows_[static_cast<size_t>(rb[k].rel)]);
+        }
+        // Filas dirty SOLO por cursor (sin rebuild): se repintan desde el
+        // snapshot cacheado (idéntico al que pintaría el camino completo).
+        for (int i = 0; i < H; ++i) {
+            if (!dirty[static_cast<size_t>(i)]) continue;
+            bool rebuilt = false;
+            for (int k = 0; k < nRels; ++k) {
+                if (rb[k].rel == i) {
+                    rebuilt = true;
+                    break;
+                }
+            }
+            if (!rebuilt) {
+                paintSnapshotRow(r, font_, dark_, g.layout, i,
+                                 contentRows_[static_cast<size_t>(i)]);
+            }
+        }
+        if (paintChrome)
+            paintChromeOnly(r, font_, dark_, g.layout, payload.data,
+                            payload.statusAccent);
+        // Cursor (espejo de paintCursorOnly, glifo desde el snapshot: el
+        // camino rápido no tiene Frame para blockGlyphInContent).
+        if (shown && next.visible && next.cell.valid()) {
+            const int ccw = font_.cellW();
+            const int cch = font_.cellH();
+            if (ccw > 0 && cch > 0) {
+                const GuiColor cc = guichrome::cursorColor(dark_);
+                const int px = next.cell.col * ccw;
+                const int py = next.cell.row * cch;
+                if (next.shape == FrameCursorShape::Bar) {
+                    SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
+                    SDL_Rect crect{px, py, 2, cch};
+                    SDL_RenderFillRect(r, &crect);
+                } else {
+                    const BlockGlyph glyph = blockGlyphInSnapshot(
+                        contentRows_, g.layout, next, dark_);
+                    const int wpx =
+                        (glyph.hasGlyph && glyph.widthCols == 2) ? 2 * ccw
+                                                                : ccw;
+                    SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
+                    SDL_Rect crect{px, py, wpx, cch};
+                    SDL_RenderFillRect(r, &crect);
+                    if (glyph.hasGlyph && font_.ok()) {
+                        const GuiColor cellBg =
+                            glyph.hasCellBg
+                                ? glyph.cellBg
+                                : guichrome::background(dark_);
+                        const GuiColor fg =
+                            guichrome::cursorGlyphFg(cellBg, dark_);
+                        void* tex = font_.textTexture(r, glyph.text, fg.r,
+                                                      fg.g, fg.b);
+                        if (tex) {
+                            SDL_Texture* t = static_cast<SDL_Texture*>(tex);
+                            int tw = 0, th = 0;
+                            SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+                            SDL_Rect dst{px, py, tw, th};
+                            SDL_RenderCopy(r, t, nullptr, &dst);
+                        }
+                    }
+                }
+            }
+        }
+        presentFramebuf(r, fb, bg);
+    }
+#else
+    // Sin SDL2: no-op (el loop nunca llega acá).
+#endif
+    return true;
+}
+
 void GuiRenderer::renderScreenDiff(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
     const std::string& filename, bool modified, const ChromeRequest& chrome,
@@ -1027,6 +1351,14 @@ void GuiRenderer::renderScreenDiff(
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
     (void)sink;  // la GUI pinta en el SDL_Renderer, no en el Sink de bytes.
+    // Camino rápido (etapa ↑/↓ sin scroll): evita buildFrame() completo si
+    // solo se movió el cursor sobre el mismo viewport sin cambios. Si lo
+    // resuelve, ya actualizó cachés/stats/snapshots y pintó; si no, se cae al
+    // camino completo de abajo sin haber mutado nada.
+    if (tryFastCursorMove(doc, cursor, viewport, filename, modified, chrome,
+                          selection, searchHighlight, bracketPair)) {
+        return;
+    }
     Frame f = buildFrame(doc, cursor, viewport, filename, modified, chrome,
                          selection, searchHighlight, bracketPair);
     const bool havePrevContent = contentHasCache_;
@@ -1120,6 +1452,23 @@ void GuiRenderer::renderScreenDiff(
     contentCursor_ = f.cursor;
     contentHasCache_ = true;
     lastIsList_ = false;
+    // Estado de validación incremental (ver contentTop_): lo publica el camino
+    // completo y lo consumen/rotan los caminos rápidos. Sin esto el fast path
+    // nunca podría validar sus precondiciones.
+    contentTop_ = viewport.top;
+    contentLeft_ = viewport.left;
+    contentVpWidth_ = viewport.width;
+    contentVpHeight_ = viewport.height;
+    contentLineCount_ = doc.lineCount();
+    contentFilename_ = filename;
+    contentModified_ = modified;
+    contentDocVersion_ = doc.version();
+    contentDocInstance_ = doc.instanceId();
+    contentCursorLine_ = cursor.line;
+    contentHadSelection_ = selection.has_value();
+    contentHadSearch_ = searchHighlight.has_value();
+    contentBracket_ = bracketPair;
+    contentCursorInMsg_ = chrome.cursorInMessageBar;
 #ifdef HAVE_SDL2
     if (sdlRenderer_) {
         SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);

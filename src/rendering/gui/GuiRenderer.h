@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -355,6 +356,26 @@ private:
     mutable FrameCursor contentCursor_;
     mutable FrameCursor listCursor_;
     mutable bool lastIsList_ = false;
+    // --- Estado para caminos incrementales (cursor-move sin scroll, scroll ±1) ---
+    // Permite validar precondiciones sin construir el Frame: el caché de filas
+    // solo es reutilizable si el documento, el viewport, el lenguaje y los
+    // efectos visuales (selección/búsqueda/bracket) son compatibles.
+    // Invariante (etapa scroll): contentRows_[i] representa el docLine
+    // contentTop_ + i. Se publica en el camino completo y se rota en scroll ±1.
+    mutable int contentTop_ = -1;
+    mutable int contentLeft_ = -1;
+    mutable int contentVpWidth_ = -1;
+    mutable int contentVpHeight_ = -1;
+    mutable int contentLineCount_ = -1;
+    mutable std::string contentFilename_;
+    mutable bool contentModified_ = false;
+    mutable uint64_t contentDocVersion_ = 0;
+    mutable uint64_t contentDocInstance_ = 0;
+    mutable int contentCursorLine_ = -1;  // línea doc del cursor al cachear
+    mutable bool contentHadSelection_ = false;
+    mutable bool contentHadSearch_ = false;
+    mutable std::optional<BracketPair> contentBracket_;
+    mutable bool contentCursorInMsg_ = false;
     // Stats del diferencial (ver getters públicos).
     mutable bool lastWasFull_ = true;
     mutable int lastRepainted_ = 0;
@@ -370,6 +391,23 @@ private:
     // relRow: fila relativa al contenido; fuera de rango = no marca.
     static void markCursorRow(std::vector<char>& dirty, const Layout& layout,
                               const FrameCursor& c);
+    // Limpia el estado de validación incremental (ver contentTop_ y ss.).
+    // Se llama al invalidar (el flag contentHasCache_=false ya bloquea el
+    // camino rápido; esto solo evita que queden valores obsoletos).
+    void resetIncrementalState() const;
+    // Camino rápido: movimiento de cursor sin scroll ni cambios (etapa ↑/↓).
+    // Evita buildFrame() completo (todas las filas + snapshot total):
+    // reconstruye solo las filas afectadas por CurrentLine y resuelve el
+    // cursor/chrome como buildFrame. Devuelve true si resolvió el frame
+    // (actualizó cachés, stats, snapshots y pintó); false para caer al camino
+    // completo existente. Nunca altera el backend TTY (método solo GUI).
+    bool tryFastCursorMove(const Document& doc, const Cursor& cursor,
+                           const Viewport& viewport,
+                           const std::string& filename, bool modified,
+                           const ChromeRequest& chrome,
+                           const std::optional<Selection>& selection,
+                           const std::optional<Selection>& searchHighlight,
+                           const std::optional<BracketPair>& bracketPair);
     // Camino común de los 3 modales: snapshots + diff por línea + pintado
     // full/parcial. `lines` ya viene compuesto (ListLines.h), `next` es el
     // cursor resuelto por el caller, `selectedRow` la fila destacada

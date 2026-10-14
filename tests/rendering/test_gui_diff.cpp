@@ -15,6 +15,8 @@
 #include "app/ChromePresentation.h"
 #include "app/Editor.h"
 #include "base/utf8.h"
+#include "diagnostics/Instrument.h"
+#include "document/Selection.h"
 #include "rendering/Sink.h"
 #include "rendering/gui/GuiChrome.h"
 #include "rendering/gui/GuiRenderer.h"
@@ -552,5 +554,141 @@ TEST(gui_sdl_toggle_theme_paridad_en_tema_nuevo) {
     std::vector<GuiColor> steady;
     CHECK(readSurfaceLocal(gui, steady));
     CHECK(steady == light);
+#endif
+}
+
+// Camino rápido de cursor-move (etapa ↑/↓ sin scroll): con el mismo
+// viewport.top y sin cambios, mover el cursor construye O(1) filas
+// (CurrentLine vieja+nueva), no las H del viewport. Se mide con
+// Instrument::renderEditorRow (cada buildContentRow cuenta 1).
+TEST(gui_diff_cursor_move_same_top_construye_O1_filas) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 50; ++i)
+        lines.push_back("linea numero " + std::to_string(i) +
+                        " con algo de texto");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    Cursor cur;
+    cur.line = 5;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());  // full
+    CHECK(gui.lastWasFull());
+    instrument::enable(true);
+    instrument::resetFrame();
+    cur.line = 6;  // mismo viewport.top: sin scroll
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    auto m = instrument::snapshotAndReset();
+    instrument::enable(false);
+    CHECK(!gui.lastWasFull());
+    CHECK(gui.lastRepainted() <= 3);
+    CHECK_EQ(gui.lastRepainted() + gui.lastSkipped(), 10);
+    CHECK(m.renderEditorRow <= 3);  // O(1), no H=10
+    CHECK(m.renderEditorRow >= 1);
+}
+
+// Paridad DTO: el camino rápido deja el mismo snapshot/chrome/cursor que el
+// camino completo de referencia (no solo contadores).
+TEST(gui_diff_cursor_move_paridad_dto_con_full) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 50; ++i)
+        lines.push_back("linea numero " + std::to_string(i) +
+                        " con algo de texto");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    Cursor cur;
+    cur.line = 5;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    cur.line = 6;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());  // camino rápido
+    CHECK(!gui.lastWasFull());
+    std::vector<std::string> fastPlain;
+    std::vector<bool> fastCur;
+    for (auto& r : gui.lastContentRows()) {
+        fastPlain.push_back(r.plain());
+        fastCur.push_back(r.isCurrentLine);
+    }
+    const ChromeData fastChrome = gui.lastChrome();
+    const FrameCursor fastCursor = gui.lastCursor();
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());  // referencia completa
+    CHECK(gui.lastWasFull());
+    CHECK_EQ(gui.lastContentRows().size(), fastPlain.size());
+    for (size_t i = 0; i < fastPlain.size(); ++i) {
+        CHECK_EQ(gui.lastContentRows()[i].plain(), fastPlain[i]);
+        CHECK_EQ(gui.lastContentRows()[i].isCurrentLine, fastCur[i]);
+    }
+    CHECK(gui.lastChrome() == fastChrome);
+    CHECK(gui.lastCursor().visible == fastCursor.visible);
+    CHECK(gui.lastCursor().shape == fastCursor.shape);
+    CHECK(gui.lastCursor().cell == fastCursor.cell);
+}
+
+// Fallback correcto: con selección activa el camino rápido declina (el
+// highlight cubre N filas) y el camino completo resuelve bien.
+TEST(gui_diff_cursor_move_con_seleccion_cae_a_completo_pero_correcto) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 50; ++i)
+        lines.push_back("linea numero " + std::to_string(i) +
+                        " con algo de texto");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    Cursor cur;
+    cur.line = 5;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    const std::optional<Selection> sel =
+        Selection{Position{5, 0}, Position{5, 3}};
+    instrument::enable(true);
+    instrument::resetFrame();
+    cur.line = 6;
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false, navChrome(), sink, sel,
+                         std::nullopt, std::nullopt);
+    auto m = instrument::snapshotAndReset();
+    instrument::enable(false);
+    // Construyó todo el viewport (fallback), pero el pintado sigue siendo
+    // diferencial (caché válido) y el highlight quedó aplicado.
+    CHECK_EQ(m.renderEditorRow, 10);
+    CHECK(!gui.lastWasFull());
+    CHECK(gui.lastContentRows()[5].hasRole(StyleRole::Selection));
+}
+
+// Paridad de píxeles (SDL dummy): el cursor-move rápido pinta lo mismo que el
+// full, incluido el glifo bajo el cursor Block (resuelto vía snapshot en el
+// camino rápido y vía Frame en el completo).
+TEST(gui_sdl_cursor_move_paridad_pixeles_con_full) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummyLocal sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola mundo", "segunda fila", "tercera línea",
+                 "cuarta fila", "quinta"});
+    Viewport vp = makeVp(10, 40);
+    Cursor cur;
+    cur.line = 1;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    cur.line = 2;  // mismo viewport.top: camino rápido (Block en navegación)
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(!gui.lastWasFull());
+    std::vector<GuiColor> parcial;
+    if (!readSurfaceLocal(gui, parcial)) SKIP("ReadPixels no disponible");
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    std::vector<GuiColor> full;
+    CHECK(readSurfaceLocal(gui, full));
+    CHECK(full == parcial);
 #endif
 }
