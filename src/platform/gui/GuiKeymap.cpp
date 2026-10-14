@@ -65,9 +65,10 @@ bool bindable(GuiKeySym sym, bool ctrl, bool alt) {
 //   - Letras sin Ctrl/Alt sin enlazar: el texto imprimible (ASCII, UTF-8,
 //     AltGr como @/|/\/{} ) llega por SDL_TEXTINPUT; mapearlo en KEYDOWN
 //     duplicaría la inserción.
-//   - Keypad mínimo: solo KeyPadEnter. Los KP numéricos son Unknown (el
-//     adaptador SDL no los traduce a Home/End) para no secuestrar dígitos
-//     con NumLock.
+//   - Keypad: KeyPadEnter siempre; KP_7/KP_1/KP_9/KP_3 llegan como
+//     Home/End/PageUp/PageDown SOLO con NumLock apagado (el adaptador SDL
+//     los traduce únicamente sin KMOD_NUM; con NumLock producen dígitos
+//     por TEXTINPUT y quedan en Unknown).
 void GuiKeymap::resetDefaults() {
     keys_.clear();
 

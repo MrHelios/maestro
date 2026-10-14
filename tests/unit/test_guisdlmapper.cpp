@@ -186,14 +186,55 @@ TEST(guisdl_keypad_numeric_stays_unknown) {
 #ifndef HAVE_SDL2
     SKIP("sin SDL2");
 #else
-    // Alcance mínimo: el KP numérico no se traduce a Home/End (secuestraría
-    // dígitos con NumLock); solo KP_Enter está mapeado.
-    CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_7, 0, false).sym),
+    // Con NumLock el KP produce dígitos por TEXTINPUT: TODO el KP numérico
+    // queda en Unknown para no secuestrarlos (incluidos KP_7/KP_1/KP_9/KP_3,
+    // que sin NumLock sí son navegación: ver guisdl_keypad_nav_sin_numlock).
+    // Solo KP_Enter está mapeado siempre.
+    CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_7, KMOD_NUM, false).sym),
              static_cast<int>(GuiKeySym::Unknown));
     CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_1, KMOD_NUM, false).sym),
              static_cast<int>(GuiKeySym::Unknown));
+    CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_9, KMOD_NUM, false).sym),
+             static_cast<int>(GuiKeySym::Unknown));
+    CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_3, KMOD_NUM, false).sym),
+             static_cast<int>(GuiKeySym::Unknown));
+    CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_0, KMOD_NUM, false).sym),
+             static_cast<int>(GuiKeySym::Unknown));
+    // El resto del KP numérico queda Unknown con y sin NumLock.
     CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_0, 0, false).sym),
              static_cast<int>(GuiKeySym::Unknown));
+    CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_5, 0, false).sym),
+             static_cast<int>(GuiKeySym::Unknown));
+    CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_5, KMOD_NUM, false).sym),
+             static_cast<int>(GuiKeySym::Unknown));
+#endif
+}
+
+TEST(guisdl_keypad_nav_sin_numlock) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    // Sin NumLock (mod=0x0, el caso del reporte en ventana real: sym
+    // 1073741919/13/21/15) el KP navegacional SÍ se traduce: no genera
+    // texto y es navegación pura.
+    CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_7, 0, false).sym),
+             static_cast<int>(GuiKeySym::Home));
+    CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_1, 0, false).sym),
+             static_cast<int>(GuiKeySym::End));
+    CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_9, 0, false).sym),
+             static_cast<int>(GuiKeySym::PageUp));
+    CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_KP_3, 0, false).sym),
+             static_cast<int>(GuiKeySym::PageDown));
+    // Y resuelve en el keymap al mismo evento que las dedicadas.
+    GuiKeymap km;
+    CHECK_EQ(static_cast<int>(*km.mapKey(guiKeyFromSdl(SDLK_KP_9, 0, false))),
+             static_cast<int>(InputEventType::PageUp));
+    CHECK_EQ(static_cast<int>(*km.mapKey(guiKeyFromSdl(SDLK_KP_3, 0, false))),
+             static_cast<int>(InputEventType::PageDown));
+    CHECK_EQ(static_cast<int>(*km.mapKey(guiKeyFromSdl(SDLK_KP_7, 0, false))),
+             static_cast<int>(InputEventType::MoveHome));
+    CHECK_EQ(static_cast<int>(*km.mapKey(guiKeyFromSdl(SDLK_KP_1, 0, false))),
+             static_cast<int>(InputEventType::MoveEnd));
 #endif
 }
 

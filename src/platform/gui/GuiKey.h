@@ -18,9 +18,11 @@
 // - Shift se conserva en el struct pero se IGNORA en la resolución (paridad
 //   v0.5 TTY: la selección se entra con 's', no con Shift; ver
 //   Terminal.cpp simpleEscapeForm). Shift+Flecha == Flecha.
-// - Alcance de keypad mínimo y explícito: solo KeyPadEnter está mapeado.
-//   Los KP numéricos (KP_7/KP_1/...) llegan como Unknown a propósito para
-//   no secuestrar dígitos con NumLock activado.
+// - Alcance de keypad explícito: KeyPadEnter siempre, más KP_7/KP_1/KP_9/
+//   KP_3 (Inicio/Fin/RePag/AvPag) SOLO con NumLock apagado —el adaptador
+//   los traduce únicamente sin KMOD_NUM, porque con NumLock producen
+//   dígitos por TEXTINPUT—. El resto del KP numérico llega como Unknown a
+//   propósito para no secuestrar dígitos con NumLock activado.
 enum class GuiKeySym {
     Unknown,
     Escape,

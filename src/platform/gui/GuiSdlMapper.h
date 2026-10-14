@@ -16,8 +16,10 @@
 //   - AltGr (KMOD_MODE en X11) cuenta como Alt: el KEYDOWN de la letra queda
 //     sin enlace y el carácter (@/|/\/{) llega por SDL_TEXTINPUT.
 //   - Letras 'A'-'Z' se normalizan a minúscula lógica (KeyA..KeyZ).
-//   - Keypad mínimo: solo SDLK_KP_ENTER se traduce; el KP numérico queda
-//     Unknown para no secuestrar dígitos con NumLock.
+//   - Keypad: SDLK_KP_ENTER se traduce siempre; KP_7/KP_1/KP_9/KP_3
+//     (Inicio/Fin/RePag/AvPag) solo con NumLock APAGADO —con NumLock
+//     producen dígitos por TEXTINPUT y traducirlos secuestraría números—.
+//     El resto del KP numérico queda Unknown.
 //   - Mouse (testeado en el mismo archivo): puntos de evento -> píxeles de
 //     drawable (guiScaleCoord, obligatorio con ALLOW_HIGHDPI) -> CellPos
 //     0-based por división entera (col = pxX / cellW, row = pxY / cellH);
@@ -251,15 +253,32 @@ inline GuiKeyPress guiKeyFromSdl(SDL_Keycode sym, Uint16 mod, bool repeat) {
         default: break;
     }
     if (p.sym == GuiKeySym::Unknown) {
+        // Keypad navegacional SOLO con NumLock apagado: KP_7/KP_1 son
+        // Inicio/Fin y KP_9/KP_3 son RePag/AvPag (los sym 1073741919/13/21/15
+        // con mod=0x0 del reporte en ventana real). Con NumLock esas mismas
+        // teclas producen dígitos por SDL_TEXTINPUT y traducirlas aquí
+        // secuestraría la entrada numérica; sin NumLock no generan texto y
+        // son navegación pura. El resto del KP numérico sigue en Unknown.
+        if ((mod & KMOD_NUM) == 0) {
+            switch (sym) {
+                case SDLK_KP_7: p.sym = GuiKeySym::Home; break;
+                case SDLK_KP_1: p.sym = GuiKeySym::End; break;
+                case SDLK_KP_9: p.sym = GuiKeySym::PageUp; break;
+                case SDLK_KP_3: p.sym = GuiKeySym::PageDown; break;
+                default: break;
+            }
+        }
+    }
+    if (p.sym == GuiKeySym::Unknown) {
         int lower = sym;
         if (lower >= 'A' && lower <= 'Z') lower += ('a' - 'A');
         if (lower >= 'a' && lower <= 'z') {
             p.sym = static_cast<GuiKeySym>(
                 static_cast<int>(GuiKeySym::KeyA) + (lower - 'a'));
         }
-    // NOTA keypad: SDLK_KP_1..SDLK_KP_9 (y el resto del KP numérico)
-    // quedan a propósito en Unknown para no secuestrar dígitos con
-    // NumLock: solo KeyPadEnter está mapeado (alcance mínimo).
+    // NOTA keypad: el resto del KP numérico (KP_0/KP_2/KP_4-6/KP_8, punto…)
+    // queda en Unknown; KP_7/KP_1/KP_9/KP_3 solo se traducen sin NumLock
+    // (ver bloque de arriba): con NumLock producen dígitos por TEXTINPUT.
     }
     return p;
 }
