@@ -318,11 +318,13 @@ private:
     // decide el repintado: filas + chrome + accent + geometría + tema.
     // La igualdad de filas es estructural (texto+rol+línea actual): el DTO
     // solo lleva estado visual, igual que ChromeData::operator== en TTY.
-    // NOTA DE SCROLL (honesta): un scroll vertical desplaza todas las filas
-    // y el diff por índice las marca todas dirty (repinta N filas, con hits
-    // en el caché de texturas de GuiFont). TTY gana ahí con su scroll de
-    // región (TtyScroll.h); el blit GPU del backbuffer queda como trabajo
-    // futuro (medido en test_gui_perf scrolltop1).
+    // NOTA DE SCROLL (honesta): sin blit GPU, un scroll vertical debe
+    // repintar las N filas físicas (los píxeles no se desplazan solos).
+    // Lo que SÍ es incremental desde la etapa scroll ±1: la CONSTRUCCIÓN
+    // (tryFastScrollLine rota snapshots y construye O(1) filas: entrante +
+    // CurrentLine; el resto sale del caché con hits de texturas, sin TTF).
+    // TTY además evita el repintado con scroll de región (TtyScroll.h); el
+    // blit GPU del framebuffer queda como trabajo futuro (etapa scroll-blit).
     mutable bool contentHasCache_ = false;
     mutable std::vector<GuiContentRow> contentRows_;
     mutable ChromeData contentChrome_;
@@ -372,8 +374,8 @@ private:
     mutable uint64_t contentDocVersion_ = 0;
     mutable uint64_t contentDocInstance_ = 0;
     mutable int contentCursorLine_ = -1;  // línea doc del cursor al cachear
-    mutable bool contentHadSelection_ = false;
-    mutable bool contentHadSearch_ = false;
+    mutable std::optional<Selection> contentSelection_;
+    mutable std::optional<Selection> contentSearch_;
     mutable std::optional<BracketPair> contentBracket_;
     mutable bool contentCursorInMsg_ = false;
     // Stats del diferencial (ver getters públicos).
@@ -402,6 +404,20 @@ private:
     // (actualizó cachés, stats, snapshots y pintó); false para caer al camino
     // completo existente. Nunca altera el backend TTY (método solo GUI).
     bool tryFastCursorMove(const Document& doc, const Cursor& cursor,
+                           const Viewport& viewport,
+                           const std::string& filename, bool modified,
+                           const ChromeRequest& chrome,
+                           const std::optional<Selection>& selection,
+                           const std::optional<Selection>& searchHighlight,
+                           const std::optional<BracketPair>& bracketPair);
+    // Camino rápido: scroll vertical de una línea (etapa scroll ±1).
+    // Rota los snapshots cacheados (la fila de docLine L sigue representando
+    // a L: solo cambia su índice) y construye únicamente la fila entrante +
+    // las extras por CurrentLine; no reconstruye las filas que siguen
+    // visibles. El repintado sale del caché (todas las filas físicas cambian
+    // de píxeles sin blit GPU: eso es la etapa siguiente). Mismas garantías
+    // de equivalencia visual que el camino completo; false = fallback.
+    bool tryFastScrollLine(const Document& doc, const Cursor& cursor,
                            const Viewport& viewport,
                            const std::string& filename, bool modified,
                            const ChromeRequest& chrome,

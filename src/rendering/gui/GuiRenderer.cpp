@@ -170,8 +170,8 @@ void GuiRenderer::resetIncrementalState() const {
     contentDocVersion_ = 0;
     contentDocInstance_ = 0;
     contentCursorLine_ = -1;
-    contentHadSelection_ = false;
-    contentHadSearch_ = false;
+    contentSelection_.reset();
+    contentSearch_.reset();
     contentBracket_.reset();
     contentCursorInMsg_ = false;
 }
@@ -594,6 +594,16 @@ BlockGlyph blockGlyphInSnapshot(const std::vector<GuiContentRow>& rows,
         return g;
     }
     return g;
+}
+
+// Igualdad de selecciones opcionales (el highlight es función de sus
+// extremos; dos renders con la misma selección pintan lo mismo por fila).
+// Selection no define operator==: se compara campo a campo.
+bool sameOptSelection(const std::optional<Selection>& a,
+                      const std::optional<Selection>& b) {
+    if (!a.has_value() || !b.has_value())
+        return a.has_value() == b.has_value();
+    return a->anchor == b->anchor && a->position == b->position;
 }
 
 #ifdef HAVE_SDL2
@@ -1089,7 +1099,7 @@ bool GuiRenderer::tryFastCursorMove(
     // tampoco CONSTRUYE ni copia los segmentos de las filas que no cambiaron.
     if (!contentHasCache_) return false;
     if (selection.has_value() || searchHighlight.has_value() ||
-        contentHadSelection_ || contentHadSearch_) {
+        contentSelection_.has_value() || contentSearch_.has_value()) {
         return false;  // el highlight de selección/búsqueda cubre N filas
     }
     // Etapa 2 (conservadora): cualquier bracket presente o cacheado invalida
@@ -1344,6 +1354,252 @@ bool GuiRenderer::tryFastCursorMove(
     return true;
 }
 
+bool GuiRenderer::tryFastScrollLine(
+    const Document& doc, const Cursor& cursor, const Viewport& viewport,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    const std::optional<Selection>& selection,
+    const std::optional<Selection>& searchHighlight,
+    const std::optional<BracketPair>& bracketPair) {
+    // Precondiciones (etapa scroll ±1). Si alguna falla, false SIN mutar:
+    // el caller cae al camino completo. Deltas != ±1 (saltos, páginas),
+    // edición, cambios visuales o geometría incompatible van por full.
+    if (!contentHasCache_) return false;
+    const int delta = viewport.top - contentTop_;
+    if (delta != 1 && delta != -1) return false;
+    // Selección/búsqueda/bracket: se admiten si son IGUALES a las cacheadas
+    // (el overlay es función de docLine y la rotación lo preserva); cualquier
+    // cambio invalida el camino rápido.
+    if (!sameOptSelection(selection, contentSelection_)) return false;
+    if (!sameOptSelection(searchHighlight, contentSearch_)) return false;
+    if (bracketPair.has_value() != contentBracket_.has_value()) return false;
+    if (bracketPair.has_value() && *bracketPair != *contentBracket_) {
+        return false;
+    }
+    if (chrome.cursorInMessageBar || contentCursorInMsg_) return false;
+    if (frameBuilder_.updateSyntaxLanguage(filename)) return false;
+    if (filename != contentFilename_) return false;
+    if (doc.instanceId() != contentDocInstance_ ||
+        doc.version() != contentDocVersion_) {
+        return false;
+    }
+    if (doc.lineCount() != contentLineCount_) return false;
+    if (viewport.left != contentLeft_ ||
+        viewport.width != contentVpWidth_ ||
+        viewport.height != contentVpHeight_) {
+        return false;
+    }
+    const FrameBuilder::EditorGeometry g =
+        frameBuilder_.editorGeometry(doc, viewport);
+    if (!sameLayout(g.layout, contentLayout_)) return false;
+    const int cw = font_.cellW();
+    const int ch = font_.cellH();
+    if (cw != contentCellW_ || ch != contentCellH_ ||
+        dark_ != contentDark_) {
+        return false;
+    }
+    const int H = g.layout.content.height;
+    if (H <= 0 ||
+        static_cast<int>(contentRows_.size()) != H ||
+        static_cast<int>(lastContentRows_.size()) != H) {
+        return false;
+    }
+#ifdef HAVE_SDL2
+    // Igual que el camino de cursor-move: sin superficie persistente no hay
+    // parcial seguro y acá no hay Frame completo con que pintar el fallback.
+    if (sdlRenderer_ && contentFb_.tex == nullptr) return false;
+#endif
+    const FrameBuilder::ChromePayload payload =
+        frameBuilder_.buildChrome(filename, modified, cursor,
+                                  doc.lineCount(), chrome);
+    const bool chromeSame = (payload.data == contentChrome_) &&
+                            (payload.statusAccent == contentAccent_);
+    const bool chromeDirty = !chromeSame;
+    FrameCursor next;
+    next.shape = chrome.cursorShape;
+    CellPos pos;
+    const bool inViewport =
+        frameBuilder_.editorCursorPos(doc, cursor, viewport, g, pos);
+    const bool visible = chrome.cursorVisibleByMode && inViewport;
+    next.visible = visible;
+    next.cell = visible ? pos : CellPos{};
+    // Rotación de snapshots: la entrada i pasa a representar
+    // docLine = viewport.top + i (el contenido es función de docLine:
+    // texto, gutter, sintaxis y overlays se preservan al rotar).
+    // Solo movimientos O(H) sin allocs (los strings ya son dueños).
+    if (delta == 1) {
+        for (int i = 0; i + 1 < H; ++i) {
+            contentRows_[static_cast<size_t>(i)] =
+                std::move(contentRows_[static_cast<size_t>(i + 1)]);
+            lastContentRows_[static_cast<size_t>(i)] =
+                std::move(lastContentRows_[static_cast<size_t>(i + 1)]);
+        }
+    } else {
+        for (int i = H - 1; i > 0; --i) {
+            contentRows_[static_cast<size_t>(i)] =
+                std::move(contentRows_[static_cast<size_t>(i - 1)]);
+            lastContentRows_[static_cast<size_t>(i)] =
+                std::move(lastContentRows_[static_cast<size_t>(i - 1)]);
+        }
+    }
+    const std::optional<Normalized> sel =
+        selection.has_value() ? normalize(*selection) : std::nullopt;
+    const std::optional<Normalized> searchSel =
+        searchHighlight.has_value() ? normalize(*searchHighlight)
+                                    : std::nullopt;
+    std::optional<Normalized> bracketOpen, bracketClose;
+    FrameBuilder::normalizeBracketPair(bracketPair, bracketOpen, bracketClose);
+    const int gutterW = g.gutterW;
+    const int textWidth =
+        std::max(0, g.layout.content.width - gutterW);
+    auto buildSnap = [&](int docLine) {
+        StyledRow sr = frameBuilder_.buildContentRow(
+            doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose,
+            docLine, gutterW, textWidth);
+        GuiContentRow gr;
+        gr.isCurrentLine = sr.isCurrentLine;
+        gr.segs.reserve(sr.segs.size());
+        for (const auto& s : sr.segs) {
+            GuiContentSeg gs;
+            gs.text.assign(s.text.data(), s.text.size());
+            gs.role = s.role;
+            gr.segs.push_back(std::move(gs));
+        }
+        return gr;
+    };
+    // Fila entrante (la única garantizada nueva) + extras por CurrentLine
+    // vieja/nueva si siguen visibles y no coinciden con la entrante.
+    // Todo lo demás se reutiliza sin construir ni copiar segmentos.
+    // SyntaxCache: buildContentRow asegura lo que necesite (típicamente 1
+    // línea nueva; el resto ya estaba válido).
+    const int enteringRel = (delta == 1) ? H - 1 : 0;
+    const int enteringDocLine =
+        (delta == 1) ? viewport.top + H - 1 : viewport.top;
+    contentRows_[static_cast<size_t>(enteringRel)] =
+        buildSnap(enteringDocLine);
+    lastContentRows_[static_cast<size_t>(enteringRel)] =
+        contentRows_[static_cast<size_t>(enteringRel)];
+    const int lines[2] = {contentCursorLine_, cursor.line};
+    for (int li = 0; li < 2; ++li) {
+        const int rel = lines[li] - viewport.top;
+        if (rel < 0 || rel >= H || rel == enteringRel) continue;
+        GuiContentRow gr = buildSnap(viewport.top + rel);
+        contentRows_[static_cast<size_t>(rel)] = gr;
+        lastContentRows_[static_cast<size_t>(rel)] = gr;
+    }
+    // Sin blit GPU (etapa siguiente), todas las filas físicas cambian de
+    // píxeles: se repintan desde el caché (hits de texturas, sin TTF). El
+    // ahorro de esta etapa es CPU (construcción O(1)) + allocs, no pintado.
+    const int repainted = H;
+    const int skipped = 0;
+    const FrameCursor prevContent = contentCursor_;
+    const bool cursorChanged =
+        prevContent.visible != next.visible ||
+        prevContent.shape != next.shape ||
+        !(prevContent.cell == next.cell);
+    bool paintChrome = chromeDirty;
+    {
+        const bool newBar = isChromeBar(next, g.layout);
+        const bool oldBar = isChromeBar(prevContent, g.layout);
+        if (newBar || (oldBar && cursorChanged)) paintChrome = true;
+    }
+    noteStats(false, repainted, skipped, chromeDirty);
+    lastChrome_ = payload.data;
+    lastAccent_ = payload.statusAccent;
+    noteCursorForBlink(next);
+    lastCursor_ = next;
+    lastLayout_ = g.layout;
+    lastListLines_.clear();
+    lastListSelected_ = -1;
+    lastListScroll_ = 0;
+    const bool shown = cursorShown();
+    contentChrome_ = payload.data;
+    contentAccent_ = payload.statusAccent;
+    contentLayout_ = g.layout;
+    contentDark_ = dark_;
+    contentCellW_ = cw;
+    contentCellH_ = ch;
+    contentCursor_ = next;
+    contentHasCache_ = true;
+    lastIsList_ = false;
+    contentTop_ = viewport.top;
+    contentModified_ = modified;
+    contentCursorLine_ = cursor.line;
+    contentSelection_ = selection;
+    contentSearch_ = searchHighlight;
+    contentBracket_ = bracketPair;
+#ifdef HAVE_SDL2
+    if (sdlRenderer_) {
+        SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
+        const GuiColor bg = guichrome::background(dark_);
+        int wPx = 0, hPx = 0;
+        bool fbFresh = false;
+        SDL_Texture* fb = nullptr;
+        if (framePxSize(g.layout, font_.cellW(), font_.cellH(), wPx, hPx)) {
+            bool fr = false;
+            fb = static_cast<SDL_Texture*>(
+                acquireFb(contentFb_, sdlRenderer_, wPx, hPx, fr));
+            fbFresh = (fb != nullptr) && fr;
+        }
+        if (!fb || fbFresh) {
+            invalidateCache();
+            return true;
+        }
+        SDL_SetRenderTarget(r, fb);
+        for (int i = 0; i < H; ++i) {
+            paintSnapshotRow(r, font_, dark_, g.layout, i,
+                             contentRows_[static_cast<size_t>(i)]);
+        }
+        if (paintChrome)
+            paintChromeOnly(r, font_, dark_, g.layout, payload.data,
+                            payload.statusAccent);
+        if (shown && next.visible && next.cell.valid()) {
+            const int ccw = font_.cellW();
+            const int cch = font_.cellH();
+            if (ccw > 0 && cch > 0) {
+                const GuiColor cc = guichrome::cursorColor(dark_);
+                const int px = next.cell.col * ccw;
+                const int py = next.cell.row * cch;
+                if (next.shape == FrameCursorShape::Bar) {
+                    SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
+                    SDL_Rect crect{px, py, 2, cch};
+                    SDL_RenderFillRect(r, &crect);
+                } else {
+                    const BlockGlyph glyph = blockGlyphInSnapshot(
+                        contentRows_, g.layout, next, dark_);
+                    const int wpx =
+                        (glyph.hasGlyph && glyph.widthCols == 2) ? 2 * ccw
+                                                                : ccw;
+                    SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
+                    SDL_Rect crect{px, py, wpx, cch};
+                    SDL_RenderFillRect(r, &crect);
+                    if (glyph.hasGlyph && font_.ok()) {
+                        const GuiColor cellBg =
+                            glyph.hasCellBg
+                                ? glyph.cellBg
+                                : guichrome::background(dark_);
+                        const GuiColor fg =
+                            guichrome::cursorGlyphFg(cellBg, dark_);
+                        void* tex = font_.textTexture(r, glyph.text, fg.r,
+                                                      fg.g, fg.b);
+                        if (tex) {
+                            SDL_Texture* t = static_cast<SDL_Texture*>(tex);
+                            int tw = 0, th = 0;
+                            SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+                            SDL_Rect dst{px, py, tw, th};
+                            SDL_RenderCopy(r, t, nullptr, &dst);
+                        }
+                    }
+                }
+            }
+        }
+        presentFramebuf(r, fb, bg);
+    }
+#else
+    // Sin SDL2: no-op (el loop nunca llega acá).
+#endif
+    return true;
+}
+
 void GuiRenderer::renderScreenDiff(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
     const std::string& filename, bool modified, const ChromeRequest& chrome,
@@ -1356,6 +1612,13 @@ void GuiRenderer::renderScreenDiff(
     // resuelve, ya actualizó cachés/stats/snapshots y pintó; si no, se cae al
     // camino completo de abajo sin haber mutado nada.
     if (tryFastCursorMove(doc, cursor, viewport, filename, modified, chrome,
+                          selection, searchHighlight, bracketPair)) {
+        return;
+    }
+    // Camino rápido (etapa scroll ±1): rota snapshots y construye O(1) filas.
+    // Mismas garantías de equivalencia; el repintado sigue saliendo del caché
+    // hasta la etapa scroll-blit.
+    if (tryFastScrollLine(doc, cursor, viewport, filename, modified, chrome,
                           selection, searchHighlight, bracketPair)) {
         return;
     }
@@ -1465,8 +1728,8 @@ void GuiRenderer::renderScreenDiff(
     contentDocVersion_ = doc.version();
     contentDocInstance_ = doc.instanceId();
     contentCursorLine_ = cursor.line;
-    contentHadSelection_ = selection.has_value();
-    contentHadSearch_ = searchHighlight.has_value();
+    contentSelection_ = selection;
+    contentSearch_ = searchHighlight;
     contentBracket_ = bracketPair;
     contentCursorInMsg_ = chrome.cursorInMessageBar;
 #ifdef HAVE_SDL2

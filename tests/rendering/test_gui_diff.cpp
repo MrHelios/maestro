@@ -692,3 +692,242 @@ TEST(gui_sdl_cursor_move_paridad_pixeles_con_full) {
     CHECK(full == parcial);
 #endif
 }
+
+// Scroll +1: rota snapshots y construye O(1) filas (entrante + CurrentLine),
+// no las H del viewport. El repintado sigue saliendo del caché hasta el
+// scroll-blit (etapa siguiente): acá se mide CONSTRUCCIÓN, no pintado.
+TEST(gui_diff_scroll_plus1_construye_O1_filas) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 50; ++i)
+        lines.push_back("linea numero " + std::to_string(i) +
+                        " con algo de texto");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    vp.top = 10;
+    Cursor cur;
+    cur.line = 12;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());  // full
+    CHECK(gui.lastWasFull());
+    instrument::enable(true);
+    instrument::resetFrame();
+    vp.top = 11;  // scroll +1 con el cursor acompañando (caso ↑/↓ en borde)
+    cur.line = 13;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    auto m = instrument::snapshotAndReset();
+    instrument::enable(false);
+    CHECK(!gui.lastWasFull());
+    // Entrante (línea 20) + CurrentLine vieja (12) y nueva (13): O(1).
+    CHECK(m.renderEditorRow <= 4);
+    CHECK(m.renderEditorRow >= 1);
+    // La fila entrante quedó cacheada con el contenido correcto.
+    CHECK(contains(gui.lastContentRows()[9].plain(), "linea numero 20"));
+}
+
+// Scroll -1: simétrico al +1.
+TEST(gui_diff_scroll_minus1_construye_O1_filas) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 50; ++i)
+        lines.push_back("linea numero " + std::to_string(i) +
+                        " con algo de texto");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    vp.top = 11;
+    Cursor cur;
+    cur.line = 13;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    instrument::enable(true);
+    instrument::resetFrame();
+    vp.top = 10;
+    cur.line = 12;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    auto m = instrument::snapshotAndReset();
+    instrument::enable(false);
+    CHECK(!gui.lastWasFull());
+    CHECK(m.renderEditorRow <= 4);
+    CHECK(m.renderEditorRow >= 1);
+    CHECK(contains(gui.lastContentRows()[0].plain(), "linea numero 10"));
+}
+
+// Paridad DTO del scroll: rotación + entrante + CurrentLine dan el mismo
+// snapshot/chrome/cursor que el camino completo (gutter, tabs y roles
+// incluidos: la entrada i sigue siendo docLine top+i).
+TEST(gui_diff_scroll_paridad_dto_con_full) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 50; ++i)
+        lines.push_back("linea numero " + std::to_string(i) +
+                        " con algo de texto");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    vp.top = 10;
+    Cursor cur;
+    cur.line = 12;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    vp.top = 11;
+    cur.line = 13;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());  // scroll rápido
+    CHECK(!gui.lastWasFull());
+    std::vector<std::string> fastPlain;
+    std::vector<bool> fastCur;
+    for (auto& r : gui.lastContentRows()) {
+        fastPlain.push_back(r.plain());
+        fastCur.push_back(r.isCurrentLine);
+    }
+    const ChromeData fastChrome = gui.lastChrome();
+    const FrameCursor fastCursor = gui.lastCursor();
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());  // referencia completa
+    CHECK(gui.lastWasFull());
+    CHECK_EQ(gui.lastContentRows().size(), fastPlain.size());
+    for (size_t i = 0; i < fastPlain.size(); ++i) {
+        CHECK_EQ(gui.lastContentRows()[i].plain(), fastPlain[i]);
+        CHECK_EQ(gui.lastContentRows()[i].isCurrentLine, fastCur[i]);
+    }
+    CHECK(gui.lastChrome() == fastChrome);
+    CHECK(gui.lastCursor().visible == fastCursor.visible);
+    CHECK(gui.lastCursor().shape == fastCursor.shape);
+    CHECK(gui.lastCursor().cell == fastCursor.cell);
+}
+
+// Scroll con selección IGUAL (no cambió): el overlay es función de docLine y
+// la rotación lo preserva, así que el camino rápido sigue valiendo.
+TEST(gui_diff_scroll_con_seleccion_igual_reutiliza) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 50; ++i)
+        lines.push_back("linea numero " + std::to_string(i) +
+                        " con algo de texto");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    vp.top = 10;
+    Cursor cur;
+    cur.line = 12;
+    const std::optional<Selection> sel =
+        Selection{Position{12, 0}, Position{14, 4}};
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false, navChrome(), sink, sel,
+                         std::nullopt, std::nullopt);
+    CHECK(gui.lastWasFull());
+    instrument::enable(true);
+    instrument::resetFrame();
+    vp.top = 11;
+    cur.line = 13;
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false, navChrome(), sink, sel,
+                         std::nullopt, std::nullopt);
+    auto m = instrument::snapshotAndReset();
+    instrument::enable(false);
+    CHECK(!gui.lastWasFull());
+    CHECK(m.renderEditorRow <= 4);
+    // El highlight rotó con las filas (líneas 12-14 siguen marcadas donde
+    // corresponde bajo el nuevo top).
+    CHECK(gui.lastContentRows()[1].hasRole(StyleRole::Selection));
+    CHECK(gui.lastContentRows()[3].hasRole(StyleRole::Selection));
+}
+
+// Fallback: scroll + selección CAMBIADA reconstruye todo (correcto).
+TEST(gui_diff_scroll_con_seleccion_cambiada_fallback_completo) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 50; ++i)
+        lines.push_back("linea numero " + std::to_string(i) +
+                        " con algo de texto");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    vp.top = 10;
+    Cursor cur;
+    cur.line = 12;
+    const std::optional<Selection> sel1 =
+        Selection{Position{12, 0}, Position{12, 3}};
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false, navChrome(), sink, sel1,
+                         std::nullopt, std::nullopt);
+    CHECK(gui.lastWasFull());
+    const std::optional<Selection> sel2 =
+        Selection{Position{13, 0}, Position{15, 4}};
+    instrument::enable(true);
+    instrument::resetFrame();
+    vp.top = 11;
+    cur.line = 13;
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false, navChrome(), sink, sel2,
+                         std::nullopt, std::nullopt);
+    auto m = instrument::snapshotAndReset();
+    instrument::enable(false);
+    CHECK_EQ(m.renderEditorRow, 10);  // camino completo
+    CHECK(!gui.lastWasFull());        // ...pero pintado diferencial válido
+    CHECK(gui.lastContentRows()[2].hasRole(StyleRole::Selection));
+}
+
+// Fallback: salto grande (delta != ±1) reconstruye todo.
+TEST(gui_diff_scroll_delta_grande_fallback_completo) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 50; ++i)
+        lines.push_back("linea numero " + std::to_string(i) +
+                        " con algo de texto");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    vp.top = 10;
+    Cursor cur;
+    cur.line = 12;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    instrument::enable(true);
+    instrument::resetFrame();
+    vp.top = 15;  // AvPág/salto: delta +5
+    cur.line = 17;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    auto m = instrument::snapshotAndReset();
+    instrument::enable(false);
+    CHECK_EQ(m.renderEditorRow, 10);
+    CHECK(contains(gui.lastContentRows()[0].plain(), "linea numero 15"));
+}
+
+// Paridad de píxeles del scroll (SDL dummy): la rotación + entrante pintan lo
+// mismo que el full, con gutter y cursor Block correctos tras el ráster.
+TEST(gui_sdl_scroll_paridad_pixeles_con_full) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummyLocal sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 15; ++i)
+        lines.push_back("linea " + std::to_string(i) + " de prueba");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    vp.top = 0;
+    Cursor cur;
+    cur.line = 2;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    vp.top = 1;
+    cur.line = 3;  // scroll +1 rápido
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(!gui.lastWasFull());
+    std::vector<GuiColor> parcial;
+    if (!readSurfaceLocal(gui, parcial)) SKIP("ReadPixels no disponible");
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    std::vector<GuiColor> full;
+    CHECK(readSurfaceLocal(gui, full));
+    CHECK(full == parcial);
+#endif
+}
