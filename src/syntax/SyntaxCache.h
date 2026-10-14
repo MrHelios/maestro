@@ -49,9 +49,9 @@ public:
 
     // Evita llamar ensureValid cuando ya está válido
     bool isValidThrough(int line) const {
-        if (language_ == SyntaxLanguage::None) return true;
-        if (line < 0) return true;
-        if (line > (int)spans_.size()) line = (int)spans_.size();
+        if (language_ == SyntaxLanguage::None || line <= 0) return true;
+        const auto n = static_cast<size_t>(line);
+        if (n > spans_.size() || before_.size() <= n) return false;
         return parsedUpTo_ >= line && dirtyFrom_ >= line;
     }
 
