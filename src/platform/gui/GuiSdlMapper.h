@@ -99,8 +99,36 @@ inline int guiScaleSize(int base, int fromDim, int toDim) {
 // altura). `basePixels` es la talla a escala 1 (16 en el loop). A 2×
 // (ventana 600 pts, drawable 1200 px) 16 -> 32: la celda TTF resultante
 // (~18×36) mantiene la grilla visual estable tras guiGridSize.
+// NOTA NO-UNIFORME: si la escala horizontal difiriera de la vertical (fuera
+// de lo que SDL produce: el factor de backing es único para ambos ejes, el
+// código por eje es defensa), la fuente sigue el eje VERTICAL a propósito
+// (la talla tipográfica es altura) y el raster TTF escala uniforme con ella.
+// Con píxeles anisotrópicos reales no se puede estabilizar filas y columnas
+// a la vez sin distorsionar glifos: las filas quedan estables y las columnas
+// derivan del eje horizontal (coords, fallback y grilla ya son por eje).
 inline int guiScaledFontPixels(int basePixels, int winH, int outH) {
     return guiScaleSize(basePixels, winH, outH);
+}
+
+// Drawable efectivo con fallback POR EJE (puro y sin SDL): única fuente del
+// fallback que el loop usa tras SDL_GetWindowSize/SDL_GetRendererOutputSize
+// (currentSize y mouseCell deben dar el mismo espacio ante las mismas
+// medidas; el init solo usa alturas porque la fuente sigue el eje vertical). Cada eje del drawable en <=0 cae a su propio eje de ventana, y
+// si tampoco hay ventana a 960×600. Por eje, no conjunto: un eje válido
+// nunca se descarta porque el otro degenere (minimizado parcial o driver
+// que reporta un eje en 0). Con todo degenerado da 960×600 (escala 1:1
+// asumida, comportamiento pre-HiDPI); la grilla además se clampe a >=1 en
+// guiGridSize, así al Editor nunca llega 0×0.
+struct GuiDrawableSize {
+    int w = 0;
+    int h = 0;
+};
+inline GuiDrawableSize guiDrawableOrWindow(int winW, int winH, int outW,
+                                           int outH) {
+    GuiDrawableSize d;
+    d.w = outW > 0 ? outW : (winW > 0 ? winW : 960);
+    d.h = outH > 0 ? outH : (winH > 0 ? winH : 600);
+    return d;
 }
 
 // Puro y sin SDL: píxeles -> celda 0-based (dominio neutro CellPos).
@@ -333,7 +361,10 @@ inline bool guiFocusLossEndsGesture(Uint8 windowEventId) {
 // pantallas. Se re-mide ante RESIZED + SIZE_CHANGED + DISPLAY_CHANGED:
 // DISPLAY_CHANGED cubre el caso sin cambio de tamaño en puntos (1× -> 2×
 // con la misma ventana lógica: el drawable duplica pero ningún resize
-// llegaría). El re-medido (currentSize en el loop) re-consulta
+// llegaría). MINIMIZED/MAXIMIZED no re-miden: maximizar llega con
+// SIZE_CHANGED, y minimizar conserva la última grilla (o la degradada por
+// eje de guiDrawableOrWindow); al restaurar, SIZE_CHANGED/DISPLAY_CHANGED
+// re-mide. El re-medido (currentSize en el loop) re-consulta
 // SDL_GetRendererOutputSize, re-escala la fuente (contrato visual-estable)
 // y recalcula rows/cols; el mouse y el rect IME ya miden fresco por
 // evento/render, así que también siguen al monitor nuevo sin código extra.

@@ -8,9 +8,16 @@ enum class GuiTheme { Dark, Light };
 
 struct GuiOptions {
     std::optional<std::string> fontPath;
+    // CONTRATO DE UNIDADES: píxeles lógicos (== píxeles del drawable a escala
+    // 1; no puntos tipográficos de 1/72in). El loop la convierte a píxeles
+    // del drawable con guiScaledFontPixels antes de TTF_OpenFont, así el
+    // mismo valor da la misma altura visual en cualquier monitor.
     std::optional<int> fontSize;
     GuiTheme theme = GuiTheme::Dark;
     bool enableHiDpi = true;
+    // CONTRATO DE UNIDADES: coordenadas de ventana (puntos, no píxeles
+    // físicos). Se pasan tal cual a SDL_CreateWindow; con HiDPI el drawable
+    // puede ser N× mayor.
     std::optional<int> windowWidth;
     std::optional<int> windowHeight;
 };

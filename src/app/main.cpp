@@ -24,10 +24,10 @@ void printHelp(const char* prog) {
     std::printf("\n");
     std::printf("Opciones GUI (requieren --gui):\n");
     std::printf("  --font <ruta>       fuente TTF monoespaciada (override MAESTRO_FONT)\n");
-    std::printf("  --font-size <pt>    tamaño base en puntos (default 16, escala HiDPI)\n");
+    std::printf("  --font-size <px>    píxeles lógicos base (default 16; misma altura visual en cualquier monitor)\n");
     std::printf("  --theme dark|light  tema inicial (default dark)\n");
     std::printf("  --no-hidpi          desactiva SDL_WINDOW_ALLOW_HIGHDPI\n");
-    std::printf("  --geometry WxH      tamaño inicial ventana en puntos (ej. 1200x800)\n");
+    std::printf("  --geometry WxH      coords iniciales de ventana, no píxeles físicos (ej. 1200x800)\n");
 }
 
 }  // namespace

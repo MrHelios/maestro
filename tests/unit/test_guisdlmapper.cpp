@@ -565,6 +565,141 @@ TEST(guigrid_stable_visual_size_hidpi) {
     CHECK_EQ(c.row, 2);
 }
 
+// CONTRATO DE UNIDADES CLI (puro y sin SDL): `--font-size N` son píxeles
+// lógicos (== píxeles del drawable a escala 1; no puntos tipográficos de
+// 1/72in) y la talla que llega a TTF_OpenFont es guiScaledFontPixels(N,
+// winH, outH) (eje vertical, redondeo). Fija que el mismo N da la misma
+// altura visual en cualquier monitor: el loop escala tanto al abrir (init)
+// como en cada resize.
+TEST(gui_contrato_fontsize_pixeles_logicos) {
+    // A escala 1 la base llega intacta a TTF_OpenFont.
+    CHECK_EQ(guiScaledFontPixels(16, 600, 600), 16);
+    // A escala 2 la talla duplica (misma altura visual, misma grilla).
+    CHECK_EQ(guiScaledFontPixels(16, 600, 1200), 32);
+    // Base custom del CLI (--font-size 18) escala igual.
+    CHECK_EQ(guiScaledFontPixels(18, 600, 1200), 36);
+    // Escala fraccionaria 1.5× con redondeo, no truncado (16 -> 24).
+    CHECK_EQ(guiScaledFontPixels(16, 600, 900), 24);
+    // Ventana/salida degenerada (minimizada, 0): identidad segura.
+    CHECK_EQ(guiScaledFontPixels(16, 0, 1200), 16);
+    CHECK_EQ(guiScaledFontPixels(16, 600, 0), 16);
+}
+
+// CONTRATO DE UNIDADES CLI (puro y sin SDL): `--geometry WxH` son
+// coordenadas de ventana (puntos, no píxeles físicos). La misma ventana
+// lógica en dos escalas da la misma grilla visual: si la geometría fueran
+// píxeles físicos, a 2× la ventana lógica sería la mitad y la grilla
+// cambiaría (53×16 en vez de 106×33).
+TEST(gui_contrato_geometry_coords_ventana) {
+    // Ventana lógica 1200×800 (p. ej. --geometry 1200x800) a escala 1.
+    const int winW = 1200, winH = 800;
+    const int cw1 = guiScaleSize(9, winW, winW);
+    const int ch1 = guiScaleSize(18, winH, winH);
+    const platform::WindowSize g1 = guiGridSize(winW, winH, cw1, ch1);
+    CHECK_EQ(g1.cols, 133);
+    CHECK_EQ(g1.rows, 44);
+    // Misma ventana lógica a escala 2 (drawable 2400×1600): misma grilla.
+    const int outW = 2400, outH = 1600;
+    const int cw2 = guiScaleSize(9, winW, outW);
+    const int ch2 = guiScaleSize(18, winH, outH);
+    const platform::WindowSize g2 = guiGridSize(outW, outH, cw2, ch2);
+    CHECK_EQ(g2.cols, g1.cols);
+    CHECK_EQ(g2.rows, g1.rows);
+    // Y la talla de fuente de esa geometría escala en la misma razón.
+    CHECK_EQ(guiScaledFontPixels(16, winH, outH), 32);
+}
+
+// P2-transición: el drawable efectivo ante medidas degeneradas (minimizado
+// o driver que reporta un eje en 0). El fallback es POR EJE: un eje válido
+// nunca se descarta porque el otro falle (el fallback conjunto lo haría).
+TEST(gui_drawable_fallback_por_eje) {
+    // Medidas sanas: passthrough intacto.
+    GuiDrawableSize ok = guiDrawableOrWindow(960, 600, 1920, 1200);
+    CHECK_EQ(ok.w, 1920);
+    CHECK_EQ(ok.h, 1200);
+    // Un eje degenerado: el otro se conserva (no cae a la ventana).
+    GuiDrawableSize mixW = guiDrawableOrWindow(960, 600, 0, 1200);
+    CHECK_EQ(mixW.w, 960);
+    CHECK_EQ(mixW.h, 1200);
+    GuiDrawableSize mixH = guiDrawableOrWindow(960, 600, 1920, 0);
+    CHECK_EQ(mixH.w, 1920);
+    CHECK_EQ(mixH.h, 600);
+    // Todo degenerado (minimizada sin medidas): 960×600, escala 1:1.
+    GuiDrawableSize all = guiDrawableOrWindow(0, 0, 0, 0);
+    CHECK_EQ(all.w, 960);
+    CHECK_EQ(all.h, 600);
+    // Negativos: igual que 0 (desconocido, nunca se guarda tal cual).
+    GuiDrawableSize neg = guiDrawableOrWindow(-10, 600, -5, 1200);
+    CHECK_EQ(neg.w, 960);
+    CHECK_EQ(neg.h, 1200);
+    // La cadena del loop sobre el fallback nunca da 0×0 al Editor: grilla
+    // mínima 1×1 y fuente en identidad.
+    const platform::WindowSize g = guiGridSize(all.w, all.h, 9, 18);
+    CHECK_EQ(g.cols, 106);
+    CHECK_EQ(g.rows, 33);
+    CHECK_EQ(guiScaledFontPixels(16, 0, all.h), 16);
+}
+
+// P2-transición: cambio de monitor ida y vuelta (1× -> 2× -> 1×) con la
+// MISMA ventana lógica. Replica la cadena del loop (fallback drawable +
+// fuente + grilla + mouse) en cada etapa: la talla sigue a la escala
+// (16->32->16), la grilla no se mueve y el mismo clic lógico cae en la
+// misma celda en las tres etapas.
+TEST(gui_hidpi_transicion_monitor_ida_y_vuelta) {
+    const int winW = 960, winH = 600;
+    // Etapa 1×: ventana == drawable.
+    GuiDrawableSize d1 = guiDrawableOrWindow(winW, winH, 960, 600);
+    const int f1 = guiScaledFontPixels(16, winH, d1.h);
+    CHECK_EQ(f1, 16);
+    const platform::WindowSize g1 = guiGridSize(d1.w, d1.h, 9, 18);
+    CHECK_EQ(g1.cols, 106);
+    CHECK_EQ(g1.rows, 33);
+    // Etapa 2× (DISPLAY_CHANGED sin resize en puntos): drawable duplica.
+    GuiDrawableSize d2 = guiDrawableOrWindow(winW, winH, 1920, 1200);
+    const int f2 = guiScaledFontPixels(16, winH, d2.h);
+    CHECK_EQ(f2, 32);
+    const int cw2 = guiScaleSize(9, winW, d2.w);
+    const int ch2 = guiScaleSize(18, winH, d2.h);
+    const platform::WindowSize g2 = guiGridSize(d2.w, d2.h, cw2, ch2);
+    CHECK_EQ(g2.cols, g1.cols);
+    CHECK_EQ(g2.rows, g1.rows);
+    // Vuelta a 1×: la talla baja sola (ensureFontPixels recarga por cambio)
+    // y la grilla sigue estable.
+    GuiDrawableSize d3 = guiDrawableOrWindow(winW, winH, 960, 600);
+    const int f3 = guiScaledFontPixels(16, winH, d3.h);
+    CHECK_EQ(f3, 16);
+    const platform::WindowSize g3 = guiGridSize(d3.w, d3.h, 9, 18);
+    CHECK_EQ(g3.cols, g1.cols);
+    CHECK_EQ(g3.rows, g1.rows);
+    // Mismo clic lógico (19,37) pts en las tres etapas -> misma celda.
+    const CellPos c1 = guiCellFromPixels(guiScaleCoord(19, winW, d1.w),
+                                         guiScaleCoord(37, winH, d1.h), 9, 18);
+    const CellPos c2 = guiCellFromPixels(guiScaleCoord(19, winW, d2.w),
+                                         guiScaleCoord(37, winH, d2.h), cw2,
+                                         ch2);
+    const CellPos c3 = guiCellFromPixels(guiScaleCoord(19, winW, d3.w),
+                                         guiScaleCoord(37, winH, d3.h), 9, 18);
+    CHECK(c2 == c1);
+    CHECK(c3 == c1);
+}
+
+// P2-transición: escala NO uniforme (X a 2×, Y a 1.5×; fuera de lo que SDL
+// produce, donde el factor es único). Cada eje usa su propia razón en
+// coords, fallback y grilla; la fuente sigue el eje VERTICAL (la talla es
+// altura) y el raster escala uniforme con ella.
+TEST(gui_hidpi_escala_no_uniforme_por_eje) {
+    const int winW = 960, winH = 600;
+    const int outW = 1920, outH = 900;
+    CHECK_EQ(guiScaleCoord(100, winW, outW), 200);
+    CHECK_EQ(guiScaleCoord(100, winH, outH), 150);
+    CHECK_EQ(guiScaledFontPixels(16, winH, outH), 24);
+    CHECK_EQ(guiScaleSize(9, winW, outW), 18);
+    CHECK_EQ(guiScaleSize(18, winH, outH), 27);
+    const platform::WindowSize g = guiGridSize(outW, outH, 18, 27);
+    CHECK_EQ(g.cols, 106);
+    CHECK_EQ(g.rows, 33);
+}
+
 // --- Headless extra (sin ventana): bordes exactos + valores grandes ---
 // División PURA en un solo espacio (no es prueba HiDPI: acá píxel y celda ya
 // están en el mismo espacio; el caso HiDPI real —puntos vs drawable— vive en

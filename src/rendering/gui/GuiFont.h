@@ -41,8 +41,10 @@ public:
     // se mide con el avance de 'M' y solo vale para todas si lo es.
     // UNIDADES HiDPI (contrato visual-estable): `pixelSize` son píxeles del
     // DRAWABLE, no puntos de ventana. El loop lo escala con
-    // guiScaledFontPixels (base 16 × drawable/ventana) antes de llamar: a 2×
-    // pide 32 y la celda resultante (~18×36) mantiene la grilla estable. Se
+    // guiScaledFontPixels desde la base del CLI (--font-size, píxeles
+    // lógicos; base 16 × drawable/ventana) antes de llamar, tanto al abrir
+    // como en cada resize: a 2× pide 32 y la celda resultante (~18×36)
+    // mantiene la grilla estable. Se
     // escala la talla en vez de usar TTF_OpenFontDPI a propósito: es
     // equivalente en raster y funciona con cualquier SDL_ttf (sin exigir
     // >=2.0.18).

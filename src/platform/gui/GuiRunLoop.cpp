@@ -102,10 +102,17 @@ namespace {
 // La celda de respaldo es la canónica (platform::kFallbackCellW/H, ver
 // WindowSize.h): con HiDPI se escala por eje con guiScaleSize, ver
 // currentSize/mouseCell.
-// Talla base a escala 1 (puntos de fuente, no píxeles del drawable). El
-// tamaño real se escala por eje vertical con guiScaledFontPixels (contrato
-// visual-estable). El valor por defecto es 16 pt; se puede cambiar con
-// --font-size.
+// CONTRATO DE UNIDADES (fuente y geometría):
+//   - `--font-size N` son PÍXELES LÓGICOS (== píxeles del drawable a escala
+//     1), no puntos tipográficos (1/72in) ni píxeles físicos. Antes de cada
+//     TTF_OpenFont la base se convierte a píxeles del drawable con
+//     guiScaledFontPixels (eje vertical, redondeo): a 2×, 16 -> 32. Así
+//     `--font-size 16` da la misma altura visual y la misma grilla en
+//     cualquier monitor (contrato visual-estable).
+//   - `--geometry WxH` son COORDENADAS DE VENTANA (puntos, no píxeles
+//     físicos): se pasan tal cual a SDL_CreateWindow; con HiDPI el drawable
+//     resulta N× mayor y grilla/fuente se derivan del drawable.
+// El valor por defecto de la base es 16 px lógicos; se cambia con --font-size.
 
 #ifdef HAVE_SDL2
 // Guard RAII del estado TextInput de SDL: garantiza SDL_StopTextInput()
@@ -188,10 +195,23 @@ int GuiRunLoop::run() {
     sdlRen_ = static_cast<void*>(ren);
     // Abre la fuente y mide la celda real ANTES del primer resize: de acá
     // salen cols/filas = píxeles/celda (ya no estimados).
-    // En puntos de fuente (pt), no píxeles: el escalado HiDPI a píxeles
-    // ocurre en currentSize vía guiScaledFontPixels.
-    const int baseFontPt = options_.fontSize.value_or(16);
-    if (gui_ && !gui_->initForRenderer(static_cast<void*>(ren), baseFontPt)) {
+    // La base del CLI son píxeles lógicos (ver contrato de arriba): se escala
+    // a píxeles del drawable con las medidas REALES de ventana/salida antes
+    // de abrir, así la celda ya nace correcta en HiDPI y el primer resize no
+    // paga una recarga. La misma fórmula corre en cada currentSize (cambio
+    // de monitor sin resize en puntos).
+    const int baseFontPx = options_.fontSize.value_or(16);
+    // Solo el eje VERTICAL: la talla tipográfica es altura y el ancho no se
+    // mezcla en la escala de la fuente (la grilla la calcula el primer
+    // currentSize con ambos ejes). Medidas degeneradas (minimizado) dan la
+    // base sin escalar vía la identidad de guiScaledFontPixels.
+    int initWinH = 0, initOutH = 0;
+    SDL_GetWindowSize(win, nullptr, &initWinH);
+    SDL_GetRendererOutputSize(ren, nullptr, &initOutH);
+    const int initFontPixels =
+        guiScaledFontPixels(baseFontPx, initWinH, initOutH);
+    if (gui_ &&
+        !gui_->initForRenderer(static_cast<void*>(ren), initFontPixels)) {
         std::fprintf(stderr, "maestro: error al abrir la fuente '%s' especificada con --font\n",
                      options_.fontPath.value_or("").c_str());
         if (gui_) gui_->setSdlRenderer(nullptr);
@@ -223,13 +243,18 @@ int GuiRunLoop::run() {
         int winW = 0, winH = 0, outW = 0, outH = 0;
         SDL_GetWindowSize(win, &winW, &winH);
         SDL_GetRendererOutputSize(ren, &outW, &outH);
-        if (outW <= 0 || outH <= 0) {
-            outW = winW > 0 ? winW : 960;
-            outH = winH > 0 ? winH : 600;
-        }
+        // Drawable efectivo por eje (minimizado / driver degenerado): un eje
+        // en 0 cae a su eje de ventana sin descartar el otro válido; con
+        // todo en 0 da 960×600 y la grilla se clampe a >=1 (nunca 0×0 al
+        // Editor). Minimizar no re-mide por evento (ver
+        // guiResizeNeedsRemeasure): conserva la última grilla válida o esta
+        // degradada; al restaurar, SIZE_CHANGED/DISPLAY_CHANGED re-mide.
+        const GuiDrawableSize fb = guiDrawableOrWindow(winW, winH, outW, outH);
+        outW = fb.w;
+        outH = fb.h;
         if (gui_) {
             gui_->ensureFontPixels(
-                guiScaledFontPixels(baseFontPt, winH, outH));
+                guiScaledFontPixels(baseFontPx, winH, outH));
         }
         int cw = 0, ch = 0;
         if (gui_ && gui_->hasFont()) {
@@ -262,13 +287,13 @@ int GuiRunLoop::run() {
         int winW = 0, winH = 0, outW = 0, outH = 0;
         SDL_GetWindowSize(win, &winW, &winH);
         SDL_GetRendererOutputSize(ren, &outW, &outH);
-        // Mismo fallback que currentSize: sin drawable se usa la ventana (o
-        // 960×600 si tampoco hay ventana), para que grilla y mouse sigan en
-        // el mismo espacio también en el camino degenerado.
-        if (outW <= 0 || outH <= 0) {
-            outW = winW > 0 ? winW : 960;
-            outH = winH > 0 ? winH : 600;
-        }
+        // Mismo fallback que currentSize (guiDrawableOrWindow, por eje): sin
+        // drawable se usa la ventana (o 960×600 si tampoco hay ventana),
+        // para que grilla y mouse sigan en el mismo espacio también en el
+        // camino degenerado.
+        const GuiDrawableSize mfb = guiDrawableOrWindow(winW, winH, outW, outH);
+        outW = mfb.w;
+        outH = mfb.h;
         int cw = 0, ch = 0;
         if (gui_ && gui_->hasFont()) {
             cw = gui_->cellW();

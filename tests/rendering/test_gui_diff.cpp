@@ -17,6 +17,8 @@
 #include "base/utf8.h"
 #include "diagnostics/Instrument.h"
 #include "document/Selection.h"
+#include "platform/gui/GuiRunLoop.h"
+#include "platform/gui/GuiSdlMapper.h"
 #include "rendering/Sink.h"
 #include "rendering/gui/GuiChrome.h"
 #include "rendering/gui/GuiRenderer.h"
@@ -929,5 +931,123 @@ TEST(gui_sdl_scroll_paridad_pixeles_con_full) {
     std::vector<GuiColor> full;
     CHECK(readSurfaceLocal(gui, full));
     CHECK(full == parcial);
+#endif
+}
+
+// Ruta de error de initForRenderer con --font inexistente: run() no entra al
+// ciclo de eventos, devuelve 1 y libera todo lo adquirido (ventana, renderer
+// y SDL). Nada queda a medio inicializar: la fuente nunca abrió (el
+// GuiRenderer queda desacoplado vía setSdlRenderer(nullptr)) y el guard de
+// TextInput aún no existe en ese punto (se crea después del init).
+// Headless con driver dummy; run() es dueño total del ciclo SDL acá: no hay
+// ventana del fixture viva durante el run (SDL_Quit destruye las ventanas
+// pendientes, así que compartirla sería doble-free).
+TEST(guirunloop_font_explicita_fallida_retorna_1_y_limpia) {
+#ifndef HAVE_SDL2
+    SKIP("sin HAVE_SDL2: el loop GUI no existe");
+#else
+    struct DummyEnv {
+        std::string prev;
+        bool had = false;
+        DummyEnv() {
+            if (const char* p = std::getenv("SDL_VIDEODRIVER")) {
+                prev = p;
+                had = true;
+            }
+            ::setenv("SDL_VIDEODRIVER", "dummy", 1);
+        }
+        ~DummyEnv() {
+            if (had)
+                ::setenv("SDL_VIDEODRIVER", prev.c_str(), 1);
+            else
+                ::unsetenv("SDL_VIDEODRIVER");
+        }
+    };
+    DummyEnv env;
+    GuiOptions opts;
+    opts.fontPath = "/maestro-test-inexistente/fuente.ttf";
+    auto gui = std::make_unique<GuiRenderer>(opts);
+    GuiRenderer* raw = gui.get();
+    int rc = -1;
+    bool fontOk = true;
+    {
+        Editor ed(std::move(gui));
+        GuiRunLoop loop(ed, opts);
+        loop.setGuiRenderer(raw);
+        rc = loop.run();
+        fontOk = raw->hasFont();
+    }
+    CHECK_EQ(rc, 1);
+    CHECK(!fontOk);
+    // SDL queda reusable tras la limpieza del camino de error (Init/Quit y
+    // Create/Destroy emparejados: se puede iniciar, crear y destruir de nuevo).
+    bool reused = false;
+    if (SDL_Init(SDL_INIT_VIDEO) == 0) {
+        SDL_Window* w = SDL_CreateWindow("maestro-reuse", 0, 0, 64, 64,
+                                         SDL_WINDOW_HIDDEN);
+        if (w) {
+            SDL_Renderer* r =
+                SDL_CreateRenderer(w, -1, SDL_RENDERER_SOFTWARE);
+            if (r) {
+                SDL_DestroyRenderer(r);
+                reused = true;
+            }
+            SDL_DestroyWindow(w);
+        }
+        SDL_Quit();
+    }
+    CHECK(reused);
+#endif
+}
+
+// Ciclo de vida HiDPI del lado renderer (integración headless con vídeo
+// dummy): recorre arranque -> monitor 2× -> minimizado -> restaurado
+// aplicando en cada etapa EXACTAMENTE la talla que el loop calcularía
+// (guiScaledFontPixels + guiDrawableOrWindow) y verifica que la fuente
+// cargada coincide con la esperada, con métricas re-medidas del ráster.
+// Complementa los tests puros de la fórmula (test_guisdlmapper.cpp): esos
+// fijan el contrato matemático; este fija que el renderer lo aplica en cada
+// transición (el run() real no es testeable: bloquearía en el ciclo).
+TEST(guirenderer_ciclo_vida_hidpi_tallas_esperadas) {
+#ifndef HAVE_SDL2
+    SKIP("sin HAVE_SDL2");
+#else
+    SdlDummyLocal sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    const int base = 16;
+    // Arranque 1×: medidas reales del drawable, talla esperada al abrir.
+    int winW = 0, winH = 0, outW = 0, outH = 0;
+    SDL_GetWindowSize(sdl.win, &winW, &winH);
+    SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
+    if (winW <= 0 || winH <= 0 || outW <= 0 || outH <= 0)
+        SKIP("medidas dummy inválidas");
+    const GuiDrawableSize fb = guiDrawableOrWindow(winW, winH, outW, outH);
+    const int initPx = guiScaledFontPixels(base, winH, fb.h);
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren, initPx);
+    if (!gui.hasFont()) SKIP("sin fuente del sistema");
+    CHECK_EQ(gui.fontPixels(), initPx);
+    const int cw1 = gui.cellW(), ch1 = gui.cellH();
+    CHECK(cw1 > 0 && ch1 > 0);
+    // Monitor 2× (misma ventana lógica, drawable doble): el loop re-escala y
+    // el renderer recarga a la talla esperada, con métricas mayores
+    // (re-medidas del ráster, no el entero guardado).
+    const int px2 = guiScaledFontPixels(base, winH, fb.h * 2);
+    CHECK(px2 > initPx);
+    gui.ensureFontPixels(px2);
+    CHECK(gui.hasFont());
+    CHECK_EQ(gui.fontPixels(), px2);
+    CHECK(gui.cellW() > cw1);
+    CHECK(gui.cellH() > ch1);
+    // Minimizado (medidas en 0): fallback por eje -> identidad -> base.
+    const GuiDrawableSize fmin = guiDrawableOrWindow(0, 0, 0, 0);
+    gui.ensureFontPixels(guiScaledFontPixels(base, 0, fmin.h));
+    CHECK(gui.hasFont());
+    CHECK_EQ(gui.fontPixels(), base);
+    // Restaurado a 1×: vuelve a la talla inicial con sus métricas.
+    gui.ensureFontPixels(guiScaledFontPixels(base, winH, fb.h));
+    CHECK_EQ(gui.fontPixels(), initPx);
+    CHECK_EQ(gui.cellW(), cw1);
+    CHECK_EQ(gui.cellH(), ch1);
 #endif
 }

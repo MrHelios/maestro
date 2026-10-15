@@ -71,10 +71,10 @@ Wrapper opcional `./maestro` (si existe en la raíz) delega en `make`/`build/mae
 | Opción | Descripción |
 |--------|-------------|
 | `--font <ruta>` | Fuente TTF monoespaciada (override `MAESTRO_FONT`) |
-| `--font-size <pt>` | Tamaño base en puntos (default 16, escala HiDPI) |
+| `--font-size <px>` | Píxeles lógicos base (default 16; misma altura visual en cualquier monitor) |
 | `--theme dark\|light` | Tema inicial (default `dark`) |
 | `--no-hidpi` | Desactiva `SDL_WINDOW_ALLOW_HIGHDPI` |
-| `--geometry WxH` | Tamaño inicial ventana en puntos (ej. `1200x800`) |
+| `--geometry WxH` | Coords iniciales de ventana, no píxeles físicos (ej. `1200x800`) |
 
 #### Variables de entorno
 

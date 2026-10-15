@@ -167,6 +167,8 @@ public:
     void setSdlRenderer(void* r);
     // Variante completa: inyecta renderer + abre la fuente y mide la celda.
     // Debe llamarse tras crear el SDL_Renderer y antes del primer resize.
+    // `fontPixels` son PÍXELES DEL DRAWABLE (el loop ya escaló la base en
+    // píxeles lógicos con guiScaledFontPixels; a escala 1 coinciden).
     // Devuelve true si la inicialización fue exitosa (fuente cargada o fallback).
     // Devuelve false si se solicitó una fuente explícita (--font) y falló al abrirla.
     bool initForRenderer(void* r, int fontPixels = 16);
