@@ -317,11 +317,15 @@ TEST(guifont_lru_promocion_sobrevive_eviccion) {
     void* t0b = f.textTexture(static_cast<void*>(r), "lru-prom-0", 0xD4, 0xD4, 0xD4);
     CHECK(t0b == t0);
     CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(t0b), nullptr, nullptr) == 0);
-    // k1 fue evictada: se re-crea (puntero distinto al destruido) y es usable.
-    // No se toca el puntero viejo t1 (destruido): solo se compara desigualdad.
+    // k1 fue evictada: se re-crea (miss, no hit sobre la entrada destruida)
+    // y es usable. Sin desigualdad de punteros: la dirección puede
+    // reutilizarse tras liberar y haría flaky al test.
+    const unsigned long long missAntes = f.cacheMisses();
+    const unsigned long long evAntes = f.cacheEvictions();
     void* t1b = f.textTexture(static_cast<void*>(r), "lru-prom-1", 0xD4, 0xD4, 0xD4);
     CHECK(t1b != nullptr);
-    CHECK(t1b != t1);
+    CHECK_EQ(f.cacheMisses(), missAntes + 1);
+    CHECK(f.cacheEvictions() > evAntes);  // la reinserción sobre el tope evicta otra
     CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(t1b), nullptr, nullptr) == 0);
     f.unload();
 }
@@ -339,7 +343,12 @@ TEST(guifont_lru_renderer_distinto_y_clear) {
     CHECK_EQ(f.cacheSize(), 1u);
     void* tB = f.textTexture(static_cast<void*>(win.rB), "lru-ctx", 0xD4, 0xD4, 0xD4);
     CHECK(tB != nullptr);
-    CHECK(tB != tA);  // nunca se devuelve la textura del otro renderer
+    // Nunca se devuelve la textura del otro renderer: el cambio vacía el
+    // caché y re-rasteriza (miss, no hit) en el renderer nuevo; el RenderCopy
+    // prueba pertenencia (con una textura de rA fallaría). Sin desigualdad
+    // de punteros: la dirección puede reutilizarse tras liberar.
+    CHECK_EQ(f.cacheMisses(), 2u);
+    CHECK_EQ(f.cacheHits(), 0u);
     CHECK_EQ(f.cacheSize(), 1u);
     CHECK(SDL_RenderCopy(win.rB, static_cast<SDL_Texture*>(tB), nullptr, nullptr) == 0);
     f.clearCache();

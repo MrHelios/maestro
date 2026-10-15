@@ -27,6 +27,8 @@
 #include <SDL2/SDL.h>
 
 #include <cstdlib>
+#include <fcntl.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -971,6 +973,29 @@ TEST(guirunloop_font_explicita_fallida_retorna_1_y_limpia) {
     int rc = -1;
     bool fontOk = true;
     {
+        // El mensaje de error por stderr es el comportamiento esperado del
+        // producto en esta ruta (no un fallo del test): se silencia solo
+        // durante el run para no ensuciar la salida de la suite.
+        struct SilenciaStderr {
+            int guardado = -1;
+            SilenciaStderr() {
+                guardado = ::dup(STDERR_FILENO);
+                if (guardado >= 0) {
+                    int nulo = ::open("/dev/null", O_WRONLY);
+                    if (nulo >= 0) {
+                        ::dup2(nulo, STDERR_FILENO);
+                        ::close(nulo);
+                    }
+                }
+            }
+            ~SilenciaStderr() {
+                if (guardado >= 0) {
+                    ::dup2(guardado, STDERR_FILENO);
+                    ::close(guardado);
+                }
+            }
+        };
+        SilenciaStderr sil;
         Editor ed(std::move(gui));
         GuiRunLoop loop(ed, opts);
         loop.setGuiRenderer(raw);
