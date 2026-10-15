@@ -46,12 +46,13 @@ void GuiRunLoop::updateImeRect() const {
 #ifdef HAVE_SDL2
     if (!gui_) return;
     const GuiPixelRect r = gui_->imeRectPx();
-    // POLÍTICA IME (explícita): si no hay cursor válido se conserva el
-    // último rect configurado en SDL (no se toca nada). SDL2 no ofrece
-    // "ocultar candidata" sin SDL_StopTextInput(), y detener la entrada
-    // mataría una composición en curso; la candidata queda anclada a la
-    // última celda válida hasta el próximo cursor válido. No es un olvido:
-    // es la posición de respaldo durante estados sin cursor.
+    // POLÍTICA IME (explícita): el rect se recalcula desde la geometría
+    // actual del cursor en cada render (y al recuperar el foco, ver
+    // FOCUS_GAINED abajo). Si no hay cursor válido se conserva el último
+    // rect configurado en SDL (no se toca nada) como fallback aceptado:
+    // SDL2 no ofrece "ocultar candidata" sin SDL_StopTextInput(), y detener
+    // la entrada mataría una composición en curso; la candidata queda
+    // anclada a la última celda válida hasta el próximo cursor válido.
     if (!r.valid) return;
     // UNIDADES (P2-IME): imeRectPx viene en píxeles del drawable (celda TTF ×
     // celda), pero SDL_SetTextInputRect habla en puntos de ventana (supuesto
@@ -361,6 +362,15 @@ int GuiRunLoop::run() {
                         editor_.handleEvent(ie);
                         const auto now = std::chrono::steady_clock::now();
                         editor_.clearExpiredMessages(now);
+                        renderWithBlink();
+                    } else if (guiFocusRegainRefreshesIme(ev.window.event)) {
+                        // Foco recuperado: el rect IME de SDL puede haber
+                        // quedado obsoleto (cursor, buffer, tamaño o escala
+                        // cambiados en el medio), así que se repinta y se
+                        // recalcula desde la geometría actual del cursor
+                        // (renderWithBlink termina en updateImeRect con
+                        // medidas frescas). Sin cursor válido aún, rige el
+                        // fallback de conservar el último conocido.
                         renderWithBlink();
                     }
                     break;

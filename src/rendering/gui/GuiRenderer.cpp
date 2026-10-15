@@ -68,6 +68,9 @@ void GuiRenderer::setSdlRenderer(void* r) {
     // el caché solo si textTexture() recibe un renderer distinto al activo.)
     // El framebuffer también muere con el renderer (y se re-prueba el
     // soporte de render targets, que puede diferir entre renderers).
+    // OBLIGACIÓN DE CICLO DE VIDA (ver GuiFont.h): llamar con nullptr ANTES
+    // de destruir el SDL_Renderer. La detección de cambio es por identidad
+    // de puntero y un renderer nuevo podría reutilizar la misma dirección.
     if (sdlRenderer_ != r) {
         font_.clearCache();
         destroyFramebuf();

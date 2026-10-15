@@ -352,6 +352,68 @@ TEST(guifont_lru_renderer_distinto_y_clear) {
     CHECK_EQ(f.cacheSize(), 0u);
 }
 
+// Cambio de cara o talla re-rasteriza: load()/loadWithPath() vacían el caché
+// vía unload, así la misma clave vuelve como miss (no hit sobre el ráster
+// viejo) y usable. Aserción por contadores (determinista), no por punteros
+// (la dirección puede reutilizarse tras liberar).
+TEST(guifont_lru_cambio_fuente_o_talla_re_rasteriza) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    SDL_Renderer* r = win.rA;
+    void* t1 = f.textTexture(static_cast<void*>(r), "lru-inv", 0xD4, 0xD4, 0xD4);
+    if (!t1) SKIP("el renderer dummy no crea texturas");
+    CHECK_EQ(f.cacheSize(), 1u);
+    CHECK_EQ(f.cacheMisses(), 1u);
+    CHECK_EQ(f.cacheHits(), 0u);
+    // Otra talla: invalida; la misma clave re-rasteriza (miss, no hit).
+    if (!f.load(20)) SKIP("sin fuentes del sistema para GuiFont");
+    CHECK_EQ(f.cacheSize(), 0u);
+    void* t2 = f.textTexture(static_cast<void*>(r), "lru-inv", 0xD4, 0xD4, 0xD4);
+    if (!t2) SKIP("el renderer dummy no crea texturas");
+    CHECK_EQ(f.cacheSize(), 1u);
+    CHECK_EQ(f.cacheMisses(), 2u);
+    CHECK_EQ(f.cacheHits(), 0u);
+    CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(t2), nullptr, nullptr) == 0);
+    // Reapertura a la misma talla: también vacía (unload previo al abrir).
+    if (!f.load(20)) SKIP("sin fuentes del sistema para GuiFont");
+    CHECK_EQ(f.cacheSize(), 0u);
+    void* t3 = f.textTexture(static_cast<void*>(r), "lru-inv", 0xD4, 0xD4, 0xD4);
+    if (!t3) SKIP("el renderer dummy no crea texturas");
+    CHECK_EQ(f.cacheMisses(), 3u);
+    CHECK_EQ(f.cacheHits(), 0u);
+    CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(t3), nullptr, nullptr) == 0);
+    f.unload();
+}
+
+// clearCache olvida renderer y contenido: la próxima petición re-rasteriza
+// (miss) en vez de devolver la textura vieja. Es la disciplina de
+// detach-antes-de-destruir (ver ciclo de vida en GuiFont.h).
+TEST(guifont_lru_clear_olvida_y_no_reutiliza) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    SDL_Renderer* r = win.rA;
+    void* t1 = f.textTexture(static_cast<void*>(r), "lru-detach", 0xD4, 0xD4, 0xD4);
+    if (!t1) SKIP("el renderer dummy no crea texturas");
+    CHECK_EQ(f.cacheMisses(), 1u);
+    f.clearCache();
+    CHECK_EQ(f.cacheSize(), 0u);
+    void* t2 = f.textTexture(static_cast<void*>(r), "lru-detach", 0xD4, 0xD4, 0xD4);
+    if (!t2) SKIP("el renderer dummy no crea texturas");
+    CHECK_EQ(f.cacheSize(), 1u);
+    CHECK_EQ(f.cacheMisses(), 2u);
+    CHECK_EQ(f.cacheHits(), 0u);
+    CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(t2), nullptr, nullptr) == 0);
+    f.unload();
+}
+
 // Destructor con entradas vivas: no debe hacer doble-free ni crashear.
 // Si hubiera doble liberación, ASan/lo vería; acá al menos no cuelga ni aborta.
 TEST(guifont_lru_destructor_con_entradas_vivas_no_crashea) {

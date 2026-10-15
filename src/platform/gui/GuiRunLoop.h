@@ -63,8 +63,11 @@ class Editor;
 // fuera igual llega; el auto-capture ≥2.0.22 no se da por sentado),
 // release sintético en FOCUS_LOST (la captura cae sola y el up puede ir a
 // otra ventana) y oráculo SDL_GetGlobalMouseState como respaldo del tick
-// (consulta al OS, no el caché del último pump). El idle (tick+render, tope
-// 30ms) ya avanza el autoscroll sin mover el mouse.
+// (consulta al OS, no el caché del último pump). Al recuperar el foco
+// (FOCUS_GAINED) se repinta y se recalcula el ancla IME desde la geometría
+// actual del cursor (el rect guardado pudo quedar obsoleto en el medio;
+// sin cursor válido aún rige el último conocido). El idle (tick+render,
+// tope 30ms) ya avanza el autoscroll sin mover el mouse.
 class GuiRenderer;
 
 class GuiRunLoop {

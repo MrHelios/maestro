@@ -35,6 +35,10 @@
 //     como 3 líneas. Dirección FLIPPED incluida.
 //   - Foco: solo SDL_WINDOWEVENT_FOCUS_LOST cierra el gesto (release
 //     sintético); LEAVE y el resto no (el arrastre fuera sigue con captura).
+//     FOCUS_GAINED refresca el IME (ver guiFocusRegainRefreshesIme): el rect
+//     se recalcula desde la geometría actual del cursor en vez de confiar en
+//     el último configurado, que pudo quedar obsoleto (cursor, buffer,
+//     tamaño o escala cambiados en el medio).
 #include <optional>
 
 #include "platform/CellPos.h"
@@ -353,6 +357,20 @@ inline std::optional<InputEventType> guiScrollTypeForWheel(int y) {
 // gesto. Testeable sin ventana: solo nombra la constante del evento.
 inline bool guiFocusLossEndsGesture(Uint8 windowEventId) {
     return windowEventId == SDL_WINDOWEVENT_FOCUS_LOST;
+}
+
+// SDL_WINDOWEVENT.window.event -> ¿hay que refrescar el ancla IME?
+// Solo FOCUS_GAINED: al recuperar el foco el loop repinta y recalcula el
+// rect desde la geometría ACTUAL del cursor (updateImeRect tras el render,
+// con medidas frescas de ventana/drawable). Sin esto regiría el último
+// rect configurado en SDL, que pudo quedar obsoleto mientras tanto
+// (cursor, buffer, tamaño de ventana o factor HiDPI cambiados). Si aún no
+// hay posición válida, updateImeRect conserva la última conocida como
+// fallback aceptado (no hay nada mejor que ofrecer). FOCUS_LOST tiene su
+// propio camino (gesto sintético) y el resto no toca el IME.
+// Testeable sin ventana: solo nombra la constante del evento.
+inline bool guiFocusRegainRefreshesIme(Uint8 windowEventId) {
+    return windowEventId == SDL_WINDOWEVENT_FOCUS_GAINED;
 }
 
 // SDL_WINDOWEVENT.window.event -> ¿hay que re-medir el drawable y la grilla?

@@ -410,6 +410,35 @@ TEST(guimouse_sdl_focus_loss_ends_gesture) {
 #endif
 }
 
+TEST(guimouse_sdl_focus_gain_refreshes_ime) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    // Solo FOCUS_GAINED refresca el ancla IME (recálculo desde la geometría
+    // actual: el rect guardado pudo quedar obsoleto en el medio). FOCUS_LOST
+    // tiene su propio camino (gesto sintético) y el resto no toca el IME;
+    // los tres conjuntos son disjuntos por diseño (un evento, un camino).
+    CHECK(guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_FOCUS_GAINED));
+    CHECK(!guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_FOCUS_LOST));
+    CHECK(!guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_ENTER));
+    CHECK(!guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_LEAVE));
+    CHECK(!guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_RESIZED));
+    CHECK(!guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_SIZE_CHANGED));
+    CHECK(!guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_DISPLAY_CHANGED));
+    CHECK(!guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_MOVED));
+    CHECK(!guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_SHOWN));
+    CHECK(!guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_HIDDEN));
+    CHECK(!guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_MINIMIZED));
+    CHECK(!guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_MAXIMIZED));
+    CHECK(!guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_CLOSE));
+    // Disjunción con los otros dos conjuntos: ningún evento cae en dos.
+    CHECK(!(guiFocusLossEndsGesture(SDL_WINDOWEVENT_FOCUS_GAINED) &&
+            guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_FOCUS_GAINED)));
+    CHECK(!(guiResizeNeedsRemeasure(SDL_WINDOWEVENT_FOCUS_GAINED) &&
+            guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_FOCUS_GAINED)));
+#endif
+}
+
 TEST(guimouse_sdl_resize_needs_remeasure) {
 #ifndef HAVE_SDL2
     SKIP("sin SDL2");

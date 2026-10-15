@@ -25,6 +25,26 @@
 // texturas cacheadas y vacía el caché automáticamente si textTexture()
 // recibe otro distinto (además, cambiarlo requiere clearCache() explícito
 // desde el caller, p. ej. GuiRenderer::setSdlRenderer).
+//
+// CICLO DE VIDA DE TEXTURAS (contrato compartido: la optimización de
+// navegación lo reutiliza tal cual, sin duplicarlo):
+//   - Propiedad: cada textura viva está exactamente en una entrada del map
+//     (y su clave una vez en la lista LRU). Se destruye UNA sola vez, en el
+//     mismo paso que sale de ambas estructuras: evicción (una por inserción
+//     sobre el tope), clearCache/unload o destructor. Tras salir, nadie la
+//     referencia: el map ya no la contiene y los callers solo toman
+//     prestado el puntero para el RenderCopy inmediato (nunca lo guardan
+//     entre frames).
+//   - Invalidación: todo lo que cambia el ráster vacía el caché.
+//     load()/loadWithPath() (cara o talla) vía unload(); cambio de renderer
+//     vía clearCache (explícito del caller + automático en textTexture()).
+//     La clave (texto, rgba con alfa) es completa PORQUE no existe otra vía
+//     que altere el resultado: sin mutación de estilo/hinting sin recarga y
+//     con blend fijado al crear.
+//   - Obligación del caller: desacoplar (setSdlRenderer(nullptr)/clearCache)
+//     ANTES de destruir el SDL_Renderer. La detección de cambio es por
+//     identidad de puntero: un renderer nuevo en la misma dirección pasaría
+//     por el viejo y devolvería texturas muertas.
 // ---------------------------------------------------------------------------
 class GuiFont {
 public:
