@@ -19,7 +19,7 @@ void printHelp(const char* prog) {
     std::printf("Uso: %s [--gui] [opciones-gui] [archivo]\n", prog);
     std::printf("\n");
     std::printf("  sin flags           modo terminal (TTY)\n");
-    std::printf("  --gui               modo ventana SDL2 (mismo binario)\n");
+    std::printf("  --gui               modo ventana SDL2 (requiere libsdl2-dev y libsdl2-ttf-dev)\n");
     std::printf("  -h, --help          esta ayuda\n");
     std::printf("\n");
     std::printf("Opciones GUI (requieren --gui):\n");

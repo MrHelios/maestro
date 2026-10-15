@@ -37,17 +37,16 @@ Genera `build/maestro`. Requiere `g++` C++17, `libX11` y `pthread`.
 ### Compilación con GUI
 
 ```bash
-make WITH_SDL2=1              # Habilita GUI (requiere libsdl2-dev)
-make WITH_SDL2=1 WITH_SDL2_TTF=1  # Con texto (recomendado, requiere libsdl2-ttf-dev)
-make WITH_SDL2=1 WITH_SDL2_TTF=0  # GUI sin texto (modo degradado forzado)
+make WITH_SDL2=1              # GUI con texto (requiere libsdl2-dev y libsdl2-ttf-dev)
 make WITH_SDL2=0              # Solo TTY (binario menor, sin dependencia SDL)
 ```
 
-`WITH_SDL2_TTF` es la opción pública (default: autodetección). Sin
-`libsdl2-ttf-dev` la GUI compila en **modo degradado**: fondo sólido sin
-renderizado de texto. Forzar `WITH_SDL2_TTF=1` sin la biblioteca instalada
-falla el build con error explícito (igual que `WITH_SDL2_TTF=1` con
-`WITH_SDL2=0`).
+SDL_ttf es **obligatorio** para una GUI utilizable: sin texto no se ve el
+documento y el editor queda ciego, así que `WITH_SDL2=1` sin
+`libsdl2-ttf-dev` (o sin `libsdl2-dev`) falla el build con error explícito
+que nombra el paquete faltante. `WITH_SDL2_TTF=0` no está permitido con
+GUI. Además se necesita una fuente en runtime (`MAESTRO_FONT` o una del
+sistema como DejaVuSansMono).
 
 ## Ejecutar
 
