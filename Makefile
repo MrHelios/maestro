@@ -34,16 +34,37 @@ SDL_LIBS :=
 endif
 
 # --- Texto GUI (SDL_ttf, Fase 1) ---
-# Solo si están los headers (libsdl2-ttf-dev): define HAVE_SDL2_TTF y linkea
-# -lSDL2_ttf. Sin ellos la GUI compila igual en modo degradado (fondo sólido
-# sin texto). La fuente se busca en runtime (ver GuiFont: MAESTRO_FONT o
-# candidatos del sistema como DejaVuSansMono).
+# WITH_SDL2_TTF: opción pública del usuario (1/0). Sin especificar se
+# autodetecta: 1 si WITH_SDL2=1 y están los headers (libsdl2-ttf-dev),
+# 0 en caso contrario. Override: make WITH_SDL2_TTF=0 / =1.
+# HAVE_SDL2_TTF: definición interna (0/1) que indica si se compila el
+# soporte de texto. No pasar HAVE_SDL2_TTF=... por línea de comandos;
+# usar WITH_SDL2_TTF. El código usa #ifdef HAVE_SDL2_TTF y linkea
+# -lSDL2_ttf solo cuando HAVE_SDL2_TTF=1.
+# Si se fuerza WITH_SDL2_TTF=1 sin headers o con WITH_SDL2=0, el build
+# falla con $(error ...) en vez de degradar en silencio. La fuente se
+# busca en runtime (ver GuiFont: MAESTRO_FONT o candidatos del sistema
+# como DejaVuSansMono). Sin TTF la GUI compila en modo degradado (fondo
+# sólido sin texto).
+HAVE_SDL2_TTF_HDR := $(shell test -f /usr/include/SDL2/SDL_ttf.h && echo 1 || echo 0)
+WITH_SDL2_TTF_AUTO := 0
 ifeq ($(WITH_SDL2),1)
-HAVE_TTF_HDR := $(shell test -f /usr/include/SDL2/SDL_ttf.h && echo 1 || echo 0)
-ifeq ($(HAVE_TTF_HDR),1)
+WITH_SDL2_TTF_AUTO := $(HAVE_SDL2_TTF_HDR)
+endif
+WITH_SDL2_TTF ?= $(WITH_SDL2_TTF_AUTO)
+HAVE_SDL2_TTF := 0
+ifeq ($(WITH_SDL2_TTF),1)
+ifneq ($(WITH_SDL2),1)
+$(error WITH_SDL2_TTF=1 requiere WITH_SDL2=1 (SDL_ttf depende de SDL2))
+endif
+ifeq ($(HAVE_SDL2_TTF_HDR),0)
+$(error WITH_SDL2_TTF=1 requiere libsdl2-ttf-dev (falta /usr/include/SDL2/SDL_ttf.h))
+endif
+HAVE_SDL2_TTF := 1
 CXXFLAGS += -DHAVE_SDL2_TTF
 SDL_LIBS += -lSDL2_ttf
-endif
+else ifneq ($(WITH_SDL2_TTF),0)
+$(error WITH_SDL2_TTF debe ser 0 o 1 (recibido '$(WITH_SDL2_TTF)'))
 endif
 
 # El binario final se llama "maestro" y vive en build/: el punto de
