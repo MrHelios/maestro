@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 #include "platform/WindowSize.h"
 
@@ -103,11 +104,22 @@ public:
     // vecinas ni desalinearse en Y. Congelado en
     // guifont_textura_1col/ancha_mide_*_exacta (la parte ancha se skipea
     // sin fuente de avance doble).
-    void* textTexture(void* sdlRenderer, const std::string& text,
+    //
+    // SEGURIDAD string_view (contrato): `text` es una vista de longitud
+    // explícita y PUEDE no estar terminada en NUL en `data()+size()` (p.
+    // ej. un segmento recortado de una línea mayor). SDL_ttf solo acepta
+    // C-strings NUL-terminados, así que la implementación COPIA la vista a
+    // un std::string NUL-terminado antes de llamar a TTF_RenderUTF8_Blended
+    // y usa esa copia como clave del caché. Nunca se pasa `view.data()`
+    // directamente a SDL_ttf. Con NULes embebidos TTF mide hasta el primero
+    // (limitación heredada de la API C; seguro, sin lecturas OOB).
+    void* textTexture(void* sdlRenderer, std::string_view text,
                       uint8_t r, uint8_t g, uint8_t b, uint8_t a = 0xFF);
 
     // Ancho en píxeles de `text` con la fuente actual (0 si no hay fuente).
-    int textWidth(const std::string& text) const;
+    // Acepta string_view con la misma disciplina que textTexture: se copia
+    // a un NUL-terminado antes de TTF_SizeUTF8 (nunca view.data() directo).
+    int textWidth(std::string_view text) const;
 
     // Libera todas las texturas (cambio de renderer o de tema si se quiere
     // forzar; el color ya va en la clave así que el toggle no lo exige).
@@ -121,12 +133,23 @@ public:
     //   cacheMisses()   -> misses acumulados (intentos de raster).
     //   cacheEvictions()-> evicciones LRU acumuladas (una por inserción
     //                      sobre el límite, nunca flush total).
+    //   cacheDestroys() -> llamadas acumuladas a SDL_DestroyTexture por
+    //                      este caché (evicción + clearCache/unload/dtor).
+    //                      Cada textura viva se destruye EXACTAMENTE una vez
+    //                      al salir del map+lista; monotónico y solo tests.
     // Sin TTF siempre 0. No alteran el pintado.
     size_t cacheSize() const;
     size_t maxCacheSize() const;
+    // Solo tests: fija el tope del caché LRU (0 = restaura el default 512).
+    // Si el caché actual excede el nuevo tope, evicta LRU hasta encajar
+    // (destruyendo una vez cada textura, contando evicciones+destrucciones).
+    // Permite secuencias deterministas mínimas (A,B,C + re-touch A + D)
+    // sin rellenar 512 entradas. No usar en producción.
+    void setMaxCacheSizeForTests(size_t n);
     unsigned long long cacheHits() const;
     unsigned long long cacheMisses() const;
     unsigned long long cacheEvictions() const;
+    unsigned long long cacheDestroys() const;
 
 private:
     void* font_ = nullptr;     // TTF_Font* opaco (solo el .cpp conoce SDL_ttf)
@@ -135,6 +158,8 @@ private:
                                 // nullptr si el caché está vacío/desconocido)
     std::string path_;
     int pixelSize_ = 16;
+    // Override del tope LRU solo para tests (0 = default kMaxCachedLines).
+    size_t testMaxCache_ = 0;
     // Fallback canónico (ver platform::kFallbackCellW/H en WindowSize.h, P3):
     // no duplicar literales.
     int cellW_ = platform::kFallbackCellW;

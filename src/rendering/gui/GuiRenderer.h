@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "document/Cursor.h"
@@ -202,7 +203,8 @@ public:
     // Ancho en píxeles de `text` con la fuente actual (0 sin fuente).
     // Expone GuiFont::textWidth para tests (p. ej. verificar que la fuente
     // avanza un carácter ancho 2 celdas antes de afirmar su pintado).
-    int textWidthPx(const std::string& text) const {
+    // string_view con copia segura a NUL-terminado dentro de GuiFont.
+    int textWidthPx(std::string_view text) const {
         return font_.textWidth(text);
     }
 

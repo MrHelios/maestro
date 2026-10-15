@@ -9,6 +9,7 @@
 
 #include <cstdlib>
 #include <string>
+#include <string_view>
 
 #include "test_framework.h"
 
@@ -25,6 +26,18 @@ TEST(guifont_sin_ttf_modo_degradado) {
     CHECK(f.cellW() == 9);
     CHECK(f.cellH() == 18);
     CHECK(f.textTexture(nullptr, "abc", 0xD4, 0xD4, 0xD4) == nullptr);
+    // string_view tampoco crea nada (y no crashea aunque no haya NUL).
+    const std::string big = "xxHELLOyy";
+    CHECK(f.textTexture(nullptr, std::string_view(big.data() + 2, 5), 0xD4,
+                        0xD4, 0xD4) == nullptr);
+    CHECK(f.textWidth(std::string_view(big.data() + 2, 5)) == 0);
+    // Tope testeable en el stub (sin recorte real, pero consistente).
+    CHECK(f.maxCacheSize() == 512u);
+    f.setMaxCacheSizeForTests(3);
+    CHECK(f.maxCacheSize() == 3u);
+    f.setMaxCacheSizeForTests(0);
+    CHECK(f.maxCacheSize() == 512u);
+    CHECK(f.cacheDestroys() == 0u);
     f.clearCache();  // no crash
     f.clearCache();  // repetible
     f.unload();
@@ -441,6 +454,191 @@ TEST(guifont_lru_destructor_con_entradas_vivas_no_crashea) {
         CHECK_EQ(f.cacheSize(), 16u);
         // Sale de scope sin unload()/clearCache(): el destructor libera una vez.
     }
+}
+
+// LRU determinista mínima (tope 3 vía hook de tests):
+// 1. Crear A, B, C. 2. Re-acceder A (pasa a MRU). 3. Insertar D sobre el
+// tope. 4. Se expulsa B (la verdadera LRU), no A. La promoción ya mueve A al
+// frente, así que el back es B. Se verifica por hits/misses (determinista,
+// sin comparar punteros: la dirección puede reutilizarse tras liberar) y por
+// usabilidad conductual (RenderCopy sobre el renderer dueño).
+TEST(guifont_lru_determinista_abc_touch_a_evicta_b) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    f.setMaxCacheSizeForTests(3);
+    CHECK_EQ(f.maxCacheSize(), 3u);
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    SDL_Renderer* r = win.rA;
+
+    void* tA = f.textTexture(static_cast<void*>(r), "lru-det-A", 0xD4, 0xD4, 0xD4);
+    if (!tA) SKIP("el renderer dummy no crea texturas");
+    void* tB = f.textTexture(static_cast<void*>(r), "lru-det-B", 0xD4, 0xD4, 0xD4);
+    void* tC = f.textTexture(static_cast<void*>(r), "lru-det-C", 0xD4, 0xD4, 0xD4);
+    CHECK(tB != nullptr);
+    CHECK(tC != nullptr);
+    CHECK_EQ(f.cacheSize(), 3u);
+    CHECK_EQ(f.cacheEvictions(), 0u);
+    CHECK_EQ(f.cacheDestroys(), 0u);
+
+    // Re-acceso a A: hit, pasa a MRU; orden MRU->LRU: A, C, B.
+    const unsigned long long hitsAntes = f.cacheHits();
+    void* tA2 = f.textTexture(static_cast<void*>(r), "lru-det-A", 0xD4, 0xD4, 0xD4);
+    CHECK(tA2 == tA);
+    CHECK_EQ(f.cacheHits(), hitsAntes + 1);
+    CHECK_EQ(f.cacheSize(), 3u);
+
+    // Insertar D sobre el tope: una sola evicción (B), una sola destrucción.
+    void* tD = f.textTexture(static_cast<void*>(r), "lru-det-D", 0xD4, 0xD4, 0xD4);
+    CHECK(tD != nullptr);
+    CHECK_EQ(f.cacheSize(), 3u);
+    CHECK_EQ(f.cacheEvictions(), 1u);
+    CHECK_EQ(f.cacheDestroys(), 1u);
+
+    // A sobrevivió (hit, misma textura viva y usable en su renderer).
+    void* tA3 = f.textTexture(static_cast<void*>(r), "lru-det-A", 0xD4, 0xD4, 0xD4);
+    CHECK(tA3 == tA);
+    CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(tA3), nullptr, nullptr) == 0);
+
+    // B fue expulsada: re-pedirla es miss (re-rasteriza, usable) y evicta otra
+    // (una destrucción más, tamaño clavado en el tope).
+    const unsigned long long missAntes = f.cacheMisses();
+    const unsigned long long evAntes = f.cacheEvictions();
+    const unsigned long long desAntes = f.cacheDestroys();
+    void* tB2 = f.textTexture(static_cast<void*>(r), "lru-det-B", 0xD4, 0xD4, 0xD4);
+    CHECK(tB2 != nullptr);
+    CHECK_EQ(f.cacheMisses(), missAntes + 1);
+    CHECK_EQ(f.cacheEvictions(), evAntes + 1);
+    CHECK_EQ(f.cacheDestroys(), desAntes + 1);
+    CHECK_EQ(f.cacheSize(), 3u);
+    CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(tB2), nullptr, nullptr) == 0);
+
+    f.setMaxCacheSizeForTests(0);
+    CHECK_EQ(f.maxCacheSize(), 512u);
+    f.unload();
+}
+
+// Cada textura expulsada/liberada se destruye exactamente una vez:
+// destroys == 1 tras la evicción de D; clearCache suma las 3 vivas (total 4);
+// reconstruir + unload suma la última (total 5); los clear/unload repetidos
+// no destruyen nada más (sin doble-free).
+TEST(guifont_lru_destroys_exactamente_una_vez) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    f.setMaxCacheSizeForTests(3);
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    SDL_Renderer* r = win.rA;
+
+    for (const char* k : {"lru-1vez-A", "lru-1vez-B", "lru-1vez-C"}) {
+        if (!f.textTexture(static_cast<void*>(r), k, 0xD4, 0xD4, 0xD4))
+            SKIP("el renderer dummy no crea texturas");
+    }
+    CHECK_EQ(f.cacheDestroys(), 0u);
+    if (!f.textTexture(static_cast<void*>(r), "lru-1vez-A", 0xD4, 0xD4, 0xD4))
+        SKIP("el renderer dummy no crea texturas");
+    if (!f.textTexture(static_cast<void*>(r), "lru-1vez-D", 0xD4, 0xD4, 0xD4))
+        SKIP("el renderer dummy no crea texturas");
+    CHECK_EQ(f.cacheEvictions(), 1u);
+    CHECK_EQ(f.cacheDestroys(), 1u);
+    CHECK_EQ(f.cacheSize(), 3u);
+
+    // clearCache libera las 3 vivas (1+3=4) y es repetible sin doble-free.
+    f.clearCache();
+    CHECK_EQ(f.cacheSize(), 0u);
+    CHECK_EQ(f.cacheDestroys(), 4u);
+    f.clearCache();
+    CHECK_EQ(f.cacheDestroys(), 4u);
+
+    // Reconstrucción tras clear: re-rasteriza (miss) y queda usable.
+    void* t = f.textTexture(static_cast<void*>(r), "lru-1vez-A", 0xD4, 0xD4, 0xD4);
+    if (!t) SKIP("el renderer dummy no crea texturas");
+    CHECK_EQ(f.cacheSize(), 1u);
+    CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(t), nullptr, nullptr) == 0);
+
+    // unload libera la viva (total 5); repetido no suma (sin doble-free).
+    f.unload();
+    CHECK_EQ(f.cacheSize(), 0u);
+    CHECK_EQ(f.cacheDestroys(), 5u);
+    f.unload();
+    CHECK_EQ(f.cacheDestroys(), 5u);
+    f.setMaxCacheSizeForTests(0);
+}
+
+// Destrucción de la fuente y reconstrucción posterior: unload() vacía el
+// caché (size 0); tras load() la misma clave re-rasteriza como miss (no hit
+// sobre el ráster viejo) y es usable en el mismo renderer.
+TEST(guifont_lru_destruccion_fuente_y_reconstruccion) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    SDL_Renderer* r = win.rA;
+
+    void* t1 = f.textTexture(static_cast<void*>(r), "lru-recon", 0xD4, 0xD4, 0xD4);
+    if (!t1) SKIP("el renderer dummy no crea texturas");
+    CHECK_EQ(f.cacheMisses(), 1u);
+    f.unload();
+    CHECK(!f.ok());
+    CHECK_EQ(f.cacheSize(), 0u);
+
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    CHECK_EQ(f.cacheSize(), 0u);
+    void* t2 = f.textTexture(static_cast<void*>(r), "lru-recon", 0xD4, 0xD4, 0xD4);
+    if (!t2) SKIP("el renderer dummy no crea texturas");
+    CHECK_EQ(f.cacheMisses(), 2u);
+    CHECK_EQ(f.cacheHits(), 0u);
+    CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(t2), nullptr, nullptr) == 0);
+    f.unload();
+}
+
+// string_view no NUL-terminado: textWidth/textTexture respetan la longitud.
+// `view` apunta al medio de un buffer mayor (el byte siguiente NO es NUL);
+// la implementación debe medir/cachear "HELLO", no "HELLOyy...". Además la
+// vista y el std::string equivalente comparten entrada (misma textura).
+TEST(guifont_stringview_no_nul_respeta_longitud) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    // Prefijo recortado: si se pasara view.data() directo, TTF mediría "abX".
+    const std::string buf = "abX";
+    const std::string_view viewAb(buf.data(), 2);  // "ab", seguida de 'X'
+    CHECK(viewAb.size() == 2u);
+    CHECK(buf.data()[2] == 'X');  // garantiza que no hay NUL tras la vista
+    const int wAb = f.textWidth(viewAb);
+    const int wAbRef = f.textWidth("ab");
+    const int wAbc = f.textWidth("abX");
+    CHECK(wAb > 0);
+    CHECK_EQ(wAb, wAbRef);
+    CHECK(wAb != wAbc);
+
+    // Segmento interior sin NUL al final de la vista.
+    const std::string big = "xxHELLOyy";
+    const std::string_view viewHello(big.data() + 2, 5);  // "HELLO"
+    CHECK(big.data()[7] == 'y');  // el byte tras la vista no es NUL
+    CHECK_EQ(f.textWidth(viewHello), f.textWidth("HELLO"));
+
+    DummyVideo video;
+    if (!video.ok) SKIP("SDL video no disponible en este entorno");
+    DummyPair win;
+    if (!win.ok) SKIP("renderer software dummy no disponible");
+    SDL_Renderer* r = win.rA;
+    const unsigned long long missAntes = f.cacheMisses();
+    void* tView =
+        f.textTexture(static_cast<void*>(r), viewHello, 0xD4, 0xD4, 0xD4);
+    if (!tView) SKIP("el renderer dummy no crea texturas");
+    CHECK_EQ(f.cacheMisses(), missAntes + 1);
+    // Misma clave lógica: hit, mismo puntero, usable.
+    void* tStr =
+        f.textTexture(static_cast<void*>(r), "HELLO", 0xD4, 0xD4, 0xD4);
+    CHECK(tStr == tView);
+    CHECK(SDL_RenderCopy(r, static_cast<SDL_Texture*>(tStr), nullptr, nullptr) == 0);
+    f.unload();
 }
 #endif  // HAVE_SDL2
 

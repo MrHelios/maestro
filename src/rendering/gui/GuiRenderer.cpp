@@ -1,6 +1,7 @@
 #include "rendering/gui/GuiRenderer.h"
 
 #include <algorithm>
+#include <string_view>
 #include <utility>
 
 #include "rendering/RenderUtil.h"
@@ -615,7 +616,8 @@ bool sameOptSelection(const std::optional<Selection>& a,
 #ifdef HAVE_SDL2
 // Pinta un texto en (px,py) con color fg; devuelve el ancho en celdas
 // consumido (para avanzar la grilla monoespaciada).
-int paintText(SDL_Renderer* r, GuiFont& font, const std::string& text,
+// string_view: GuiFont copia a NUL-terminado antes de SDL_ttf (ver GuiFont.h).
+int paintText(SDL_Renderer* r, GuiFont& font, std::string_view text,
               const GuiColor& fg, int px, int py) {
     if (text.empty() || !font.ok()) return chrome::colCount(text);
     void* tex = font.textTexture(r, text, fg.r, fg.g, fg.b);
@@ -635,19 +637,21 @@ void paintSegmentRow(SDL_Renderer* r, GuiFont& font, bool dark,
     // PERF(GUI): este es el punto caliente probable del pintado, a medir
     // cuando empiece el trabajo de performance GUI (hoy no se optimiza: la
     // GUI primero tiene que funcionar). Costo POR SEGMENTO y por frame:
-    //   - 1 alloc de heap (`view` copia los bytes del segmento),
+    //   - 1 alloc de heap (la vista se copia a la clave NUL-terminada del
+    //     caché dentro de GuiFont::textTexture),
     //   - 1 lookup en el caché de texturas (clave por texto+color),
     //   - 1 SDL_RenderCopy + 1 fill de fondo.
     // Con syntax highlighting una línea se fragmenta en muchos segmentos
     // (keyword | identifier | punctuation | string | comment | ...) y eso
     // multiplica el trabajo por frame. Interactúa además con el caché
-    // acotado de GuiFont (flush total a las 512 entradas, sin LRU): más
-    // segmentos por frame = más entradas = más ciclos de vaciado.
+    // acotado de GuiFont (LRU de una evicción por inserción sobre el tope):
+    // más segmentos por frame = más entradas = más evicciones.
     // Al medir, empezar por: segmentos/frame, hit rate y evicciones del
     // caché, y cantidad de RenderCopy. Candidatas (no implementar a ciegas):
-    // string_view hasta la clave del caché, coalescer runs contiguos del
-    // mismo estilo, o cachear filas ya compuestas.
-    const std::string view(text, len);
+    // coalescer runs contiguos del mismo estilo, o cachear filas ya
+    // compuestas. NOTA: no pasar (text,len) directo a SDL_ttf: el segmento
+    // puede no terminar en NUL; GuiFont::textTexture ya hace la copia segura.
+    const std::string_view view(text, len);
     const int cols = chrome::colCount(view);
     if (cols <= 0) return;
     const guichrome::GuiStyle st = guichrome::styleFor(role, isCurrentLine, dark);

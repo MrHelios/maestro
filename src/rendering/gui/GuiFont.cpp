@@ -1,6 +1,7 @@
 #include "rendering/gui/GuiFont.h"
 
 #include <cstdlib>
+#include <string_view>
 #include <utility>
 
 #ifdef HAVE_SDL2_TTF
@@ -32,20 +33,23 @@ void GuiFont::unload() {
 }
 int GuiFont::cellW() const { return cellW_; }
 int GuiFont::cellH() const { return cellH_; }
-void* GuiFont::textTexture(void*, const std::string&, uint8_t, uint8_t, uint8_t,
+void* GuiFont::textTexture(void*, std::string_view, uint8_t, uint8_t, uint8_t,
                            uint8_t) {
     return nullptr;
 }
-int GuiFont::textWidth(const std::string&) const { return 0; }
+int GuiFont::textWidth(std::string_view) const { return 0; }
 void GuiFont::clearCache() {}
 size_t GuiFont::cacheSize() const { return 0; }
-size_t GuiFont::maxCacheSize() const { return 512; }
+size_t GuiFont::maxCacheSize() const { return testMaxCache_ ? testMaxCache_ : 512; }
+void GuiFont::setMaxCacheSizeForTests(size_t n) { testMaxCache_ = n; }
 unsigned long long GuiFont::cacheHits() const { return 0; }
 unsigned long long GuiFont::cacheMisses() const { return 0; }
 unsigned long long GuiFont::cacheEvictions() const { return 0; }
+unsigned long long GuiFont::cacheDestroys() const { return 0; }
 
 #else
 
+#include <cstdio>
 #include <list>
 #include <unordered_map>
 
@@ -84,11 +88,23 @@ struct TextCache {
     unsigned long long hits = 0;
     unsigned long long misses = 0;
     unsigned long long evictions = 0;
+    // Total de SDL_DestroyTexture ejecutadas por este caché (evicción +
+    // clearCache/unload/dtor). Cada textura viva se destruye exactamente una
+    // vez al salir de ambas estructuras; monotónico, solo observabilidad.
+    unsigned long long destroys = 0;
 };
+
+void destroyTextureCounted(TextCache* c, SDL_Texture* t) {
+    SDL_DestroyTexture(t);
+    if (c) ++c->destroys;
+}
 
 void destroyCache(TextCache* c) {
     if (!c) return;
-    for (auto& kv : c->map) SDL_DestroyTexture(kv.second.tex);
+    for (auto& kv : c->map) {
+        SDL_DestroyTexture(kv.second.tex);
+        ++c->destroys;
+    }
     delete c;
 }
 
@@ -101,6 +117,31 @@ const char* kFontCandidates[] = {
 
 // Refcount de TTF_Init/TTF_Quit entre todas las GuiFont vivas.
 int g_tffInitCount = 0;
+
+// Heurística monoespaciada P2 (aviso, nunca rechazo): compara el avance de
+// 'M' (ancha) con el de 'i' (angosta en proporcionales). Si ambos se miden
+// y difieren, la fuente probablemente no es monoespaciada y la grilla de
+// celdas (medida con 'M') no valdrá para todos los glifos. Se avisa UNA sola
+// vez por proceso por stderr y se sigue (no se rechazan fuentes válidas por
+// una heurística demasiado estricta).
+void maybeWarnNonMonospaceOnce(TTF_Font* f, const std::string& path) {
+    static bool warned = false;
+    if (warned || !f) return;
+    int advM = 0, advI = 0;
+    int x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+    if (TTF_GlyphMetrics(f, 'M', &x0, &x1, &y0, &y1, &advM) != 0 || advM <= 0)
+        return;
+    if (TTF_GlyphMetrics(f, 'i', &x0, &x1, &y0, &y1, &advI) != 0 || advI <= 0)
+        return;
+    if (advM == advI) return;
+    warned = true;
+    std::string where = path.empty() ? "<desconocida>" : path;
+    fprintf(stderr,
+            "maestro: aviso: la fuente '%s' no parece monoespaciada "
+            "(avance 'M'=%d vs 'i'=%d); la grilla se mide con 'M' y puede "
+            "desalinearse\n",
+            where.c_str(), advM, advI);
+}
 }  // namespace
 
 GuiFont::GuiFont() : cache_(new TextCache()) {}
@@ -170,6 +211,8 @@ bool GuiFont::load(int pixelSize) {
     }
     cellH_ = TTF_FontHeight(f);
     if (cellH_ <= 0) cellH_ = pixelSize_;
+    // P2: aviso único si la fuente no parece monoespaciada (nunca rechazo).
+    maybeWarnNonMonospaceOnce(f, path_);
     return true;
 }
 
@@ -200,6 +243,8 @@ bool GuiFont::loadWithPath(int pixelSize, const std::string& path) {
     }
     cellH_ = TTF_FontHeight(f);
     if (cellH_ <= 0) cellH_ = pixelSize_;
+    // P2: aviso único si la fuente no parece monoespaciada (nunca rechazo).
+    maybeWarnNonMonospaceOnce(f, path_);
     return true;
 }
 
@@ -216,7 +261,7 @@ void GuiFont::unload() {
 int GuiFont::cellW() const { return cellW_; }
 int GuiFont::cellH() const { return cellH_; }
 
-void* GuiFont::textTexture(void* sdlRenderer, const std::string& text,
+void* GuiFont::textTexture(void* sdlRenderer, std::string_view text,
                            uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
     if (!font_ || !sdlRenderer || text.empty()) return nullptr;
     auto* cache = static_cast<TextCache*>(cache_);
@@ -228,7 +273,11 @@ void* GuiFont::textTexture(void* sdlRenderer, const std::string& text,
         clearCache();
         renderer_ = sdlRenderer;
     }
-    CacheKey key{text, static_cast<uint32_t>(r | (g << 8) | (b << 16) | (a << 24))};
+    // Copia NUL-terminada: la vista puede no terminar en NUL en data()+size()
+    // y SDL_ttf exige C-string. La copia es además la clave del caché.
+    const size_t cap = testMaxCache_ ? testMaxCache_ : kMaxCachedLines;
+    CacheKey key{std::string(text),
+                 static_cast<uint32_t>(r | (g << 8) | (b << 16) | (a << 24))};
     auto it = cache->map.find(key);
     if (it != cache->map.end()) {
         // Hit: promociona a MRU y devuelve la textura viva. Nunca se devuelve
@@ -240,27 +289,30 @@ void* GuiFont::textTexture(void* sdlRenderer, const std::string& text,
     }
     ++cache->misses;
 
-    if (cache->map.size() >= kMaxCachedLines && !cache->lru.empty()) {
+    // Render PRIMERO, evicción DESPUÉS: si TTF_RenderUTF8_Blended o
+    // SDL_CreateTextureFromSurface fallan, el caché conserva sus entradas
+    // válidas (sin pérdida innecesaria de la LRU ni hueco bajo el tope).
+    SDL_Color c{r, g, b, a};
+    SDL_Surface* surf = TTF_RenderUTF8_Blended(static_cast<TTF_Font*>(font_),
+                                              key.text.c_str(), c);
+    if (!surf) return nullptr;
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(
+        static_cast<SDL_Renderer*>(sdlRenderer), surf);
+    SDL_FreeSurface(surf);
+    if (!tex) return nullptr;
+    if (cache->map.size() >= cap && !cache->lru.empty()) {
         // Evicción LRU de UNA sola entrada (la menos usada): se destruye su
         // textura y se borra del map y de la lista. El resto del caché sigue
         // válido (sin flush total ni ciclos de vaciado/render).
         const CacheKey& victim = cache->lru.back();
         auto vit = cache->map.find(victim);
         if (vit != cache->map.end()) {
-            SDL_DestroyTexture(vit->second.tex);
+            destroyTextureCounted(cache, vit->second.tex);
             cache->map.erase(vit);
             ++cache->evictions;
         }
         cache->lru.pop_back();
     }
-    SDL_Color c{r, g, b, a};
-    SDL_Surface* surf = TTF_RenderUTF8_Blended(static_cast<TTF_Font*>(font_),
-                                              text.c_str(), c);
-    if (!surf) return nullptr;
-    SDL_Texture* tex = SDL_CreateTextureFromSurface(
-        static_cast<SDL_Renderer*>(sdlRenderer), surf);
-    SDL_FreeSurface(surf);
-    if (!tex) return nullptr;
     // La superficie blended trae fondo transparente: se fija BLENDMODE_BLEND
     // explícito (defensa en profundidad: los SDL2 modernos ya lo activan
     // solo ante superficies con alfa, pero no todos los backends/versiones
@@ -276,10 +328,13 @@ void* GuiFont::textTexture(void* sdlRenderer, const std::string& text,
     return static_cast<void*>(tex);
 }
 
-int GuiFont::textWidth(const std::string& text) const {
+int GuiFont::textWidth(std::string_view text) const {
     if (!font_ || text.empty()) return 0;
+    // Copia NUL-terminada: nunca se pasa view.data() directo a SDL_ttf
+    // (la vista puede no terminar en NUL en data()+size()).
+    const std::string owned(text);
     int w = 0, h = 0;
-    if (TTF_SizeUTF8(static_cast<TTF_Font*>(font_), text.c_str(), &w, &h) != 0)
+    if (TTF_SizeUTF8(static_cast<TTF_Font*>(font_), owned.c_str(), &w, &h) != 0)
         return 0;
     return w;
 }
@@ -290,7 +345,7 @@ void GuiFont::clearCache() {
     // textura). Además olvida el renderer activo (ver invariante en el header).
     auto* cache = static_cast<TextCache*>(cache_);
     if (cache) {
-        for (auto& kv : cache->map) SDL_DestroyTexture(kv.second.tex);
+        for (auto& kv : cache->map) destroyTextureCounted(cache, kv.second.tex);
         cache->map.clear();
         cache->lru.clear();
     }
@@ -302,7 +357,29 @@ size_t GuiFont::cacheSize() const {
     return cache ? cache->map.size() : 0;
 }
 
-size_t GuiFont::maxCacheSize() const { return kMaxCachedLines; }
+size_t GuiFont::maxCacheSize() const {
+    return testMaxCache_ ? testMaxCache_ : kMaxCachedLines;
+}
+
+void GuiFont::setMaxCacheSizeForTests(size_t n) {
+    testMaxCache_ = n;
+    // Si el nuevo tope deja entradas sobrantes, evicta LRU hasta encajar
+    // (una destrucción por textura, contando evicciones+destrucciones).
+    // n == 0 restaura el default 512 y también recorta si se excede.
+    auto* cache = static_cast<TextCache*>(cache_);
+    if (!cache) return;
+    const size_t cap = n != 0 ? n : kMaxCachedLines;
+    while (cache->map.size() > cap && !cache->lru.empty()) {
+        const CacheKey& victim = cache->lru.back();
+        auto vit = cache->map.find(victim);
+        if (vit != cache->map.end()) {
+            destroyTextureCounted(cache, vit->second.tex);
+            cache->map.erase(vit);
+            ++cache->evictions;
+        }
+        cache->lru.pop_back();
+    }
+}
 
 unsigned long long GuiFont::cacheHits() const {
     const auto* cache = static_cast<const TextCache*>(cache_);
@@ -317,6 +394,11 @@ unsigned long long GuiFont::cacheMisses() const {
 unsigned long long GuiFont::cacheEvictions() const {
     const auto* cache = static_cast<const TextCache*>(cache_);
     return cache ? cache->evictions : 0;
+}
+
+unsigned long long GuiFont::cacheDestroys() const {
+    const auto* cache = static_cast<const TextCache*>(cache_);
+    return cache ? cache->destroys : 0;
 }
 
 #endif
