@@ -189,6 +189,19 @@ public:
     SdlTextInputGuard(const SdlTextInputGuard&) = delete;
     SdlTextInputGuard& operator=(const SdlTextInputGuard&) = delete;
 };
+
+// Captura de mouse best-effort (NO fatal): SDL_CaptureMouse() devuelve 0
+// en éxito y -1 si el entorno no la soporta. En Wayland el compositor
+// puede denegarla (el protocolo no garantiza captura global implícita
+// como X11); eso es una LIMITACIÓN DEL ENTORNO, no un error del editor:
+// el press/drag/release ya entregado sigue siendo válido y la selección
+// queda coherente con la última celda conocida (ver nota en el press).
+// Por eso el retorno se ignora a propósito y se limpia el error de SDL
+// para no contaminar el diagnóstico posterior de SDL_WaitEventTimeout
+// (que distingue timeout/error por SDL_GetError).
+inline void sdlCaptureMouseBestEffort(SDL_bool enabled) {
+    if (SDL_CaptureMouse(enabled) != 0) SDL_ClearError();
+}
 #endif
 }  // namespace
 
@@ -203,7 +216,11 @@ int GuiRunLoop::run() {
     // mouseButtonPressedQuery_ y desarma como un release. Es la ÚLTIMA capa
     // (respaldo), no la primera:
     //   1. Captura explícita en el press (ver SDL_MOUSEBUTTONDOWN): el up
-    //      fuera de la ventana igual llega a esta ventana.
+    //      fuera de la ventana igual llega a esta ventana. Best-effort:
+    //      en Wayland el compositor puede denegarla y entonces este nivel
+    //      no aplica (ver sdlCaptureMouseBestEffort); el gesto sigue
+    //      coherente con lo entregado dentro de la ventana y el cierre
+    //      recae en los niveles 2-3.
     //   2. Release sintético en FOCUS_LOST (ver SDL_WINDOWEVENT): cubre el
     //      robo de foco, donde la captura cae sola y el up va a otro lado.
     //   3. Este oráculo: SDL_GetGlobalMouseState consulta al OS (a
@@ -419,7 +436,7 @@ int GuiRunLoop::run() {
                         // hay gesto armado; la celda no se usa en release).
                         // Sin esto, el autoscroll quedaría corriendo con el
                         // botón ya suelto hasta que el oráculo lo note.
-                        SDL_CaptureMouse(SDL_FALSE);
+                        sdlCaptureMouseBestEffort(SDL_FALSE);
                         // Fábrica testeada (misma que el press/drag: tipo +
                         // celda en un solo punto de construcción).
                         InputEvent ie = makeMouseReleaseEvent(CellPos{});
@@ -509,11 +526,20 @@ int GuiRunLoop::run() {
                     // None, sin gesto). El Editor arma el gesto (cursor +
                     // anchor, sin rango): el drag posterior crea la
                     // selección, el release sin drag es no-op.
-                    // Captura explícita (best-effort): el up/motion fuera de
-                    // la ventana igual llega acá. SDL ≥2.0.22 ya hace
-                    // auto-capture durante el botón, pero la explícita cubre
-                    // versiones viejas y deja la intención en el código; es
-                    // seguro llamarla aunque ya haya captura.
+                    // Captura explícita best-effort (ver
+                    // sdlCaptureMouseBestEffort): con captura el up/motion
+                    // fuera de la ventana igual llega acá. SDL ≥2.0.22 ya
+                    // hace auto-capture durante el botón, pero la explícita
+                    // cubre versiones viejas y deja la intención en el
+                    // código; es seguro llamarla aunque ya haya captura.
+                    // Si el entorno la deniega (Wayland: SDL_CaptureMouse
+                    // devuelve -1), NO es error fatal: el gesto sigue
+                    // coherente con lo entregado dentro de la ventana (la
+                    // selección congela su borde en la última celda válida
+                    // en vez de seguir al puntero de fuera) y el cierre
+                    // recae en el release entregado dentro, el sintético de
+                    // FOCUS_LOST o el oráculo del tick. Ver degradado en
+                    // GuiRunLoop.h y README (--gui en Wayland).
                     // Construcción por fábrica testeada (makeMousePressEvent:
                     // tipo + celda 0-based en un solo punto, igual que el
                     // drag): el gate de arriba y la fábrica son las mismas
@@ -522,7 +548,7 @@ int GuiRunLoop::run() {
                         InputEvent ie = makeMousePressEvent(
                             mouseCell(ev.button.x, ev.button.y));
                         editor_.handleEvent(ie);
-                        SDL_CaptureMouse(SDL_TRUE);
+                        sdlCaptureMouseBestEffort(SDL_TRUE);
                         const auto now = std::chrono::steady_clock::now();
                         editor_.clearExpiredMessages(now);
                         renderWithBlink();
@@ -533,13 +559,15 @@ int GuiRunLoop::run() {
                     // Release izquierdo -> MouseRelease (cierra el gesto;
                     // sin drag previo es no-op, con drag permanece en
                     // Selección y apaga el autoscroll). Libera la captura
-                    // del press (también cae sola al perder foco, ver
-                    // SDL_WINDOWEVENT). Fábrica testeada igual que el press.
+                    // del press en modo best-effort (también cae sola al
+                    // perder foco, ver SDL_WINDOWEVENT; si nunca hubo
+                    // captura —Wayland— liberar es no-op seguro). Fábrica
+                    // testeada igual que el press.
                     if (guiReleaseTypeForButton(ev.button.button).has_value()) {
                         InputEvent ie = makeMouseReleaseEvent(
                             mouseCell(ev.button.x, ev.button.y));
                         editor_.handleEvent(ie);
-                        SDL_CaptureMouse(SDL_FALSE);
+                        sdlCaptureMouseBestEffort(SDL_FALSE);
                         const auto now = std::chrono::steady_clock::now();
                         editor_.clearExpiredMessages(now);
                         renderWithBlink();
@@ -551,7 +579,11 @@ int GuiRunLoop::run() {
                     // evento (1 línea / 1 celda + autoscroll en bordes en
                     // el Editor). Sin LMask no se emite nada: el Editor ya
                     // ignora drags sin press previo, pero no se genera
-                    // tráfico espurio de hover.
+                    // tráfico espurio de hover. Sin captura (Wayland cuando
+                    // el compositor la deniega) el motion de fuera no llega:
+                    // la selección conserva su último borde válido dentro
+                    // (coherente, sin rango espurio) hasta el próximo evento
+                    // dentro, el release o el cierre por tick/foco.
                     if (!guiLeftHeld(ev.motion.state)) break;
                     InputEvent ie = makeMouseDragEvent(
                         mouseCell(ev.motion.x, ev.motion.y));

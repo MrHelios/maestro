@@ -74,8 +74,12 @@ class Editor;
 // CONTRATO VISUAL-ESTABLE (P1): la fuente se escala con el drawable
 // (guiScaledFontPixels: 16 -> 32 a 2×) y el fallback por eje (guiScaleSize),
 // así la grilla se mantiene (~106×33) en vez de duplicarse con texto diminuto.
-// Anti-release-perdido en 3 capas: captura explícita en el press (el up
-// fuera igual llega; el auto-capture ≥2.0.22 no se da por sentado),
+// Anti-release-perdido en 3 capas: captura explícita best-effort en el
+// press (el up fuera igual llega; el auto-capture ≥2.0.22 no se da por
+// sentado; en Wayland el compositor puede denegarla y NO es error fatal:
+// ver sdlCaptureMouseBestEffort en el .cpp — la selección queda coherente
+// con la última celda válida dentro y el arrastre de fuera simplemente no
+// extiende hasta re-entrar, liberarse dentro, FOCUS_LOST u oráculo),
 // release sintético en FOCUS_LOST (la captura cae sola y el up puede ir a
 // otra ventana) y oráculo SDL_GetGlobalMouseState como respaldo del tick
 // (consulta al OS, no el caché del último pump). Al recuperar el foco

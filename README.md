@@ -99,6 +99,24 @@ Wrapper opcional `./maestro` (si existe en la raíz) delega en `make`/`build/mae
 ./build/maestro --gui --no-hidpi archivo.txt
 ```
 
+#### Nota Wayland: captura de mouse y arrastre fuera de la ventana
+
+`SDL_CaptureMouse(SDL_TRUE)` se pide en cada click como best-effort, pero
+en Wayland el compositor puede denegarla (devuelve `-1`). Eso es una
+**limitación del entorno, no un error fatal**: el editor sigue funcionando
+con la selección coherente hasta la última celda válida.
+
+- **Con captura (X11 / Wayland que la concede):** el `motion`/`up` fuera de
+  la ventana igual llega: la selección se extiende al borde + autoscroll y
+  el release cierra el gesto.
+- **Sin captura (Wayland que la deniega):** el `motion` de fuera no llega y
+  la selección **se congela en su último borde válido dentro** (sin rangos
+  espurios ni crash). El gesto se cierra por el release entregado dentro al
+  re-entrar, por el release sintético de `FOCUS_LOST`, o por el oráculo del
+  tick (`SDL_GetGlobalMouseState`); el autoscroll por timer puede frenar
+  antes donde el driver no pueda consultar el botón al OS (los pasos por
+  evento de drag no se afectan).
+
 ## Instalación
 
 Instalación local sin privilegios de administrador (no modifica archivos fuera del home del usuario):
