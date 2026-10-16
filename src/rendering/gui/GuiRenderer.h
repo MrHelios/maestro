@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "document/Cursor.h"
@@ -245,6 +246,15 @@ public:
     void setBlinkNow(std::chrono::steady_clock::time_point now);
     // Fase del parpadeo: true = pintar cursor. Block siempre true.
     bool blinkPhaseOn() const;
+    // Ms restantes hasta el próximo cambio de fase ON<->OFF, medidos desde
+    // `now` contra el ancla actual. Sin valor = no hay animación pendiente
+    // (cursor Block, cursor invisible, o aún sin primer render con tiempo
+    // inyectado). Puro y sin SDL: el loop lo usa como deadline de su espera
+    // idle (despertar en el cambio de fase, no muestrear a cadencia fija).
+    // Comparte la fase con blinkPhaseOn() vía blinkPhaseForElapsedMs: un
+    // cambio de constantes debe hacerse ahí, no en cada caller.
+    std::optional<int> msUntilBlinkToggle(
+        std::chrono::steady_clock::time_point now) const;
     // Visibilidad efectiva para pintar: visible lógico AND fase.
     bool cursorShown() const;
     // Geometría lógica del cursor (dónde se dibujaría: Bar = 2px de ancho,
@@ -324,6 +334,13 @@ private:
     static constexpr int kBlinkOnMs = 530;
     static constexpr int kBlinkPeriodMs = 1060;
     void noteCursorForBlink(const FrameCursor& next) const;
+    // Lógica de fase compartida por blinkPhaseOn() y msUntilBlinkToggle():
+    // dado el tiempo transcurrido (>= 0) desde el ancla, devuelve
+    // {faseEncendida, ms restantes hasta el próximo cambio de fase}.
+    // El resto es 1..530: el borde exacto (rest == 0) devuelve 1 para que
+    // un deadline ya vencido no genere una espera de 0 ms (busy-spin); el
+    // borde se resuelve en el render inmediato.
+    static std::pair<bool, int> blinkPhaseForElapsedMs(long elapsedMs);
 
     // --- Caché diferencial por línea (ver invalidateCache) ---
     // Contenido del editor y modales tienen cachés SEPARADOS: el Editor

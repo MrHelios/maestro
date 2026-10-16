@@ -17,10 +17,25 @@ class Editor;
 // cursor lógico). El parpadeo lo resuelve GuiRenderer (fase ON/OFF); el loop
 // cumple su contrato de reloj inyectando el tiempo (setBlinkNow) antes de
 // cada render y actualiza el rect IME después. En la rama sin eventos el
-// loop duerme como máximo 30ms antes de reinyectar y repintar, lo que en
-// la práctica anima el blink sin deadline propio; no hay temporizador
-// independiente y con eventos pendientes o bloqueos el repintado puede
-// retrasarse.
+// loop espera hasta el próximo deadline real (ver computeIdleWaitMs:
+// mínimo entre el timeout del Editor y el cambio de fase del blink,
+// acotado por kMaxIdleWaitMs) con SDL_WaitEventTimeout, que despierta ante
+// el próximo evento de entrada o al vencer la espera. Solo se renderiza
+// cuando algo venció (timer del Editor o cambio de fase): los despertares
+// de polling sin cambios no solicitan ningún render (ver idleOnTimeout).
+// Con eventos pendientes o bloqueos el repintado puede retrasarse: el
+// deadline se calcula con precisión de ms, pero la latencia real depende
+// de la planificación del SO (SDL no garantiza el instante exacto).
+//
+// INVARIANTE DE RENDER: cada render recibe el tiempo actualizado del cursor
+// (setBlinkNow) antes de pintar; los despertares que no cambian el estado
+// visible ni requieren procesar un timer no solicitan otro render.
+// INVARIANTE DEL WATCHER: el servicio del watcher tiene periodicidad propia
+// (watcherServiceDue): la espera inactiva limita el tiempo hasta el próximo
+// polling, y la actividad continua de eventos no puede posponerlo
+// indefinidamente (se comprueba también dentro del drenado de eventos).
+// kMaxIdleWaitMs es el máximo intervalo de servicio BUSCADO, sujeto a la
+// planificación del SO, no una garantía temporal absoluta.
 //
 // POLÍTICA TEXT INPUT: SDL_StartTextInput() se mantiene activo durante TODO
 // el run (también en navegación) para que SDL gestione la composición de
@@ -66,8 +81,8 @@ class Editor;
 // (consulta al OS, no el caché del último pump). Al recuperar el foco
 // (FOCUS_GAINED) se repinta y se recalcula el ancla IME desde la geometría
 // actual del cursor (el rect guardado pudo quedar obsoleto en el medio;
-// sin cursor válido aún rige el último conocido). El idle (tick+render,
-// tope 30ms) ya avanza el autoscroll sin mover el mouse.
+// sin cursor válido aún rige el último conocido). El idle (tick+render al
+// vencer el deadline del Editor) ya avanza el autoscroll sin mover el mouse.
 class GuiRenderer;
 
 class GuiRunLoop {
@@ -82,20 +97,54 @@ public:
     // Devuelve código de salida (0 ok, 1 sin SDL2).
     int run();
 
-    // Camino idle (vuelta sin eventos) extraído para tests: EXACTAMENTE lo
-    // que run() hace sin eventos, menos el SDL_Delay (propio del loop real
-    // con ventana) y menos el bombeo externo (run() lo hace una vez al tope
-    // de cada vuelta; idleStep es solo tick+render). tick(now) expira
-    // mensajes con timeout y avanza el autoscroll; renderFrame repinta.
-    // Quien lo llame directo (tests) bombea antes vía
+    // Camino de render idle (tick+render con tiempo de blink inyectado)
+    // extraído para tests. run() lo usa vía idleOnTimeout SOLO cuando venció
+    // un deadline real; los wakes de polling sin cambios no lo llaman.
+    // tick(now) expira mensajes con timeout y avanza el autoscroll;
+    // renderFrame repinta. Sin bombeo externo a propósito: run() sirve al
+    // watcher por periodicidad propia (serviceWatcherIfDue), así el camino
+    // idle no lo repite. Quien lo llame directo (tests) bombea antes vía
     // editor_.pollExternalEvents(), igual que run(). Sin SDL: solo toca
     // Editor + GuiRenderer.
     void idleStep(std::chrono::steady_clock::time_point now);
-    // Delay del idle derivado del Editor (clamp 0..30ms; indefinido → 30).
-    // Puro y sin SDL: la misma fórmula que run() pasa a SDL_Delay. Solo
-    // acota la pausa de la rama sin eventos; no garantiza por sí misma la
-    // cadencia de repintado.
+    // Cota superior de la espera idle (ms): máximo intervalo de servicio
+    // BUSCADO para el polling del watcher (único consumidor real de la
+    // cota: SDL no multiplexa el fd de inotify con los eventos de ventana
+    // y sin cota un cambio externo en disco no despertaría al loop). No es
+    // cadencia de animación ni garantía temporal absoluta. El clipboard GUI
+    // es síncrono y no justifica cota alguna.
+    static constexpr int kMaxIdleWaitMs = 30;
+    // Espera idle hasta el próximo deadline real (ms para SDL_WaitEventTimeout):
+    // mínimo entre el timeout del Editor (mensaje/autoscroll; -1 = ausente)
+    // y el cambio de fase del blink (ausente = sin animación pendiente),
+    // acotado por kMaxIdleWaitMs. Puro y sin SDL. Los deadlines ausentes no
+    // intervienen en el mínimo (un -1 nunca tapa un deadline real).
+    // PRECONDICIÓN: los deadlines vencidos (== 0) se despachan sin esperar
+    // (ver idleOnTimeout); con esta precondición el resultado es > 0 en la
+    // práctica (el blink nunca devuelve 0: el borde da 1).
+    int computeIdleWaitMs(std::chrono::steady_clock::time_point now) const;
+    // Delay del idle derivado del Editor (compatibilidad: delega en
+    // computeIdleWaitMs). Los tests nuevos usan computeIdleWaitMs.
     int idleDelayMs(std::chrono::steady_clock::time_point now) const;
+    // ¿Toca servir al watcher? Periodicidad propia del polling externo:
+    // true si pasaron >= kMaxIdleWaitMs desde el último servicio (o si
+    // nunca se sirvió). Pura y testeable; run() la comprueba al tope de
+    // cada vuelta Y dentro del drenado de eventos.
+    static bool watcherServiceDue(
+        std::chrono::steady_clock::time_point lastService,
+        std::chrono::steady_clock::time_point now) {
+        return (now - lastService) >=
+               std::chrono::milliseconds(kMaxIdleWaitMs);
+    }
+    // Maneja un wake por timeout de la espera idle, sin SDL (testeable):
+    // sirve al watcher si toca, y ejecuta tick/render SOLO si venció un
+    // deadline real (timer del Editor -> tick+render; cambio de fase del
+    // blink -> render sin tick). La fase se registra DESPUÉS del render
+    // (el render puede resetear el ancla) y la rama del blink se omite sin
+    // animación pendiente. Un wake de polling sin cambios no renderiza ni
+    // presenta nada. Devuelve true si renderizó. No toca el
+    // rect IME (run() lo actualiza tras un render, igual que en idleStep).
+    bool idleOnTimeout(std::chrono::steady_clock::time_point now);
 
 private:
     Editor& editor_;
@@ -104,6 +153,17 @@ private:
     // Significado de cada tecla. Se consulta en cada SDL_KEYDOWN;
     // remapeable en tiempo de ejecución vía keymapIface().
     GuiKeymap keymap_;
+    // Fase del blink tras el último render (para detectar el cambio de fase
+    // en idleOnTimeout sin render especulativo). Init ON: sin ninguna
+    // inyección la fase es ON por contrato del renderer. Se actualiza en
+    // cada camino con render (idleStep y renderWithBlink en run()).
+    bool lastBlinkPhaseOn_ = true;
+    // Último servicio del watcher (pollExternalEvents). Reloj de la
+    // periodicidad propia: epoch = "nunca servido" = debido de inmediato.
+    std::chrono::steady_clock::time_point lastWatcherService_{};
+    // Sirve al watcher si vence su periodicidad (actualiza el reloj).
+    // Sin SDL: solo Editor + reloj.
+    void serviceWatcherIfDue(std::chrono::steady_clock::time_point now);
     // Handles SDL vivos durante run() (opacos para no meter SDL en el
     // header): los necesita updateImeRect para devolver el rect a puntos de
     // ventana (SDL_SetTextInputRect habla en puntos, no en píxeles del

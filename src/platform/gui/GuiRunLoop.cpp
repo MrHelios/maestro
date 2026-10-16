@@ -1,5 +1,6 @@
 #include "platform/gui/GuiRunLoop.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 
@@ -30,16 +31,75 @@ void GuiRunLoop::idleStep(std::chrono::steady_clock::time_point now) {
     if (gui_) gui_->setBlinkNow(now);
     editor_.tick(now);
     editor_.renderFrame();
+    if (gui_) lastBlinkPhaseOn_ = gui_->blinkPhaseOn();
+}
+
+int GuiRunLoop::computeIdleWaitMs(
+    std::chrono::steady_clock::time_point now) const {
+    // Mínimo explícito entre deadlines reales: los ausentes no intervienen.
+    // (Un std::min ingenuo con el -1 de nextTimeoutMs taparía el deadline
+    // del blink y el loop despertaría tarde.)
+    int waitMs = kMaxIdleWaitMs;
+    const int editorMs = editor_.nextTimeoutMs(now);
+    if (editorMs >= 0) waitMs = std::min(waitMs, editorMs);
+    if (gui_) {
+        if (const auto blinkMs = gui_->msUntilBlinkToggle(now))
+            waitMs = std::min(waitMs, *blinkMs);
+    }
+    return waitMs;
 }
 
 int GuiRunLoop::idleDelayMs(std::chrono::steady_clock::time_point now) const {
-    int waitMs = editor_.nextTimeoutMs(now);
-    if (waitMs < 0 || waitMs > 30) waitMs = 30;
-    // Tope 30ms << periodo de blink (530ms): acota el SDL_Delay de la rama
-    // sin eventos para que, en ese camino, el repintado sea lo bastante
-    // frecuente para animar la barra. No planifica nada por sí mismo: la
-    // frecuencia real depende de que el loop drene eventos sin bloquearse.
-    return waitMs;
+    return computeIdleWaitMs(now);
+}
+
+void GuiRunLoop::serviceWatcherIfDue(
+    std::chrono::steady_clock::time_point now) {
+    if (!watcherServiceDue(lastWatcherService_, now)) return;
+    editor_.pollExternalEvents();
+    lastWatcherService_ = now;
+}
+
+bool GuiRunLoop::idleOnTimeout(std::chrono::steady_clock::time_point now) {
+    // Reloj de blink fresco ANTES de servir al watcher: si el
+    // procesamiento externo recarga y renderiza tras bambalinas
+    // (Editor::handleFileChange lo hace sincrónicamente), lo hace con la
+    // fase actual en vez de un tiempo obsoleto. Inyectar sin renderar es
+    // seguro (ver comentario en la rama del blink, abajo).
+    if (gui_) gui_->setBlinkNow(now);
+    // Periodicidad propia del watcher (ver invariante en el header).
+    serviceWatcherIfDue(now);
+    // Deadline vencido del Editor (mensaje/autoscroll): tick + render con
+    // tiempo de blink inyectado. Se despacha sin iniciar otra espera.
+    if (editor_.nextTimeoutMs(now) == 0) {
+        idleStep(now);
+        return true;
+    }
+    // Sin animación pendiente (Block/invisible/sin ancla) no hay fase que
+    // seguir: se omite el render especulativo (el loop solo pinta al
+    // vencer un deadline real).
+    // Sin animación pendiente (Block/invisible/sin ancla) no hay fase que
+    // seguir: se omite el render especulativo (el loop solo pinta al
+    // vencer un deadline real).
+    if (gui_ && gui_->msUntilBlinkToggle(now).has_value()) {
+        // Cambio de fase del blink: se informa el tiempo y se compara con
+        // la fase del último render. Inyectar sin renderar es seguro: el
+        // ancla solo cambia durante un render (noteCursorForBlink) y la
+        // consulta de deadline usa el ancla, no el tiempo inyectado.
+        const bool phaseOn = gui_->blinkPhaseOn();
+        if (phaseOn != lastBlinkPhaseOn_) {
+            editor_.renderFrame();
+            // Registrar DESPUÉS del render: noteCursorForBlink() puede
+            // haber reseteado el ancla (celda/forma/visibilidad) y la fase
+            // efectiva se mide contra la nueva ancla (igual que idleStep
+            // y renderWithBlink).
+            lastBlinkPhaseOn_ = gui_->blinkPhaseOn();
+            return true;
+        }
+        lastBlinkPhaseOn_ = phaseOn;
+    }
+    // Wake de polling sin cambios: sin render ni present.
+    return false;
 }
 
 void GuiRunLoop::updateImeRect() const {
@@ -270,6 +330,7 @@ int GuiRunLoop::run() {
     auto renderWithBlink = [&] {
         if (gui_) gui_->setBlinkNow(std::chrono::steady_clock::now());
         editor_.renderFrame();
+        if (gui_) lastBlinkPhaseOn_ = gui_->blinkPhaseOn();
         updateImeRect();
     };
     // Puntos de evento SDL -> celda 0-based (dominio neutro CellPos): la
@@ -319,17 +380,20 @@ int GuiRunLoop::run() {
     double wheelAcc = 0.0;
 
     while (editor_.isRunning()) {
-        // ÚNICO bombeo externo por vuelta (paridad con el pollExternalEvents
-        // del TtyRunLoop en readiness): inotify vía pollEvents(), sin fd. El
-        // clipboard SDL es síncrono (no-op). Va ANTES de drenar SDL para que
-        // una recarga por cambio externo quede visible en los renders de
-        // eventos de este mismo frame; la rama sin eventos reutiliza este
-        // bombeo (idleStep ya no lo repite: solo tick+render).
-        editor_.pollExternalEvents();
-        SDL_Event ev;
-        bool hadEvent = false;
-        while (SDL_PollEvent(&ev)) {
-            hadEvent = true;
+        // Servicio del watcher con periodicidad propia (ver invariante en el
+        // header): inotify vía pollEvents(), sin fd. El clipboard SDL es
+        // síncrono (no-op). Va ANTES de drenar SDL para que una recarga por
+        // cambio externo quede visible en los renders de eventos de este
+        // mismo frame. Solo se bombea al vencer la periodicidad, no en cada
+        // vuelta incondicionalmente.
+        serviceWatcherIfDue(std::chrono::steady_clock::now());
+        // Camino ÚNICO de eventos: lo drenado por SDL_PollEvent y lo
+        // obtenido por SDL_WaitEventTimeout se procesan acá, sin re-push.
+        // (Reencolar lo esperado con SDL_PushEvent mostró livelock bajo
+        // carga continua: el evento volvía a la espera sin pasar jamás por
+        // el drenado. El procesado directo preserva orden FIFO sin
+        // intermediarios.)
+        auto handleSdlEvent = [&](SDL_Event& ev) {
             switch (ev.type) {
                 case SDL_QUIT:
                     // Cierre de ventana = intento de salida (respeta
@@ -529,20 +593,63 @@ int GuiRunLoop::run() {
                 default:
                     break;
             }
+        };
+        SDL_Event ev;
+        bool hadEvent = false;
+        while (SDL_PollEvent(&ev)) {
+            hadEvent = true;
+            // La actividad continua de eventos no puede posponer el polling
+            // del watcher: se comprueba también dentro del drenado.
+            serviceWatcherIfDue(std::chrono::steady_clock::now());
+            handleSdlEvent(ev);
         }
         if (!hadEvent) {
-            // Sin eventos: tick por timeout (mensajes/autoscroll) y pausa
-            // para no quemar CPU. El delay (tope 30ms << blink de 530ms)
-            // acota la pausa de ESTA rama para reinyectar el tiempo y
-            // repintar con frecuencia suficiente; con eventos pendientes o
-            // una operación bloqueante el repintado puede retrasarse.
-            // idleStep ya inyecta el tiempo de blink; acá solo se actualiza
-            // el rect IME.
+            // Sin eventos: espera hasta el próximo deadline real (timeout
+            // del Editor o cambio de fase del blink, acotado por
+            // kMaxIdleWaitMs para el polling del watcher) o hasta el
+            // próximo evento de entrada, lo que ocurra primero. Solo se
+            // renderiza cuando algo venció (ver idleOnTimeout): los
+            // despertares de polling sin cambios no tocan la GPU. Con una
+            // operación bloqueante el repintado puede retrasarse (la
+            // precisión del deadline es de cálculo, no garantía del SO).
             const auto now = std::chrono::steady_clock::now();
-            const int waitMs = idleDelayMs(now);
-            if (waitMs > 0) SDL_Delay(static_cast<Uint32>(waitMs));
-            idleStep(std::chrono::steady_clock::now());
-            updateImeRect();
+            const int waitMs = computeIdleWaitMs(now);
+            if (waitMs <= 0) {
+                // Deadline ya vencido: se despacha sin esperar.
+                if (idleOnTimeout(now)) updateImeRect();
+                continue;
+            }
+            SDL_ClearError();
+            SDL_Event wev;
+            const int rc = SDL_WaitEventTimeout(&wev, waitMs);
+            if (rc == 1) {
+                // Evento durante la espera: se procesa por el camino único
+                // (arriba), sin re-push a la cola.
+                handleSdlEvent(wev);
+                continue;
+            }
+            // rc == 0: timeout normal O error de espera (el contrato SDL 2.0+
+            // documentado en SDL_events.h devuelve 0 en ambos casos).
+            // Se distingue SOLO a efectos de pacing, nunca de corrección:
+            // el texto de SDL_GetError (limpiado antes de esperar, así un
+            // error viejo no se confunde con este) decide únicamente si se
+            // aplica un retroceso acotado. El camino de deadlines corre
+            // igual en ambos casos: un error no provoca renders espurios
+            // (idleOnTimeout solo pinta ante deadlines reales) ni bloquea
+            // la entrada (la próxima vuelta bombea PollEvent). Nótese que
+            // SDL desaconseja el texto como señal de error en general
+            // (SDL_error.h); acá un falso positivo solo costaría una
+            // espera de 30ms, sin efecto en corrección.
+            const char* waitErr = SDL_GetError();
+            if (waitErr != nullptr && waitErr[0] != '\0') {
+                // Error real de espera: retroceso acotado ANTES de seguir,
+                // separado del mecanismo de deadlines (no altera timers ni
+                // blink), para no producir un ciclo rápido de reintentos si
+                // el fallo persiste.
+                SDL_ClearError();
+                SDL_Delay(static_cast<Uint32>(kMaxIdleWaitMs));
+            }
+            if (idleOnTimeout(std::chrono::steady_clock::now())) updateImeRect();
         }
     }
 

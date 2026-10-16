@@ -238,6 +238,15 @@ void GuiRenderer::noteCursorForBlink(const FrameCursor& next) const {
     blinkAnchorSet_ = true;
 }
 
+std::pair<bool, int> GuiRenderer::blinkPhaseForElapsedMs(long elapsedMs) {
+    const long phase = elapsedMs % kBlinkPeriodMs;
+    const bool on = phase < kBlinkOnMs;
+    int rest = on ? static_cast<int>(kBlinkOnMs - phase)
+                  : static_cast<int>(kBlinkPeriodMs - phase);
+    if (rest <= 0) rest = 1;
+    return {on, rest};
+}
+
 bool GuiRenderer::blinkPhaseOn() const {
     // Bloque (navegación y modales): fijo, sin parpadeo.
     if (lastCursor_.shape == FrameCursorShape::Block) return true;
@@ -248,7 +257,23 @@ bool GuiRenderer::blinkPhaseOn() const {
                                                               blinkAnchor_)
             .count();
     if (ms < 0) return true;
-    return (ms % kBlinkPeriodMs) < kBlinkOnMs;
+    return blinkPhaseForElapsedMs(ms).first;
+}
+
+std::optional<int> GuiRenderer::msUntilBlinkToggle(
+    std::chrono::steady_clock::time_point now) const {
+    // Solo la barra visible se anima: el bloque es fijo y un cursor
+    // apagado nunca se pinta (cursorShown() es siempre false), así que en
+    // ambos casos no hay cambio de fase que esperar.
+    if (lastCursor_.shape != FrameCursorShape::Bar) return std::nullopt;
+    if (!lastCursor_.visible) return std::nullopt;
+    if (!blinkAnchorSet_ || !blinkNowSet_) return std::nullopt;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now -
+                                                                    blinkAnchor_)
+                  .count();
+    // Consulta anterior al ancla (tiempos fijos en tests): fase ON completa.
+    if (ms < 0) ms = 0;
+    return blinkPhaseForElapsedMs(ms).second;
 }
 
 bool GuiRenderer::cursorShown() const {
