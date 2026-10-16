@@ -12,10 +12,21 @@
 //
 // Reglas del adaptador (testeadas en tests/unit/test_guisdlmapper.cpp):
 //   - CapsLock/NumLock (KMOD_CAPS/KMOD_NUM) se pelan: nunca llegan al keymap.
-//   - Shift se conserva (el keymap lo ignora en la resolución, paridad TTY).
-//   - AltGr (KMOD_MODE en X11) cuenta como Alt: el KEYDOWN de la letra queda
-//     sin enlace y el carácter (@/|/\/{) llega por SDL_TEXTINPUT.
-//   - Letras 'A'-'Z' se normalizan a minúscula lógica (KeyA..KeyZ).
+//   - Shift se conserva: el keymap lo ignora en lo no-textual (paridad TTY)
+//     pero lo distingue en letras con Ctrl (Ctrl+S vs Ctrl+Shift+S son
+//     enlaces distintos y se prueban por separado).
+//   - AltGr: comportamiento ACTUAL, no garantía universal de layouts. En
+//     X11 se observa KMOD_MODE y cuenta como Alt: el KEYDOWN de la letra
+//     queda sin enlace y el carácter (@/|/\/{ según layout) llega por
+//     SDL_TEXTINPUT. Otros layouts/plataformas pueden variar.
+//   - KEYDOWN es comandos/navegación/modificadores; TEXTINPUT es texto
+//     Unicode confirmado (el loop lo trocea en InsertChar por celda).
+//   - Letras 'A'-'Z' se normalizan a minúscula lógica (KeyA..KeyZ) ANTES
+//     de buscar el binding: la representación real con Shift held llega
+//     como mayúscula ('S' con KMOD_SHIFT en varios layouts/drivers, no
+//     SDLK_s) y sin esta normalización Ctrl+Shift+S caería en Unknown y
+//     el atajo directo a Guardar como se perdería en esos layouts
+//     (regresión probada en test_guisdlmapper.cpp).
 //   - Keypad: SDLK_KP_ENTER se traduce siempre; KP_7/KP_1/KP_9/KP_3
 //     (Inicio/Fin/RePag/AvPag) solo con NumLock APAGADO —con NumLock
 //     producen dígitos por TEXTINPUT y traducirlos secuestraría números—.

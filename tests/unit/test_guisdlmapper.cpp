@@ -242,8 +242,8 @@ TEST(guisdl_ctrl_shift_combo) {
 #ifndef HAVE_SDL2
     SKIP("sin SDL2");
 #else
-    // Ctrl+Shift+K: ambos se conservan (el keymap ignora Shift y resuelve
-    // Prefix por el Ctrl).
+    // Ctrl+Shift+K: ambos se conservan (el keymap trae un enlace explícito
+    // por variante y resuelve Prefix; solo S distingue Shift: Save/SaveAs).
     GuiKeyPress p = guiKeyFromSdl(SDLK_k, KMOD_CTRL | KMOD_SHIFT, false);
     CHECK_EQ(static_cast<int>(p.sym), static_cast<int>(GuiKeySym::KeyK));
     CHECK(p.mods.ctrl && p.mods.shift && !p.mods.alt);
@@ -255,12 +255,111 @@ TEST(guisdl_ctrl_shift_combo) {
 #endif
 }
 
+TEST(guisdl_ctrl_shift_s_explicit_combo) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    // Costura SDL completa de Ctrl+Shift+S: el adaptador conserva ambos
+    // modificadores y el keymap los distingue (Ctrl+S = Save,
+    // Ctrl+Shift+S = SaveAs directo a `buffer.guardar.como`, sin pasar por
+    // Prefix ni simular teclas TTY).
+    GuiKeyPress plain = guiKeyFromSdl(SDLK_s, KMOD_CTRL, false);
+    CHECK_EQ(static_cast<int>(plain.sym), static_cast<int>(GuiKeySym::KeyS));
+    CHECK(plain.mods.ctrl && !plain.mods.shift && !plain.mods.alt);
+    GuiKeyPress shifted = guiKeyFromSdl(SDLK_s, KMOD_CTRL | KMOD_SHIFT, false);
+    CHECK_EQ(static_cast<int>(shifted.sym), static_cast<int>(GuiKeySym::KeyS));
+    CHECK(shifted.mods.ctrl && shifted.mods.shift && !shifted.mods.alt);
+    GuiKeymap km;
+    CHECK_EQ(static_cast<int>(*km.mapKey(plain)),
+             static_cast<int>(InputEventType::Save));
+    CHECK_EQ(static_cast<int>(*km.mapKey(shifted)),
+             static_cast<int>(InputEventType::SaveAs));
+    // Sin Ctrl no hay comando por KEYDOWN en ninguna variante (el texto va
+    // por SDL_TEXTINPUT): ni S pelada ni Shift+S resuelven.
+    CHECK(!km.mapKey(guiKeyFromSdl(SDLK_s, 0, false)).has_value());
+    CHECK(!km.mapKey(guiKeyFromSdl(SDLK_s, KMOD_SHIFT, false)).has_value());
+    // Con Alt tampoco (incluye Ctrl+Alt, alias de AltGr en algunas
+    // plataformas), con o sin Shift.
+    CHECK(!km.mapKey(guiKeyFromSdl(SDLK_s, KMOD_ALT, false)).has_value());
+    CHECK(!km.mapKey(guiKeyFromSdl(SDLK_s, KMOD_CTRL | KMOD_ALT, false))
+                .has_value());
+    CHECK(!km.mapKey(guiKeyFromSdl(SDLK_s, KMOD_CTRL | KMOD_ALT | KMOD_SHIFT,
+                                   false))
+                .has_value());
+    // El evento SaveAs llega al Editor por el comando semántico existente,
+    // sin sintetizar Prefix: abre SaveAs directo desde Navegación.
+    Editor ed;
+    InputEvent e;
+    e.type = *km.mapKey(shifted);
+    ed.handleEvent(e);
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::SaveAsFileBrowser));
+    Editor direct;
+    direct.executeCommand("buffer.guardar.como");
+    CHECK_EQ(static_cast<int>(direct.getStateForTesting()),
+             static_cast<int>(State::SaveAsFileBrowser));
+#endif
+}
+
+TEST(guisdl_shift_uppercase_normaliza_antes_del_binding) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    // P1: representación REAL con Shift held. SDL2 entrega en keysym.sym la
+    // letra afectada por el modificador en varios layouts/drivers ('S' ==
+    // 83 con Shift, no SDLK_s == 115): el adaptador DEBE minorizarla a KeyS
+    // ANTES de buscar el binding, o Ctrl+Shift+S caería en Unknown y el
+    // atajo directo a Guardar como se perdería en esos layouts.
+    GuiKeyPress upper =
+        guiKeyFromSdl((SDL_Keycode)'S', KMOD_CTRL | KMOD_SHIFT, false);
+    CHECK_EQ(static_cast<int>(upper.sym), static_cast<int>(GuiKeySym::KeyS));
+    CHECK(upper.mods.ctrl && upper.mods.shift && !upper.mods.alt);
+    GuiKeymap km;
+    CHECK_EQ(static_cast<int>(*km.mapKey(upper)),
+             static_cast<int>(InputEventType::SaveAs));
+    // Mayúscula con solo Ctrl (driver que refleja Shift en sym pero no en
+    // mod, o viceversa): misma normalización, binding sin Shift.
+    GuiKeyPress upperCtrl = guiKeyFromSdl((SDL_Keycode)'S', KMOD_CTRL, false);
+    CHECK_EQ(static_cast<int>(upperCtrl.sym),
+             static_cast<int>(GuiKeySym::KeyS));
+    CHECK_EQ(static_cast<int>(*km.mapKey(upperCtrl)),
+             static_cast<int>(InputEventType::Save));
+    // Mayúscula sin Ctrl: minoriza pero NO resuelve (el texto va por
+    // SDL_TEXTINPUT, nunca por KEYDOWN).
+    CHECK(!km.mapKey(guiKeyFromSdl((SDL_Keycode)'S', 0, false)).has_value());
+    CHECK(
+        !km.mapKey(guiKeyFromSdl((SDL_Keycode)'S', KMOD_SHIFT, false))
+                .has_value());
+    // ...y con Alt tampoco (Alt/AltGr de los layouts no disparan comandos).
+    CHECK(!km.mapKey(guiKeyFromSdl((SDL_Keycode)'S', KMOD_ALT, false))
+                .has_value());
+    CHECK(!km.mapKey(guiKeyFromSdl((SDL_Keycode)'S',
+                                   KMOD_CTRL | KMOD_ALT | KMOD_SHIFT, false))
+                .has_value());
+    // Exhaustivo: las 26 mayúsculas ('A'-'Z') con Shift held minorizan a su
+    // KeyA..KeyZ, con y sin Ctrl (el binding decide después, ya en
+    // minúscula lógica).
+    for (int i = 0; i < 26; ++i) {
+        const GuiKeySym want = static_cast<GuiKeySym>(
+            static_cast<int>(GuiKeySym::KeyA) + i);
+        const SDL_Keycode up = static_cast<SDL_Keycode>('A' + i);
+        CHECK_EQ(static_cast<int>(guiKeyFromSdl(up, KMOD_SHIFT, false).sym),
+                 static_cast<int>(want));
+        CHECK_EQ(static_cast<int>(
+                     guiKeyFromSdl(up, KMOD_CTRL | KMOD_SHIFT, false).sym),
+                 static_cast<int>(want));
+    }
+#endif
+}
+
 TEST(guisdl_altgr_counts_as_alt) {
 #ifndef HAVE_SDL2
     SKIP("sin SDL2");
 #else
-    // AltGr (KMOD_MODE en X11) cuenta como Alt: el KEYDOWN de la letra queda
-    // sin enlace en el keymap y el carácter real llega por SDL_TEXTINPUT.
+    // AltGr: comportamiento ACTUAL, no garantía universal de layouts. En
+    // X11 se observa KMOD_MODE y cuenta como Alt: el KEYDOWN de la letra
+    // queda sin enlace en el keymap y el carácter real llega por
+    // SDL_TEXTINPUT (que el loop acepta siempre, sin filtrar por mods).
     GuiKeyPress p = guiKeyFromSdl(SDLK_a, KMOD_MODE, false);
     CHECK(p.mods.alt && !p.mods.ctrl);
     CHECK_EQ(static_cast<int>(p.sym), static_cast<int>(GuiKeySym::KeyA));
@@ -268,6 +367,45 @@ TEST(guisdl_altgr_counts_as_alt) {
     CHECK(!km.mapKey(p).has_value());
     // Igual con Alt clásico.
     CHECK(guiKeyFromSdl(SDLK_a, KMOD_ALT, false).mods.alt);
+#endif
+}
+
+TEST(guisdl_mods_combinados_sin_accidentales) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    // P1 a nivel SDL (constantes KMOD_* reales, sin vídeo): los modificadores
+    // combinados que SDL entrega en los layouts soportados no generan
+    // comandos accidentales en letras, y no bloquean la navegación.
+    // Letras: Ctrl+Alt / Alt / Alt+Shift / Ctrl+Alt+Shift nunca resuelven
+    // (incluido KMOD_MODE de AltGr combinado con Ctrl).
+    GuiKeymap km;
+    CHECK(!km.mapKey(guiKeyFromSdl(SDLK_k, KMOD_CTRL | KMOD_ALT, false))
+                .has_value());
+    CHECK(!km.mapKey(guiKeyFromSdl(SDLK_k, KMOD_CTRL | KMOD_ALT | KMOD_SHIFT,
+                                   false))
+                .has_value());
+    CHECK(!km.mapKey(guiKeyFromSdl(SDLK_k, KMOD_ALT, false)).has_value());
+    CHECK(!km.mapKey(guiKeyFromSdl(SDLK_k, KMOD_ALT | KMOD_SHIFT, false))
+                .has_value());
+    CHECK(!km.mapKey(guiKeyFromSdl(SDLK_k, KMOD_CTRL | KMOD_MODE, false))
+                .has_value());
+    // No-textual: los mismos modificadores combinados NO bloquean la acción
+    // (paridad TTY deliberada): Ctrl+Alt+Escape sigue siendo Escape y
+    // Ctrl+Alt+Left sigue siendo MoveLeft.
+    CHECK_EQ(static_cast<int>(
+                 *km.mapKey(guiKeyFromSdl(SDLK_ESCAPE, KMOD_CTRL | KMOD_ALT,
+                                          false))),
+             static_cast<int>(InputEventType::Escape));
+    CHECK_EQ(static_cast<int>(
+                 *km.mapKey(guiKeyFromSdl(SDLK_LEFT, KMOD_CTRL | KMOD_ALT,
+                                          false))),
+             static_cast<int>(InputEventType::MoveLeft));
+    CHECK_EQ(static_cast<int>(
+                 *km.mapKey(guiKeyFromSdl(SDLK_RETURN,
+                                          KMOD_CTRL | KMOD_ALT | KMOD_SHIFT,
+                                          false))),
+             static_cast<int>(InputEventType::InsertNewline));
 #endif
 }
 

@@ -52,6 +52,14 @@ enum class InputEventType {
     // de el se ignora. La entrada a seleccion ya NO es por Ctrl+S: desde
     // v0.5 se hace con la letra 's' dentro del modo Navegacion.
     Save,
+    // Ctrl+Shift+S (GUI): guardar como DIRECTO, sin prefijo. El handling
+    // semántico del Editor lo traduce a `buffer.guardar.como` (el mismo
+    // comando que Ctrl+K Ctrl+S y que el botón GUI), sin sintetizar
+    // secuencias de teclas TTY ni pasar por Prefix. Solo lo produce el
+    // keymap GUI (el TTY no distingue Shift en los bytes de control);
+    // en TTY este evento nunca llega. Dentro del prefijo equivale a Save;
+    // en el explorador SaveAs confirma igual que Save.
+    SaveAs,
     // Ctrl+Z: pedir suspensión (job control, como vim). El Editor solo
     // marca la petición (vale en cualquier modo, incluidos los modales);
     // el loop de plataforma la consume y se auto-envía SIGTSTP, cuyos

@@ -11,13 +11,26 @@
 // - `sym` cubre solo lo que el keymap necesita: navegación/edición y las
 //   letras A-Z para combos Ctrl+*. El texto imprimible normal (incluido
 //   UTF-8 y AltGr) NUNCA pasa por aquí: llega por SDL_TEXTINPUT y el loop
-//   lo trocea con utf8::splitCells() en InsertChar por celda.
+//   lo trocea con utf8::splitCells() en InsertChar por celda. KEYDOWN es
+//   comandos/navegación/modificadores; TEXTINPUT es texto Unicode.
 // - Los modificadores CapsLock/NumLock NO existen en este vocabulario: el
 //   adaptador SDL los pela (KMOD_CAPS/KMOD_NUM) antes de construir el press,
 //   así que nunca rompen una coincidencia.
-// - Shift se conserva en el struct pero se IGNORA en la resolución (paridad
-//   v0.5 TTY: la selección se entra con 's', no con Shift; ver
-//   Terminal.cpp simpleEscapeForm). Shift+Flecha == Flecha.
+// - Shift es SIGNIFICATIVO en letras con Ctrl (Ctrl+S vs Ctrl+Shift+S son
+//   enlaces distintos: Guardar vs Guardar como) y se IGNORA en lo
+//   no-textual (paridad v0.5 TTY: la selección se entra con 's', no con
+//   Shift; ver Terminal.cpp simpleEscapeForm). Shift+Flecha == Flecha,
+//   pero Shift+letra-Ctrl == enlace propio. Más aún: en lo no-textual
+//   NINGÚN modificador extra bloquea la acción (Ctrl+Alt+Escape sigue
+//   siendo Escape, Ctrl+Left sigue siendo MoveLeft): paridad TTY
+//   deliberada (el TTY no distingue esas combinaciones), en contraste con
+//   las letras, donde Alt siempre deja la pulsación sin enlace para que los
+//   layouts con AltGr no disparen comandos accidentales.
+// - AltGr: comportamiento ACTUAL (no garantía universal de layouts). En X11
+//   el adaptador ve KMOD_MODE y lo cuenta como Alt: el KEYDOWN de la letra
+//   queda sin enlace y el carácter (@/|/\/{ según layout) llega por
+//   SDL_TEXTINPUT. Otros layouts/plataformas pueden variar; lo documentado
+//   es lo observado, no un contrato con todos los teclados.
 // - Alcance de keypad explícito: KeyPadEnter siempre, más KP_7/KP_1/KP_9/
 //   KP_3 (Inicio/Fin/RePag/AvPag) SOLO con NumLock apagado —el adaptador
 //   los traduce únicamente sin KMOD_NUM, porque con NumLock producen
@@ -84,16 +97,20 @@ struct GuiKeyPress {
     bool repeat = false;
 };
 
-// Enlace remapeable (sym + ctrl/alt; shift se ignora en la resolución).
+// Enlace remapeable (sym + ctrl/alt/shift).
 // Vive aquí —y no en el keymap concreto— para que la interfaz IGuiKeymap
 // pueda ofrecer bindKey/unbindKey/boundKey sin exponer el tipo concreto.
+// Shift solo decide en letras con Ctrl (Ctrl+S vs Ctrl+Shift+S); en lo
+// no-textual se normaliza al guardar y no distingue enlaces.
 struct GuiKeyBinding {
     GuiKeySym sym = GuiKeySym::Unknown;
     bool ctrl = false;
     bool alt = false;
+    bool shift = false;
     bool operator<(const GuiKeyBinding& o) const {
         if (sym != o.sym) return sym < o.sym;
         if (ctrl != o.ctrl) return ctrl < o.ctrl;
-        return alt < o.alt;
+        if (alt != o.alt) return alt < o.alt;
+        return shift < o.shift;
     }
 };

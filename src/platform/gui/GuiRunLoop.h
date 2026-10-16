@@ -53,11 +53,15 @@ class Editor;
 // El teclado completo vive en GuiKeymap (SDL_Keysym se adapta
 // a vocabulario propio (GuiKey.h, sin SDL) en el límite SDL del .cpp -> InputEvent): flechas, Home/End,
 // PgUp/PgDn, Enter (incl. keypad), Backspace/Delete, Escape, Ctrl+K/S/Q/U/
-// Y/Z. El texto confirmado (incl. UTF-8 y AltGr) llega por SDL_TEXTINPUT →
-// InsertChar por celda (utf8::splitCells); KEYDOWN nunca lleva texto
-// imprimible (sin doble inserción). La composición provisional
-// (SDL_TEXTEDITING) se descarta a propósito hasta tener superficie de
-// pintado (nunca se inserta en el Document).
+// Y/Z y Ctrl+Shift+S (SaveAs directo a `buffer.guardar.como` sin prefijo,
+// vía comando semántico existente, nunca sintetizando teclas TTY).
+// SDL_KEYDOWN es comandos/navegación/modificadores; el texto confirmado
+// (incl. UTF-8 y AltGr —comportamiento actual según layout, no garantía
+// universal—) llega por SDL_TEXTINPUT → InsertChar por celda
+// (utf8::splitCells); KEYDOWN nunca lleva texto imprimible (sin doble
+// inserción). La composición provisional (SDL_TEXTEDITING) se descarta a
+// propósito hasta tener superficie de pintado (nunca se inserta en el
+// Document).
 // El mouse vive en el mismo límite (GuiSdlMapper.h, único que nombra
 // SDL_BUTTON_*/SDL_MOUSEWHEEL_*/SDL_WINDOWEVENT_FOCUS_LOST): puntos de
 // evento -> píxeles de drawable (guiScaleCoord, obligatorio con

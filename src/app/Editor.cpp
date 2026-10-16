@@ -1654,6 +1654,24 @@ void Editor::handleEvent(const InputEvent& event) {
     // en cada modo: Ctrl+S deja de tener significado especial.
     if (event.type == InputEventType::Undo) { commands_.execute("edicion.deshacer"); return; }
     if (event.type == InputEventType::Redo) { commands_.execute("edicion.rehacer"); return; }
+    // Ctrl+Shift+S (GUI, SaveAs): atajo directo a `buffer.guardar.como`
+    // sin pasar por Prefix (vía comando semántico existente, nunca
+    // sintetizando Prefix+tecla TTY). Solo en modos de edición
+    // (Navegacion/Interaccion/Seleccion). Política explícita por estado
+    // (probada en test_guikeymap.cpp):
+    //   - FileBrowser/BufferSelector/Busqueda/IrAFila/Renombrar: no-op
+    //     (rama default de su handler: no confirma nombres, no cancela la
+    //     operación, no pierde el input del prompt), igual que Save fuera
+    //     de prefijo.
+    //   - Prefix: equivale a Save (abre el explorador SaveAs).
+    //   - SaveAsFileBrowser: confirma igual que Save (con nombre vacío
+    //     avisa y conserva el estado, sin confirmar nada).
+    if (event.type == InputEventType::SaveAs &&
+        (state_ == State::Navegacion || state_ == State::Interaccion ||
+         state_ == State::Seleccion)) {
+        commands_.execute("buffer.guardar.como");
+        return;
+    }
     if (event.type == InputEventType::Prefix) {
         priorState_ = state_;
         state_ = State::Prefix;
@@ -2200,6 +2218,7 @@ std::optional<Selection> Editor::selectAllSelection() const {
 void Editor::handlePrefixKey(const InputEvent& event) {
     switch (event.type) {
         case InputEventType::Save:
+        case InputEventType::SaveAs:  // Ctrl+K Ctrl+Shift+S: igual que Ctrl+K Ctrl+S
             commands_.execute("buffer.guardar.como");
             break;
 
@@ -2342,7 +2361,8 @@ void Editor::handleSaveAsFileBrowserEvent(const InputEvent& event) {
                 saveAsFileName_ = utf8::truncate(saveAsFileName_, cols - 1);
             }
             break;
-        case InputEventType::Save: // Ctrl+S: guardar
+        case InputEventType::Save:  // Ctrl+S: guardar
+        case InputEventType::SaveAs:  // Ctrl+Shift+S confirma igual
             commitSaveAsFileBrowser();
             break;
         case InputEventType::Escape:

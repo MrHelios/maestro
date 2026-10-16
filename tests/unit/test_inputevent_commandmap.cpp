@@ -121,6 +121,7 @@ TEST(inputcmd_inputevent_header) {
     (void)InputEventType::Quit;
     (void)InputEventType::Prefix;
     (void)InputEventType::Save;
+    (void)InputEventType::SaveAs;
     (void)InputEventType::Escape;
     (void)InputEventType::ScrollUp;
     (void)InputEventType::ScrollDown;

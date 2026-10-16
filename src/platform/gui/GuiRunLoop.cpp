@@ -461,7 +461,7 @@ int GuiRunLoop::run() {
                     // SDL y el keymap traduce a InputEvent semántico. La
                     // política de repetición vive en el keymap (flechas,
                     // Home/End, PgUp/PgDn y borrado repiten; Enter, Escape,
-                    // Prefix/Save/Quit/Undo/Redo no).
+                    // Prefix/Save/SaveAs/Quit/Undo/Redo no).
                     // KEYDOWN nunca lleva texto imprimible (sin doble
                     // inserción: el texto viene por SDL_TEXTINPUT).
                     InputEvent ie;
@@ -487,7 +487,8 @@ int GuiRunLoop::run() {
                     // modificadores. El evento SDL_TEXTINPUT no trae mods y
                     // los combos de control (Ctrl+S/Ctrl+Q/...) no generan
                     // texto en SDL, así que no hay doble inserción; en
-                    // cambio AltGr (p.ej. @/|/\) SÍ llega por aquí y un
+                    // cambio AltGr (p.ej. @/|/\ según layout: comportamiento
+                    // actual, no garantía universal) SÍ llega por aquí y un
                     // filtro global de Ctrl/Alt lo rompería. UTF-8 que
                     // puede traer varios caracteres en un solo commit.
                     // Cada celda entra como InsertChar, la operación
