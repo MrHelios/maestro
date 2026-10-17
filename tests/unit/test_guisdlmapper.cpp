@@ -1154,3 +1154,36 @@ TEST(gui_sin_desborde_coordenadas_grandes_headless) {
     CHECK_EQ(guiScaleCoord(1000000, 960, 1920), 2000000);
     CHECK_EQ(guiScaleCoord(2000000, 1920, 960), 1000000);
 }
+
+#ifdef HAVE_SDL2
+TEST(guiwindowflags_no_hidpi_elimina_flag_highdpi) {
+    // Garantía A (la opción hace efecto): los flags de creación de ventana
+    // salen de UN lugar (guiWindowFlags en GuiSdlMapper.h, usado por el
+    // único SDL_CreateWindow del loop). Sin --no-hidpi, ALLOW_HIGHDPI
+    // está presente; con --no-hidpi, ausente. La máscara se compara contra
+    // las constantes SDL reales (no números sueltos).
+    CHECK_EQ(guiWindowFlags(false),
+             Uint32(SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE));
+    CHECK((guiWindowFlags(true) & SDL_WINDOW_ALLOW_HIGHDPI) != 0);
+    CHECK((guiWindowFlags(false) & SDL_WINDOW_ALLOW_HIGHDPI) == 0);
+    // El resto de la máscara no cambia con la opción: la única diferencia
+    // entre ambas llamadas es el flag HiDPI.
+    CHECK_EQ(guiWindowFlags(true) & ~Uint32(SDL_WINDOW_ALLOW_HIGHDPI),
+             guiWindowFlags(false));
+}
+
+TEST(guiwindowflags_escala1_celulas_intactas_sin_hidpi) {
+    // Garantía B (separada de la A, etiquetada como cálculo): con la ventana
+    // sin ALLOW_HIGHDPI el drawable coincide con la ventana, la escala de
+    // guiScaledFontPixels es 1 y el cálculo de celdas sigue funcionando
+    // con la misma fórmula de siempre (evaluada acá con SDL real instalado
+    // pero sin tocar SDL en el cálculo: es puro).
+    CHECK_EQ(guiScaledFontPixels(16, 600, 600), 16);
+    const platform::WindowSize g =
+        guiGridSize(960, 600, 9, 18);
+    CHECK_EQ(g.cols, 106);
+    CHECK_EQ(g.rows, 33);
+    CHECK_EQ(g.cellW, 9);
+    CHECK_EQ(g.cellH, 18);
+}
+#endif  // HAVE_SDL2

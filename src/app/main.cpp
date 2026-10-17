@@ -20,14 +20,25 @@ void printHelp(const char* prog) {
     std::printf("\n");
     std::printf("  sin flags           modo terminal (TTY)\n");
     std::printf("  --gui               modo ventana SDL2 (requiere libsdl2-dev y libsdl2-ttf-dev)\n");
-    std::printf("  -h, --help          esta ayuda\n");
+    std::printf("  -h, --help          esta ayuda (válida en cualquier posición; sale sin abrir ventana)\n");
     std::printf("\n");
     std::printf("Opciones GUI (requieren --gui):\n");
-    std::printf("  --font <ruta>       fuente TTF monoespaciada (override MAESTRO_FONT)\n");
+    std::printf("  --font <ruta>       fuente TTF monoespaciada (precede a MAESTRO_FONT y a\n");
+    std::printf("                      los candidatos del sistema; si falla, error sin fallback).\n");
+    std::printf("                      También --font=ruta (admite rutas con guion inicial)\n");
     std::printf("  --font-size <px>    píxeles lógicos base (default 16; misma altura visual en cualquier monitor)\n");
     std::printf("  --theme dark|light  tema inicial (default dark)\n");
     std::printf("  --no-hidpi          desactiva SDL_WINDOW_ALLOW_HIGHDPI\n");
     std::printf("  --geometry WxH      coords iniciales de ventana, no píxeles físicos (ej. 1200x800)\n");
+    std::printf("\n");
+    std::printf("Selección de fuente: --font > MAESTRO_FONT > candidatos del sistema > ~/.fonts.\n");
+}
+
+// Mensaje de uso tras un error de args (args.badReason explica el motivo).
+void printBadUse(const char* prog, const std::string& reason) {
+    std::fprintf(stderr, "maestro: %s\n", reason.c_str());
+    std::fprintf(stderr, "Uso: %s [--gui] [opciones-gui] [archivo] (ayuda: %s --help)\n",
+                 prog, prog);
 }
 
 }  // namespace
@@ -46,7 +57,9 @@ int main(int argc, char* argv[]) {
         return 0;
     }
     if (args.bad) {
-        std::fprintf(stderr, "Uso: %s [--gui] [archivo]\n", prog);
+        printBadUse(prog, args.badReason.empty()
+                             ? std::string("argumentos inválidos")
+                             : args.badReason);
         return 1;
     }
 

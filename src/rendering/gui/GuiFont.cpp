@@ -4,6 +4,8 @@
 #include <string_view>
 #include <utility>
 
+#include "rendering/gui/FontOrder.h"
+
 #ifdef HAVE_SDL2_TTF
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
@@ -27,6 +29,10 @@ bool GuiFont::loadWithPath(int pixelSize, const std::string&) {
     pixelSize_ = pixelSize;
     return false;
 }
+
+bool GuiFont::openWithMetrics(int, const std::optional<std::string>&) {
+    return false;
+}
 void GuiFont::unload() {
     font_ = nullptr;
     path_.clear();
@@ -46,6 +52,9 @@ unsigned long long GuiFont::cacheHits() const { return 0; }
 unsigned long long GuiFont::cacheMisses() const { return 0; }
 unsigned long long GuiFont::cacheEvictions() const { return 0; }
 unsigned long long GuiFont::cacheDestroys() const { return 0; }
+unsigned long long GuiFont::envFontWarnings() const { return 0; }
+void GuiFont::setEnvWarnPrintForTests(bool) {}
+void GuiFont::resetEnvWarnStateForTests() {}
 
 #else
 
@@ -108,15 +117,53 @@ void destroyCache(TextCache* c) {
     delete c;
 }
 
-// Candidatos del sistema (orden de preferencia). MAESTRO_FONT los precede.
-const char* kFontCandidates[] = {
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
-    "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
-};
+// Métricas de celda de una fuente ABIERTA (helper del swap transaccional:
+// se mide la candidata ANTES de sustituir la actual). cellW = avance de 'M'
+// (solo representa la celda si la fuente es monoespaciada); cellH = alto
+// de línea, con respaldo en la talla pedida si TTF no lo reporta.
+void measureCell(TTF_Font* f, int pixelSize, int& cellW, int& cellH) {
+    int advance = 0;
+    int minx = 0, maxx = 0, miny = 0, maxy = 0;
+    if (TTF_GlyphMetrics(f, 'M', &minx, &maxx, &miny, &maxy, &advance) == 0 &&
+        advance > 0) {
+        cellW = advance;
+    } else {
+        int w = 0, h = 0;
+        if (TTF_SizeUTF8(f, "M", &w, &h) == 0 && w > 0) cellW = w;
+    }
+    cellH = TTF_FontHeight(f);
+    if (cellH <= 0) cellH = pixelSize;
+}
 
 // Refcount de TTF_Init/TTF_Quit entre todas las GuiFont vivas.
 int g_tffInitCount = 0;
+
+// Avisos por MAESTRO_FONT inválida en ESTE proceso: máximo 1 (política de
+// FontOrder.h; una recarga/resize no vuelve a avisar). Observabilidad para
+// tests vía GuiFont::envFontWarnings().
+unsigned long long g_envFontWarnings = 0;
+// Ya avisó en este proceso (política una-vez; los tests la reinician con
+// resetEnvWarnStateForTests para poder medir su propio disparo aislado).
+bool g_envWarned = false;
+
+// Canal silenciado solo para tests (GuiFont::setEnvWarnPrintForTests): el
+// runner no debe imprimir diagnósticos; el contador sigue contando.
+bool g_envWarnPrintEnabled = true;
+
+// Aviso único: la env explícita no se pudo abrir, se continúa con el
+// siguiente candidato (nunca error terminal: la env es hint, no override).
+// UNA sola vez por proceso: una recarga/resize con la misma env inválida
+// no repite el aviso (observado con g_envFontWarnings, 0..1).
+void warnEnvFontOnce(const std::string& path) {
+    if (g_envWarned) return;
+    g_envWarned = true;
+    ++g_envFontWarnings;
+    if (!g_envWarnPrintEnabled) return;
+    fprintf(stderr,
+            "maestro: aviso: no se pudo abrir MAESTRO_FONT '%s'; "
+            "continuando con el siguiente candidato de fuente\n",
+            path.c_str());
+}
 
 // Heurística monoespaciada P2 (aviso, nunca rechazo): compara el avance de
 // 'M' (ancha) con el de 'i' (angosta en proporcionales). Si ambos se miden
@@ -152,100 +199,75 @@ GuiFont::~GuiFont() {
 }
 
 bool GuiFont::load(int pixelSize) {
-    // Tamaño inválido: se rechaza sin tocar el estado actual (no se
-    // descarga la fuente en uso ni se delega a SDL_ttf).
-    if (pixelSize <= 0) return false;
-    unload();
-    pixelSize_ = pixelSize;
-
-    if (g_tffInitCount == 0 && TTF_Init() != 0) return false;
-    ++g_tffInitCount;
-
-    auto tryOpen = [&](const char* p) -> TTF_Font* {
-        if (!p || !*p) return nullptr;
-        TTF_Font* f = TTF_OpenFont(p, pixelSize_);
-        if (f) path_ = p;
-        return f;
-    };
-
-    TTF_Font* f = nullptr;
-    if (const char* env = std::getenv("MAESTRO_FONT")) f = tryOpen(env);
-    for (const char* c : kFontCandidates) {
-        if (f) break;
-        f = tryOpen(c);
-    }
-    // ~/.local/share/fonts (JetBrainsMono y cía, nombre exacto variable):
-    // se prueban los habituales si lo anterior falló.
-    if (!f) {
-        const char* home = std::getenv("HOME");
-        if (home && *home) {
-            const std::string h = home;
-            const char* extra[] = {
-                "/.local/share/fonts/JetBrainsMono-Regular.ttf",
-                "/.fonts/JetBrainsMono-Regular.ttf",
-            };
-            for (const char* e : extra) {
-                if (f) break;
-                f = tryOpen((h + e).c_str());
-            }
-        }
-    }
-    if (!f) {
-        // Sin fuente: se deshace el TTF_Init de arriba.
-        if (--g_tffInitCount == 0) TTF_Quit();
-        return false;
-    }
-    font_ = static_cast<void*>(f);
-
-    // Celda: avance horizontal de 'M' (vale para todos los glifos solo
-    // si la fuente es monoespaciada, requisito documentado en el header) y
-    // alto de línea de la fuente.
-    int advance = 0;
-    int minx = 0, maxx = 0, miny = 0, maxy = 0;
-    if (TTF_GlyphMetrics(f, 'M', &minx, &maxx, &miny, &maxy, &advance) == 0 &&
-        advance > 0) {
-        cellW_ = advance;
-    } else {
-        int w = 0, h = 0;
-        if (TTF_SizeUTF8(f, "M", &w, &h) == 0 && w > 0) cellW_ = w;
-    }
-    cellH_ = TTF_FontHeight(f);
-    if (cellH_ <= 0) cellH_ = pixelSize_;
-    // P2: aviso único si la fuente no parece monoespaciada (nunca rechazo).
-    maybeWarnNonMonospaceOnce(f, path_);
-    return true;
+    // Tamaño inválido: openWithMetrics lo rechaza sin tocar el estado.
+    return openWithMetrics(pixelSize, std::nullopt);
 }
 
 bool GuiFont::loadWithPath(int pixelSize, const std::string& path) {
-    if (pixelSize <= 0) return false;
-    unload();
-    pixelSize_ = pixelSize;
+    return openWithMetrics(pixelSize, std::optional<std::string>(path));
+}
 
-    if (g_tffInitCount == 0 && TTF_Init() != 0) return false;
+bool GuiFont::openWithMetrics(int pixelSize,
+                              const std::optional<std::string>& explicitPath) {
+    if (pixelSize <= 0) return false;
+    // Ruta explícita vacía: error sin fallback (ni siquiera candidatos).
+    if (explicitPath.has_value() && explicitPath->empty()) return false;
+    // Refcount de TTF_Init: +1 por el intento (se descuenta si el intento
+    // completo falla o al cerrar la fuente que reemplaza). Un reload
+    // exitoso queda balanceado (+1 nuevo, -1 viejo).
+    const bool needInit = (g_tffInitCount == 0);
+    if (needInit) {
+        if (TTF_Init() != 0) return false;
+    }
     ++g_tffInitCount;
 
-    TTF_Font* f = TTF_OpenFont(path.c_str(), pixelSize_);
-    if (!f) {
-        if (--g_tffInitCount == 0) TTF_Quit();
-        return false;
+    const auto order = resolveFontOrder(explicitPath);
+    for (const FontCandidate& cand : order) {
+        // Sin ::explicitPath el orden contiene exactamente un candidato
+        // Cli; su fallo termina el intento SIN fallback (política:
+        // una --font que no abre es error terminal, ver FontOrder.h).
+        TTF_Font* f = TTF_OpenFont(cand.path.c_str(), pixelSize);
+        if (!f) {
+            if (cand.origin == FontOrigin::Env) warnEnvFontOnce(cand.path);
+            // Defensa en origen: la Cli no prueba más candidatos (la
+            // resolución ya devolvió solo la explícita, policy P1).
+            if (cand.origin == FontOrigin::Cli) break;
+            continue;
+        }
+        int cw = 0, ch = 0;
+        measureCell(f, pixelSize, cw, ch);
+        if (cw <= 0) {
+            // Métricas inutilizables: la candidata no se adopta (y el
+            // estado actual no se toca: transaccional).
+            TTF_CloseFont(f);
+            if (cand.origin == FontOrigin::Env) warnEnvFontOnce(cand.path);
+            if (cand.origin == FontOrigin::Cli) break;
+            continue;
+        }
+        // COMMIT del swap: nuevo estado primero, cierre del viejo después.
+        TTF_Font* old = static_cast<TTF_Font*>(font_);
+        font_ = static_cast<void*>(f);
+        path_ = cand.path;
+        pixelSize_ = pixelSize;
+        cellW_ = cw;
+        cellH_ = ch;
+        // El ráster cambió (aunque sea solo de talla): el caché de
+        // texturas del viejo raster ya no vale.
+        clearCache();
+        if (old) {
+            TTF_CloseFont(old);
+            if (--g_tffInitCount == 0) TTF_Quit();
+        }
+        // P2: aviso único si la fuente no parece monoespaciada (nunca
+        // rechazo).
+        maybeWarnNonMonospaceOnce(f, path_);
+        return true;
     }
-    font_ = static_cast<void*>(f);
-    path_ = path;
 
-    int advance = 0;
-    int minx = 0, maxx = 0, miny = 0, maxy = 0;
-    if (TTF_GlyphMetrics(f, 'M', &minx, &maxx, &miny, &maxy, &advance) == 0 &&
-        advance > 0) {
-        cellW_ = advance;
-    } else {
-        int w = 0, h = 0;
-        if (TTF_SizeUTF8(f, "M", &w, &h) == 0 && w > 0) cellW_ = w;
-    }
-    cellH_ = TTF_FontHeight(f);
-    if (cellH_ <= 0) cellH_ = pixelSize_;
-    // P2: aviso único si la fuente no parece monoespaciada (nunca rechazo).
-    maybeWarnNonMonospaceOnce(f, path_);
-    return true;
+    // Nadie abrió: se deshace el TTF_Init de arriba y el estado actual
+    // quedó intacto (ni unload ni clearCache: transaccional).
+    if (--g_tffInitCount == 0) TTF_Quit();
+    return false;
 }
 
 void GuiFont::unload() {
@@ -399,6 +421,19 @@ unsigned long long GuiFont::cacheEvictions() const {
 unsigned long long GuiFont::cacheDestroys() const {
     const auto* cache = static_cast<const TextCache*>(cache_);
     return cache ? cache->destroys : 0;
+}
+
+unsigned long long GuiFont::envFontWarnings() const {
+    return g_envFontWarnings;
+}
+
+void GuiFont::setEnvWarnPrintForTests(bool enabled) {
+    g_envWarnPrintEnabled = enabled;
+}
+
+void GuiFont::resetEnvWarnStateForTests() {
+    g_envWarned = false;
+    g_envFontWarnings = 0;
 }
 
 #endif

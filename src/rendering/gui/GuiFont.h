@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -13,10 +14,19 @@
 // HAVE_SDL2_TTF. Sin TTF, load() es no-op y ok() es false (modo degradado).
 //
 // Responsabilidades:
-//   - load(): abre el primer candidato disponible (MAESTRO_FONT o lista del
-//     sistema) y mide la celda (ancho del avance de 'M', alto de línea).
-//     Requiere fuente monoespaciada: MAESTRO_FONT debe apuntar a una
-//     fuente monoespaciada, igual que los candidatos del sistema.
+//   - load(): resuelve el orden de candidatos con resolveFontOrder
+//     (rendering/gui/FontOrder.h: --font CLI > MAESTRO_FONT > candidatos
+//     del sistema > ~/.fonts), abre el primero que funcione y mide la
+//     celda (ancho del avance de 'M', alto de línea). Requiere fuente
+//     monoespaciada: MAESTRO_FONT y los candidatos del sistema deben
+//     apuntar a fuentes monoespaciadas.
+//     POLÍTICA POR ORIGEN: MAESTRO_FONT inválida emite UN aviso por
+//     proceso (envFontWarnings) y continúa con el siguiente candidato;
+//     ninguna fuente utilizable devuelve false (error terminal).
+//   - loadWithPath(): abre EXCLUSIVAMENTE la ruta explícita (--font): si
+//     falla, devuelve false SIN fallback a env ni candidatos. La política
+//     de error (exit != 0) la aplica el caller (GuiRunLoop con
+//     fontOpenDiagnostic).
 //   - textTexture(): renderiza una línea UTF-8 a SDL_Texture* cacheada por
 //     (texto, color). Las texturas dependen del renderer: clearCache() se
 //     llama al cambiar/recrear el SDL_Renderer (la fuente CPU se conserva).
@@ -37,8 +47,11 @@
 //     prestado el puntero para el RenderCopy inmediato (nunca lo guardan
 //     entre frames).
 //   - Invalidación: todo lo que cambia el ráster vacía el caché.
-//     load()/loadWithPath() (cara o talla) vía unload(); cambio de renderer
-//     vía clearCache (explícito del caller + automático en textTexture()).
+//     load()/loadWithPath() con RECARGA EXITOSA (cambio de talla o ruta)
+//     vía el clearCache del swap transaccional; una recarga FALLIDA no
+//     toca el estado ni vacía el caché (la fuente anterior sigue viva).
+//     Cambio de renderer vía clearCache (explícito del caller + automático
+//     en textTexture()).
 //     La clave (texto, rgba con alfa) es completa PORQUE no existe otra vía
 //     que altere el resultado: sin mutación de estilo/hinting sin recarga y
 //     con blend fijado al crear.
@@ -71,9 +84,20 @@ public:
     // >=2.0.18).
     bool load(int pixelSize = 16);
     // Variante que usa una ruta explícita (p. ej. --font). Si falla, no
-    // intenta fallbacks del sistema.
+    // intenta fallbacks del sistema y NO altera el estado actual (ver
+    // transaccionalidad más abajo).
     bool loadWithPath(int pixelSize, const std::string& path);
     void unload();
+
+    // TRANSACCIONALIDAD (contrato, probado en test_guifont.cpp): open /
+    // measure / swap. Tanto load() como loadWithPath() abren la nueva
+    // fuente y miden su celda ANTES de tocar el estado actual; solo si todo
+    // tiene éxito se sustituye (y ahí sí se vacía el caché, porque el
+    // ráster cambió). Una recarga fallida (talla nueva en una ruta que ya
+    // no abre, archivo existente que no es una fuente, etc.) devuelve false
+    // con la fuente anterior, sus métricas y su caché intactos: los
+    // callers de resize (ensureFontPixels) pueden ignorar el retorno sin
+    // degradar la grilla. `pixelSize <= 0` se rechaza sin tocar nada.
 
     bool ok() const { return font_ != nullptr; }
     // Path elegido en el último load() exitoso (vacío si no hay).
@@ -151,7 +175,30 @@ public:
     unsigned long long cacheEvictions() const;
     unsigned long long cacheDestroys() const;
 
+    // Avisos por MAESTRO_FONT inválida acumulados en el proceso (0..1:
+    // el aviso es UNA vez por proceso aunque la recarga se repita). Solo
+    // observabilidad para tests; con el stub sin TTF siempre 0.
+    unsigned long long envFontWarnings() const;
+
+    // Solo tests: silencia el fprintf del aviso de MAESTRO_FONT (el
+    // contador envFontWarnings sigue contando igual). Default true: el
+    // runner de tests no debe emitir diagnósticos por stderr. Los tests
+    // que disparan la política la silencian/restauran con RAII.
+    static void setEnvWarnPrintForTests(bool enabled);
+
+    // Solo tests: reinicia el estado global de la política de aviso
+    // (bandera "ya avisó" + contador a 0) para que un test de política
+    // mida SOLO su propio disparo y no dependa de qué tests corrieron
+    // antes en el mismo proceso. La semántica de producción (una vez por
+    // proceso) no cambia: ningún camino productivo llama a esto.
+    static void resetEnvWarnStateForTests();
+
 private:
+    // Reemplazo transaccional (implementado en el .cpp sobre SDL_ttf):
+    // explicitPath vacío = resolución con FontOrder (load); con valor =
+    // ruta única Cli sin fallback (loadWithPath).
+    bool openWithMetrics(int pixelSize,
+                         const std::optional<std::string>& explicitPath);
     void* font_ = nullptr;     // TTF_Font* opaco (solo el .cpp conoce SDL_ttf)
     void* cache_ = nullptr;    // caché (texto,color)->SDL_Texture*, opaco
     void* renderer_ = nullptr;  // SDL_Renderer* opaco dueño del caché (o

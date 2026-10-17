@@ -46,7 +46,12 @@ documento y el editor queda ciego, así que `WITH_SDL2=1` sin
 `libsdl2-ttf-dev` (o sin `libsdl2-dev`) falla el build con error explícito
 que nombra el paquete faltante. `WITH_SDL2_TTF=0` no está permitido con
 GUI. Además se necesita una fuente en runtime (`MAESTRO_FONT` o una del
-sistema como DejaVuSansMono).
+sistema como DejaVuSansMono, ver "Selección de fuente").
+
+En un binario compilado `WITH_SDL2=0`, ejecutar `./build/maestro --gui`
+**no** abre ventana ni degrada en silencio: informa
+`maestro: --gui requiere compilar con SDL2 (WITH_SDL2=1, falta
+libsdl2-dev).` y termina con código de salida `1`.
 
 ## Ejecutar
 
@@ -65,19 +70,45 @@ Wrapper opcional `./maestro` (si existe en la raíz) delega en `make`/`build/mae
 ./build/maestro --gui [opciones-gui] [archivo]
 ```
 
+#### Ayuda
+
+`--help` (o `-h`) funciona **en cualquier posición** de la línea de
+comandos, incluso conviviendo con argumentos que serían inválidos: imprime
+la ayuda y sale con código `0` sin inicializar SDL ni abrir ventana.
+
 #### Opciones GUI
 
 | Opción | Descripción |
 |--------|-------------|
-| `--font <ruta>` | Fuente TTF monoespaciada (override `MAESTRO_FONT`) |
-| `--font-size <px>` | Píxeles lógicos base (default 16; misma altura visual en cualquier monitor) |
+| `--font <ruta>` | Fuente TTF monoespaciada (precede a `MAESTRO_FONT` y a los candidatos del sistema; si no abre, **error terminal sin fallback**). `--font=ruta` también es válido y es la forma para rutas con guion inicial (ej. `--font=-mi-fuente.ttf`) |
+| `--font-size <px>` | Píxeles lógicos base (default 16; misma altura visual en cualquier monitor). Solo dígitos decimales entre 1 y 200 |
 | `--theme dark\|light` | Tema inicial (default `dark`) |
 | `--no-hidpi` | Desactiva `SDL_WINDOW_ALLOW_HIGHDPI` |
-| `--geometry WxH` | Coords iniciales de ventana, no píxeles físicos (ej. `1200x800`) |
+| `--geometry WxH` | Coords iniciales de ventana, no píxeles físicos (ej. `1200x800`; dimensiones 1–10000, área total ≤ 12000000) |
 
-#### Variables de entorno
+Un valor de opción que empieza con `-` se interpreta como otra opción
+(por ejemplo `--font --theme` es error, no la ruta `--theme`); para esos
+valores use la forma `--opt=VALOR`. Cada argumento inválido produce un
+diagnóstico que nombra la opción y el valor recibido.
 
-- `MAESTRO_FONT` — Ruta a fuente TTF monoespaciada (prioridad sobre candidatos del sistema)
+#### Variables de entorno y selección de fuente
+
+Orden (única fuente de verdad, `src/rendering/gui/FontOrder.h`):
+
+1. `--font` (CLI) — si la fuente explícita no abre: **error y salida ≠ 0,
+   sin fallback** (una fuente explícita nunca cae silenciosamente a otra).
+2. `MAESTRO_FONT` — si no abre: **aviso por stderr (una sola vez por
+   proceso)** y se continúa con el siguiente candidato.
+3. Candidatos del sistema: DejaVuSansMono, LiberationMono, NotoSansMono.
+4. `$HOME/.local/share/fonts/JetBrainsMono-Regular.ttf` y
+   `$HOME/.fonts/JetBrainsMono-Regular.ttf`.
+
+`MAESTRO_FONT` vacía o sin definir usa el comportamiento predeterminado.
+La fuente (cualquier origen) debe ser monoespaciada: la celda se mide con
+el avance de `'M'`.
+
+#### Otras variables de entorno
+
 - `SDL_VIDEODRIVER` — Fuerza driver SDL (`x11`, `wayland`, `dummy` para tests)
 
 #### Atajos GUI adicionales
@@ -87,7 +118,7 @@ Wrapper opcional `./maestro` (si existe en la raíz) delega en `make`/`build/mae
 | Click izq | Posicionar cursor / Seleccionar (drag) |
 | Rueda | Scroll ±3 líneas |
 | Doble click | Seleccionar palabra |
-| `Ctrl+K l` | Toggle tema (dark/light) |
+| `Ctrl+K` luego `l` | Toggle tema (dark/light). Es una **secuencia**: prefijo `Ctrl+K`, seguido de `l` |
 
 #### Ejemplos
 
@@ -97,6 +128,10 @@ Wrapper opcional `./maestro` (si existe en la raíz) delega en `make`/`build/mae
 
 # Sin HiDPI (útil en algunos entornos Wayland/XWayland)
 ./build/maestro --gui --no-hidpi archivo.txt
+
+# Ayuda en cualquier posición (salida inmediata, sin ventana)
+./build/maestro --gui --help
+./build/maestro --font --help
 ```
 
 #### Nota Wayland: captura de mouse y arrastre fuera de la ventana

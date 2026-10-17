@@ -87,6 +87,182 @@ TEST(guifont_unload_libera_fuente) {
     CHECK(!f.ok());
 }
 
+// POLÍTICA DE FUENTES POR ORIGEN (FontOrder.h, única instancia de las
+// reglas; el orden puro se prueba en test_fontorder.cpp). El entorno se
+// guarda/restaura con RAII para no filtrar estado a otros tests.
+namespace {
+struct FontEnvGuard {
+    bool hadFont = false;
+    std::string fontOld;
+    FontEnvGuard() {
+        if (const char* f = std::getenv("MAESTRO_FONT")) {
+            hadFont = true;
+            fontOld = f;
+        }
+        // El runner de tests no emite diagnósticos: el aviso de env sigue
+        // CONTANDO (envFontWarnings) pero no imprime (restaurado al salir,
+        // aunque el test falle antes).
+        GuiFont::setEnvWarnPrintForTests(false);
+        // Aislamiento del estado global de la política (ya-avisó +
+        // contador): cada test de política arranca en cero y mide SOLO
+        // sus propias cargas, independientemente de qué tests corrieron
+        // antes en el mismo proceso.
+        GuiFont::resetEnvWarnStateForTests();
+    }
+    ~FontEnvGuard() {
+        if (hadFont)
+            setenv("MAESTRO_FONT", fontOld.c_str(), 1);
+        else
+            unsetenv("MAESTRO_FONT");
+        GuiFont::setEnvWarnPrintForTests(true);
+    }
+};
+
+const char* kDejaVuMono =
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf";
+const char* kLiberationMono =
+    "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf";
+
+bool fontFileExists(const char* p) {
+    FILE* fp = fopen(p, "rb");
+    if (!fp) return false;
+    fclose(fp);
+    return true;
+}
+}  // namespace
+
+TEST(guifont_env_invalido_avisa_una_vez_y_falla_al_siguiente) {
+    // Aislado: el guard reinicia ya-avisó + contador, así que el ==1 de
+    // abajo prueba que ESTE test disparó el aviso (no depende de cargas
+    // previas del proceso).
+    FontEnvGuard g;
+    setenv("MAESTRO_FONT", "/no/existe/maestro-test.ttf", 1);
+    GuiFont f;
+    // La env inválida es un AVISO (una vez) y se continúa: algún candidato
+    // del sistema abre y el estado queda utilizable.
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    CHECK(f.ok());
+    CHECK(!f.path().empty());
+    CHECK(f.path() != std::string("/no/existe/maestro-test.ttf"));
+    CHECK_EQ(f.envFontWarnings(), 1u);
+    // Recarga/cambio de talla (lo que hace cada resize): NO re-avisa.
+    if (f.load(18)) CHECK_EQ(f.envFontWarnings(), 1u);
+    // Otro GuiFont en el mismo proceso tampoco re-avisa (por proceso).
+    GuiFont f2;
+    if (f2.load(16)) CHECK_EQ(f2.envFontWarnings(), 1u);
+}
+
+TEST(guifont_env_valido_precede_al_sistema) {
+    FontEnvGuard g;
+    // La env debe ser DISTINTA del primer candidato del sistema: si la env
+    // apuntara a DejaVu (primer System), el test pasaría aunque load()
+    // ignorara MAESTRO_FONT por completo. Con Liberation (segundo
+    // candidato) la única forma de que path() sea la env es la precedencia.
+    if (!fontFileExists(kLiberationMono))
+        SKIP("falta LiberationMono en este sistema");
+    setenv("MAESTRO_FONT", kLiberationMono, 1);
+    GuiFont f;
+    // El load con env válida NO emite avisos (solo la falla de la env).
+    const unsigned long long antes = f.envFontWarnings();
+    if (!f.load(16)) SKIP("TTF no abrió la env en este entorno");
+    CHECK_EQ(f.path(), std::string(kLiberationMono));
+    CHECK_EQ(f.envFontWarnings(), antes);
+}
+
+TEST(guifont_cli_prevalece_sobre_env_y_recarga_vuelve_a_resolver) {
+    FontEnvGuard g;
+    if (!fontFileExists(kDejaVuMono)) SKIP("falta DejaVuSansMono en este sistema");
+    if (!fontFileExists(kLiberationMono))
+        SKIP("falta LiberationMono en este sistema");
+    // Env DISTINTA del primer candidato del sistema (Liberation, no
+    // DejaVu): así cada tramo del test discrimina precedencia real.
+    setenv("MAESTRO_FONT", kLiberationMono, 1);
+    GuiFont f;
+    // env simple: MAESTRO_FONT precede al sistema (sin env habría caído a
+    // DejaVu, el primer System).
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    CHECK_EQ(f.path(), std::string(kLiberationMono));
+    // --font (ruta explícita) SIEMPRE gana: el orden de resolución es CLI >
+    // env; loadWithPath no consulta env.
+    if (!f.loadWithPath(20, kDejaVuMono))
+        SKIP("TTF no abrió DejaVuSansMono en este entorno");
+    CHECK_EQ(f.path(), std::string(kDejaVuMono));
+    CHECK(f.pixelSize() == 20);
+    // Recarga normal (sin explícita): se re-resuelve y la env vuelve a
+    // preceder a los candidatos del sistema.
+    if (f.load(14)) CHECK_EQ(f.path(), std::string(kLiberationMono));
+}
+
+TEST(guifont_cli_invalida_error_sin_fallback) {
+    FontEnvGuard g;
+    if (!fontFileExists(kDejaVuMono)) SKIP("falta DejaVuSansMono en este sistema");
+    if (!fontFileExists(kLiberationMono))
+        SKIP("falta LiberationMono en este sistema");
+    // Env válida (Liberation) DISTINTA de la fuente en uso (DejaVu, puesta
+    // por CLI): si una --font inválida cayera al env, path() pasaría de
+    // DejaVu a Liberation y el test lo detectaría.
+    setenv("MAESTRO_FONT", kLiberationMono, 1);
+    GuiFont f;
+    // Estado inicial sano vía CLI explícita (no env).
+    if (!f.loadWithPath(16, kDejaVuMono)) SKIP("TTF no abrió DejaVuMono en este entorno");
+    CHECK(f.ok());
+    CHECK_EQ(f.path(), std::string(kDejaVuMono));
+    const int cw = f.cellW();
+    const int ch = f.cellH();
+    const unsigned long long warnings = f.envFontWarnings();
+    // La explícita NO abre: false y SIN caída al env (que está sano y
+    // habría "salvado" la carga si hubiera fallback). Estado intacto.
+    CHECK(!f.loadWithPath(18, "/no/existe/maestro-test.ttf"));
+    CHECK(f.ok());
+    CHECK_EQ(f.path(), std::string(kDejaVuMono));  // NO es la env (Liberation)
+    CHECK_EQ(f.cellW(), cw);
+    CHECK_EQ(f.cellH(), ch);
+    CHECK(f.pixelSize() == 16);  // la talla pedida tampoco se adoptó
+    CHECK_EQ(f.envFontWarnings(), warnings);  // ni siquiera avisó
+}
+
+TEST(guifont_recarga_transaccional_conserva_estado) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    CHECK(f.ok());
+    const std::string path = f.path();
+    const int cw = f.cellW();
+    const int ch = f.cellH();
+    const unsigned long long antesMiss = f.cacheMisses();
+    // (El miss count cambia solo si textTexture corre; acá solo el estado.)
+    CHECK(!f.loadWithPath(20, "/no/existe/maestro-test.ttf"));
+    CHECK(f.ok());
+    CHECK_EQ(f.path(), path);       // misma fuente
+    CHECK_EQ(f.cellW(), cw);        // mismas métricas
+    CHECK_EQ(f.cellH(), ch);
+    CHECK(f.pixelSize() == 16);     // la talla anterior sigue la activa
+    CHECK_EQ(f.cacheMisses(), antesMiss);  // el caché no se tocó
+    // La fuente vieja sigue REALMENTE utilizable (no solo en los getters):
+    // textWidth usa la TTF_Font* viva, no un puntero colgante.
+    CHECK(f.textWidth("M") > 0);
+    // Talla inválida tampoco degrada.
+    CHECK(!f.load(0));
+    CHECK(f.ok());
+    CHECK_EQ(f.path(), path);
+    f.unload();
+}
+
+TEST(guifont_archivo_existente_no_es_fuente_falla) {
+    // La existencia del archivo por sí sola no basta: un .txt (o cualquier
+    // no-TTF) falla al abrir como fuente y NO hay fallback silencioso.
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    const std::string path = f.path();
+    const int cw = f.cellW();
+    const testfw::TempFile txt;
+    txt.write("esto no es una fuente valida");
+    CHECK(!f.loadWithPath(18, txt.path));
+    CHECK(f.ok());
+    CHECK_EQ(f.path(), path);
+    CHECK_EQ(f.cellW(), cw);
+    f.unload();
+}
+
 #ifdef HAVE_SDL2
 namespace {
 

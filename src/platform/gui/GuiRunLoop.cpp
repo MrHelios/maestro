@@ -235,8 +235,11 @@ int GuiRunLoop::run() {
         return (st & SDL_BUTTON_LMASK) != 0;
     });
 
-    Uint32 windowFlags = SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE;
-    if (options_.enableHiDpi) windowFlags |= SDL_WINDOW_ALLOW_HIGHDPI;
+    // Único lugar que decide los flags de creación de ventana (helper puro
+    // testeado en test_guisdlmapper.cpp): --no-hidpi elimina
+    // SDL_WINDOW_ALLOW_HIGHDPI y el cálculo de celdas sigue intacto (sin
+    // HiDPI el drawable == ventana y la escala de guiScaledFontPixels es 1).
+    const Uint32 windowFlags = guiWindowFlags(options_.enableHiDpi);
 
     int winW = options_.windowWidth.value_or(960);
     int winH = options_.windowHeight.value_or(600);
@@ -290,8 +293,7 @@ int GuiRunLoop::run() {
         guiScaledFontPixels(baseFontPx, initWinH, initOutH);
     if (gui_ &&
         !gui_->initForRenderer(static_cast<void*>(ren), initFontPixels)) {
-        std::fprintf(stderr, "maestro: error al abrir la fuente '%s' especificada con --font\n",
-                     options_.fontPath.value_or("").c_str());
+        std::fputs(fontOpenDiagnostic(options_).c_str(), stderr);
         if (gui_) gui_->setSdlRenderer(nullptr);
         sdlWin_ = nullptr;
         sdlRen_ = nullptr;

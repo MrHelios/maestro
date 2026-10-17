@@ -272,6 +272,20 @@ inline int guiConsumeWheelDelta(double& acc, double delta) {
 
 #include "platform/gui/GuiKey.h"
 
+// Flags de creación de la ventana GUI (GARANTÍA A de --no-hidpi, probada
+// en test_guisdlmapper.cpp): también es "límite SDL" y acá vive por la
+// misma regla del header — único sitio que nombra constantes SDL. Es el
+// ÚNICO SDL_CreateWindow del loop, así que el test de la máscara cubre el
+// efecto real de la opción. Con --no-hidpi la ventana no pide
+// ALLOW_HIGHDPI: el drawable coincide con la ventana y la escala de la
+// fuente con guiScaledFontPixels es 1 (el cálculo de celdas no cambia de
+// camino, GARANTÍA B, probada por separado).
+inline Uint32 guiWindowFlags(bool hidpi) {
+    Uint32 flags = SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE;
+    if (hidpi) flags |= SDL_WINDOW_ALLOW_HIGHDPI;
+    return flags;
+}
+
 inline GuiKeyPress guiKeyFromSdl(SDL_Keycode sym, Uint16 mod, bool repeat) {
     GuiKeyPress p;
     p.repeat = repeat;
