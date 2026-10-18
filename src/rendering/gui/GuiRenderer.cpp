@@ -942,15 +942,140 @@ bool framePxSize(const Layout& layout, int cw, int ch, int& wPx, int& hPx) {
     return true;
 }
 
+// ---- Geometría única de la MessageBar (texto y cursor Bar) ----
+//
+// La banda VISIBLE de la MessageBar no es solo su celda: llega al borde
+// inferior de la ventana porque la división entera de guiGridSize deja una
+// franja residual (winH - filas*ch, 0..ch-1 px) que visualmente es parte de
+// la barra. Texto y cursor se centran en esa banda con la MISMA referencia
+// vertical; una ventana múltiplo exacto de la celda no introduce
+// desplazamiento (visibleH == ch => offset 0).
+//
+// `outH` DEBE ser la altura real del drawable: se consulta con el target de
+// ventana activo (o se recibe ya calculada). NUNCA bajo el framebuffer
+// seleccionado: SDL_GetRendererOutputSize devuelve el tamaño del render
+// target activo, no el de la ventana.
+struct MessageBarGeometry {
+    int yBar = 0;      // fila superior de la MessageBar (px)
+    int visibleH = 0;  // alto de la banda visible (celda + franja residual)
+};
+
+MessageBarGeometry messageBarGeometry(const Layout& layout, int outH, int ch) {
+    MessageBarGeometry geo;
+    if (ch <= 0 || layout.chrome.height < 2) return geo;
+    geo.yBar = (layout.chrome.row + 1) * ch;
+    const int gridBottom = (layout.chrome.row + layout.chrome.height) * ch;
+    int restH = outH - gridBottom;
+    // La franja residual (división entera de guiGridSize) mide 0..ch-1 px.
+    // Un resto >= ch significa que el layout no cubre la ventana (p. ej. un
+    // modal de N filas en una ventana más alta): no es una franja de la
+    // barra y no debe desplazar el contenido.
+    if (restH <= 0 || restH >= ch) restH = 0;
+    geo.visibleH = ch + restH;
+    return geo;
+}
+
+// Top del texto centrado en la banda con la tinta real (th = alto de la
+// textura, medido con SDL_QueryTexture, no supuesto == ch).
+int messageTextTop(const MessageBarGeometry& geo, int th) {
+    const int gap = geo.visibleH - th;
+    return geo.yBar + (gap > 0 ? gap / 2 : 0);
+}
+
+// Top del cursor Bar centrado en la banda con su propia geometría (alto ch).
+int messageBarTop(const MessageBarGeometry& geo, int ch) {
+    const int gap = geo.visibleH - ch;
+    return geo.yBar + (gap > 0 ? gap / 2 : 0);
+}
+
+// Pinta la MessageBar sobre el destino de VENTANA (target por defecto):
+// rellena la banda visible (celda + franja residual), dibuja el texto
+// centrado y el cursor Bar con la misma referencia. Se llama DESPUÉS de
+// copiar el framebuffer: así ni el texto ni el cursor quedan recortados por
+// el borde inferior del framebuffer. Cambiar de camino (completo, parcial,
+// cursor rápido, scroll) no cambia esta geometría.
+void paintMessageBarOverlay(SDL_Renderer* r, GuiFont& font, bool dark,
+                            const Layout& layout, const ChromeData& chromeData,
+                            const FrameCursor& cursor, bool cursorShown,
+                            int ch) {
+    const int cw = font.cellW();
+    if (cw <= 0 || ch <= 0 || layout.chrome.width <= 0) return;
+    int outW = 0, outH = 0;
+    if (SDL_GetRendererOutputSize(r, &outW, &outH) != 0) return;
+    if (layout.chrome.height < 2) {
+        // Ventana degenerada sin MessageBar: la franja residual sigue a la
+        // única fila del chrome (StatusBar) para no dejar un borde del fondo
+        // del editor. No hay texto que centrar.
+        if (layout.chrome.height >= 1) {
+            const int hGrid = (layout.chrome.row + layout.chrome.height) * ch;
+            const int restH = outH - hGrid;
+            if (restH > 0 && restH < ch) {
+                const GuiColor sbg = guichrome::statusBackground(dark);
+                SDL_SetRenderDrawColor(r, sbg.r, sbg.g, sbg.b, sbg.a);
+                SDL_Rect rest{0, hGrid, outW, restH};
+                SDL_RenderFillRect(r, &rest);
+            }
+        }
+        return;
+    }
+    const MessageBarGeometry geo = messageBarGeometry(layout, outH, ch);
+    const int baseX = layout.chrome.col * cw;
+    const int bandW = layout.chrome.width * cw;
+    const GuiColor mbg = guichrome::messageBackground(dark);
+    SDL_Rect band{baseX, geo.yBar, bandW, geo.visibleH};
+    SDL_SetRenderDrawColor(r, mbg.r, mbg.g, mbg.b, mbg.a);
+    SDL_RenderFillRect(r, &band);
+    if (font.ok()) {
+        const std::vector<guichrome::GuiChromeSeg> segs =
+            guichrome::messageSegments(chromeData.message,
+                                       layout.chrome.width);
+        int consumed = 0;
+        for (const auto& sg : segs) {
+            if (sg.text.empty()) continue;
+            const int cols = chrome::colCount(sg.text);
+            const bool onlySpaces =
+                sg.text.find_first_not_of(' ') == std::string::npos;
+            if (!onlySpaces) {
+                const GuiColor fg = guichrome::colorFor(sg.role, dark);
+                void* tex = font.textTexture(r, sg.text, fg.r, fg.g, fg.b);
+                if (tex) {
+                    SDL_Texture* t = static_cast<SDL_Texture*>(tex);
+                    int tw = 0, th = 0;
+                    SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+                    const int y = messageTextTop(geo, th);
+                    SDL_Rect dst{baseX + consumed * cw, y, tw, th};
+                    SDL_RenderCopy(r, t, nullptr, &dst);
+                }
+            }
+            consumed += cols;
+        }
+    }
+    // Cursor Bar en la fila del MessageBar (prompts con input): misma
+    // referencia vertical que el texto; no toca la geometría de otras filas.
+    if (cursorShown && cursor.visible && cursor.cell.valid() &&
+        cursor.shape == FrameCursorShape::Bar &&
+        cursor.cell.row == layout.chrome.row + 1) {
+        const GuiColor cc = guichrome::cursorColor(dark);
+        const int px = cursor.cell.col * cw;
+        const int py = messageBarTop(geo, ch);
+        SDL_SetRenderDrawColor(r, cc.r, cc.g, cc.b, cc.a);
+        SDL_Rect crect{px, py, 2, ch};
+        SDL_RenderFillRect(r, &crect);
+    }
+}
+
 // Vuelca el framebuffer a la ventana: vuelve al destino por defecto, limpia
-// el backbuffer, copia la textura completa y presenta. El backbuffer se
-// trata como invalidado en cada Present (contrato SDL2): nunca se lee de
-// él, así el parcial no depende de que conserve píxeles.
-// La copia es 1:1 en la esquina superior izquierda (el framebuffer mide la
-// grilla, no la ventana): el resto queda con el fondo del clear, igual que
-// el pintado directo anterior (un stretch a ventana rompería las
-// coordenadas de celda).
-void presentFramebuf(SDL_Renderer* r, SDL_Texture* fb, const GuiColor& bg) {
+// el backbuffer, copia la textura completa, repinta la MessageBar sobre la
+// ventana (centrada, con la franja residual como parte de la barra) y
+// presenta. El backbuffer se trata como invalidado en cada Present (contrato
+// SDL2): nunca se lee de él, así el parcial no depende de que conserve
+// píxeles. La copia es 1:1 en la esquina superior izquierda (el framebuffer
+// mide la grilla, no la ventana; un stretch rompería las coordenadas de
+// celda).
+void presentFramebuf(SDL_Renderer* r, GuiFont& font, SDL_Texture* fb,
+                     const GuiColor& bg, const Layout& layout, int ch,
+                     bool dark, const ChromeData& chromeData,
+                     const FrameCursor& cursor, bool cursorShown) {
     SDL_SetRenderTarget(r, nullptr);
     SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
     SDL_RenderClear(r);
@@ -958,6 +1083,11 @@ void presentFramebuf(SDL_Renderer* r, SDL_Texture* fb, const GuiColor& bg) {
     SDL_QueryTexture(fb, nullptr, nullptr, &w, &h);
     SDL_Rect dst{0, 0, w, h};
     SDL_RenderCopy(r, fb, nullptr, &dst);
+    // Con el target de VENTANA activo: mide outH real y sobre-dibuja la
+    // banda de la MessageBar (cubre el texto/borde que haya traído el
+    // framebuffer en posición de grilla).
+    paintMessageBarOverlay(r, font, dark, layout, chromeData, cursor,
+                           cursorShown, ch);
     SDL_RenderPresent(r);
 }
 
@@ -1387,7 +1517,8 @@ bool GuiRenderer::tryFastCursorMove(
         // Cursor desde el snapshot (sin Frame en el camino rápido).
         paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
                                        contentRows_, next, shown);
-        presentFramebuf(r, fb, bg);
+        presentFramebuf(r, font_, fb, bg, g.layout, ch, dark_, payload.data,
+                        next, shown);
     }
 #else
     // Sin SDL2: no-op (el loop nunca llega acá).
@@ -1626,7 +1757,8 @@ bool GuiRenderer::tryFastScrollLine(
                                 payload.statusAccent);
             paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
                                            contentRows_, next, shown);
-            presentFramebuf(r, srcFb, bg);
+            presentFramebuf(r, font_, srcFb, bg, g.layout, cch, dark_,
+                            payload.data, next, shown);
             return true;
         }
         // Scroll-blit: desplaza la región de contenido ±1 fila hacia el
@@ -1659,7 +1791,8 @@ bool GuiRenderer::tryFastScrollLine(
                         payload.statusAccent);
         paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
                                        contentRows_, next, shown);
-        presentFramebuf(r, dstFb, bg);
+        presentFramebuf(r, font_, dstFb, bg, g.layout, cch, dark_,
+                        payload.data, next, shown);
         contentFbActive_ = dstIdx;
     }
 #else
@@ -1825,6 +1958,10 @@ void GuiRenderer::renderScreenDiff(
             paintChromeAndCursor(r, font_, dark_, f.layout, f.chrome,
                                  f.statusAccent, f.cursor, shown, &f, nullptr,
                                  -1);
+            // Misma geometría de MessageBar que el camino con framebuffer
+            // (target de ventana activo): sobre-dibuja la banda centrada.
+            paintMessageBarOverlay(r, font_, dark_, f.layout, f.chrome,
+                                   f.cursor, shown, ch);
             SDL_RenderPresent(r);
         } else {
             SDL_SetRenderTarget(r, fb);
@@ -1848,7 +1985,8 @@ void GuiRenderer::renderScreenDiff(
                 paintCursorOnly(r, font_, dark_, f.layout, f.cursor, shown,
                                 &f, nullptr, -1);
             }
-            presentFramebuf(r, fb, bg);
+            presentFramebuf(r, font_, fb, bg, f.layout, ch, dark_, f.chrome,
+                            f.cursor, shown);
         }
     }
 #else
@@ -1967,6 +2105,8 @@ void GuiRenderer::renderListCommon(std::vector<ListLine> lines,
             paintChromeAndCursor(r, font_, dark_, layout, lastChrome_,
                                  lastAccent_, lastCursor_, shown, nullptr,
                                  &lines, selectedRow);
+            paintMessageBarOverlay(r, font_, dark_, layout, lastChrome_,
+                                   lastCursor_, shown, lch);
             SDL_RenderPresent(r);
         } else {
             SDL_SetRenderTarget(r, fb);
@@ -1989,7 +2129,8 @@ void GuiRenderer::renderListCommon(std::vector<ListLine> lines,
                 paintCursorOnly(r, font_, dark_, layout, lastCursor_, shown,
                                 nullptr, &lines, selectedRow);
             }
-            presentFramebuf(r, fb, bg);
+            presentFramebuf(r, font_, fb, bg, layout, lch, dark_, lastChrome_,
+                            lastCursor_, shown);
         }
     }
 #else

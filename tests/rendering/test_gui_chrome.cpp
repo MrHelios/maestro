@@ -788,6 +788,45 @@ bool stripHasPureBlack(SDL_Renderer* r, int col0, int col1, int row, int cw,
     return stripHas(r, col0, col1, row, cw, ch, GuiColor{0, 0, 0, 0xFF});
 }
 
+// Extensión vertical de la tinta (píxeles != `bg`) en las columnas [col0,col1)
+// dentro de [y0,y1). Devuelve false si no hay tinta. Sirve para medir el
+// centrado REAL del texto en una banda (no sólo el color de fondo).
+bool inkExtent(SDL_Renderer* r, int col0, int col1, int y0, int y1, int cw,
+               const GuiColor& bg, int& top, int& bot) {
+    top = -1;
+    bot = -1;
+    for (int y = y0; y < y1; ++y) {
+        bool ink = false;
+        for (int c = col0; c < col1 && !ink; ++c)
+            for (int dx = 0; dx < cw && !ink; ++dx) {
+                GuiColor p{};
+                if (!readPixel(r, c * cw + dx, y, p)) continue;
+                if (p != bg) ink = true;
+            }
+        if (ink) {
+            if (top < 0) top = y;
+            bot = y;
+        }
+    }
+    return top >= 0;
+}
+
+// Extensión vertical de un color exacto (el Bar sólido) en una columna.
+bool colorExtent(SDL_Renderer* r, int px, int y0, int y1,
+                 const GuiColor& want, int& top, int& bot) {
+    top = -1;
+    bot = -1;
+    for (int y = y0; y < y1; ++y) {
+        GuiColor p{};
+        if (!readPixel(r, px, y, p)) continue;
+        if (p == want) {
+            if (top < 0) top = y;
+            bot = y;
+        }
+    }
+    return top >= 0;
+}
+
 }  // namespace
 #endif
 
@@ -2010,6 +2049,205 @@ TEST(gui_sdl_mensaje_llena_y_vacia_messagebar) {
                 if (probe != mbg) allBg = false;
             }
     CHECK(allBg);
+#endif
+}
+
+// Franja de la ventana por debajo de la grilla (SdlDummy 800x600 con celda
+// ~19px: grilla 31 filas = 589px, franja restante [589,600) de ~11px). La
+// banda visible de la MessageBar es ahora [yBar, borde inferior] y la pinta
+// el overlay de la MessageBar sobre la ventana; el fondo debe llegar al
+// borde inferior sin arrastrar al StatusBar (de otro color). Sólo comprueba
+// el color de la banda: el centrado real del texto/cursor lo cubren los
+// tests gui_sdl_messagebar_*_centrado_en_banda_visible.
+TEST(gui_sdl_franja_bajo_grilla_fondo_messagebar) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;  // 800x600
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola"});
+    const int cw = gui.cellW(), ch = gui.cellH();
+    Viewport vp = makeVp(600 / ch - 2, 800 / cw);
+    Cursor cur;
+    Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    const bool dark = gui.isDarkTheme();
+    const Layout lo = gui.lastLayout();
+    const int hGrid = (lo.chrome.row + lo.chrome.height) * ch;
+    int outW = 0, outH = 0;
+    SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
+    if (outH <= hGrid || outW <= 0) SKIP("ventana multiplo de la celda (sin franja)");
+    const int yMid = hGrid + (outH - hGrid) / 2;
+    const int xMid = outW / 2;
+    // La franja completa (con y sin mensaje: el color no depende del texto).
+    CHECK(readPixel(sdl.ren, xMid, yMid, probe));
+    CHECK(probe == guichrome::messageBackground(dark));
+    Message emptyMsg{std::string(""), MessageKind::Info, std::nullopt};
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                         makeChromeRequest(emptyMsg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    CHECK(readPixel(sdl.ren, xMid, yMid, probe));
+    CHECK(probe == guichrome::messageBackground(dark));
+    // El StatusBar (fila superior del chrome, aquí encima de la franja)
+    // conserva su propio fondo: no se contagia de la franja.
+    CHECK(readPixel(sdl.ren, xMid, lo.chrome.row * ch + ch / 2, probe));
+    CHECK(probe == guichrome::statusBackground(dark));
+#endif
+}
+
+// Centrado REAL del texto de la MessageBar: con ventana 800x600 y celda
+// ~19px la banda visible es [yBar, 600) = celda (570..589) + franja residual
+// (589..600). El centro de la tinta de "Guardado" debe quedar junto al centro
+// de la banda visible (~585), no en el de la celda (~579.5) como antes de la
+// corrección. Este test mide la tinta, no el color de fondo.
+TEST(gui_sdl_messagebar_texto_centrado_en_banda_visible) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;  // 800x600
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.hasFont()) SKIP("sin fuente");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola"});
+    const int cw = gui.cellW(), ch = gui.cellH();
+    Viewport vp = makeVp(600 / ch - 2, 800 / cw);
+    Cursor cur;
+    Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    const bool dark = gui.isDarkTheme();
+    const Layout lo = gui.lastLayout();
+    const int yBar = (lo.chrome.row + 1) * ch;
+    const int gridBottom = (lo.chrome.row + lo.chrome.height) * ch;
+    int outW = 0, outH = 0;
+    SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
+    if (outH - gridBottom <= 0 || outH - gridBottom >= ch)
+        SKIP("ventana sin franja residual");
+    const GuiColor mbg = guichrome::messageBackground(dark);
+    int top = 0, bot = 0;
+    // "Guardado" arranca en padL=1; basta escanear sus ~8 columnas.
+    CHECK(inkExtent(sdl.ren, 1, 9, yBar, outH, cw, mbg, top, bot));
+    // Centros x2 para comparar con aritmética entera (sin <cmath>).
+    const int ink2 = top + bot;
+    const int vis2 = yBar + outH;
+    const int cell2 = 2 * yBar + ch;
+    // Centrado en la banda visible (tolerancia por asimetría de la tinta).
+    CHECK(std::abs(ink2 - vis2) <= 4);
+    // Y más cerca del centro visible que del de la celda: eso prueba que la
+    // franja residual desplaza el texto (antes caía en el centro de celda).
+    CHECK(std::abs(ink2 - vis2) <= std::abs(ink2 - cell2));
+#endif
+}
+
+// Centrado REAL del cursor Bar de la MessageBar (prompt Busqueda): misma
+// referencia vertical que el texto, no el centro de la celda.
+TEST(gui_sdl_messagebar_cursor_bar_centrado_en_banda_visible) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;  // 800x600
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.hasFont()) SKIP("sin fuente");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola mundo"});
+    const int cw = gui.cellW(), ch = gui.cellH();
+    Viewport vp = makeVp(600 / ch - 2, 800 / cw);
+    Cursor cur;
+    Message prompt{std::string("Find: ho (1/2)"), MessageKind::Prompt,
+                   std::nullopt, 7, 6};
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                         makeChromeRequest(prompt, State::Busqueda), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    CHECK(gui.lastCursor().visible);
+    CHECK(gui.lastCursor().shape == FrameCursorShape::Bar);
+    CHECK(gui.lastCursor().cell.valid());
+    const bool dark = gui.isDarkTheme();
+    const Layout lo = gui.lastLayout();
+    const int yBar = (lo.chrome.row + 1) * ch;
+    const int gridBottom = (lo.chrome.row + lo.chrome.height) * ch;
+    int outW = 0, outH = 0;
+    SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
+    if (outH - gridBottom <= 0 || outH - gridBottom >= ch)
+        SKIP("ventana sin franja residual");
+    // Columna dentro del Bar de 2px: su primera columna (+1 si cabe).
+    const int px = gui.lastCursor().cell.col * cw + (cw > 2 ? 1 : 0);
+    int top = 0, bot = 0;
+    CHECK(colorExtent(sdl.ren, px, yBar, outH,
+                      guichrome::cursorColor(dark), top, bot));
+    const int bar2 = top + bot;
+    const int vis2 = yBar + outH;
+    const int cell2 = 2 * yBar + ch;
+    CHECK(std::abs(bar2 - vis2) <= 2);
+    CHECK(std::abs(bar2 - vis2) <= std::abs(bar2 - cell2));
+#endif
+}
+
+// Ventana múltiplo EXACTO de la celda: sin franja residual la geometría
+// compartida no introduce desplazamiento; el texto queda en su celda.
+TEST(gui_sdl_messagebar_sin_franja_no_desplaza) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    // La celda sólo se conoce tras abrir la fuente: primer dummy para medirla.
+    int ch = 0;
+    {
+        SdlDummy probeSdl;
+        if (!probeSdl.ok) SKIP("sin video dummy");
+        GuiRenderer g;
+        g.initForRenderer(probeSdl.ren);
+        ch = g.cellH();
+    }
+    if (ch <= 0) SKIP("sin celda");
+    SdlDummy sdl(800, ch * 24);  // 24 filas exactas
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.hasFont()) SKIP("sin fuente");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola"});
+    const int cw = gui.cellW();
+    Viewport vp = makeVp(24 - 2, 800 / cw);
+    Cursor cur;
+    Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    const bool dark = gui.isDarkTheme();
+    const Layout lo = gui.lastLayout();
+    const int yBar = (lo.chrome.row + 1) * ch;
+    const int gridBottom = (lo.chrome.row + lo.chrome.height) * ch;
+    int outW = 0, outH = 0;
+    SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
+    CHECK_EQ(outH, gridBottom);  // múltiplo exacto: sin franja
+    const GuiColor mbg = guichrome::messageBackground(dark);
+    int top = 0, bot = 0;
+    CHECK(inkExtent(sdl.ren, 1, 9, yBar, outH, cw, mbg, top, bot));
+    const int ink2 = top + bot;
+    const int cell2 = 2 * yBar + ch;
+    // Sin franja no hay desplazamiento adicional: tinta centrada en la celda.
+    CHECK(std::abs(ink2 - cell2) <= 4);
 #endif
 }
 
