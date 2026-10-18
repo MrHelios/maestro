@@ -1162,8 +1162,10 @@ TEST(guiwindowflags_no_hidpi_elimina_flag_highdpi) {
     // único SDL_CreateWindow del loop). Sin --no-hidpi, ALLOW_HIGHDPI
     // está presente; con --no-hidpi, ausente. La máscara se compara contra
     // las constantes SDL reales (no números sueltos).
+    // La ventana nace HIDDEN (se muestra con SDL_ShowWindow tras el primer
+    // frame completo, ver GuiRunLoop::run): nunca SHOWN en la creación.
     CHECK_EQ(guiWindowFlags(false),
-             Uint32(SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE));
+             Uint32(SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE));
     CHECK((guiWindowFlags(true) & SDL_WINDOW_ALLOW_HIGHDPI) != 0);
     CHECK((guiWindowFlags(false) & SDL_WINDOW_ALLOW_HIGHDPI) == 0);
     // El resto de la máscara no cambia con la opción: la única diferencia

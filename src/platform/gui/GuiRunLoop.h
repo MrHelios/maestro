@@ -46,6 +46,12 @@ class Editor;
 // rect de SDL (no se oculta ni se detiene la entrada, para no matar una
 // composición en curso).
 //
+// ARRANQUE SIN DESTELLO: la ventana se crea HIDDEN (guiWindowFlags) y se
+// muestra con SDL_ShowWindow recién tras el primer frame completo, ya con
+// renderer/fuente/grilla listos y la caché de texturas caliente. El
+// contenido presentado en oculto no se da por conservado: se fuerza un frame
+// completo sobre la ventana visible antes de entrar al loop.
+//
 // Espejo de TtyRunLoop pero sin terminal: abre una ventana SDL2 y bombea
 // SDL_PollEvent hacia la fachada neutra del Editor
 // (resize/handleEvent/tick/renderFrame). Sin friend: solo usa API pública.

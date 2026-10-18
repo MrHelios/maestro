@@ -392,6 +392,22 @@ int GuiRunLoop::run() {
     // Tema inicial ya establecido en GuiRenderer constructor
     renderWithBlink();
 
+    // La ventana se creó OCULTA (guiWindowFlags): recién ahora se muestra,
+    // con el primer frame ya compuesto. Así el usuario no ve el hueco de la
+    // inicialización (SDL_CreateRenderer/GLX, apertura de la fuente TTF y
+    // primer llenado de la caché de texturas), que en un WM tiling sin
+    // compositor se percibía como un destello "abre/cierra/abre".
+    SDL_ShowWindow(win);
+    // El contenido presentado mientras la ventana estaba oculta NO se da por
+    // conservado (el driver puede haberlo descartado): se fuerza un frame
+    // completo sobre la ventana ya visible. La preparación previa dejó la
+    // caché de texturas caliente, así que este segundo frame es barato.
+    // El gestor de ventanas puede reacomodar la geometría al mostrar (i3),
+    // lo que llega como RESIZED/SIZE_CHANGED y se re-mide en el handler de
+    // SDL_WINDOWEVENT de abajo.
+    if (gui_) gui_->invalidateCache();
+    renderWithBlink();
+
     // Resto fraccionario de rueda sin emitir (ver SDL_MOUSEWHEEL): un táctil
     // manda fracciones de preciseY que se juntan hasta 1.0. Vive todo el
     // run; no se resetea con el tiempo (0.9 parado + 0.2 tarde igual mueve:

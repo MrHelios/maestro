@@ -280,8 +280,14 @@ inline int guiConsumeWheelDelta(double& acc, double delta) {
 // ALLOW_HIGHDPI: el drawable coincide con la ventana y la escala de la
 // fuente con guiScaledFontPixels es 1 (el cálculo de celdas no cambia de
 // camino, GARANTÍA B, probada por separado).
+// HIDDEN a propósito: la ventana se crea OCULTA y se muestra recién cuando
+// hay un primer frame completo listo (SDL_ShowWindow en GuiRunLoop::run).
+// Evita que el usuario vea una ventana vacía durante la inicialización
+// (SDL_CreateRenderer/GLX, apertura de la fuente y primer llenado de la
+// caché de texturas); en un WM tiling sin compositor ese hueco se percibía
+// como un destello "abre/cierra/abre".
 inline Uint32 guiWindowFlags(bool hidpi) {
-    Uint32 flags = SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE;
+    Uint32 flags = SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE;
     if (hidpi) flags |= SDL_WINDOW_ALLOW_HIGHDPI;
     return flags;
 }
