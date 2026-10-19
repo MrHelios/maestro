@@ -308,10 +308,14 @@ private:
     //   - ultimo buffer: no se elimina; se convierte en vacio sin nombre.
     //   - varios buffers: se elimina y se pasa al selector de buffers.
     void closeActiveBuffer();
-    // v0.6.3: activa el buffer `idx` y reconcilia el modo con el estado
-    // de su seleccion (Seleccion si tiene rango no vacio, si no Navegacion).
+    // v0.6.3: activa el buffer en el indice FISICO `idx` y reconcilia el
+    // modo con el estado de su seleccion (Seleccion si tiene rango no
+    // vacio, si no Navegacion). Uso interno/tests.
     void activateBuffer(int idx);
-    // Cambia al buffer anterior (para Ctrl+K b).
+    // v0.6.3: activa el buffer en la posicion MRU `pos` y reconcilia el
+    // modo. Es el camino de la UI (selector).
+    void activateBufferAtMruPosition(int pos);
+    // Cambia al buffer anterior (posicion 1 de la MRU) para Ctrl+K b.
     void switchToPreviousBuffer();
 
 private:
@@ -411,17 +415,9 @@ private:
     std::string getClipboardText() const;
     bool isClipboardEmpty() const;
 
-    // Indice seleccionado en la pantalla del selector de buffers.
+    // Posicion seleccionada en la pantalla del selector de buffers.
+    // Es una POSICION MRU (no un indice fisico): 0 = activo, 1 = anterior.
     int bufferSelectorIndex_ = 0;
-
-    // Buffer anterior (para Ctrl+K b: volver al buffer previo).
-    // Usamos id estable del Buffer para detectar si fue cerrado.
-    struct PreviousBufferInfo {
-        bool valid = false;
-        int id = -1;
-        std::string displayName;
-    };
-    PreviousBufferInfo previousBuffer_;
 
     // ---- Explorador de archivos (v0.6.4) ----
     // Estado y navegacion del explorador (ruta actual, entradas, indice y

@@ -481,7 +481,9 @@ void Editor::registerCommands() {
             setActionMessage("Solo hay un buffer.", MessageKind::Warning);
             state_ = priorState_;
         } else {
-            bufferSelectorIndex_ = buffers.activeIndex();
+            // La lista esta en orden MRU: el cursor arranca en el buffer
+            // anterior (posicion 1), no en el activo (posicion 0).
+            bufferSelectorIndex_ = buffers.previousMruPosition();
             state_ = State::BufferSelector;
             setStatusMessage("Buffers: ↑/↓ mover | Enter abrir | ESC cancelar");
         }
@@ -823,14 +825,8 @@ void Editor::syncViewportSize(Buffer& b) {
 
 void Editor::createBuffer() {
     const int rows = currentRows_, cols = currentCols_;
-    // Guardar buffer actual como anterior ANTES de crear el nuevo (el nuevo
-    // se vuelve activo automaticamente en BufferManager::createBuffer).
-    if (buffers.count() > 0) {
-        const Buffer& cur = active();
-        previousBuffer_.valid = true;
-        previousBuffer_.id = cur.id;
-        previousBuffer_.displayName = cur.displayName();
-    }
+    // El nuevo buffer se vuelve activo y pasa al frente de la MRU
+    // automaticamente en BufferManager::createBuffer.
     const int idx = buffers.createBuffer(rows, cols);
     renderer_->invalidateCache();
     setActionMessage("Buffer nuevo: " + buffers.at(idx).unnamedName, MessageKind::Success);
@@ -838,10 +834,6 @@ void Editor::createBuffer() {
 
 void Editor::closeActiveBuffer() {
     Buffer& cur = active();
-    // Guardar el buffer que se va a cerrar como "anterior" para el toggle
-    int closedId = cur.id;
-    std::string closedDisplayName = cur.displayName();
-
     std::string oldPath = cur.filename;
     const int rows = currentRows_, cols = currentCols_;
     auto cr = buffers.closeActive(rows, cols);
@@ -854,15 +846,12 @@ void Editor::closeActiveBuffer() {
         case CloseResult::ResetLast:
             setActionMessage("Buffer reiniciado: " + active().unnamedName);
             state_ = State::Navegacion;
-            previousBuffer_.valid = false;
             renderer_->invalidateCache();
             break;
         case CloseResult::Removed: {
-            previousBuffer_.valid = true;
-            previousBuffer_.id = closedId;
-            previousBuffer_.displayName = closedDisplayName;
-
-            const bool hasSelection = buffers.activate(buffers.activeIndex());
+            // closeActive() ya dejo activo el frente de la MRU (el buffer
+            // anterior). Reconciliamos el modo con su seleccion.
+            const bool hasSelection = buffers.activateMruPosition(0);
             state_ = hasSelection ? State::Seleccion : State::Navegacion;
             renderer_->invalidateCache();
             setActionMessage("Buffer cerrado. Activo: " + active().displayName());
@@ -872,60 +861,34 @@ void Editor::closeActiveBuffer() {
 }
 
 void Editor::activateBuffer(int idx) {
-    if (idx >= 0 && idx < buffers.count() && idx != buffers.activeIndex()) {
-        const Buffer& cur = buffers.at(buffers.activeIndex());
-        previousBuffer_.valid = true;
-        previousBuffer_.id = cur.id;
-        previousBuffer_.displayName = cur.displayName();
-    }
-    const bool hasSelection = buffers.activate(idx);
+    const bool hasSelection = buffers.activateIndex(idx);
+    state_ = hasSelection ? State::Seleccion : State::Navegacion;
+    setStatusMessage("");
+    renderer_->invalidateCache();
+}
+
+void Editor::activateBufferAtMruPosition(int pos) {
+    const bool hasSelection = buffers.activateMruPosition(pos);
     state_ = hasSelection ? State::Seleccion : State::Navegacion;
     setStatusMessage("");
     renderer_->invalidateCache();
 }
 
 void Editor::switchToPreviousBuffer() {
-    if (!previousBuffer_.valid) {
+    if (buffers.count() <= 1) {
         setActionMessage("No hay buffer anterior.", MessageKind::Warning);
         state_ = priorState_;  // Restaurar estado previo al entrar en Prefix
         return;
     }
 
-    int targetIdx = -1;
-    for (int i = 0; i < buffers.count(); ++i) {
-        const Buffer& b = buffers.at(i);
-        if (b.id == previousBuffer_.id) {
-            targetIdx = i;
-            break;
-        }
-    }
-
-    if (targetIdx == -1) {
-        std::string display = previousBuffer_.displayName;
-        std::string msg = "El buffer anterior '" + display + "' ya no existe (fue cerrado).";
-        setActionMessage(msg, MessageKind::Warning);
-        previousBuffer_.valid = false;
-        state_ = priorState_;
-        return;
-    }
-
-    // Toggle: el buffer actual se convierte en el "anterior" para la próxima vez.
-    const Buffer& cur = active();
-    int curId = cur.id;
-    std::string curDisplayName = cur.displayName();
-
-    activateBuffer(targetIdx);
-
-    // Restaurar previousBuffer_ al buffer del que venimos (toggle explícito).
-    previousBuffer_.valid = true;
-    previousBuffer_.id = curId;
-    previousBuffer_.displayName = curDisplayName;
-
+    // La MRU ya expresa el toggle: activar la posicion 1 promueve ese
+    // buffer al frente y deja el actual como nuevo "anterior".
+    activateBufferAtMruPosition(buffers.previousMruPosition());
     setActionMessage("Buffer anterior: " + active().displayName());
 }
 
 std::vector<std::string> Editor::bufferNames() const {
-    return buffers.names();
+    return buffers.mruNames();
 }
 
 void Editor::handleBufferSelectorEvent(const InputEvent& event) {
@@ -945,7 +908,7 @@ void Editor::handleBufferSelectorEvent(const InputEvent& event) {
                 bufferSelectorIndex_++;
             break;
         case InputEventType::InsertNewline: // Enter: abrir el buffer seleccionado
-            activateBuffer(bufferSelectorIndex_);
+            activateBufferAtMruPosition(bufferSelectorIndex_);
             break;
         case InputEventType::Escape:
             // Se cancela el selector y se vuelve al buffer que estaba
@@ -1089,14 +1052,10 @@ void Editor::openFileInBuffer(const std::string& path) {
     nuevo.selectAllActive = false;
     nuevo.selectAllPrevious.reset();
     watchFile(nuevo.filename);
-    if (buffers.count() > 0) {
-        const Buffer& cur = active();
-        previousBuffer_.valid = true;
-        previousBuffer_.id = cur.id;
-        previousBuffer_.displayName = cur.displayName();
-    }
-    const int idx = buffers.push(std::move(nuevo));
-    activateBuffer(idx);
+    // push() deja el buffer nuevo activo y al frente de la MRU.
+    buffers.push(std::move(nuevo));
+    state_ = State::Navegacion;
+    renderer_->invalidateCache();
     if (result == LoadResult::Success) {
         setStatusMessage("");
     } else {
@@ -2456,17 +2415,13 @@ void Editor::commitSaveAsFileBrowser() {
         setActionMessage("Error al guardar: " + path, MessageKind::Error);
         return;
     }
-    const int oldId = b.id;
-    const std::string oldDisplay = b.displayName();
     Buffer copy = b;
     copy.filename = path;
     copy.syncSavedState();
     copy.savedIdentity = captureIdentity(path);
+    // push() deja la copia activa y al frente de la MRU.
     buffers.push(std::move(copy));
     watchFile(path);
-    previousBuffer_.valid = true;
-    previousBuffer_.id = oldId;
-    previousBuffer_.displayName = oldDisplay;
     renderer_->invalidateCache();
     setActionMessage("Guardado: " + path, MessageKind::Success);
     state_ = priorState_;

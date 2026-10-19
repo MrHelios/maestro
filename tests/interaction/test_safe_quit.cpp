@@ -22,7 +22,7 @@ TEST(safe_quit_one_saved_one_modified_from_A) {
     newBuffer(ed);
     type(ed, "modB");
     press(ed, InputEventType::Escape);
-    ed.buffers.activate(0);
+    ed.buffers.activateIndex(0);
     CHECK(!ed.buffers.at(0).modified);
     CHECK(ed.buffers.at(1).modified);
     safeQuit(ed);
@@ -34,7 +34,7 @@ TEST(safe_quit_active_saved_inactive_modified) {
     newBuffer(ed);
     type(ed, "x");
     press(ed, InputEventType::Escape);
-    ed.buffers.activate(0);
+    ed.buffers.activateIndex(0);
     safeQuit(ed);
     CHECK(ed.running_);
 }
@@ -348,7 +348,7 @@ TEST(caso_13_activo_guardado_inactivo_modificado) {
     newBuffer(ed);
     type(ed, "Bmod");
     press(ed, InputEventType::Escape);
-    ed.buffers.activate(0);
+    ed.buffers.activateIndex(0);
     CHECK(!ed.buffers.at(0).modified);
     CHECK(ed.buffers.at(1).modified);
     safeQuit(ed);
@@ -361,7 +361,7 @@ TEST(caso_14_activo_modificado_resto_guardado) {
     CHECK(ed.loadIntoActiveBuffer(f.path));
     newBuffer(ed);
     newBuffer(ed);
-    ed.buffers.activate(2);
+    ed.buffers.activateIndex(2);
     type(ed, "X");
     press(ed, InputEventType::Escape);
     CHECK(ed.buffers.at(2).modified);
@@ -380,7 +380,7 @@ TEST(caso_15_cambiar_buffer_despues_cancelada) {
     CHECK(ed.running_);
     newBuffer(ed);
     CHECK(ed.buffers.at(0).modified);
-    ed.buffers.activate(0);
+    ed.buffers.activateIndex(0);
     CHECK(ed.buffers.at(0).modified);
     CHECK(ed.running_);
 }

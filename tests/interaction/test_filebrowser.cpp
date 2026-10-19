@@ -1096,9 +1096,9 @@ TEST(browser_open_switch_reopen_open) {
     press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
 
-    // cambiar al buffer sin nombre (indice 0) via selector
+    // cambiar al buffer sin nombre (indice 0) via selector.
+    // El cursor arranca en la posicion MRU 1, que ya es ese buffer.
     openSelector(ed);
-    press(ed, InputEventType::MoveUp);     // indice 1 -> 0
     press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK(ed.active().filename.empty());
@@ -1111,9 +1111,10 @@ TEST(browser_open_switch_reopen_open) {
     CHECK_EQ(ed.buffers.activeBuffer_, 2);
     CHECK_EQ(ed.active().filename, t.path + "/b.txt");
 
-    // volver a a.txt por selector
+    // volver a a.txt por selector. MRU = [b.txt, sin nombre, a.txt]:
+    // el cursor arranca en "sin nombre" (pos 1) y hay que bajar a a.txt.
     openSelector(ed);
-    press(ed, InputEventType::MoveUp);     // indice 2 -> 1 (a.txt)
+    press(ed, InputEventType::MoveDown);   // pos 1 -> 2 (a.txt)
     press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK_EQ(ed.active().filename, t.path + "/a.txt");

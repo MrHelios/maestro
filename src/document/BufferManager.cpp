@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <unordered_map>
 
 BufferManager::BufferManager() {
     // Invariante 1 y 2 (v0.6.3): siempre existe al menos un buffer y hay
@@ -12,6 +13,7 @@ BufferManager::BufferManager() {
     buffers_.emplace_back();
     buffers_.back().id = nextBufferId_++;
     activeBuffer_ = 0;
+    mru_.push_back(buffers_.back().id);
 }
 
 Buffer& BufferManager::active() {
@@ -40,10 +42,44 @@ int BufferManager::activeIndex() const {
     return activeBuffer_;
 }
 
+int BufferManager::indexOfId(int id) const {
+    for (int i = 0; i < count(); ++i) {
+        if (buffers_[static_cast<size_t>(i)].id == id) return i;
+    }
+    return -1;
+}
+
+void BufferManager::touchMru(int id) {
+    removeFromMru(id);
+    mru_.insert(mru_.begin(), id);
+}
+
+void BufferManager::removeFromMru(int id) {
+    mru_.erase(std::remove(mru_.begin(), mru_.end(), id), mru_.end());
+}
+
+void BufferManager::resetMru(int id) {
+    mru_.clear();
+    mru_.push_back(id);
+}
+
+bool BufferManager::activateId(int id) {
+    const int idx = indexOfId(id);
+    assert(idx >= 0);
+    // Activar el buffer ya activo no reordena nada (contrato de la MRU).
+    if (idx != activeBuffer_ || mru_.empty() || mru_.front() != id) {
+        activeBuffer_ = idx;
+        touchMru(id);
+    }
+    const Buffer& b = active();
+    return b.selection.has_value() && b.selection->anchor != b.selection->position;
+}
+
 int BufferManager::push(Buffer&& buffer) {
     buffer.id = nextBufferId_++;
     buffers_.push_back(std::move(buffer));
-    activeBuffer_ = static_cast<int>(buffers_.size()) - 1;
+    const int id = buffers_.back().id;
+    activateId(id);
     return activeBuffer_;
 }
 
@@ -95,26 +131,43 @@ CloseResult BufferManager::closeActive(int rows, int cols) {
         b.savedIdentity = Buffer::FileIdentity{};
         b.undoStack.clear();
         b.redoStack.clear();
+        // El mismo buffer reiniciado conserva su identidad: la MRU queda
+        // con ese unico ID (sin IDs obsoletos).
+        resetMru(b.id);
         return CloseResult::ResetLast;
     }
 
-    // Varios buffers: se elimina el activo y el buffer que HEREDA la ranura
-    // queda activo: el que ahora ocupa la misma posicion, o el ultimo si se
-    // cerro el ultimo (misma ranura, clamp al final). No se abre el selector
-    // al cerrar (eso es Ctrl+K t, browse explicito): cerrar es un acto
-    // rapido, no un dialogo. Invariante 17.
+    // Varios buffers: se elimina el activo de la coleccion y de la MRU.
+    // El nuevo activo es el frente restante, es decir el buffer anterior
+    // (posicion 1 de la MRU previa). No se abre el selector al cerrar
+    // (eso es Ctrl+K t, browse explicito). Invariante 17.
+    const int closedId = b.id;
     buffers_.erase(buffers_.begin() + activeBuffer_);
-    activeBuffer_ = std::min(activeBuffer_, static_cast<int>(buffers_.size()) - 1);
+    removeFromMru(closedId);
+    assert(!mru_.empty());
+    activateId(mru_.front());
     return CloseResult::Removed;
 }
 
-bool BufferManager::activate(int idx) {
+bool BufferManager::activateIndex(int idx) {
     assert(idx >= 0 && idx < count());
-    activeBuffer_ = idx;
-    // Devuelve si el buffer activado tiene seleccion NO vacia, para que el
-    // Editor reconcilie el modo global (Seleccion vs Navegacion).
-    const Buffer& b = active();
-    return b.selection.has_value() && b.selection->anchor != b.selection->position;
+    return activateId(buffers_[static_cast<size_t>(idx)].id);
+}
+
+bool BufferManager::activateMruPosition(int pos) {
+    assert(pos >= 0 && pos < static_cast<int>(mru_.size()));
+    return activateId(mru_[static_cast<size_t>(pos)]);
+}
+
+int BufferManager::mruPositionOf(int id) const {
+    for (int i = 0; i < static_cast<int>(mru_.size()); ++i) {
+        if (mru_[static_cast<size_t>(i)] == id) return i;
+    }
+    return -1;
+}
+
+int BufferManager::previousMruPosition() const {
+    return mru_.size() > 1 ? 1 : 0;
 }
 
 void BufferManager::fitViewport(Buffer& b, int rows, int cols) {
@@ -126,10 +179,21 @@ void BufferManager::fitViewport(Buffer& b, int rows, int cols) {
     b.viewport.width = cols;
 }
 
-std::vector<std::string> BufferManager::names() const {
+std::vector<std::string> BufferManager::mruNames() const {
+    // Indice id -> posicion fisica construido una sola vez: recorrer la
+    // MRU y buscar cada ID con indexOfId() seria O(n^2).
+    std::unordered_map<int, int> indexById;
+    indexById.reserve(buffers_.size());
+    for (int i = 0; i < count(); ++i) {
+        indexById.emplace(buffers_[static_cast<size_t>(i)].id, i);
+    }
+
     std::vector<std::string> names;
-    names.reserve(buffers_.size());
-    for (const Buffer& b : buffers_) {
+    names.reserve(mru_.size());
+    for (int id : mru_) {
+        const auto it = indexById.find(id);
+        assert(it != indexById.end());
+        const Buffer& b = buffers_[static_cast<size_t>(it->second)];
         names.push_back(b.modified ? b.displayName() + " *"
                                    : b.displayName());
     }

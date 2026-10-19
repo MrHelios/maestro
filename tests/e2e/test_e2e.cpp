@@ -536,9 +536,9 @@ TEST(e2e_05_utf8_workflow_byte_exact) {
 //   loadIntoActiveBuffer A      : "AAA\n"  -> buffer 0 activo, Navegacion, modified=false
 //   Ctrl+K n    : buffer B nuevo SIN nombre, activo, Navegacion
 //   escribir B  : 'i' + "BBB"                -> B = "BBB", modified
-//   volver A    : Ctrl+K t (selector) + MoveUp + Enter -> A activo, "AAA"
+//   volver A    : Ctrl+K t (selector ya apunta al anterior) + Enter -> A activo, "AAA"
 //   editar A    : MoveEnd + 'i' + "A2"       -> A = "AAAA2", modified
-//   volver B    : Ctrl+K t + MoveDown + Enter -> B activo, "BBB"
+//   volver B    : Ctrl+K t + Enter -> B activo, "BBB"
 //   editar B    : MoveEnd + 'i' + "B2"       -> B = "BBBB2", modified
 //   save A      : Ctrl+K Ctrl+S (A tiene nombre)  -> A modified=false
 //   save B      : Ctrl+K Ctrl+S -> prompt "Guardar archivo:" + ruta(B)
@@ -575,11 +575,10 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     CHECK(ed.active().modified);
     CHECK_EQ(ed.active().cursor.col, 3);
 
-    // volver A: selector Ctrl+K t, subir una posicion, Enter.
+    // volver A: el selector abre en el anterior (A), Enter.
     press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));                // buffer.selector
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::BufferSelector));
-    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
     InputEvent enter;
     enter.type = InputEventType::InsertNewline;
     ed.handleEvent(enter);                      // activar A
@@ -594,10 +593,9 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     CHECK_EQ(ed.active().document.lineAt(0), "AAAA2");
     CHECK(ed.active().modified);
 
-    // volver B: selector, bajar una posicion, Enter.
+    // volver B: el selector abre en el anterior (B), Enter.
     press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
     ed.handleEvent(enter);                      // activar B
     CHECK_EQ(ed.active().document.lineAt(0), "BBB");   // B sigue como quedo
     CHECK_EQ(ed.active().cursor.col, 3);
@@ -608,19 +606,17 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     CHECK_EQ(ed.active().document.lineAt(0), "BBBB2");
     CHECK(ed.active().modified);
 
-    // save A: volver a A (selector, subir) y Ctrl+K Ctrl+S.
+    // save A: volver a A (selector ya apunta a A) y Ctrl+K Ctrl+S.
     press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "AAAA2");
     saveViaS(ed);
     CHECK(!ed.active().modified);               // A guardado
 
-    // save B: volver a B y Ctrl+K Ctrl+S -> file browser Guardar como.
+    // save B: volver a B (selector ya apunta a B) y Ctrl+K Ctrl+S.
     press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "BBBB2");
 
@@ -692,8 +688,7 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
 
     // ---- A edit: volver a A y anexar 'X' -> "AAAX".
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));                // selector
-    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
+    ed.handleEvent(insert('t'));                // selector en A (anterior)
     InputEvent enter;
     enter.type = InputEventType::InsertNewline;
     ed.handleEvent(enter);                      // activar A
@@ -705,8 +700,7 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
 
     // ---- B edit: volver a B y escribir 'B' -> "B".
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
+    ed.handleEvent(insert('t'));                // selector en B (anterior)
     ed.handleEvent(enter);
     type(ed, "B");                              // B = "B"
     CHECK_EQ(ed.active().document.lineAt(0), "B");
@@ -715,8 +709,7 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
 
     // ---- A undo: volver a A y deshacer -> "AAA".
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
+    ed.handleEvent(insert('t'));                // selector en A
     ed.handleEvent(enter);
     press(ed, InputEventType::Undo);                 // A deshace
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
@@ -726,8 +719,7 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
 
     // ---- B undo: volver a B y deshacer -> "".
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
+    ed.handleEvent(insert('t'));                // selector en B
     ed.handleEvent(enter);
     press(ed, InputEventType::Undo);                 // B deshace
     CHECK_EQ(ed.active().document.lineAt(0), "");
@@ -736,23 +728,20 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
     CHECK_EQ(ed.active().redoStack.size(), 1u);
     // Editar/deshacer B NO toco la rama de redo pendiente de A.
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
+    ed.handleEvent(insert('t'));                // selector en A
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().redoStack.size(), 1u); // A aun puede rehacer
 
     // ---- B edit tras undo: editar B NO debe limpiar el redo de A.
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
+    ed.handleEvent(insert('t'));                // selector en B
     ed.handleEvent(enter);
     type(ed, "C");
     CHECK_EQ(ed.active().document.lineAt(0), "C");
     CHECK_EQ(ed.active().redoStack.size(), 0u); // B perdio su propia rama de redo
     CHECK_EQ(ed.active().undoStack.size(), 1u);
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
+    ed.handleEvent(insert('t'));                // selector en A
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().redoStack.size(), 1u); // A sigue rehacible pese a editar B
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
@@ -765,8 +754,7 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
 
     // ---- B sigue en "C" y sin redo pendiente.
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
+    ed.handleEvent(insert('t'));                // selector en B
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "C");
     CHECK(ed.active().modified);
@@ -774,14 +762,12 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
 
     // Estado final: A="AAAX", B="C", cada uno con su propio modificado.
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
+    ed.handleEvent(insert('t'));                // selector en A
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "AAAX");
     CHECK(ed.active().modified);
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
+    ed.handleEvent(insert('t'));                // selector en B
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "C");
     CHECK(ed.active().modified);
@@ -810,7 +796,7 @@ TEST(e2e_07_multibuffer_undo_redo_isolated) {
 //   openFileInBuffer B     : MoveDown -> "gamma.txt"; Enter -> buffer B activo, "BBB"
 //   editar B    : MoveEnd + 'X' -> "BBBX", modified
 //   save        : Ctrl+K Ctrl+S (B tiene nombre) -> modified=false, disco="BBBX\n"
-//   volver A    : Ctrl+K t + MoveUp + Enter -> buffer A, "AAA" (intacto)
+//   volver A    : Ctrl+K t + Enter -> buffer A, "AAA" (intacto)
 // ---------------------------------------------------------------------------
 TEST(e2e_08_filebrowser_open_edit_save_switch) {
     namespace fs = std::filesystem;
@@ -878,10 +864,9 @@ TEST(e2e_08_filebrowser_open_edit_save_switch) {
     CHECK(!ed.active().modified);
     CHECK_EQ(readBytes(pathB), "BBBX\n");       // conservo el '\n' final de B
 
-    // volver A: selector Ctrl+K t, subir, Enter.
+    // volver A: el selector ya apunta al anterior (A), Enter.
     press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
-    press(ed, InputEventType::MoveUp);               // 1 -> 0 (A)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
     CHECK(!ed.active().modified);
@@ -1039,16 +1024,15 @@ TEST(e2e_10_new_buffer_save_as_cancel_keeps_state) {
 // Verificar que cambiar de buffer conserva su contenido y el estado
 // esencial de cada buffer.
 //
-// El selector abre en el buffer activo; para que "Down Down -> C" sea
-// determinista, el flujo arranca con A activo. B, C, D se crean con
-// Ctrl+K n y se les escribe contenido (indices 0=A 1=B 2=C 3=D).
+// El selector muestra la MRU (activo primero, anterior en la posicion 1).
+// B, C, D se crean con Ctrl+K n y se les escribe contenido.
 //
 //   setup   : A="AAA" (archivo) ; B="BBB" ; C="CCC" ; D="DDD"  (activo=D)
-//             -> selector Up Up Up -> A (activo A para arrancar)
-//   Ctrl+K t: selector @A -> Down Down -> Enter -> activar C ("CCC")
+//             -> MRU = [D, C, B, A]; para dejar A activo se baja a la pos 3.
+//   Ctrl+K t: selector @A -> MRU [A, D, C, B]; Down -> C; Enter
 //   edit C  : MoveEnd + '!'              -> C="CCC!"
-//   volver  : Ctrl+K t @C -> Up Up -> Enter -> A ("AAA")
-//   volver C: Ctrl+K t @A -> Down Down -> Enter -> C ("CCC!" conservado)
+//   volver  : Ctrl+K t ya apunta a A (anterior) -> Enter
+//   volver C: Ctrl+K t ya apunta a C (anterior) -> Enter
 //   verificar: A="AAA", B="BBB", C="CCC!", D="DDD", y al final se activa C.
 // ---------------------------------------------------------------------------
 TEST(e2e_11_buffer_selector_abc_verify_states) {
@@ -1072,21 +1056,19 @@ TEST(e2e_11_buffer_selector_abc_verify_states) {
     type(ed, "DDD");                            // buffer 3 = D "DDD" (activo)
     CHECK_EQ(ed.buffers.count(), 4);
 
-    // Activar A para arrancar el flujo desde el tope del selector.
+    // Activar A: MRU [D, C, B, A], el cursor abre en C (pos 1).
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));                // selector @ D(3)
-    press(ed, InputEventType::MoveUp);               // -> ...
-    press(ed, InputEventType::MoveUp);
-    press(ed, InputEventType::MoveUp);               // -> 0 (A)
+    ed.handleEvent(insert('t'));
+    press(ed, InputEventType::MoveDown);             // 1 -> 2 (B)
+    press(ed, InputEventType::MoveDown);             // 2 -> 3 (A)
     ed.handleEvent(enter);                      // activar A
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
 
-    // ---- Ctrl+K t -> Down -> Down -> Enter: activar C (indice 2).
+    // ---- Ctrl+K t: MRU [A, D, C, B]; Down -> C; Enter.
     press(ed, InputEventType::Prefix);
     ed.handleEvent(insert('t'));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::BufferSelector));
-    press(ed, InputEventType::MoveDown);             // 0 -> 1 (B)
-    press(ed, InputEventType::MoveDown);             // 1 -> 2 (C)
+    press(ed, InputEventType::MoveDown);             // 1 (D) -> 2 (C)
     ed.handleEvent(enter);                      // activar C
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK_EQ(ed.active().document.lineAt(0), "CCC");
@@ -1097,41 +1079,37 @@ TEST(e2e_11_buffer_selector_abc_verify_states) {
     CHECK_EQ(ed.active().document.lineAt(0), "CCC!");
     CHECK(ed.active().modified);
 
-    // ---- volver selector y elegir A.
+    // ---- volver selector y elegir A (ya apunta al anterior A).
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));                // selector @ C(2)
-    press(ed, InputEventType::MoveUp);               // -> 1 (B)
-    press(ed, InputEventType::MoveUp);               // -> 0 (A)
+    ed.handleEvent(insert('t'));                // MRU [C, A, D, B]
     ed.handleEvent(enter);                      // activar A
     CHECK_EQ(ed.active().document.lineAt(0), "AAA");
     CHECK(!ed.active().modified);               // A intacto/no modificado
 
     // ---- volver a C: el buffer C conserva su edicion "CCC!".
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));                // selector @ A(0)
-    press(ed, InputEventType::MoveDown);             // -> 1 (B)
-    press(ed, InputEventType::MoveDown);             // -> 2 (C)
+    ed.handleEvent(insert('t'));                // MRU [A, C, D, B]
     ed.handleEvent(enter);                      // activar C
     CHECK_EQ(ed.active().document.lineAt(0), "CCC!");
     CHECK_EQ(ed.active().cursor.col, 4);        // cursor conservado (fin "CCC!")
 
     // ---- verificar todos los estados: B y D quedaron como estaban.
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));                // selector @ C(2)
-    press(ed, InputEventType::MoveDown);             // -> 3 (D)
+    ed.handleEvent(insert('t'));                // MRU [C, A, D, B]
+    press(ed, InputEventType::MoveDown);             // 1 (A) -> 2 (D)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "DDD");
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));                // selector @ D(3)
-    press(ed, InputEventType::MoveUp);               // -> 2 (C)
-    press(ed, InputEventType::MoveUp);               // -> 1 (B)
+    ed.handleEvent(insert('t'));                // MRU [D, C, A, B]
+    press(ed, InputEventType::MoveDown);             // 1 (C) -> 2 (A)
+    press(ed, InputEventType::MoveDown);             // 2 (A) -> 3 (B)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "BBB");
 
     // de vuelta a C (el estado final pedido), aun con su edicion.
     press(ed, InputEventType::Prefix);
-    ed.handleEvent(insert('t'));                // selector @ B(1)
-    press(ed, InputEventType::MoveDown);             // -> 2 (C)
+    ed.handleEvent(insert('t'));                // MRU [B, D, C, A]
+    press(ed, InputEventType::MoveDown);             // 1 (D) -> 2 (C)
     ed.handleEvent(enter);
     CHECK_EQ(ed.active().document.lineAt(0), "CCC!");
     CHECK_EQ(ed.buffers.count(), 4);            // nadie se perdio

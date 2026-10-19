@@ -113,3 +113,23 @@ El `app::Message` (texto + tipo + `expiry`) y el `State` se traducen en
 
 Los tests que ejercitan el rendering directamente arman el `ChromeRequest`
 con `makeChromeRequest` (pueden incluir `app/`: son tests, no la frontera).
+
+## 7. Orden MRU de buffers (`BufferManager`)
+
+La lista de buffers separa el almacenamiento del orden de uso:
+
+- `buffers_` conserva el **orden físico** de creación (índices estables para
+  escaneos internos y para los IDs de `Buffer`).
+- `mru_` conserva el **orden de uso** como lista de IDs (no de índices):
+  el frente es el buffer más reciente y la posición 1 el anterior.
+- `mru_.front()` identifica al **buffer activo**; es la fuente de verdad del
+  orden. Toda activación pasa por `BufferManager::activateId()`, el único
+  punto que mueve un ID al frente (una sola vez, no-op si ya era el activo).
+- Las posiciones del **selector** de buffers (`bufferSelectorIndex_`,
+  `activateMruPosition()`, `previousMruPosition()`) son **posiciones MRU**,
+  nunca índices físicos. El cursor abre en la posición `1` (el anterior).
+
+Cerrar el buffer activo elimina su ID y activa el nuevo frente de `mru_`
+(normalmente el anterior); reiniciar el último buffer conserva su ID y deja
+`mru_` con ese único ID. TUI y GUI comparten este estado: el render solo
+traduce `mruNames()` + la posición MRU.

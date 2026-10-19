@@ -303,9 +303,10 @@ TEST(ctrl_k_n_names_are_session_global) {
     CHECK_EQ(ed.active().unnamedName, "SinNombre2");
 
     // Cerrar el primero (SinNombre) via selector + w.
+    // MRU = [SinNombre2, SinNombre1, SinNombre]: el cursor arranca en
+    // SinNombre1 (pos 1) y baja una vez hasta SinNombre (pos 2).
     openSelector(ed);
-    press(ed, InputEventType::MoveUp);
-    press(ed, InputEventType::MoveUp);          // index 0
+    press(ed, InputEventType::MoveDown);
     press(ed, InputEventType::InsertNewline);   // activar SinNombre
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
     closeBuffer(ed);                       // cerrar SinNombre (sin modificar)
@@ -320,23 +321,23 @@ TEST(ctrl_k_n_names_are_session_global) {
 // ---------------------------------------------------------------------------
 // Ctrl+K t : selector de buffers
 // ---------------------------------------------------------------------------
-TEST(ctrl_k_t_opens_selector_on_active) {
+TEST(ctrl_k_t_opens_selector_on_previous) {
     Editor ed;
     newBuffer(ed);
-    newBuffer(ed);                         // activo = 2
+    newBuffer(ed);                         // activo = 2; MRU = [2, 1, 0]
     openSelector(ed);
     CHECK(ed.state_ == State::BufferSelector);
-    CHECK_EQ(ed.bufferSelectorIndex_, 2);
-    CHECK_EQ(ed.buffers.activeBuffer_, 2);         // el activo no cambia al abrir
+    CHECK_EQ(ed.bufferSelectorIndex_, 1);  // anterior, no el activo
+    CHECK_EQ(ed.buffers.activeBuffer_, 2); // el activo no cambia al abrir
 
-    press(ed, InputEventType::MoveUp);
-    CHECK_EQ(ed.bufferSelectorIndex_, 1);
     press(ed, InputEventType::MoveDown);
     CHECK_EQ(ed.bufferSelectorIndex_, 2);
     press(ed, InputEventType::MoveDown);        // clamp abajo
     CHECK_EQ(ed.bufferSelectorIndex_, 2);
     press(ed, InputEventType::MoveUp);
+    CHECK_EQ(ed.bufferSelectorIndex_, 1);
     press(ed, InputEventType::MoveUp);
+    CHECK_EQ(ed.bufferSelectorIndex_, 0);
     press(ed, InputEventType::MoveUp);          // clamp arriba
     CHECK_EQ(ed.bufferSelectorIndex_, 0);
 }
@@ -345,10 +346,9 @@ TEST(ctrl_k_t_enter_switches_buffer) {
     Editor ed;
     type(ed, "hola");                      // B0
     newBuffer(ed);
-    type(ed, "mundo");                     // B1 activo
+    type(ed, "mundo");                     // B1 activo; cursor en B0
     openSelector(ed);
-    press(ed, InputEventType::MoveUp);          // seleccionar B0
-    press(ed, InputEventType::InsertNewline);   // Enter
+    press(ed, InputEventType::InsertNewline);   // Enter: B0 (anterior)
     CHECK(ed.state_ == State::Navegacion);
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK_EQ(ed.active().document.lineAt(0), "hola");
@@ -384,7 +384,7 @@ TEST(ctrl_k_t_other_keys_are_noop) {
     press(ed, InputEventType::Undo);
     press(ed, InputEventType::Redo);
     CHECK(ed.state_ == State::BufferSelector);
-    CHECK_EQ(ed.bufferSelectorIndex_, 2);
+    CHECK_EQ(ed.bufferSelectorIndex_, 1);  // posicion MRU del anterior
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(3));
     CHECK_EQ(ed.buffers.activeBuffer_, 2);
 }
@@ -436,7 +436,8 @@ TEST(ctrl_k_t_return_same_buffer_preserves_selection) {
 
     openSelector(ed);                    // Ctrl+K t
     CHECK(ed.state_ == State::BufferSelector);
-    CHECK_EQ(ed.bufferSelectorIndex_, 0);  // activo = B0
+    CHECK_EQ(ed.bufferSelectorIndex_, 1);  // cursor en el anterior (B1)
+    press(ed, InputEventType::MoveUp);          // -> posicion 0: B0 activo
     press(ed, InputEventType::InsertNewline);   // Enter: mismo buffer
 
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
@@ -465,13 +466,13 @@ TEST(ctrl_k_t_switch_away_and_back_preserves_selection) {
     const auto pos = ed.active().selection->position;
 
     openSelector(ed);                    // Ctrl+K t (activo = B0)
-    press(ed, InputEventType::MoveDown);      // -> B1
+    // El cursor arranca en B1 (posicion 1), que es el buffer buscado.
     press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK(ed.state_ == State::Navegacion);   // B1 sin seleccion
 
     openSelector(ed);                    // Ctrl+K t (activo = B1)
-    press(ed, InputEventType::MoveUp);        // -> B0
+    // El cursor arranca en B0 (posicion 1), que es el buffer buscado.
     press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK(ed.state_ == State::Seleccion);    // B0 conserva su seleccion
@@ -489,6 +490,7 @@ TEST(ctrl_k_t_mode_table_per_source_mode) {
         newBuffer(ed);
         CHECK(ed.state_ == State::Navegacion);
         openSelector(ed);
+        press(ed, InputEventType::MoveUp);          // posicion 0: B1 activo
         press(ed, InputEventType::InsertNewline);   // mismo buffer (B1)
         CHECK(ed.state_ == State::Navegacion);
         CHECK_EQ(ed.buffers.activeBuffer_, 1);
@@ -499,6 +501,7 @@ TEST(ctrl_k_t_mode_table_per_source_mode) {
         newBuffer(ed);                   // 2 buffers para poder abrir selector
         type(ed, "hola");
         openSelector(ed);                // priorState_ = Interaccion
+        press(ed, InputEventType::MoveUp);          // posicion 0: B1 activo
         press(ed, InputEventType::InsertNewline);   // mismo buffer (B1)
         CHECK(ed.state_ == State::Navegacion); // reconcile, no priorState_
         CHECK_EQ(ed.active().document.lineAt(0), "hola");  // contenido intacto
@@ -570,8 +573,7 @@ TEST(ctrl_k_t_buffer_switch_returns_preserves_named_selection) {
     CHECK(!ed.hasSelection());
     CHECK_EQ(ed.active().document.lineAt(0), "");
 
-    openSelector(ed);                    // Ctrl+K t
-    press(ed, InputEventType::MoveUp);        // -> A (B0)
+    openSelector(ed);                    // Ctrl+K t: cursor en A (B0, pos 1)
     press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 0);
     CHECK(ed.state_ == State::Seleccion);      // vuelve a seleccion...
@@ -1248,8 +1250,132 @@ TEST(buffer_names_include_modified_marker) {
     newBuffer(ed);                       // B1 limpio
     std::vector<std::string> names = ed.bufferNames();
     CHECK_EQ(names.size(), size_t(2));
-    CHECK_EQ(names[0], "SinNombre *");
-    CHECK_EQ(names[1], "SinNombre1");
+    // Orden MRU: el activo (B1) primero y el anterior (B0) despues.
+    CHECK_EQ(names[0], "SinNombre1");
+    CHECK_EQ(names[1], "SinNombre *");
+}
+
+// ---------------------------------------------------------------------------
+// Orden MRU compartido: activo primero, anterior segundo.
+// ---------------------------------------------------------------------------
+TEST(mru_order_follows_activation_history) {
+    Editor ed;
+    ed.active().unnamedName = "a";
+    newBuffer(ed); ed.active().unnamedName = "d";
+    newBuffer(ed); ed.active().unnamedName = "c";
+    newBuffer(ed); ed.active().unnamedName = "b";
+    ed.activateBuffer(0);                 // a activo
+    CHECK(ed.bufferNames() ==
+          (std::vector<std::string>{"a", "b", "c", "d"}));
+
+    // Abrir d: pasa al frente.
+    int dIdx = -1;
+    for (int i = 0; i < ed.buffers.count(); ++i)
+        if (ed.buffers.at(i).unnamedName == "d") dIdx = i;
+    CHECK(dIdx >= 0);
+    ed.activateBuffer(dIdx);
+    CHECK(ed.bufferNames() ==
+          (std::vector<std::string>{"d", "a", "b", "c"}));
+
+    // Abrir a: pasa al frente.
+    ed.activateBuffer(0);
+    CHECK(ed.bufferNames() ==
+          (std::vector<std::string>{"a", "d", "b", "c"}));
+
+    // El selector arranca en el anterior (d) y Enter lo activa.
+    openSelector(ed);
+    CHECK_EQ(ed.bufferSelectorIndex_, 1);
+    CHECK_EQ(ed.active().unnamedName, "a");
+    press(ed, InputEventType::InsertNewline);
+    CHECK_EQ(ed.active().unnamedName, "d");
+    CHECK(ed.bufferNames().front() == "d");
+    assertBuffersConsistent(ed);
+}
+
+TEST(mru_new_buffer_goes_to_front_and_active_reopen_is_noop) {
+    Editor ed;
+    ed.active().unnamedName = "a";
+    newBuffer(ed);
+    ed.active().unnamedName = "b";
+    CHECK(ed.bufferNames() ==
+          (std::vector<std::string>{"b", "a"}));
+
+    ed.activateBuffer(0);                 // a
+    CHECK(ed.bufferNames() ==
+          (std::vector<std::string>{"a", "b"}));
+
+    // Reactivar el activo no reordena ni cambia el frente.
+    const std::vector<int> before = ed.buffers.mru_;
+    ed.activateBuffer(0);
+    CHECK(ed.buffers.mru_ == before);
+    assertBuffersConsistent(ed);
+}
+
+TEST(mru_open_existing_file_moves_to_front_without_duplicate) {
+    TempDir t;
+    const std::string a = t.file("a.txt");
+    const std::string b = t.file("b.txt");
+    Editor ed;
+    ed.openFileInBuffer(a);               // crea buffer
+    ed.openFileInBuffer(b);               // crea buffer
+    CHECK_EQ(ed.buffers.count(), 3);      // SinNombre + a + b
+    ed.openFileInBuffer(a);               // reusa el de a
+    CHECK_EQ(ed.buffers.count(), 3);      // no duplica
+    CHECK_EQ(ed.active().filename, a);
+    CHECK_EQ(ed.bufferNames()[0], "a.txt");
+    CHECK_EQ(ed.bufferNames()[1], "b.txt");
+    assertBuffersConsistent(ed);
+}
+
+TEST(mru_selector_uses_id_not_display_name) {
+    TempDir t;
+    const std::string d1 = t.dir("uno");
+    const std::string d2 = t.dir("dos");
+    const std::string p1 = d1 + "/same.txt";
+    const std::string p2 = d2 + "/same.txt";
+    { std::ofstream(p1) << "uno"; std::ofstream(p2) << "dos"; }
+
+    Editor ed;
+    ed.openFileInBuffer(p1);              // activo p1
+    ed.openFileInBuffer(p2);              // activo p2
+    CHECK_EQ(ed.active().displayName(), "same.txt");
+    CHECK_EQ(ed.active().filename, p2);
+
+    // Dos nombres visibles iguales: el selector debe activar por ID/posicion,
+    // no buscar por texto.
+    openSelector(ed);
+    CHECK_EQ(ed.bufferSelectorIndex_, 1);
+    press(ed, InputEventType::InsertNewline);
+    CHECK_EQ(ed.active().filename, p1);
+    assertBuffersConsistent(ed);
+}
+
+TEST(mru_close_active_activates_previous) {
+    Editor ed;
+    ed.active().unnamedName = "a";
+    newBuffer(ed); ed.active().unnamedName = "b";
+    newBuffer(ed); ed.active().unnamedName = "c";
+    CHECK(ed.bufferNames() ==
+          (std::vector<std::string>{"c", "b", "a"}));
+
+    ed.active().modified = false;
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
+    closeBuffer(ed);
+    CHECK(ed.bufferNames() ==
+          (std::vector<std::string>{"b", "a"}));
+    CHECK_EQ(ed.active().unnamedName, "b");
+    assertBuffersConsistent(ed);
+}
+
+TEST(mru_reset_last_buffer_keeps_id_and_single_mru) {
+    Editor ed;
+    const int id = ed.active().id;
+    closeBuffer(ed);
+    CHECK_EQ(ed.buffers.count(), 1);
+    CHECK_EQ(ed.active().id, id);
+    CHECK_EQ(ed.buffers.mru_.size(), size_t(1));
+    CHECK_EQ(ed.buffers.mru_.front(), id);
+    assertBuffersConsistent(ed);
 }
 
 TEST(ctrl_k_b_single_buffer_no_change) {
@@ -1308,9 +1434,8 @@ TEST(ctrl_k_b_via_selector_updates_history) {
     type(ed, "C");
     press(ed, InputEventType::Escape);
 
-    // Via selector: ir a B1
+    // Via selector: ir a B1 (el cursor ya arranca en el anterior, B1)
     openSelector(ed);
-    press(ed, InputEventType::MoveUp);        // B1
     press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
 
@@ -1342,14 +1467,13 @@ TEST(ctrl_k_b_previous_buffer_closed) {
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK_EQ(ed.buffers.activeBuffer_, 0); // B1 hereda ranura 0
 
-    // Ctrl+K b: B0 ya no existe
+    // Ctrl+K b: ya no queda otro buffer.
     previousBuffer(ed);
     CHECK_EQ(ed.buffers.activeBuffer_, 0); // se queda en B1
-    CHECK(ed.statusMessage_.find("ya no existe") != std::string::npos);
-    CHECK(ed.statusMessage_.find("fue cerrado") != std::string::npos);
+    CHECK_EQ(ed.statusMessage_, "No hay buffer anterior.");
 }
 
-TEST(ctrl_k_b_previous_buffer_closed_via_selector) {
+TEST(ctrl_k_b_previous_buffer_closed_falls_back_to_next_mru) {
     Editor ed;
     type(ed, "A");                       // B0
     press(ed, InputEventType::Escape);
@@ -1360,9 +1484,8 @@ TEST(ctrl_k_b_previous_buffer_closed_via_selector) {
     type(ed, "C");
     press(ed, InputEventType::Escape);
 
-    // Ir a B1 via selector
+    // Ir a B1 via selector (ya arranca en B1, la posicion 1).
     openSelector(ed);
-    press(ed, InputEventType::MoveUp);        // B1
     press(ed, InputEventType::InsertNewline);
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
 
@@ -1375,11 +1498,10 @@ TEST(ctrl_k_b_previous_buffer_closed_via_selector) {
     // Activo ahora es B1 (indice 1, que era B1 antes)
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
 
-    // Ctrl+K b: el anterior era B2, que fue cerrado
+    // Ctrl+K b: el anterior era B2, pero la MRU ya lo elimino; pasa a A.
     previousBuffer(ed);
-    CHECK_EQ(ed.buffers.activeBuffer_, 1); // se queda en B1
-    CHECK(ed.statusMessage_.find("ya no existe") != std::string::npos);
-    CHECK(ed.statusMessage_.find("fue cerrado") != std::string::npos);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK_EQ(ed.active().document.lineAt(0), "A");
 }
 
 TEST(ctrl_k_b_three_new_buffers_toggle_via_b) {
@@ -1416,20 +1538,20 @@ TEST(ctrl_k_b_selector_open_without_selection_preserves_history) {
     type(ed, "C");
     press(ed, InputEventType::Escape);
     CHECK_EQ(ed.buffers.activeBuffer_, 2);
-    int prevIdBefore = ed.previousBuffer_.id;
+    const int prevIdBefore = ed.buffers.mru_[1];
     CHECK(prevIdBefore != -1);
     openSelector(ed);
     CHECK(ed.state_ == State::BufferSelector);
     press(ed, InputEventType::Escape);
     CHECK(ed.state_ == State::Navegacion);
     CHECK_EQ(ed.buffers.activeBuffer_, 2);
-    CHECK_EQ(ed.previousBuffer_.id, prevIdBefore);
+    CHECK_EQ(ed.buffers.mru_[1], prevIdBefore);
     previousBuffer(ed);
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK_EQ(ed.active().document.lineAt(0), "B");
 }
 
-TEST(ctrl_k_b_close_active_with_previous_to_third_shows_closed) {
+TEST(ctrl_k_b_after_close_active_uses_new_previous) {
     Editor ed;
     type(ed, "A");
     press(ed, InputEventType::Escape);
@@ -1446,11 +1568,13 @@ TEST(ctrl_k_b_close_active_with_previous_to_third_shows_closed) {
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
     CHECK_EQ(ed.active().document.lineAt(0), "B");
-    CHECK(ed.previousBuffer_.valid);
+    // El anterior ahora es A: Ctrl+K b alterna B <-> A.
+    previousBuffer(ed);
+    CHECK_EQ(ed.buffers.activeBuffer_, 0);
+    CHECK_EQ(ed.active().document.lineAt(0), "A");
     previousBuffer(ed);
     CHECK_EQ(ed.buffers.activeBuffer_, 1);
-    CHECK(ed.statusMessage_.find("ya no existe") != std::string::npos);
-    CHECK(ed.statusMessage_.find("fue cerrado") != std::string::npos);
+    CHECK_EQ(ed.active().document.lineAt(0), "B");
 }
 
 // ---------------------------------------------------------------------------

@@ -81,9 +81,27 @@ TEST(spy_modal_selector_invalidates_entry_and_exit) {
     CHECK(spy.renderBufferListCount == listBase + 1);
     CHECK(spy.renderScreenDiffCount == screenBase);
     CHECK(!spy.pendingInvalidation); // el render la consumió
-    // Contenido correcto: la lista de buffers y el índice activo.
+    // Contenido correcto: la lista de buffers y el cursor en el anterior.
     CHECK(spy.lastBufferNames == ed.bufferNames());
-    CHECK(spy.lastBufferListSelected == ed.buffers.activeIndex());
+    CHECK_EQ(ed.bufferSelectorIndex_, 1);
+    CHECK(spy.lastBufferListSelected == ed.bufferSelectorIndex_);
+
+    // El renderer debe seguir al cursor, no quedarse en la posición inicial.
+    press(ed, InputEventType::MoveUp);
+    CHECK_EQ(ed.bufferSelectorIndex_, 0);
+    const int listMoved = spy.renderBufferListCount;
+    ed.renderFrame();
+    CHECK(spy.renderBufferListCount == listMoved + 1);
+    CHECK(spy.lastBufferListSelected == ed.bufferSelectorIndex_);
+    CHECK_EQ(spy.lastBufferListSelected, 0);
+
+    press(ed, InputEventType::MoveDown);
+    CHECK_EQ(ed.bufferSelectorIndex_, 1);
+    const int listBack = spy.renderBufferListCount;
+    ed.renderFrame();
+    CHECK(spy.renderBufferListCount == listBack + 1);
+    CHECK(spy.lastBufferListSelected == ed.bufferSelectorIndex_);
+    CHECK_EQ(spy.lastBufferListSelected, 1);
 
     // Frame modal intermedio: cero invalidaciones extra
     const int invEntry = spy.invalidateCount;
@@ -385,7 +403,7 @@ TEST(spy_render_dispatch_by_state) {
     CHECK(spy.renderBufferListCount == listBase + 1);
     CHECK(spy.renderScreenDiffCount == screenBase + 2);
     CHECK(spy.lastBufferNames == ed.bufferNames());
-    CHECK(spy.lastBufferListSelected == ed.buffers.activeIndex());
+    CHECK(spy.lastBufferListSelected == ed.bufferSelectorIndex_);
 
     press(ed, InputEventType::Escape);
     CHECK(ed.getStateForTesting() == State::Navegacion);

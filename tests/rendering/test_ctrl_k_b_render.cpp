@@ -143,7 +143,7 @@ TEST(ctrl_k_b_no_previous_buffer_no_crash){
     TtyRenderer& r = ttyOf(ed);
     std::string prime = r.buildDiffFrame(ed.active().document, ed.active().cursor, ed.active().viewport, ed.active().filename, ed.active().modified, makeChromeRequest(Message{}, State::Navegacion), ed.active().selection);
     (void)prime;
-    CHECK(!ed.previousBuffer_.valid);
+    CHECK_EQ(ed.buffers.count(), 1);
     previousBuffer(ed);
     CHECK(ed.buffers.activeBuffer_==0);
     CHECK(ed.active().document.lineAt(0)=="ONLY_ONE");

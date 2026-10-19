@@ -158,6 +158,25 @@ inline void assertBuffersConsistent(Editor& ed){
     assertStateConsistent(ed);
     CHECK(!ed.buffers.buffers_.empty());
     CHECK(ed.buffers.activeBuffer_>=0); CHECK(ed.buffers.activeBuffer_<static_cast<int>(ed.buffers.buffers_.size()));
+    // Invariantes MRU: misma cardinalidad, sin duplicados, misma poblacion
+    // de IDs y frente == buffer activo.
+    CHECK_EQ(ed.buffers.mru_.size(), ed.buffers.buffers_.size());
+    CHECK(!ed.buffers.mru_.empty());
+    CHECK_EQ(ed.buffers.mru_.front(), ed.buffers.active().id);
+    for(size_t i=0;i<ed.buffers.mru_.size();++i){
+        bool exists=false;
+        for(const Buffer& b: ed.buffers.buffers_){
+            if(b.id==ed.buffers.mru_[i]){ exists=true; break; }
+        }
+        CHECK(exists);
+        for(size_t j=i+1;j<ed.buffers.mru_.size();++j)
+            CHECK(ed.buffers.mru_[i]!=ed.buffers.mru_[j]);
+    }
+    for(const Buffer& b: ed.buffers.buffers_){
+        bool inMru=false;
+        for(int id: ed.buffers.mru_){ if(id==b.id){ inMru=true; break; } }
+        CHECK(inMru);
+    }
     for(const Buffer& b: ed.buffers.buffers_) assertBufferConsistent(b);
 }
 inline void assertInitialState(const Editor& ed){
