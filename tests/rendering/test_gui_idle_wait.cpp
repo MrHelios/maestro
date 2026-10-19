@@ -887,7 +887,6 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
     if (!blocked) return;
     const int base = h.gui->renderCount.load();
     const int hgt = h.ed->getActiveBufferForTesting().viewport.height;
-    const int cursor0 = h.ed->getActiveBufferForTesting().cursor.line;
     CHECK(hgt > 0);
     CHECK(hgt < kLines);
     // Referencia secuencial: mismo documento y misma geometría, procesando
@@ -913,6 +912,7 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
         ref.ed->processEventForTesting(pageDown);
     const int expectedTop = ref.ed->getActiveBufferForTesting().viewport.top;
     const int expectedCursor = ref.ed->getActiveBufferForTesting().cursor.line;
+    const size_t samplesBefore = h.gui->cursorSamples().size();
 
     auto pushKeyDown = [](SDL_Keycode sym, bool repeat) {
         SDL_Event ev{};
@@ -942,15 +942,15 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
     std::this_thread::sleep_for(std::chrono::milliseconds(120));
     CHECK(h.ed->getActiveBufferForTesting().viewport.top == expectedTop);
     CHECK(h.ed->getActiveBufferForTesting().cursor.line == expectedCursor);
-    // Todos los repeats se aplicaron en el MISMO lote: ningún render vio un
-    // estado intermedio del cursor (solo el inicial o el final). Puede
-    // haber renders extra por eventos de ventana, pero no por cada tecla.
-    bool sawFinal = false;
-    for (const auto& sample : h.gui->cursorSamples()) {
-        CHECK(sample.first == cursor0 || sample.first == expectedCursor);
-        if (sample.first == expectedCursor) sawFinal = true;
-    }
-    CHECK(sawFinal);
+    // La compuerta garantiza que la cola estaba vacía y que lo único
+    // encolado es el lote de teclas: cualquier render posterior es de este
+    // lote. Se exige UN render y UNA muestra, y que esa muestra ya tenga el
+    // estado final (ningún frame intermedio).
+    CHECK(h.gui->renderCount.load() == base + 1);
+    const auto samples = h.gui->cursorSamples();
+    CHECK(samples.size() == samplesBefore + 1);
+    if (samples.size() == samplesBefore + 1)
+        CHECK(samples.back() == std::make_pair(expectedCursor, expectedTop));
     // Sin eventos pendientes: ni renders ni movimiento adicionales.
     const int settled = h.gui->renderCount.load();
     std::this_thread::sleep_for(std::chrono::milliseconds(150));
