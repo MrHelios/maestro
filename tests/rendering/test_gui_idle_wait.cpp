@@ -971,6 +971,151 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
     CHECK(rc == 0);
 }
 
+TEST(gui_runloop_batch_keyup_en_lote_posterior_se_estabiliza) {
+    // KEYUP (y repeats) llegan DESPUÉS del primer render, en un lote
+    // posterior: se verifica (a) que cada lote se pinta una vez, (b) que el
+    // render del primer lote NO vio las repeticiones, y (c) que tras el
+    // lote final no queda movimiento residual y la latencia desde el KEYUP
+    // está acotada.
+    {
+        VideoProbe probe;
+        if (!probe.ok) SKIP("sin video dummy");
+    }
+    SdlDummyDrivers env;
+
+    auto watcher = std::make_unique<BlockingWatcher>();
+    BlockingWatcher* raw = watcher.get();
+    Harness h = makeHarness(std::move(watcher));
+    static constexpr int kLines = 2000;
+    std::string content;
+    for (int i = 0; i < kLines; ++i)
+        content += "linea " + std::to_string(i) + "\n";
+    testfw::TempFile tmp;
+    tmp.write(content);
+    CHECK(h.ed->loadIntoActiveBuffer(tmp.path));
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer([raw] { raw->release(); }, runner);
+    int lastRender = -1;
+    int stableCount = 0;
+    bool idle = false;
+    for (int i = 0; i < 500 && !idle; ++i) {
+        const int rcNow = h.gui->renderCount.load();
+        if (raw->pollCount.load() >= 1 && rcNow == lastRender) {
+            if (++stableCount >= 10) idle = true;
+        } else {
+            stableCount = 0;
+        }
+        lastRender = rcNow;
+        if (!idle) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(idle);
+    raw->arm();
+    const bool blocked = raw->waitBlocked();
+    CHECK(blocked);
+    if (!blocked) return;
+    const int base = h.gui->renderCount.load();
+    const size_t samplesBefore = h.gui->cursorSamples().size();
+    const int hgt = h.ed->getActiveBufferForTesting().viewport.height;
+    CHECK(hgt > 0);
+    CHECK(hgt < kLines);
+    constexpr int kRepeats = 4;
+    // Referencia secuencial: una página (lote 1) y luego una más por cada
+    // repetición (lote 2), con la semántica real del Editor.
+    Harness ref = makeHarness();
+    CHECK(ref.ed->loadIntoActiveBuffer(tmp.path));
+    {
+        Buffer& rb = ref.ed->getActiveBufferForTesting();
+        const Buffer& lb = h.ed->getActiveBufferForTesting();
+        rb.viewport.height = lb.viewport.height;
+        rb.viewport.width = lb.viewport.width;
+        rb.viewport.top = lb.viewport.top;
+        rb.viewport.left = lb.viewport.left;
+        rb.cursor.line = lb.cursor.line;
+        rb.cursor.col = lb.cursor.col;
+    }
+    InputEvent pageDown;
+    pageDown.type = InputEventType::PageDown;
+    ref.ed->processEventForTesting(pageDown);
+    const std::pair<int, int> expectedFirst{
+        ref.ed->getActiveBufferForTesting().cursor.line,
+        ref.ed->getActiveBufferForTesting().viewport.top};
+    for (int i = 0; i < kRepeats; ++i)
+        ref.ed->processEventForTesting(pageDown);
+    const std::pair<int, int> expectedAll{
+        ref.ed->getActiveBufferForTesting().cursor.line,
+        ref.ed->getActiveBufferForTesting().viewport.top};
+
+    auto pushKeyDown = [](SDL_Keycode sym, bool repeat) {
+        SDL_Event ev{};
+        ev.type = SDL_KEYDOWN;
+        ev.key.keysym.sym = sym;
+        ev.key.keysym.mod = KMOD_NONE;
+        ev.key.state = SDL_PRESSED;
+        ev.key.repeat = repeat ? 1 : 0;
+        CHECK(SDL_PushEvent(&ev) == 1);
+    };
+    // Lote 1: solo el KEYDOWN inicial.
+    pushKeyDown(SDLK_PAGEDOWN, false);
+    raw->release();
+    bool firstRender = false;
+    for (int i = 0; i < 300 && !firstRender; ++i) {
+        firstRender = h.gui->renderCount.load() > base;
+        if (!firstRender) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(firstRender);
+    if (!firstRender) return;
+    // Lote 2: los repeats y el KEYUP llegan mientras el loop pinta el lote 1.
+    for (int i = 0; i < kRepeats; ++i) pushKeyDown(SDLK_PAGEDOWN, true);
+    SDL_Event up{};
+    up.type = SDL_KEYUP;
+    up.key.keysym.sym = SDLK_PAGEDOWN;
+    up.key.state = SDL_RELEASED;
+    CHECK(SDL_PushEvent(&up) == 1);
+    const auto tKeyUp = clk::now();
+
+    bool settledAll = false;
+    for (int i = 0; i < 1000 && !settledAll; ++i) {
+        const Buffer& lb = h.ed->getActiveBufferForTesting();
+        settledAll = h.gui->renderCount.load() > base + 1 &&
+                     lb.cursor.line == expectedAll.first &&
+                     lb.viewport.top == expectedAll.second;
+        if (!settledAll)
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    const auto tStable = clk::now();
+    CHECK(settledAll);
+    // Un render por lote: el del KEYDOWN inicial y el de repeats+KEYUP.
+    CHECK(h.gui->renderCount.load() == base + 2);
+    const auto samples = h.gui->cursorSamples();
+    CHECK(samples.size() == samplesBefore + 2);
+    if (samples.size() == samplesBefore + 2) {
+        // El primer render NO vio las repeticiones (lote posterior).
+        CHECK(samples[samplesBefore] == expectedFirst);
+        CHECK(samples[samplesBefore + 1] == expectedAll);
+    }
+    // Sin movimiento residual tras el lote que contiene el KEYUP.
+    const int settledRenders = h.gui->renderCount.load();
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    CHECK(h.gui->renderCount.load() == settledRenders);
+    CHECK(h.ed->getActiveBufferForTesting().cursor.line == expectedAll.first);
+    CHECK(h.ed->getActiveBufferForTesting().viewport.top == expectedAll.second);
+    // Latencia acotada desde el KEYUP hasta la estabilización.
+    CHECK(tStable - tKeyUp < std::chrono::milliseconds(1000));
+
+    bool quitPushed = false;
+    for (int i = 0; i < 500 && !quitPushed; ++i) {
+        SDL_Event q{};
+        q.type = SDL_QUIT;
+        if (SDL_PushEvent(&q) == 1) quitPushed = true;
+        else std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(quitPushed);
+    runner.join();
+    closer.dismiss();
+    CHECK(rc == 0);
+}
+
 TEST(gui_runloop_batch_cursor_vuelve_al_origen_resetea_blink) {
     // AvPág + RePág en el MISMO lote: la celda final es igual a la inicial,
     // pero hubo actividad intermedia. El render debe resetear el ancla
