@@ -565,7 +565,91 @@ struct VideoProbe {
     std::string prevVideo;
     std::string prevAudio;
 };
+
+// Fija los drivers dummy durante TODO el test y restaura el entorno previo
+// al salir del scope, incluso por return temprano o excepción.
+struct SdlDummyDrivers {
+    std::string prevVideo;
+    std::string prevAudio;
+    bool hadVideo = false;
+    bool hadAudio = false;
+    SdlDummyDrivers() {
+        if (const char* p = std::getenv("SDL_VIDEODRIVER")) {
+            prevVideo = p;
+            hadVideo = true;
+        }
+        if (const char* p = std::getenv("SDL_AUDIODRIVER")) {
+            prevAudio = p;
+            hadAudio = true;
+        }
+        ::setenv("SDL_VIDEODRIVER", "dummy", 1);
+        ::setenv("SDL_AUDIODRIVER", "dummy", 1);
+    }
+    ~SdlDummyDrivers() {
+        if (hadVideo)
+            ::setenv("SDL_VIDEODRIVER", prevVideo.c_str(), 1);
+        else
+            ::unsetenv("SDL_VIDEODRIVER");
+        if (hadAudio)
+            ::setenv("SDL_AUDIODRIVER", prevAudio.c_str(), 1);
+        else
+            ::unsetenv("SDL_AUDIODRIVER");
+    }
+    SdlDummyDrivers(const SdlDummyDrivers&) = delete;
+    SdlDummyDrivers& operator=(const SdlDummyDrivers&) = delete;
+};
+
+// Garantiza el cierre del loop al salir del scope: libera el watcher, encola
+// SDL_QUIT con reintentos y une el hilo. Dismiss() cuando el test ya cerró.
+struct LoopCloser {
+    BlockingWatcher* watcher;
+    std::thread& runner;
+    bool closed = false;
+    LoopCloser(BlockingWatcher* w, std::thread& t) : watcher(w), runner(t) {}
+    ~LoopCloser() {
+        if (closed || !runner.joinable()) return;
+        if (watcher) watcher->release();
+        for (int i = 0; i < 500; ++i) {
+            SDL_Event q{};
+            q.type = SDL_QUIT;
+            if (SDL_PushEvent(&q) == 1) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        runner.join();
+    }
+    void dismiss() { closed = true; }
+    LoopCloser(const LoopCloser&) = delete;
+    LoopCloser& operator=(const LoopCloser&) = delete;
+};
+
+// Restaura el tope de lote de tests aunque el test salga por return o
+// excepción.
+struct MaxBatchMsGuard {
+    int prev;
+    explicit MaxBatchMsGuard(int ms)
+        : prev(GuiRunLoop::maxBatchMsForTests()) {
+        GuiRunLoop::setMaxBatchMsForTests(ms);
+    }
+    ~MaxBatchMsGuard() { GuiRunLoop::setMaxBatchMsForTests(prev); }
+    MaxBatchMsGuard(const MaxBatchMsGuard&) = delete;
+    MaxBatchMsGuard& operator=(const MaxBatchMsGuard&) = delete;
+};
 }  // namespace
+
+TEST(sdl_dummy_drivers_restaura_entorno_al_salir) {
+    // La limpieza RAII restaura el entorno aunque el scope termine por
+    // return/return temprano o excepción, sin depender del flujo normal.
+    ::setenv("SDL_VIDEODRIVER", "orig_video", 1);
+    ::unsetenv("SDL_AUDIODRIVER");
+    {
+        SdlDummyDrivers env;
+        CHECK(std::string(std::getenv("SDL_VIDEODRIVER")) == "dummy");
+        CHECK(std::string(std::getenv("SDL_AUDIODRIVER")) == "dummy");
+    }
+    const char* video = std::getenv("SDL_VIDEODRIVER");
+    CHECK(video && std::string(video) == "orig_video");
+    CHECK(std::getenv("SDL_AUDIODRIVER") == nullptr);
+}
 
 TEST(gui_runloop_idle_sirve_watcher_con_actividad_continua) {
     {
@@ -777,11 +861,7 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
         VideoProbe probe;
         if (!probe.ok) SKIP("sin video dummy");
     }
-    std::string prevVideo, prevAudio;
-    if (const char* p = std::getenv("SDL_VIDEODRIVER")) prevVideo = p;
-    if (const char* p = std::getenv("SDL_AUDIODRIVER")) prevAudio = p;
-    ::setenv("SDL_VIDEODRIVER", "dummy", 1);
-    ::setenv("SDL_AUDIODRIVER", "dummy", 1);
+    SdlDummyDrivers env;
 
     auto watcher = std::make_unique<BlockingWatcher>();
     BlockingWatcher* raw = watcher.get();
@@ -795,6 +875,7 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
     CHECK(h.ed->loadIntoActiveBuffer(tmp.path));
     int rc = 1;
     std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer(raw, runner);
     // Esperar a que el loop haya drenado los eventos de creación de la
     // ventana y esté en reposo (render estable + watcher ya servido); recién
     // ahí se arma la compuerta para no bloquear a mitad del drenado inicial.
@@ -814,18 +895,10 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
     CHECK(idle);
     raw->arm();
     const bool blocked = raw->waitBlocked();
-    if (!blocked) {
-        raw->release();
-        SDL_Event q{};
-        q.type = SDL_QUIT;
-        SDL_PushEvent(&q);
-        runner.join();
-        CHECK(blocked);
-        return;
-    }
+    CHECK(blocked);
+    if (!blocked) return;
     const int base = h.gui->renderCount.load();
     const int hgt = h.ed->getActiveBufferForTesting().viewport.height;
-    const int top0 = h.ed->getActiveBufferForTesting().viewport.top;
     const int cursor0 = h.ed->getActiveBufferForTesting().cursor.line;
     CHECK(hgt > 0);
     CHECK(hgt < kLines);
@@ -906,15 +979,7 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
     }
     CHECK(quitPushed);
     runner.join();
-
-    if (prevVideo.empty())
-        ::unsetenv("SDL_VIDEODRIVER");
-    else
-        ::setenv("SDL_VIDEODRIVER", prevVideo.c_str(), 1);
-    if (prevAudio.empty())
-        ::unsetenv("SDL_AUDIODRIVER");
-    else
-        ::setenv("SDL_AUDIODRIVER", prevAudio.c_str(), 1);
+    closer.dismiss();
     CHECK(rc == 0);
 }
 
@@ -926,11 +991,7 @@ TEST(gui_runloop_batch_cursor_vuelve_al_origen_resetea_blink) {
         VideoProbe probe;
         if (!probe.ok) SKIP("sin video dummy");
     }
-    std::string prevVideo, prevAudio;
-    if (const char* p = std::getenv("SDL_VIDEODRIVER")) prevVideo = p;
-    if (const char* p = std::getenv("SDL_AUDIODRIVER")) prevAudio = p;
-    ::setenv("SDL_VIDEODRIVER", "dummy", 1);
-    ::setenv("SDL_AUDIODRIVER", "dummy", 1);
+    SdlDummyDrivers env;
 
     auto watcher = std::make_unique<BlockingWatcher>();
     BlockingWatcher* raw = watcher.get();
@@ -938,14 +999,13 @@ TEST(gui_runloop_batch_cursor_vuelve_al_origen_resetea_blink) {
     std::string content;
     for (int i = 0; i < 200; ++i)
         content += "linea " + std::to_string(i) + "\n";
-    {
-        testfw::TempFile tmp;
-        tmp.write(content);
-        CHECK(h.ed->loadIntoActiveBuffer(tmp.path));
-    }
+    testfw::TempFile tmp;
+    tmp.write(content);
+    CHECK(h.ed->loadIntoActiveBuffer(tmp.path));
     h.ed->executeCommand("navegacion.interaccion");  // Bar sin modificar
     int rc = 1;
     std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer(raw, runner);
     // Esperar a que el loop haya drenado los eventos de creación de la
     // ventana y esté en reposo (render estable + watcher ya servido); recién
     // ahí se arma la compuerta para no bloquear a mitad del drenado inicial.
@@ -965,15 +1025,8 @@ TEST(gui_runloop_batch_cursor_vuelve_al_origen_resetea_blink) {
     CHECK(idle);
     raw->arm();
     const bool blocked = raw->waitBlocked();
-    if (!blocked) {
-        raw->release();
-        SDL_Event q{};
-        q.type = SDL_QUIT;
-        SDL_PushEvent(&q);
-        runner.join();
-        CHECK(blocked);
-        return;
-    }
+    CHECK(blocked);
+    if (!blocked) return;
     CHECK(h.gui->lastCursor().shape == FrameCursorShape::Bar);
     const int base = h.gui->renderCount.load();
     const int top0 = h.ed->getActiveBufferForTesting().viewport.top;
@@ -1034,15 +1087,7 @@ TEST(gui_runloop_batch_cursor_vuelve_al_origen_resetea_blink) {
     }
     CHECK(quitPushed);
     runner.join();
-
-    if (prevVideo.empty())
-        ::unsetenv("SDL_VIDEODRIVER");
-    else
-        ::setenv("SDL_VIDEODRIVER", prevVideo.c_str(), 1);
-    if (prevAudio.empty())
-        ::unsetenv("SDL_AUDIODRIVER");
-    else
-        ::setenv("SDL_AUDIODRIVER", prevAudio.c_str(), 1);
+    closer.dismiss();
     CHECK(rc == 0);
 }
 
@@ -1058,11 +1103,7 @@ TEST(gui_runloop_batch_tope_de_tiempo_evita_inanicion) {
         VideoProbe probe;
         if (!probe.ok) SKIP("sin video dummy");
     }
-    std::string prevVideo, prevAudio;
-    if (const char* p = std::getenv("SDL_VIDEODRIVER")) prevVideo = p;
-    if (const char* p = std::getenv("SDL_AUDIODRIVER")) prevAudio = p;
-    ::setenv("SDL_VIDEODRIVER", "dummy", 1);
-    ::setenv("SDL_AUDIODRIVER", "dummy", 1);
+    SdlDummyDrivers env;
 
     auto watcher = std::make_unique<BlockingWatcher>();
     BlockingWatcher* raw = watcher.get();
@@ -1076,6 +1117,7 @@ TEST(gui_runloop_batch_tope_de_tiempo_evita_inanicion) {
 
     int rc = 1;
     std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer(raw, runner);
     int lastRender = -1, stable = 0;
     bool idle = false;
     for (int i = 0; i < 500 && !idle; ++i) {
@@ -1091,16 +1133,9 @@ TEST(gui_runloop_batch_tope_de_tiempo_evita_inanicion) {
     CHECK(idle);
     raw->arm();
     const bool blocked = raw->waitBlocked();
-    if (!blocked) {
-        raw->release();
-        SDL_Event q{};
-        q.type = SDL_QUIT;
-        SDL_PushEvent(&q);
-        runner.join();
-        CHECK(blocked);
-        return;
-    }
-    GuiRunLoop::setMaxBatchMsForTests(5);
+    CHECK(blocked);
+    if (!blocked) return;
+    MaxBatchMsGuard batchCap(5);
     const int base = h.gui->renderCount.load();
     for (int i = 0; i < kEvents; ++i) {
         SDL_Event ev{};
@@ -1119,7 +1154,6 @@ TEST(gui_runloop_batch_tope_de_tiempo_evita_inanicion) {
         if (!done) std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     const int renders = h.gui->renderCount.load() - base;
-    GuiRunLoop::setMaxBatchMsForTests(0);
     CHECK(done);
     CHECK(renders >= 2);
     CHECK(h.ed->getActiveBufferForTesting().cursor.col == kEvents);
@@ -1133,15 +1167,7 @@ TEST(gui_runloop_batch_tope_de_tiempo_evita_inanicion) {
     }
     CHECK(quitPushed);
     runner.join();
-
-    if (prevVideo.empty())
-        ::unsetenv("SDL_VIDEODRIVER");
-    else
-        ::setenv("SDL_VIDEODRIVER", prevVideo.c_str(), 1);
-    if (prevAudio.empty())
-        ::unsetenv("SDL_AUDIODRIVER");
-    else
-        ::setenv("SDL_AUDIODRIVER", prevAudio.c_str(), 1);
+    closer.dismiss();
     CHECK(rc == 0);
 }
 

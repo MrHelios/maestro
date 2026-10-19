@@ -145,6 +145,7 @@ public:
     // Permite secuencias deterministas con lotes artificialmente cortos sin
     // depender del costo por evento de cada máquina. No usar en producción.
     static void setMaxBatchMsForTests(int ms);
+    static int maxBatchMsForTests() { return maxBatchMsOverride_; }
     // Espera idle hasta el próximo deadline real (ms para SDL_WaitEventTimeout):
     // mínimo entre el timeout del Editor (mensaje/autoscroll; -1 = ausente)
     // y el cambio de fase del blink (ausente = sin animación pendiente),
