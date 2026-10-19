@@ -207,15 +207,22 @@ public:
     // el loop GUI para detectar actividad DENTRO de un lote de eventos,
     // incluso si el cursor vuelve a su posición original antes del render
     // (p. ej. AvPág + RePág): el renderer necesita resetear el ancla de
-    // blink en ese caso. No expone el Buffer ni depende de la GUI.
+    // blink en ese caso. Incluye la identidad del buffer activo para que un
+    // cambio de buffer cuente como actividad aunque coincidan coordenadas y
+    // estado. No expone el Buffer ni depende de la GUI.
     struct CursorViewSnapshot {
+        // Identidad estable del buffer activo (Buffer::id, unico por sesion):
+        // un cambio de buffer mueve el cursor aunque las coordenadas y el
+        // estado coincidan (p. ej. otro buffer recien abierto en 0,0).
+        int bufferId = 0;
         int cursorLine = 0;
         int cursorCol = 0;
         int viewportTop = 0;
         State state = State::Navegacion;
         bool operator==(const CursorViewSnapshot& o) const {
-            return cursorLine == o.cursorLine && cursorCol == o.cursorCol &&
-                   viewportTop == o.viewportTop && state == o.state;
+            return bufferId == o.bufferId && cursorLine == o.cursorLine &&
+                   cursorCol == o.cursorCol && viewportTop == o.viewportTop &&
+                   state == o.state;
         }
         bool operator!=(const CursorViewSnapshot& o) const {
             return !(*this == o);

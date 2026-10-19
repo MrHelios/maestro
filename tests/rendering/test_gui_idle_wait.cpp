@@ -522,10 +522,31 @@ TEST(idle_timeout_cambio_externo_en_bloque_renderiza) {
     CHECK(seen);
 }
 
+TEST(cursor_view_snapshot_incluye_identidad_de_buffer) {
+    // Cambio de buffer con las MISMAS coordenadas/estado (otro buffer en
+    // 0,0): el snapshot debe diferir por la identidad del buffer, para que
+    // el lote registre actividad intermedia y resetee el blink.
+    Harness h = makeHarness();
+    const Editor::CursorViewSnapshot a = h.ed->cursorViewSnapshot();
+    CHECK(a.state == State::Navegacion);
+    CHECK(a.cursorLine == 0);
+    CHECK(a.cursorCol == 0);
+    h.ed->executeCommand("buffer.nuevo");
+    const Editor::CursorViewSnapshot b = h.ed->cursorViewSnapshot();
+    CHECK(a != b);
+    CHECK(a.bufferId != b.bufferId);
+    // Volver al anterior: coordenadas/estado iguales al inicial y mismo
+    // buffer, así que el snapshot coincide (la actividad intermedia ya se
+    // registró al comparar paso a paso en el lote).
+    h.ed->executeCommand("buffer.anterior");
+    const Editor::CursorViewSnapshot c = h.ed->cursorViewSnapshot();
+    CHECK(c == a);
+    CHECK(c.bufferId == a.bufferId);
+}
+
 // ---------------------------------------------------------------------------
 // Integración SDL: el watcher se sirve durante actividad continua
 // ---------------------------------------------------------------------------
-
 #ifdef HAVE_SDL2
 #include <SDL2/SDL.h>
 
