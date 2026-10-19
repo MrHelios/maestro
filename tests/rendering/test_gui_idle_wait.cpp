@@ -599,16 +599,18 @@ struct SdlDummyDrivers {
     SdlDummyDrivers& operator=(const SdlDummyDrivers&) = delete;
 };
 
-// Garantiza el cierre del loop al salir del scope: libera el watcher, encola
-// SDL_QUIT con reintentos y une el hilo. Dismiss() cuando el test ya cerró.
+// Garantiza el cierre del loop al salir del scope: ejecuta el release del
+// watcher (si lo hay), encola SDL_QUIT con reintentos y une el hilo.
+// Dismiss() cuando el test ya cerró.
 struct LoopCloser {
-    BlockingWatcher* watcher;
+    std::function<void()> release;
     std::thread& runner;
     bool closed = false;
-    LoopCloser(BlockingWatcher* w, std::thread& t) : watcher(w), runner(t) {}
+    LoopCloser(std::function<void()> rel, std::thread& t)
+        : release(std::move(rel)), runner(t) {}
     ~LoopCloser() {
         if (closed || !runner.joinable()) return;
-        if (watcher) watcher->release();
+        if (release) release();
         for (int i = 0; i < 500; ++i) {
             SDL_Event q{};
             q.type = SDL_QUIT;
@@ -656,19 +658,14 @@ TEST(gui_runloop_idle_sirve_watcher_con_actividad_continua) {
         VideoProbe probe;
         if (!probe.ok) SKIP("sin video dummy");
     }
-    // El driver dummy debe estar fijo durante TODO el test (run() en otro
-    // hilo + pushes desde acá): se restaura al salir.
-    std::string prevVideo, prevAudio;
-    if (const char* p = std::getenv("SDL_VIDEODRIVER")) prevVideo = p;
-    if (const char* p = std::getenv("SDL_AUDIODRIVER")) prevAudio = p;
-    ::setenv("SDL_VIDEODRIVER", "dummy", 1);
-    ::setenv("SDL_AUDIODRIVER", "dummy", 1);
+    SdlDummyDrivers env;
 
     auto watcher = std::make_unique<CountingWatcher>();
     CountingWatcher* rawWatcher = watcher.get();
     Harness h = makeHarness(std::move(watcher));
     int rc = 1;
     std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer({}, runner);
     // Compuerta observable: el loop está vivo y sirviendo (primer servicio
     // del watcher) antes de inundar. Acotada: si el video nunca inicia,
     // run() ya devolvió 1 y el join no cuelga.
@@ -706,15 +703,7 @@ TEST(gui_runloop_idle_sirve_watcher_con_actividad_continua) {
     }
     CHECK(quitPushed);
     runner.join();
-
-    if (prevVideo.empty())
-        ::unsetenv("SDL_VIDEODRIVER");
-    else
-        ::setenv("SDL_VIDEODRIVER", prevVideo.c_str(), 1);
-    if (prevAudio.empty())
-        ::unsetenv("SDL_AUDIODRIVER");
-    else
-        ::setenv("SDL_AUDIODRIVER", prevAudio.c_str(), 1);
+    closer.dismiss();
 
     CHECK(rc == 0);
     // Servicios estrictamente DENTRO de la ventana de flood (se excluyen
@@ -743,11 +732,7 @@ TEST(gui_runloop_idle_evento_sdl_mueve_cursor_reinicia_blink) {
         VideoProbe probe;
         if (!probe.ok) SKIP("sin video dummy");
     }
-    std::string prevVideo, prevAudio;
-    if (const char* p = std::getenv("SDL_VIDEODRIVER")) prevVideo = p;
-    if (const char* p = std::getenv("SDL_AUDIODRIVER")) prevAudio = p;
-    ::setenv("SDL_VIDEODRIVER", "dummy", 1);
-    ::setenv("SDL_AUDIODRIVER", "dummy", 1);
+    SdlDummyDrivers env;
 
     auto watcher = std::make_unique<CountingWatcher>();
     CountingWatcher* rawWatcher = watcher.get();
@@ -761,6 +746,7 @@ TEST(gui_runloop_idle_evento_sdl_mueve_cursor_reinicia_blink) {
     GuiRenderer* gui = h.gui;
     int rc = 1;
     std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer({}, runner);
     // Compuerta: primer servicio del loop (ocurre tras el primer render,
     // que fija el ancla inicial). Así los 800ms siguientes miden fase real,
     // sin depender de la velocidad de init. Acotada y no fatal: si el video
@@ -792,15 +778,7 @@ TEST(gui_runloop_idle_evento_sdl_mueve_cursor_reinicia_blink) {
     quit.type = SDL_QUIT;
     SDL_PushEvent(&quit);
     runner.join();
-
-    if (prevVideo.empty())
-        ::unsetenv("SDL_VIDEODRIVER");
-    else
-        ::setenv("SDL_VIDEODRIVER", prevVideo.c_str(), 1);
-    if (prevAudio.empty())
-        ::unsetenv("SDL_AUDIODRIVER");
-    else
-        ::setenv("SDL_AUDIODRIVER", prevAudio.c_str(), 1);
+    closer.dismiss();
 
     CHECK(rc == 0);
     // El cursor se movió por el evento SDL (coords de contenido: la celda
@@ -825,30 +803,19 @@ TEST(gui_runloop_idle_quit_limpio) {
         VideoProbe probe;
         if (!probe.ok) SKIP("sin video dummy");
     }
-    std::string prevVideo, prevAudio;
-    if (const char* p = std::getenv("SDL_VIDEODRIVER")) prevVideo = p;
-    if (const char* p = std::getenv("SDL_AUDIODRIVER")) prevAudio = p;
-    ::setenv("SDL_VIDEODRIVER", "dummy", 1);
-    ::setenv("SDL_AUDIODRIVER", "dummy", 1);
+    SdlDummyDrivers env;
 
     Harness h = makeHarness();
     int rc = 1;
     std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer({}, runner);
     for (int i = 0; i < 200 && !(SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO); ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     SDL_Event quit{};
     quit.type = SDL_QUIT;
     SDL_PushEvent(&quit);
     runner.join();
-
-    if (prevVideo.empty())
-        ::unsetenv("SDL_VIDEODRIVER");
-    else
-        ::setenv("SDL_VIDEODRIVER", prevVideo.c_str(), 1);
-    if (prevAudio.empty())
-        ::unsetenv("SDL_AUDIODRIVER");
-    else
-        ::setenv("SDL_AUDIODRIVER", prevAudio.c_str(), 1);
+    closer.dismiss();
 
     CHECK(rc == 0);
 }
@@ -875,7 +842,7 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
     CHECK(h.ed->loadIntoActiveBuffer(tmp.path));
     int rc = 1;
     std::thread runner([&] { rc = h.loop->run(); });
-    LoopCloser closer(raw, runner);
+    LoopCloser closer([raw] { raw->release(); }, runner);
     // Esperar a que el loop haya drenado los eventos de creación de la
     // ventana y esté en reposo (render estable + watcher ya servido); recién
     // ahí se arma la compuerta para no bloquear a mitad del drenado inicial.
@@ -1005,7 +972,7 @@ TEST(gui_runloop_batch_cursor_vuelve_al_origen_resetea_blink) {
     h.ed->executeCommand("navegacion.interaccion");  // Bar sin modificar
     int rc = 1;
     std::thread runner([&] { rc = h.loop->run(); });
-    LoopCloser closer(raw, runner);
+    LoopCloser closer([raw] { raw->release(); }, runner);
     // Esperar a que el loop haya drenado los eventos de creación de la
     // ventana y esté en reposo (render estable + watcher ya servido); recién
     // ahí se arma la compuerta para no bloquear a mitad del drenado inicial.
@@ -1117,7 +1084,7 @@ TEST(gui_runloop_batch_tope_de_tiempo_evita_inanicion) {
 
     int rc = 1;
     std::thread runner([&] { rc = h.loop->run(); });
-    LoopCloser closer(raw, runner);
+    LoopCloser closer([raw] { raw->release(); }, runner);
     int lastRender = -1, stable = 0;
     bool idle = false;
     for (int i = 0; i < 500 && !idle; ++i) {
