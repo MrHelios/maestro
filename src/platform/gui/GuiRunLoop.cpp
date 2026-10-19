@@ -471,6 +471,12 @@ int GuiRunLoop::run() {
                         // medidas frescas). Sin cursor válido aún, rige el
                         // fallback de conservar el último conocido.
                         renderWithBlink();
+                    } else if (guiExposeNeedsRepaint(ev.window.event)) {
+                        // Región descubierta (p. ej. al cerrarse el overlay de
+                        // una captura): sin compositor, X11 no restaura los
+                        // píxeles. Se vuelve a presentar desde el framebuffer
+                        // persistente; no hace falta invalidar el contenido.
+                        renderWithBlink();
                     }
                     break;
                 case SDL_KEYDOWN: {

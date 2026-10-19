@@ -404,6 +404,16 @@ inline bool guiFocusRegainRefreshesIme(Uint8 windowEventId) {
     return windowEventId == SDL_WINDOWEVENT_FOCUS_GAINED;
 }
 
+// SDL_WINDOWEVENT.window.event -> ¿hay que repintar por exposición?
+// Solo EXPOSED: X11 avisa que una región de la ventana quedó descubierta
+// (p. ej. al cerrarse un overlay de captura) y sus píxeles deben repintarse.
+// Sin compositor, nadie restaura ese contenido por nosotros; sin este caso
+// el loop deja el frame viejo hasta el próximo evento o FOCUS_GAINED.
+// Testeable sin ventana: solo nombra la constante del evento.
+inline bool guiExposeNeedsRepaint(Uint8 windowEventId) {
+    return windowEventId == SDL_WINDOWEVENT_EXPOSED;
+}
+
 // SDL_WINDOWEVENT.window.event -> ¿hay que re-medir el drawable y la grilla?
 // P2 (cambio de monitor): SDL recomienda re-consultar el drawable tras
 // eventos importantes porque puede cambiar al mover la ventana entre

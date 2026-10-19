@@ -577,6 +577,36 @@ TEST(guimouse_sdl_focus_gain_refreshes_ime) {
 #endif
 }
 
+TEST(guimouse_sdl_expose_needs_repaint) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    // Solo EXPOSED repinta por exposición: X11 avisa que una región quedó
+    // descubierta (p. ej. al cerrarse un overlay de captura) y, sin
+    // compositor, el contenido no se restaura solo. Sin esta rama el loop
+    // mantiene píxeles viejos hasta FOCUS_GAINED o el próximo evento.
+    CHECK(guiExposeNeedsRepaint(SDL_WINDOWEVENT_EXPOSED));
+    // Resto de eventos con camino propio o sin repintado: no deben caer acá.
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_FOCUS_LOST));
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_FOCUS_GAINED));
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_RESIZED));
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_SIZE_CHANGED));
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_DISPLAY_CHANGED));
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_MOVED));
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_SHOWN));
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_HIDDEN));
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_MINIMIZED));
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_ENTER));
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_LEAVE));
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_MAXIMIZED));
+    CHECK(!guiExposeNeedsRepaint(SDL_WINDOWEVENT_CLOSE));
+    // Disjunción con los otros clasificadores: EXPOSED tiene un solo camino.
+    CHECK(!(guiResizeNeedsRemeasure(SDL_WINDOWEVENT_EXPOSED) ||
+            guiFocusLossEndsGesture(SDL_WINDOWEVENT_EXPOSED) ||
+            guiFocusRegainRefreshesIme(SDL_WINDOWEVENT_EXPOSED)));
+#endif
+}
+
 TEST(guimouse_sdl_resize_needs_remeasure) {
 #ifndef HAVE_SDL2
     SKIP("sin SDL2");
