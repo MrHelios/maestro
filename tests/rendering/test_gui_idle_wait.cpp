@@ -790,11 +790,9 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
     std::string content;
     for (int i = 0; i < kLines; ++i)
         content += "linea " + std::to_string(i) + "\n";
-    {
-        testfw::TempFile tmp;
-        tmp.write(content);
-        CHECK(h.ed->loadIntoActiveBuffer(tmp.path));
-    }
+    testfw::TempFile tmp;
+    tmp.write(content);
+    CHECK(h.ed->loadIntoActiveBuffer(tmp.path));
     int rc = 1;
     std::thread runner([&] { rc = h.loop->run(); });
     // Esperar a que el loop haya drenado los eventos de creación de la
@@ -831,6 +829,29 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
     const int cursor0 = h.ed->getActiveBufferForTesting().cursor.line;
     CHECK(hgt > 0);
     CHECK(hgt < kLines);
+    // Referencia secuencial: mismo documento y misma geometría, procesando
+    // los AvPág uno a uno con la semántica real del Editor. La expectativa
+    // no reimplementa la fórmula de applyPage; solo verifica que el lote
+    // produce el mismo estado que el manejo secuencial (paso real).
+    constexpr int kPageDowns = 5;
+    Harness ref = makeHarness();
+    CHECK(ref.ed->loadIntoActiveBuffer(tmp.path));
+    {
+        Buffer& rb = ref.ed->getActiveBufferForTesting();
+        const Buffer& lb = h.ed->getActiveBufferForTesting();
+        rb.viewport.height = lb.viewport.height;
+        rb.viewport.width = lb.viewport.width;
+        rb.viewport.top = lb.viewport.top;
+        rb.viewport.left = lb.viewport.left;
+        rb.cursor.line = lb.cursor.line;
+        rb.cursor.col = lb.cursor.col;
+    }
+    InputEvent pageDown;
+    pageDown.type = InputEventType::PageDown;
+    for (int i = 0; i < kPageDowns; ++i)
+        ref.ed->processEventForTesting(pageDown);
+    const int expectedTop = ref.ed->getActiveBufferForTesting().viewport.top;
+    const int expectedCursor = ref.ed->getActiveBufferForTesting().cursor.line;
 
     auto pushKeyDown = [](SDL_Keycode sym, bool repeat) {
         SDL_Event ev{};
@@ -841,7 +862,6 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
         ev.key.repeat = repeat ? 1 : 0;
         CHECK(SDL_PushEvent(&ev) == 1);
     };
-    constexpr int kPageDowns = 5;
     pushKeyDown(SDLK_PAGEDOWN, false);
     for (int i = 1; i < kPageDowns; ++i) pushKeyDown(SDLK_PAGEDOWN, true);
     SDL_Event up{};
@@ -859,9 +879,6 @@ TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
     CHECK(rendered);
     // Dejar terminar el render (el contador sube al inicio del frame).
     std::this_thread::sleep_for(std::chrono::milliseconds(120));
-    const int expectedTop = std::min(top0 + kPageDowns * hgt,
-                                     kLines - hgt);
-    const int expectedCursor = expectedTop + (cursor0 - top0);
     CHECK(h.ed->getActiveBufferForTesting().viewport.top == expectedTop);
     CHECK(h.ed->getActiveBufferForTesting().cursor.line == expectedCursor);
     // Todos los repeats se aplicaron en el MISMO lote: ningún render vio un
