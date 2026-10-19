@@ -1030,4 +1030,102 @@ TEST(gui_runloop_batch_cursor_vuelve_al_origen_resetea_blink) {
 }
 
 
+
+TEST(gui_runloop_batch_tope_de_tiempo_evita_inanicion) {
+    // Lote grande con render pedido: con el tope de tiempo se pinta más de
+    // una vez ANTES de haber procesado todo (sin tope habría un único render
+    // al final). El hook de tests acorta el tope para que la prueba no
+    // dependa del costo por evento de la máquina; el orden FIFO se verifica
+    // por el cursor final.
+    {
+        VideoProbe probe;
+        if (!probe.ok) SKIP("sin video dummy");
+    }
+    std::string prevVideo, prevAudio;
+    if (const char* p = std::getenv("SDL_VIDEODRIVER")) prevVideo = p;
+    if (const char* p = std::getenv("SDL_AUDIODRIVER")) prevAudio = p;
+    ::setenv("SDL_VIDEODRIVER", "dummy", 1);
+    ::setenv("SDL_AUDIODRIVER", "dummy", 1);
+
+    auto watcher = std::make_unique<BlockingWatcher>();
+    BlockingWatcher* raw = watcher.get();
+    Harness h = makeHarness(std::move(watcher));
+    static constexpr int kEvents = 60000;
+    std::string content(kEvents + 100, 'a');
+    content += "\n";
+    testfw::TempFile tmp;
+    tmp.write(content);
+    CHECK(h.ed->loadIntoActiveBuffer(tmp.path));
+
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+    int lastRender = -1, stable = 0;
+    bool idle = false;
+    for (int i = 0; i < 500 && !idle; ++i) {
+        const int r = h.gui->renderCount.load();
+        if (raw->pollCount.load() >= 1 && r == lastRender) {
+            if (++stable >= 10) idle = true;
+        } else {
+            stable = 0;
+        }
+        lastRender = r;
+        if (!idle) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(idle);
+    raw->arm();
+    const bool blocked = raw->waitBlocked();
+    if (!blocked) {
+        raw->release();
+        SDL_Event q{};
+        q.type = SDL_QUIT;
+        SDL_PushEvent(&q);
+        runner.join();
+        CHECK(blocked);
+        return;
+    }
+    GuiRunLoop::setMaxBatchMsForTests(5);
+    const int base = h.gui->renderCount.load();
+    for (int i = 0; i < kEvents; ++i) {
+        SDL_Event ev{};
+        ev.type = SDL_KEYDOWN;
+        ev.key.keysym.sym = SDLK_RIGHT;
+        ev.key.keysym.mod = KMOD_NONE;
+        ev.key.state = SDL_PRESSED;
+        ev.key.repeat = 0;
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    raw->release();
+
+    bool done = false;
+    for (int i = 0; i < 2000 && !done; ++i) {
+        done = h.ed->getActiveBufferForTesting().cursor.col == kEvents;
+        if (!done) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const int renders = h.gui->renderCount.load() - base;
+    GuiRunLoop::setMaxBatchMsForTests(0);
+    CHECK(done);
+    CHECK(renders >= 2);
+    CHECK(h.ed->getActiveBufferForTesting().cursor.col == kEvents);
+
+    bool quitPushed = false;
+    for (int i = 0; i < 500 && !quitPushed; ++i) {
+        SDL_Event q{};
+        q.type = SDL_QUIT;
+        if (SDL_PushEvent(&q) == 1) quitPushed = true;
+        else std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(quitPushed);
+    runner.join();
+
+    if (prevVideo.empty())
+        ::unsetenv("SDL_VIDEODRIVER");
+    else
+        ::setenv("SDL_VIDEODRIVER", prevVideo.c_str(), 1);
+    if (prevAudio.empty())
+        ::unsetenv("SDL_AUDIODRIVER");
+    else
+        ::setenv("SDL_AUDIODRIVER", prevAudio.c_str(), 1);
+    CHECK(rc == 0);
+}
+
 #endif

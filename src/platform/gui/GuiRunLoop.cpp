@@ -17,6 +17,12 @@
 #include "platform/gui/GuiSdlMapper.h"
 #endif
 
+int GuiRunLoop::maxBatchMsOverride_ = 0;
+
+void GuiRunLoop::setMaxBatchMsForTests(int ms) {
+    maxBatchMsOverride_ = ms;
+}
+
 GuiRunLoop::GuiRunLoop(Editor& editor, const GuiOptions& opts)
     : editor_(editor), options_(opts) {}
 
@@ -676,12 +682,22 @@ int GuiRunLoop::run() {
         };
         SDL_Event ev;
         bool hadEvent = false;
+        // Tope de tiempo del lote: con entrada continua la cola puede no
+        // vaciarse nunca. Si ya hay un render pedido, se corta y se pinta
+        // para no postergar la presentación/blink; el resto queda para el
+        // próximo lote (FIFO, sin descartes).
+        const auto batchStart = std::chrono::steady_clock::now();
         while (SDL_PollEvent(&ev)) {
             hadEvent = true;
             // La actividad continua de eventos no puede posponer el polling
             // del watcher: se comprueba también dentro del drenado.
             serviceWatcherIfDue(std::chrono::steady_clock::now());
             processEvent(ev);
+            if (renderNeeded &&
+                std::chrono::steady_clock::now() - batchStart >=
+                    std::chrono::milliseconds(batchCapMs())) {
+                break;
+            }
         }
         if (renderNeeded) {
             // Un solo render por lote, con el estado final ya aplicado. La

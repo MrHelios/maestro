@@ -134,6 +134,17 @@ public:
     // cadencia de animación ni garantía temporal absoluta. El clipboard GUI
     // es síncrono y no justifica cota alguna.
     static constexpr int kMaxIdleWaitMs = 30;
+    // Tope de tiempo (ms) sin renderizar dentro de un lote de eventos SDL.
+    // Si el drenado sigue con eventos pendientes y ya hay un render pedido,
+    // se corta el lote y se pinta: bajo entrada continua la cola puede no
+    // vaciarse nunca y sin este tope la presentación (y el blink) quedaría
+    // postergada indefinidamente. Los eventos restantes se procesan en el
+    // lote siguiente, en el mismo orden FIFO (nada se descarta).
+    static constexpr int kMaxBatchMs = 30;
+    // Solo tests: fija el tope de lote (0 = restaura el default kMaxBatchMs).
+    // Permite secuencias deterministas con lotes artificialmente cortos sin
+    // depender del costo por evento de cada máquina. No usar en producción.
+    static void setMaxBatchMsForTests(int ms);
     // Espera idle hasta el próximo deadline real (ms para SDL_WaitEventTimeout):
     // mínimo entre el timeout del Editor (mensaje/autoscroll; -1 = ausente)
     // y el cambio de fase del blink (ausente = sin animación pendiente),
@@ -167,6 +178,12 @@ public:
     bool idleOnTimeout(std::chrono::steady_clock::time_point now);
 
 private:
+    // Override de tests para kMaxBatchMs (0 = default). Ver
+    // setMaxBatchMsForTests. Estático: el loop es único por proceso.
+    static int maxBatchMsOverride_;
+    static int batchCapMs() {
+        return maxBatchMsOverride_ > 0 ? maxBatchMsOverride_ : kMaxBatchMs;
+    }
     Editor& editor_;
     GuiOptions options_;
     GuiRenderer* gui_ = nullptr;
