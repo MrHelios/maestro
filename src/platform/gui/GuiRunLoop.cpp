@@ -352,6 +352,20 @@ int GuiRunLoop::run() {
         if (gui_) lastBlinkPhaseOn_ = gui_->blinkPhaseOn();
         updateImeRect();
     };
+    // LOTE DE EVENTOS: en vez de renderizar dentro de handleSdlEvent (lo
+    // que hace un frame completo por cada KEYDOWN repetido), se acumulan
+    // los efectos de estado y se pinta UNA vez al vaciar la cola SDL. El
+    // KEYUP entra en el mismo lote: no queda atrapado detrás de renders.
+    // La semántica de cada evento se preserva en orden FIFO; solo se
+    // difiere el pintado. Sin tope de lote a propósito (un límite podría
+    // dejar el KEYUP para después del render).
+    bool renderNeeded = false;
+    auto requestRender = [&] { renderNeeded = true; };
+    // Actividad de cursor/viewport DENTRO del lote: un AvPág + RePág deja
+    // la misma celda final, pero el cursor sí se movió y el blink debe
+    // reiniciarse (ver GuiRenderer::markCursorActivity).
+    Editor::CursorViewSnapshot batchView = editor_.cursorViewSnapshot();
+    bool batchCursorActivity = false;
     // Puntos de evento SDL -> celda 0-based (dominio neutro CellPos): la
     // MISMA métrica que el resize (fuente escalada o fallback escalado) y el
     // MISMO espacio (drawable). Los eventos llegan en puntos de ventana: con
@@ -434,7 +448,7 @@ int GuiRunLoop::run() {
                     // Cierre de ventana = intento de salida (respeta
                     // buffers modificados: requestQuit(false) avisa).
                     if (!editor_.requestQuit(false)) {
-                        renderWithBlink();
+                        requestRender();
                     }
                     break;
                 case SDL_WINDOWEVENT:
@@ -446,7 +460,7 @@ int GuiRunLoop::run() {
                         // escala sí). currentSize() re-consulta el drawable,
                         // re-escala la fuente y recalcula la grilla.
                         editor_.resize(currentSize());
-                        renderWithBlink();
+                        requestRender();
                     } else if (guiFocusLossEndsGesture(ev.window.event)) {
                         // Pérdida de foco con gesto en curso: la captura cae
                         // sola y el BUTTONUP puede ir a otra ventana, así que
@@ -461,7 +475,7 @@ int GuiRunLoop::run() {
                         editor_.handleEvent(ie);
                         const auto now = std::chrono::steady_clock::now();
                         editor_.clearExpiredMessages(now);
-                        renderWithBlink();
+                        requestRender();
                     } else if (guiFocusRegainRefreshesIme(ev.window.event)) {
                         // Foco recuperado: el rect IME de SDL puede haber
                         // quedado obsoleto (cursor, buffer, tamaño o escala
@@ -470,13 +484,13 @@ int GuiRunLoop::run() {
                         // (renderWithBlink termina en updateImeRect con
                         // medidas frescas). Sin cursor válido aún, rige el
                         // fallback de conservar el último conocido.
-                        renderWithBlink();
+                        requestRender();
                     } else if (guiExposeNeedsRepaint(ev.window.event)) {
                         // Región descubierta (p. ej. al cerrarse el overlay de
                         // una captura): sin compositor, X11 no restaura los
                         // píxeles. Se vuelve a presentar desde el framebuffer
                         // persistente; no hace falta invalidar el contenido.
-                        renderWithBlink();
+                        requestRender();
                     }
                     break;
                 case SDL_KEYDOWN: {
@@ -501,7 +515,7 @@ int GuiRunLoop::run() {
                         editor_.handleEvent(ie);
                         const auto now = std::chrono::steady_clock::now();
                         editor_.clearExpiredMessages(now);
-                        renderWithBlink();
+                        requestRender();
                     }
                     break;
                 }
@@ -531,7 +545,7 @@ int GuiRunLoop::run() {
                         }
                         const auto now = std::chrono::steady_clock::now();
                         editor_.clearExpiredMessages(now);
-                        renderWithBlink();
+                        requestRender();
                     }
                     break;
                 }
@@ -576,7 +590,7 @@ int GuiRunLoop::run() {
                         sdlCaptureMouseBestEffort(SDL_TRUE);
                         const auto now = std::chrono::steady_clock::now();
                         editor_.clearExpiredMessages(now);
-                        renderWithBlink();
+                        requestRender();
                     }
                     break;
                 }
@@ -595,7 +609,7 @@ int GuiRunLoop::run() {
                         sdlCaptureMouseBestEffort(SDL_FALSE);
                         const auto now = std::chrono::steady_clock::now();
                         editor_.clearExpiredMessages(now);
-                        renderWithBlink();
+                        requestRender();
                     }
                     break;
                 }
@@ -615,7 +629,7 @@ int GuiRunLoop::run() {
                     editor_.handleEvent(ie);
                     const auto now = std::chrono::steady_clock::now();
                     editor_.clearExpiredMessages(now);
-                    renderWithBlink();
+                    requestRender();
                     break;
                 }
                 case SDL_MOUSEWHEEL: {
@@ -644,12 +658,21 @@ int GuiRunLoop::run() {
                     }
                     const auto now = std::chrono::steady_clock::now();
                     editor_.clearExpiredMessages(now);
-                    renderWithBlink();
+                    requestRender();
                     break;
                 }
                 default:
                     break;
             }
+        };
+        // Envuelve el handler con la detección de actividad intermedia del
+        // lote (debe definirse DESPUÉS de handleSdlEvent).
+        auto processEvent = [&](SDL_Event& ev) {
+            handleSdlEvent(ev);
+            const Editor::CursorViewSnapshot after =
+                editor_.cursorViewSnapshot();
+            if (after != batchView) batchCursorActivity = true;
+            batchView = after;
         };
         SDL_Event ev;
         bool hadEvent = false;
@@ -658,7 +681,19 @@ int GuiRunLoop::run() {
             // La actividad continua de eventos no puede posponer el polling
             // del watcher: se comprueba también dentro del drenado.
             serviceWatcherIfDue(std::chrono::steady_clock::now());
-            handleSdlEvent(ev);
+            processEvent(ev);
+        }
+        if (renderNeeded) {
+            // Un solo render por lote, con el estado final ya aplicado. La
+            // actividad intermedia (aunque el cursor haya vuelto al origen)
+            // se le informa al renderer antes de pintar.
+            if (batchCursorActivity && gui_) gui_->markCursorActivity();
+            batchCursorActivity = false;
+            renderNeeded = false;
+            renderWithBlink();
+            // Volver al tope: durante el render pueden haber llegado más
+            // eventos; se drenan en el próximo lote en vez de esperar.
+            continue;
         }
         if (!hadEvent) {
             // Sin eventos: espera hasta el próximo deadline real (timeout
@@ -682,7 +717,7 @@ int GuiRunLoop::run() {
             if (rc == 1) {
                 // Evento durante la espera: se procesa por el camino único
                 // (arriba), sin re-push a la cola.
-                handleSdlEvent(wev);
+                processEvent(wev);
                 continue;
             }
             // rc == 0: timeout normal O error de espera (el contrato SDL 2.0+

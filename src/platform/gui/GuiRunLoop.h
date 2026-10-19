@@ -27,6 +27,12 @@ class Editor;
 // deadline se calcula con precisión de ms, pero la latencia real depende
 // de la planificación del SO (SDL no garantiza el instante exacto).
 //
+// LOTE DE EVENTOS: run() no renderiza por evento. Drena la cola SDL
+// aplicando todos los eventos en orden FIFO y pinta UNA vez al final; el
+// KEYUP entra en el mismo lote (sin tope que lo deje detrás de un render).
+// La actividad de cursor/viewport intermedia se conserva aunque el cursor
+// vuelva al origen (AvPág + RePág), para resetear el blink correctamente.
+//
 // INVARIANTE DE RENDER: cada render recibe el tiempo actualizado del cursor
 // (setBlinkNow) antes de pintar; los despertares que no cambian el estado
 // visible ni requieren procesar un timer no solicitan otro render.

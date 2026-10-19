@@ -1158,6 +1158,11 @@ bool Editor::requestQuit(bool force) {
     return true;
 }
 
+Editor::CursorViewSnapshot Editor::cursorViewSnapshot() const {
+    const Buffer& b = active();
+    return {b.cursor.line, b.cursor.col, b.viewport.top, state_};
+}
+
 bool Editor::consumeSuspendRequest() {
     if (!suspendRequested_) return false;
     suspendRequested_ = false;

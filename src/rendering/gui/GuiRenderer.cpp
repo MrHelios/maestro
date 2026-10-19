@@ -222,10 +222,14 @@ void GuiRenderer::setBlinkNow(
     blinkNowSet_ = true;
 }
 
+void GuiRenderer::markCursorActivity() { cursorActivity_ = true; }
+
 void GuiRenderer::noteCursorForBlink(const FrameCursor& next) const {
     const bool changed =
-        !blinkAnchorSet_ || next.visible != lastCursor_.visible ||
+        cursorActivity_ || !blinkAnchorSet_ ||
+        next.visible != lastCursor_.visible ||
         next.shape != lastCursor_.shape || !(next.cell == lastCursor_.cell);
+    cursorActivity_ = false;
     if (!changed) return;
     // CONTRATO: el reloj lo inyecta el propietario con setBlinkNow() antes
     // de cada render; el renderer nunca consulta el reloj interno para el

@@ -16,8 +16,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -43,7 +45,11 @@ using clk = std::chrono::steady_clock;
 // frame), para probar "cero renders espurios" por observación directa en
 // vez de comparar snapshots visuales.
 struct CountingGuiRenderer : public GuiRenderer {
-    int renderCount = 0;
+    std::atomic<int> renderCount{0};
+    // Cursor/viewport que vio cada render (protegido: el loop escribe desde
+    // otro hilo y los tests de lote leen antes del join para no esperar).
+    std::mutex samplesMutex;
+    std::vector<std::pair<int, int>> renderedCursors;
     void renderScreenDiff(const Document& doc, const Cursor& cursor,
                           const Viewport& viewport, const std::string& filename,
                           bool modified, const ChromeRequest& chrome, Sink& sink,
@@ -51,9 +57,55 @@ struct CountingGuiRenderer : public GuiRenderer {
                           const std::optional<Selection>& searchHighlight,
                           const std::optional<BracketPair>& bracketPair) override {
         ++renderCount;
+        {
+            std::lock_guard<std::mutex> lk(samplesMutex);
+            renderedCursors.emplace_back(cursor.line, viewport.top);
+        }
         GuiRenderer::renderScreenDiff(doc, cursor, viewport, filename, modified,
                                       chrome, sink, selection, searchHighlight,
                                       bracketPair);
+    }
+    std::vector<std::pair<int, int>> cursorSamples() {
+        std::lock_guard<std::mutex> lk(samplesMutex);
+        return renderedCursors;
+    }
+};
+
+// Watcher con compuerta: el primer poll se bloquea hasta release(). El
+// loop llama al watcher al tope de cada vuelta, ANTES de drenar SDL, así
+// que la compuerta deja el hilo detenido con la cola intacta: el test
+// puede encolar un lote completo y liberar para que se procese de una vez.
+struct BlockingWatcher : public FileWatcher {
+    std::atomic<int> pollCount{0};
+    std::atomic<bool> armed{false};
+    std::mutex m;
+    std::condition_variable cv;
+    bool blocked = false;
+    bool released = false;
+    void watch(const std::string&) override {}
+    void unwatch(const std::string&) override {}
+    int fd() const override { return -1; }
+    void pollEvents(
+        const std::function<void(const FileChangeEvent&)>&) override {
+        ++pollCount;
+        if (!armed.load(std::memory_order_acquire)) return;
+        std::unique_lock<std::mutex> lk(m);
+        if (!blocked) {
+            blocked = true;
+            cv.notify_all();
+            cv.wait(lk, [&] { return released; });
+        }
+    }
+    void arm() { armed.store(true, std::memory_order_release); }
+    bool waitBlocked() {
+        std::unique_lock<std::mutex> lk(m);
+        return cv.wait_for(lk, std::chrono::seconds(5),
+                           [&] { return blocked; });
+    }
+    void release() {
+        std::lock_guard<std::mutex> lk(m);
+        released = true;
+        cv.notify_all();
     }
 };
 
@@ -183,6 +235,24 @@ TEST(idle_blink_deadline_resetea_al_mover_cursor) {
     CHECK(*rest(0) == 530);
     CHECK(*rest(529) == 1);
     CHECK(*rest(530) == 530);
+}
+
+TEST(idle_blink_mark_cursor_activity_fuerza_reset) {
+    // El loop GUI marca actividad de lote aunque la celda final coincida con
+    // la anterior (AvPág + RePág). Sin la marca, el ancla vieja mantendría
+    // la fase OFF; con ella, el render vuelve a ON.
+    Harness h = makeHarness();
+    h.ed->handleEvent(insertCharEv("i"));
+    const auto t0 = clk::now();
+    h.loop->idleStep(t0);
+    h.gui->setBlinkNow(t0 + std::chrono::milliseconds(800));
+    CHECK(!h.gui->blinkPhaseOn());
+    h.gui->markCursorActivity();
+    h.loop->idleStep(t0 + std::chrono::milliseconds(800));
+    CHECK(h.gui->blinkPhaseOn());
+    auto rest = h.gui->msUntilBlinkToggle(t0 + std::chrono::milliseconds(800));
+    CHECK(rest.has_value());
+    CHECK(*rest == 530);
 }
 
 TEST(idle_blink_deadline_cursor_invisible) {
@@ -698,4 +768,266 @@ TEST(gui_runloop_idle_quit_limpio) {
 
     CHECK(rc == 0);
 }
+
+TEST(gui_runloop_batch_repeats_un_solo_render_y_sin_movimiento_posterior) {
+    // Reproduce el lag de AvPág: KEYDOWN + N repeats + KEYUP en un solo
+    // lote. El loop aplica todos los eventos (FIFO) pero pinta UNA vez, y
+    // tras soltar no quedan repeticiones pendientes que muevan la vista.
+    {
+        VideoProbe probe;
+        if (!probe.ok) SKIP("sin video dummy");
+    }
+    std::string prevVideo, prevAudio;
+    if (const char* p = std::getenv("SDL_VIDEODRIVER")) prevVideo = p;
+    if (const char* p = std::getenv("SDL_AUDIODRIVER")) prevAudio = p;
+    ::setenv("SDL_VIDEODRIVER", "dummy", 1);
+    ::setenv("SDL_AUDIODRIVER", "dummy", 1);
+
+    auto watcher = std::make_unique<BlockingWatcher>();
+    BlockingWatcher* raw = watcher.get();
+    Harness h = makeHarness(std::move(watcher));
+    static constexpr int kLines = 2000;
+    std::string content;
+    for (int i = 0; i < kLines; ++i)
+        content += "linea " + std::to_string(i) + "\n";
+    {
+        testfw::TempFile tmp;
+        tmp.write(content);
+        CHECK(h.ed->loadIntoActiveBuffer(tmp.path));
+    }
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+    // Esperar a que el loop haya drenado los eventos de creación de la
+    // ventana y esté en reposo (render estable + watcher ya servido); recién
+    // ahí se arma la compuerta para no bloquear a mitad del drenado inicial.
+    int lastRender = -1;
+    int stable = 0;
+    bool idle = false;
+    for (int i = 0; i < 500 && !idle; ++i) {
+        const int rcNow = h.gui->renderCount.load();
+        if (raw->pollCount.load() >= 1 && rcNow == lastRender) {
+            if (++stable >= 10) idle = true;
+        } else {
+            stable = 0;
+        }
+        lastRender = rcNow;
+        if (!idle) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(idle);
+    raw->arm();
+    const bool blocked = raw->waitBlocked();
+    if (!blocked) {
+        raw->release();
+        SDL_Event q{};
+        q.type = SDL_QUIT;
+        SDL_PushEvent(&q);
+        runner.join();
+        CHECK(blocked);
+        return;
+    }
+    const int base = h.gui->renderCount.load();
+    const int hgt = h.ed->getActiveBufferForTesting().viewport.height;
+    const int top0 = h.ed->getActiveBufferForTesting().viewport.top;
+    const int cursor0 = h.ed->getActiveBufferForTesting().cursor.line;
+    CHECK(hgt > 0);
+    CHECK(hgt < kLines);
+
+    auto pushKeyDown = [](SDL_Keycode sym, bool repeat) {
+        SDL_Event ev{};
+        ev.type = SDL_KEYDOWN;
+        ev.key.keysym.sym = sym;
+        ev.key.keysym.mod = KMOD_NONE;
+        ev.key.state = SDL_PRESSED;
+        ev.key.repeat = repeat ? 1 : 0;
+        CHECK(SDL_PushEvent(&ev) == 1);
+    };
+    constexpr int kPageDowns = 5;
+    pushKeyDown(SDLK_PAGEDOWN, false);
+    for (int i = 1; i < kPageDowns; ++i) pushKeyDown(SDLK_PAGEDOWN, true);
+    SDL_Event up{};
+    up.type = SDL_KEYUP;
+    up.key.keysym.sym = SDLK_PAGEDOWN;
+    up.key.state = SDL_RELEASED;
+    CHECK(SDL_PushEvent(&up) == 1);
+    raw->release();
+
+    bool rendered = false;
+    for (int i = 0; i < 300 && !rendered; ++i) {
+        rendered = h.gui->renderCount.load() > base;
+        if (!rendered) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(rendered);
+    // Dejar terminar el render (el contador sube al inicio del frame).
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    const int expectedTop = std::min(top0 + kPageDowns * hgt,
+                                     kLines - hgt);
+    const int expectedCursor = expectedTop + (cursor0 - top0);
+    CHECK(h.ed->getActiveBufferForTesting().viewport.top == expectedTop);
+    CHECK(h.ed->getActiveBufferForTesting().cursor.line == expectedCursor);
+    // Todos los repeats se aplicaron en el MISMO lote: ningún render vio un
+    // estado intermedio del cursor (solo el inicial o el final). Puede
+    // haber renders extra por eventos de ventana, pero no por cada tecla.
+    bool sawFinal = false;
+    for (const auto& sample : h.gui->cursorSamples()) {
+        CHECK(sample.first == cursor0 || sample.first == expectedCursor);
+        if (sample.first == expectedCursor) sawFinal = true;
+    }
+    CHECK(sawFinal);
+    // Sin eventos pendientes: ni renders ni movimiento adicionales.
+    const int settled = h.gui->renderCount.load();
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    CHECK(h.gui->renderCount.load() == settled);
+    CHECK(h.ed->getActiveBufferForTesting().viewport.top == expectedTop);
+    CHECK(h.ed->getActiveBufferForTesting().cursor.line == expectedCursor);
+
+    bool quitPushed = false;
+    for (int i = 0; i < 500 && !quitPushed; ++i) {
+        SDL_Event q{};
+        q.type = SDL_QUIT;
+        if (SDL_PushEvent(&q) == 1) quitPushed = true;
+        else std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(quitPushed);
+    runner.join();
+
+    if (prevVideo.empty())
+        ::unsetenv("SDL_VIDEODRIVER");
+    else
+        ::setenv("SDL_VIDEODRIVER", prevVideo.c_str(), 1);
+    if (prevAudio.empty())
+        ::unsetenv("SDL_AUDIODRIVER");
+    else
+        ::setenv("SDL_AUDIODRIVER", prevAudio.c_str(), 1);
+    CHECK(rc == 0);
+}
+
+TEST(gui_runloop_batch_cursor_vuelve_al_origen_resetea_blink) {
+    // AvPág + RePág en el MISMO lote: la celda final es igual a la inicial,
+    // pero hubo actividad intermedia. El render debe resetear el ancla
+    // (Bar ON) aunque el renderer no vea cambio de celda.
+    {
+        VideoProbe probe;
+        if (!probe.ok) SKIP("sin video dummy");
+    }
+    std::string prevVideo, prevAudio;
+    if (const char* p = std::getenv("SDL_VIDEODRIVER")) prevVideo = p;
+    if (const char* p = std::getenv("SDL_AUDIODRIVER")) prevAudio = p;
+    ::setenv("SDL_VIDEODRIVER", "dummy", 1);
+    ::setenv("SDL_AUDIODRIVER", "dummy", 1);
+
+    auto watcher = std::make_unique<BlockingWatcher>();
+    BlockingWatcher* raw = watcher.get();
+    Harness h = makeHarness(std::move(watcher));
+    std::string content;
+    for (int i = 0; i < 200; ++i)
+        content += "linea " + std::to_string(i) + "\n";
+    {
+        testfw::TempFile tmp;
+        tmp.write(content);
+        CHECK(h.ed->loadIntoActiveBuffer(tmp.path));
+    }
+    h.ed->executeCommand("navegacion.interaccion");  // Bar sin modificar
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+    // Esperar a que el loop haya drenado los eventos de creación de la
+    // ventana y esté en reposo (render estable + watcher ya servido); recién
+    // ahí se arma la compuerta para no bloquear a mitad del drenado inicial.
+    int lastRender = -1;
+    int stable = 0;
+    bool idle = false;
+    for (int i = 0; i < 500 && !idle; ++i) {
+        const int rcNow = h.gui->renderCount.load();
+        if (raw->pollCount.load() >= 1 && rcNow == lastRender) {
+            if (++stable >= 10) idle = true;
+        } else {
+            stable = 0;
+        }
+        lastRender = rcNow;
+        if (!idle) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(idle);
+    raw->arm();
+    const bool blocked = raw->waitBlocked();
+    if (!blocked) {
+        raw->release();
+        SDL_Event q{};
+        q.type = SDL_QUIT;
+        SDL_PushEvent(&q);
+        runner.join();
+        CHECK(blocked);
+        return;
+    }
+    CHECK(h.gui->lastCursor().shape == FrameCursorShape::Bar);
+    const int base = h.gui->renderCount.load();
+    const int top0 = h.ed->getActiveBufferForTesting().viewport.top;
+    const int cursor0 = h.ed->getActiveBufferForTesting().cursor.line;
+    const int hgt = h.ed->getActiveBufferForTesting().viewport.height;
+    CHECK(hgt > 0);
+    // Llevar la fase a OFF de forma determinista: el loop está bloqueado,
+    // así que se inyecta el reloj sin render y se espera el cambio de fase.
+    // (Un sleep fijo no sirve: el ancla puede tener una edad arbitraria por
+    // los renders idle previos.)
+    for (int i = 0; i < 200 && h.gui->blinkPhaseOn(); ++i) {
+        h.gui->setBlinkNow(clk::now());
+        if (h.gui->blinkPhaseOn())
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(!h.gui->blinkPhaseOn());
+
+    auto push = [](SDL_Keycode sym) {
+        SDL_Event ev{};
+        ev.type = SDL_KEYDOWN;
+        ev.key.keysym.sym = sym;
+        ev.key.keysym.mod = KMOD_NONE;
+        ev.key.state = SDL_PRESSED;
+        ev.key.repeat = 0;
+        CHECK(SDL_PushEvent(&ev) == 1);
+    };
+    push(SDLK_PAGEDOWN);
+    push(SDLK_PAGEUP);
+    raw->release();
+
+    bool rendered = false;
+    for (int i = 0; i < 300 && !rendered; ++i) {
+        rendered = h.gui->renderCount.load() > base;
+        if (!rendered) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(rendered);
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    CHECK(h.ed->getActiveBufferForTesting().viewport.top == top0);
+    CHECK(h.ed->getActiveBufferForTesting().cursor.line == cursor0);
+    // El AvPág intermedio no se renderizó: todos los samples tienen el
+    // cursor en la posición original (el lote se aplicó completo).
+    for (const auto& sample : h.gui->cursorSamples()) {
+        CHECK(sample.first == cursor0);
+    }
+    // Sin la actividad intermedia el ancla seguiría en el primer render y
+    // la fase continuaría OFF.
+    CHECK(h.gui->cursorShown());
+    const auto rest = h.gui->msUntilBlinkToggle(clk::now());
+    CHECK(rest.has_value());
+    CHECK(*rest > 300);
+
+    bool quitPushed = false;
+    for (int i = 0; i < 500 && !quitPushed; ++i) {
+        SDL_Event q{};
+        q.type = SDL_QUIT;
+        if (SDL_PushEvent(&q) == 1) quitPushed = true;
+        else std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(quitPushed);
+    runner.join();
+
+    if (prevVideo.empty())
+        ::unsetenv("SDL_VIDEODRIVER");
+    else
+        ::setenv("SDL_VIDEODRIVER", prevVideo.c_str(), 1);
+    if (prevAudio.empty())
+        ::unsetenv("SDL_AUDIODRIVER");
+    else
+        ::setenv("SDL_AUDIODRIVER", prevAudio.c_str(), 1);
+    CHECK(rc == 0);
+}
+
+
 #endif

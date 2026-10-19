@@ -203,6 +203,26 @@ public:
     void executeCommand(const std::string& name);
     bool hasCommand(const std::string& name) const;
 
+    // Snapshot neutro del estado visible que puede mover el cursor. Lo usa
+    // el loop GUI para detectar actividad DENTRO de un lote de eventos,
+    // incluso si el cursor vuelve a su posición original antes del render
+    // (p. ej. AvPág + RePág): el renderer necesita resetear el ancla de
+    // blink en ese caso. No expone el Buffer ni depende de la GUI.
+    struct CursorViewSnapshot {
+        int cursorLine = 0;
+        int cursorCol = 0;
+        int viewportTop = 0;
+        State state = State::Navegacion;
+        bool operator==(const CursorViewSnapshot& o) const {
+            return cursorLine == o.cursorLine && cursorCol == o.cursorCol &&
+                   viewportTop == o.viewportTop && state == o.state;
+        }
+        bool operator!=(const CursorViewSnapshot& o) const {
+            return !(*this == o);
+        }
+    };
+    CursorViewSnapshot cursorViewSnapshot() const;
+
     // Getters para testing
     State getStateForTesting() const { return state_; }
     std::string getGoToLineQueryForTesting() const { return goToLineQuery_; }

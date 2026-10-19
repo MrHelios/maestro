@@ -244,6 +244,11 @@ public:
     // de inyectar, el parpadeo queda congelado (bug del propietario).
     // Reutilizar el renderer en otro contexto exige seguir inyectando.
     void setBlinkNow(std::chrono::steady_clock::time_point now);
+    // Marca actividad de cursor DENTRO del lote de eventos aunque la celda
+    // final coincida con la del último render (AvPág + RePág, etc.). Fuerza
+    // el reset del ancla de blink en el próximo render; no pinta por sí
+    // solo. El loop GUI la llama una vez por lote si detectó movimiento.
+    void markCursorActivity();
     // Fase del parpadeo: true = pintar cursor. Block siempre true.
     bool blinkPhaseOn() const;
     // Ms restantes hasta el próximo cambio de fase ON<->OFF, medidos desde
@@ -331,6 +336,9 @@ private:
     mutable std::chrono::steady_clock::time_point blinkNow_{};
     mutable bool blinkAnchorSet_ = false;
     mutable bool blinkNowSet_ = false;
+    // Actividad intermedia del lote pendiente de consumir por
+    // noteCursorForBlink (ver markCursorActivity).
+    mutable bool cursorActivity_ = false;
     static constexpr int kBlinkOnMs = 530;
     static constexpr int kBlinkPeriodMs = 1060;
     void noteCursorForBlink(const FrameCursor& next) const;
