@@ -57,6 +57,7 @@ public:
     void invalidateCache() {
         hasCache_ = false;
         hasLastChromeData_ = false;
+        lastGutterW_ = -1;
     }
 
     // Observabilidad para tests (solo lectura): estado del cache diferencial.
@@ -105,6 +106,11 @@ private:
     int lastCursorCol_ = 0;
     uint64_t lastVersion_ = 0;
     int lastLineCount_ = 0;
+    // Ancho del gutter usado al construir rowCache_. Si cambia (p.ej. al
+    // cruzar 99->100 lineas) TODO el viewport queda con numeros desalineados:
+    // los fast paths (scroll de region) solo repintan filas puntuales, asi
+    // que el cambio de ancho fuerza rebuild total (ver buildDiffFrame).
+    int lastGutterW_ = -1;
     ChromeData lastChromeData_;
     bool hasLastChromeData_ = false;
     std::optional<BracketPair> lastBracketPair_;

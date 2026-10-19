@@ -196,6 +196,7 @@ void TtyDiff::rebuildCache(
     cachedContentH_ = contentH;
     lastVersion_ = doc.version();
     lastLineCount_ = doc.lineCount();
+    lastGutterW_ = gutterW;
     lastBracketPair_ = bracketPair;
     hasLastBracketPair_ = true;
 }
@@ -284,6 +285,10 @@ std::string TtyDiff::buildScrollFrame(
 
     const int gutterW = g.gutterW;
     const int textWidth = std::max(0, g.layout.content.width - gutterW);
+    // El ancho del gutter cambio: las filas ya cacheadas conservan el ancho
+    // viejo y la region de scroll las desplazaria sin repintarlas. Declinar
+    // para que buildDiffFrame haga el rebuild total (gate de lastGutterW_).
+    if (gutterW != lastGutterW_) return "";
     std::optional<Normalized> sel =
         selection.has_value() ? normalize(*selection) : std::nullopt;
     std::optional<Normalized> searchSel =
@@ -354,8 +359,9 @@ std::string TtyDiff::buildDiffFrame(
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
     const bool langChanged = builder_.updateSyntaxLanguage(filename);
-    const Layout layout =
-        builder_.calculateLayout(viewport.height, viewport.width);
+    const FrameBuilder::EditorGeometry geom =
+        builder_.editorGeometry(doc, viewport);
+    const Layout layout = geom.layout;
     const int contentH = layout.content.height;
 
     bool bracketChanged = false;
@@ -363,11 +369,12 @@ std::string TtyDiff::buildDiffFrame(
     else if (lastBracketPair_ != bracketPair) bracketChanged = true;
     if (!hasCache_ || langChanged || viewport.width != lastViewportW_ ||
         viewport.height != lastViewportH_ || cachedContentH_ != contentH ||
-        bracketChanged) {
+        geom.gutterW != lastGutterW_ || bracketChanged) {
         rebuildCache(doc, cursor, viewport, filename, modified, chrome,
                      selection, searchHighlight, bracketPair);
         lastViewportW_ = viewport.width;
         lastViewportH_ = viewport.height;
+        lastGutterW_ = geom.gutterW;
         updateCacheState(viewport, cursor, doc);
         std::string out;
         encoder_.beginFrame(out);
@@ -469,6 +476,7 @@ std::string TtyDiff::buildDiffFrame(
     hasLastChromeData_ = true;
     lastBracketPair_ = bracketPair;
     hasLastBracketPair_ = true;
+    lastGutterW_ = fresh.gutterW;
 
     if (!chrome.cursorVisibleByMode) {
         updateCacheState(viewport, cursor, doc);

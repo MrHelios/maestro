@@ -33,9 +33,14 @@ struct TinyTerm {
     int rows;
     int cur_row = 0;
     int cur_col = 0;
+    // Region de scroll (DECSTBM, 0-based inclusive). Por defecto toda la
+    // pantalla. TtyScroll la fija a las filas de contenido y la resetea luego.
+    int scrollTop = 0;
+    int scrollBottom = 0;
     std::vector<std::string> screen;
 
-    explicit TinyTerm(int r) : rows(r), screen(static_cast<size_t>(r), "") {}
+    explicit TinyTerm(int r)
+        : rows(r), scrollBottom(r - 1), screen(static_cast<size_t>(r), "") {}
 
     void writeChar(char c) {
         if (cur_row < 0 || cur_row >= rows || cur_col < 0) return;
@@ -111,8 +116,42 @@ struct TinyTerm {
                             for (int rr = cur_row + 1; rr < rows; ++rr) screen[static_cast<size_t>(rr)].clear();
                         }
                     }
+                } else if (term == 'r') {
+                    // DECSTBM: define la region de scroll [top;bottom] (1-based).
+                    // Parametros vacios (reset) => toda la pantalla.
+                    int top = 1, bottom = rows;
+                    if (!params.empty()) {
+                        std::size_t semi = params.find(';');
+                        std::string topStr = semi == std::string::npos ? params : params.substr(0, semi);
+                        std::string botStr = semi == std::string::npos ? "" : params.substr(semi + 1);
+                        if (!topStr.empty()) { try { top = std::stoi(topStr); } catch (...) { top = 1; } }
+                        if (!botStr.empty()) { try { bottom = std::stoi(botStr); } catch (...) { bottom = rows; } }
+                    }
+                    if (top < 1) top = 1;
+                    if (bottom > rows) bottom = rows;
+                    if (bottom < top) { top = 1; bottom = rows; }
+                    scrollTop = top - 1;
+                    scrollBottom = bottom - 1;
+                } else if (term == 'S' || term == 'T') {
+                    // SU/SD: desplaza la region de scroll n filas (arriba/abajo),
+                    // rellenando con lineas vacias. Emula el movimiento fisico
+                    // que el render diferencial asume al usar region de scroll.
+                    int n = 1;
+                    if (!params.empty()) { try { n = std::stoi(params); } catch (...) { n = 1; } }
+                    if (n < 0) n = 0;
+                    const int top = scrollTop < 0 ? 0 : scrollTop;
+                    const int bottom = scrollBottom >= rows ? rows - 1 : scrollBottom;
+                    for (int k = 0; k < n && top <= bottom; ++k) {
+                        if (term == 'S') {
+                            for (int r = top; r < bottom; ++r) screen[static_cast<size_t>(r)] = screen[static_cast<size_t>(r) + 1];
+                            screen[static_cast<size_t>(bottom)].clear();
+                        } else {
+                            for (int r = bottom; r > top; --r) screen[static_cast<size_t>(r)] = screen[static_cast<size_t>(r) - 1];
+                            screen[static_cast<size_t>(top)].clear();
+                        }
+                    }
                 } else {
-                    // CSI no reconocido (colores \x1b[...m, scroll \x1b[...r/S/T): ignorado,
+                    // CSI no reconocido (colores \x1b[...m): ignorado,
                     // no afecta buffer. Si aparece uno nuevo que sí mueve cursor,
                     // añadir rama explícita.
                 }
@@ -525,4 +564,38 @@ TEST(render_diff_mismo_texto_distinto_kind_repinta) {
     CHECK(deltaExpiry.find("\x1b[2J") == std::string::npos);
     CHECK(deltaExpiry.find(messageCup) == std::string::npos);
     CHECK(deltaExpiry.find(statusCup) == std::string::npos);
+}
+
+// Regresion BUG VISUAL gutter: al cruzar 99->100 lineas el ancho del gutter
+// pasa de 3 a 4 columnas. Con el viewport pegado al fondo, agregar la linea
+// produce deltaTop==1; antes entraba al fast path de scroll de region, que
+// solo repinta la fila entrante y deja las ya dibujadas con el gutter viejo
+// (numeros desalineados). El contrato es: cambio de ancho de gutter => rebuild
+// total del viewport.
+TEST(render_diff_gutter_crece_repinta_viewport_completo) {
+    DiffHarness h(99);
+    Buffer& b = h.buf();
+
+    // Cursor en la ultima linea, viewport al fondo: InsertNewline scrollea +1.
+    b.cursor.line = 98;
+    b.cursor.col = 0;
+    b.viewport.scrollToCursor(b.cursor);
+
+    TinyTerm viaDiff(h.kRows), viaFull(h.kRows);
+    const std::string init = h.getDiffOutput();
+    viaDiff.apply(init);
+    viaFull.apply(init);
+    CHECK_EQ(b.document.lineCount(), 99);
+
+    h.ed.handleEvent(move(InputEventType::InsertNewline));
+    b.viewport.scrollToCursor(b.cursor);
+    CHECK_EQ(b.document.lineCount(), 100);
+
+    const std::string delta = h.getDiffOutput();
+    const std::string full = h.r.buildScreen(
+        b.document, b.cursor, b.viewport, b.filename, b.modified,
+        makeChromeRequest(Message(""), State::Navegacion), b.selection);
+
+    CHECK(delta.find("\x1b[2J\x1b[H") != std::string::npos);
+    checkDiffMatchesFull(viaDiff, viaFull, delta, full, /*allowFullClear=*/true);
 }
