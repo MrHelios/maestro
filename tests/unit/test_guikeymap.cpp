@@ -785,6 +785,22 @@ TEST(guikeymap_iface_remap) {
              static_cast<int>(InputEventType::MoveDown));
 }
 
+// El contexto de repeticion tambien debe despacharse por la interfaz
+// virtual (IGuiKeymap), no solo por el tipo concreto: GuiKeymap es el unico
+// implementador, pero el contrato de keymapIface() es la interfaz.
+TEST(guikeymap_iface_contexto_enter_repetido) {
+    Editor ed;
+    GuiRunLoop loop(ed);
+    IGuiKeymap& iface = loop.keymapIface();
+    const GuiKeyPress enterRepeat =
+        key(GuiKeySym::Enter, false, false, false, true);
+    // Sin contexto: Enter repetido se suprime (prompts/selectores).
+    CHECK(!iface.mapKey(enterRepeat).has_value());
+    // Con contexto explicito: se permite InsertNewline (Interaccion).
+    CHECK_EQ(static_cast<int>(*iface.mapKey(enterRepeat, true)),
+             static_cast<int>(InputEventType::InsertNewline));
+}
+
 // El keymap es accesible vía la interfaz GUI del run loop (misma frontera
 // que Terminal::keymapIface()), sin exponer el tipo concreto.
 TEST(guikeymap_runloop_iface) {
