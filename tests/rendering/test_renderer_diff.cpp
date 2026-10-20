@@ -586,6 +586,8 @@ TEST(render_diff_gutter_crece_repinta_viewport_completo) {
     viaDiff.apply(init);
     viaFull.apply(init);
     CHECK_EQ(b.document.lineCount(), 99);
+    // Con 99 lineas el gutter es el minimo de 3 columnas.
+    CHECK_EQ(h.r.lastGutterW(), 3);
 
     h.ed.handleEvent(move(InputEventType::InsertNewline));
     b.viewport.scrollToCursor(b.cursor);
@@ -596,6 +598,32 @@ TEST(render_diff_gutter_crece_repinta_viewport_completo) {
         b.document, b.cursor, b.viewport, b.filename, b.modified,
         makeChromeRequest(Message(""), State::Navegacion), b.selection);
 
+    // 100 lineas => gutter de 4 columnas y rebuild total (no scroll parcial).
+    CHECK_EQ(h.r.lastGutterW(), 4);
     CHECK(delta.find("\x1b[2J\x1b[H") != std::string::npos);
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, /*allowFullClear=*/true);
+
+    // Todas las filas visibles (no solo la entrante) quedaron alineadas con el
+    // gutter nuevo. Se verifica el prefijo completo de cada numero: 99 debe ser
+    // " 99 " y 100 "100 ", ambos dentro de las mismas 4 columnas.
+    auto gutterPrefix = [](int lineNumber, int width) {
+        std::string num = std::to_string(lineNumber);
+        const int numberCols = width - 1;
+        if (static_cast<int>(num.size()) > numberCols)
+            num = num.substr(num.size() - static_cast<size_t>(numberCols));
+        return std::string(static_cast<size_t>(numberCols - num.size()), ' ') +
+               num + ' ';
+    };
+    for (int row = 0; row < b.viewport.height; ++row) {
+        const int lineNumber = b.viewport.top + row + 1;
+        if (lineNumber > b.document.lineCount()) break;
+        CHECK_EQ(viaDiff.screen[static_cast<size_t>(row)].substr(0, 4),
+                 gutterPrefix(lineNumber, 4));
+    }
+    CHECK_EQ(viaDiff.screen[static_cast<size_t>(b.viewport.height - 2)]
+                 .substr(0, 4),
+             " 99 ");
+    CHECK_EQ(viaDiff.screen[static_cast<size_t>(b.viewport.height - 1)]
+                 .substr(0, 4),
+             "100 ");
 }

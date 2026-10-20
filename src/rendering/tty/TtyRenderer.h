@@ -155,6 +155,7 @@ public:
     // Observabilidad para tests (solo lectura): estado del cache diferencial.
     bool hasCache() const { return diff_.hasCache(); }
     int lastViewportH() const { return diff_.lastViewportH(); }
+    int lastGutterW() const { return diff_.lastGutterW(); }
 
     // Primitivas del backend (las usan los benches).
     void renderEditorContent(std::string& out,

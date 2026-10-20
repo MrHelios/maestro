@@ -64,6 +64,7 @@ public:
     bool hasCache() const { return hasCache_; }
     int lastViewportW() const { return lastViewportW_; }
     int lastViewportH() const { return lastViewportH_; }
+    int lastGutterW() const { return lastGutterW_; }
 
     std::string buildDiffFrame(const Document& doc,
                                const Cursor& cursor,
