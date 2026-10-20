@@ -188,8 +188,8 @@ TEST(bracket_selection_highlight_hidden_but_jump_works) {
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=40;
     std::string outSel = r.buildScreen(doc, cur, vp, "t.cpp", false, makeChromeRequest(Message{}, State::Seleccion), std::nullopt, std::nullopt, std::nullopt);
     std::string outNav = r.buildScreen(doc, cur, vp, "t.cpp", false, makeChromeRequest(Message{}, State::Navegacion), std::nullopt, std::nullopt, ed.bracketPair_);
-    CHECK(outSel.find("\x1b[48;5;221m") == std::string::npos);
-    CHECK(outNav.find("\x1b[48;5;221m") != std::string::npos);
+    CHECK(outSel.find("\x1b[48;2;255;215;95m") == std::string::npos);
+    CHECK(outNav.find("\x1b[48;2;255;215;95m") != std::string::npos);
     ed.handleEvent(ev(InputEventType::Prefix));
     ed.handleEvent(insert('m'));
     CHECK_EQ(ed.active().cursor.col, 0);
@@ -266,7 +266,7 @@ TEST(bracket_unicode_before) {
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=40;
     Cursor cur = ed.active().cursor;
     std::string out = r.buildScreen(ed.active().document, cur, vp, "t.cpp", false, makeChromeRequest(Message{}, State::Navegacion), std::nullopt, std::nullopt, ed.bracketPair_);
-    CHECK(out.find("\x1b[48;5;221m") != std::string::npos);
+    CHECK(out.find("\x1b[48;2;255;215;95m") != std::string::npos);
 }
 TEST(bracket_tab_before) {
     Editor ed;
@@ -281,7 +281,7 @@ TEST(bracket_tab_before) {
     Viewport vp; vp.top=0; vp.left=0; vp.height=5; vp.width=40;
     Cursor cur = ed.active().cursor;
     std::string out = r.buildScreen(ed.active().document, cur, vp, "t.cpp", false, makeChromeRequest(Message{}, State::Navegacion), std::nullopt, std::nullopt, ed.bracketPair_);
-    CHECK(out.find("\x1b[48;5;221m") != std::string::npos);
+    CHECK(out.find("\x1b[48;2;255;215;95m") != std::string::npos);
 }
 
 // ---------------------------------------------------------------------------

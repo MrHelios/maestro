@@ -18,7 +18,8 @@ namespace Ansi {
     constexpr const char* CURSOR_HIDE  = "\x1b[?25l";
     constexpr const char* CURSOR_STEADY = "\x1b[2 q";
     constexpr const char* CURSOR_BLINK = "\x1b[1 q";
-    constexpr const char* HIGHLIGHT_BG = "\x1b[48;5;60m";
+    constexpr const char* HIGHLIGHT_BG =
+        "\x1b[38;2;255;255;255m\x1b[48;2;95;95;135m";
     constexpr const char* RESET        = "\x1b[0m";
 }
 

@@ -82,7 +82,7 @@ TEST(theme_default_matches_legacy_colors) {
     CHECK_EQ(t.statusBarName, std::string(kStatusBarName));
     CHECK_EQ(t.statusBarPath, std::string(kStatusBarPath));
     CHECK_EQ(t.statusBarAccent, std::string(kStatusBarCommand));
-    CHECK_EQ(t.message, std::string(""));
+    CHECK_EQ(t.message, std::string(kMessageInfo));
     CHECK_EQ(t.success, std::string(kMessageSuccess));
     CHECK_EQ(t.warning, std::string(kMessageWarning));
     CHECK_EQ(t.error, std::string(kMessageError));
@@ -110,9 +110,14 @@ TEST(theme_defaults_new_visual_language) {
     CHECK_EQ(t.accentBuffers, std::string(kAccentBuffers));
     CHECK_EQ(t.accentGuardar, std::string(kAccentGuardar));
     CHECK_EQ(t.accentAbrir, std::string(kAccentAbrir));
-    // El lenguaje ACTIVO se unifica: el item de lista usa el mismo gris que
-    // la fila del cursor del editor (listSelected == currentLine).
-    CHECK_EQ(t.listSelected, t.currentLine);
+    // El lenguaje ACTIVO se unifica: el item de lista usa el mismo gris de
+    // fondo que la fila del cursor del editor. El fg puede diferir (el item
+    // activo usa listSelectedFg), por eso se compara solo la parte de fondo.
+    auto bgOf = [](const std::string& s) {
+        const size_t p = s.find("\x1b[48;");
+        return p == std::string::npos ? std::string() : s.substr(p);
+    };
+    CHECK_EQ(bgOf(t.listSelected), bgOf(t.currentLine));
 }
 
 TEST(theme_renderer_uses_theme_for_selection_and_currentline) {
@@ -183,6 +188,27 @@ TEST(theme_chrome_uses_theme_for_colors) {
     // Con default theme el output es distinto: se usa el TtyTheme, no constantes.
     TtyChrome plainBar;
     CHECK(out != plainBar.render(area, d));
+}
+
+// Regresión: en tema claro el indicador [*] debe ser rojo también en el
+// backend TTY (no el amarillo del tema oscuro). Se comprueba el valor del
+// tema y la secuencia realmente emitida por el StatusBar.
+TEST(theme_light_status_modified_marker_is_red) {
+    const TtyTheme t = lightTheme();
+    CHECK_EQ(t.statusBarModified, "\x1b[1m\x1b[38;2;215;0;0m");
+    CHECK(t.statusBarModified.find("221;221;0") == std::string::npos);
+
+    TtyChrome bar;
+    bar.setTheme(t);
+    Rect area; area.row = 0; area.col = 0; area.width = 60; area.height = 2;
+    ChromeData d;
+    d.statusBar.name = "x.cc";
+    d.statusBar.path = "/tmp";
+    d.statusBar.estado = "NAVEGACION";
+    d.statusBar.modified = true;
+    d.statusBar.totalLines = 1;
+    const std::string out = bar.render(area, d);
+    CHECK(out.find(t.statusBarModified + " [*]") != std::string::npos);
 }
 
 // ---------------------------------------------------------------------------

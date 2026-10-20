@@ -534,10 +534,10 @@ TEST(render_diff_mismo_texto_distinto_kind_repinta) {
     const std::string messageCup =
         "\x1b[" + std::to_string(contentH + 2) + ";1H";
 
-    // Prime: "hola" Info.
+    // Prime: "hola" Prompt (estilo distinto al resto de mensajes).
     std::string prime = h.r.buildDiffFrame(
         b.document, b.cursor, b.viewport, "a.txt", false,
-        makeChromeRequest(Message("hola", MessageKind::Info, std::nullopt),
+        makeChromeRequest(Message("hola", MessageKind::Prompt, std::nullopt),
                           State::Navegacion),
         b.selection);
     CHECK(prime.find("\x1b[2J") != std::string::npos);

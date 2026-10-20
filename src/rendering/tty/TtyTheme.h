@@ -3,30 +3,30 @@
 #include <string>
 
 #include "rendering/Style.h"
+#include "rendering/Theme.h"
 
 struct TtyTheme {
     int id;
-    std::string background;        // fondo del area de texto y relleno de filas "~"
-    std::string foreground;        // texto normal del documento
-    std::string lineNumber;        // numeros de linea del gutter (gris tenue)
-    std::string gutterCurrent;     // numero de linea de la fila del cursor (negrita blanca sobre gris)
-    std::string marker;            // filas de relleno fuera del documento "~" (dim)
-    std::string currentLine;       // resaltado de la fila del cursor (fondo gris)
-    std::string selection;         // texto seleccionado (video inverso)
-    std::string listSelected;      // item activo de las listas (mismo gris que currentLine)
-    std::string statusBar;         // fondo/base del StatusBar (fila superior del chrome)
-    std::string statusBarName;     // nombre de archivo en el StatusBar
-    std::string statusBarPath;     // ruta en el StatusBar
-    std::string statusBarAccent;   // etiqueta de estado por defecto
-    std::string statusBarModified; // indicador "[*]" en el StatusBar (v1.4: antes "[modificado]")
-    std::string message;           // MessageBar (Info/ayuda, sin color)
-    std::string prompt;            // prompts de entrada (p.ej. "Guardar archivo:")
-    std::string success;           // mensajes de exito
-    std::string warning;           // mensajes de aviso
-    std::string error;             // mensajes de error
-    std::string reset;             // vuelve al estado base
+    std::string background;
+    std::string foreground;
+    std::string lineNumber;
+    std::string gutterCurrent;
+    std::string marker;
+    std::string currentLine;
+    std::string selection;
+    std::string listSelected;
+    std::string statusBar;
+    std::string statusBarName;
+    std::string statusBarPath;
+    std::string statusBarAccent;
+    std::string statusBarModified;
+    std::string message;
+    std::string prompt;
+    std::string success;
+    std::string warning;
+    std::string error;
+    std::string reset;
 
-    // (NAVEGACION/INTERACCION/SELECCION/COMANDO/BUFFERS/GUARDAR/ABRIR).
     std::string accentNavegacion;
     std::string accentInteraccion;
     std::string accentSeleccion;
@@ -44,91 +44,101 @@ struct TtyTheme {
     std::string bracketMatch;
 };
 
-inline TtyTheme darkTheme() {
-    constexpr const char* kAccentDark = "\x1b[1m\x1b[38;5;81m"; // azul clarito
-    constexpr const char* kMessage    = "\x1b[38;5;250m"; // mismo color para todos los mensajes
-    constexpr const char* kStatusBar  = "\x1b[38;2;140;140;140m";
+// Política de representación TTY: truecolor (38;2 / 48;2) desde el RGB
+// compartido. No se mantiene un índice ANSI-256 paralelo: una sola fuente de
+// verdad y paridad exacta con la GUI. Requiere terminal con truecolor.
+namespace ttytheme_detail {
+
+inline std::string fg(const ThemeColor& c) {
+    return "\x1b[38;2;" + std::to_string(c.r) + ";" + std::to_string(c.g) +
+           ";" + std::to_string(c.b) + "m";
+}
+
+inline std::string bg(const ThemeColor& c) {
+    return "\x1b[48;2;" + std::to_string(c.r) + ";" + std::to_string(c.g) +
+           ";" + std::to_string(c.b) + "m";
+}
+
+inline std::string fgFor(const std::optional<ThemeColor>& c) {
+    return c ? fg(*c) : std::string();
+}
+
+inline std::string bgFor(const std::optional<ThemeColor>& c) {
+    return c ? bg(*c) : std::string();
+}
+
+inline std::string styleFor(const ThemeStyle& s) {
+    return fgFor(s.fg) + bgFor(s.bg);
+}
+
+}  // namespace ttytheme_detail
+
+inline TtyTheme ttyThemeFrom(const ThemePalette& p) {
+    using ttytheme_detail::bg;
+    using ttytheme_detail::fg;
+    using ttytheme_detail::fgFor;
+    using ttytheme_detail::styleFor;
 
     TtyTheme t;
-    t.id = 0;
-    t.background        = "\x1b[48;2;18;19;20m";   // #121314 alias
-    t.foreground        = "";
-    t.lineNumber        = "\x1b[38;5;242m";
-    t.gutterCurrent     = "\x1b[1m\x1b[38;5;81;48;5;237m";
-    t.marker            = "\x1b[38;5;65m";
-    t.currentLine       = "\x1b[48;5;237m";
-    t.selection         = "\x1b[48;5;60m";
-    t.listSelected      = "\x1b[48;5;237m";
-    t.statusBar         = "\x1b[38;2;140;140;140m\x1b[48;2;25;26;27m";
-    t.statusBarName     = kStatusBar;
-    t.statusBarPath     = kStatusBar;
-    t.statusBarAccent   = "\x1b[1m\x1b[38;5;178m";
-    t.statusBarModified = "\x1b[1;38;5;221m";
-    t.message           = "";
-    t.prompt            = "\x1b[1m"; // negrita
-    t.success           = kMessage;
-    t.warning           = kMessage;
-    t.error             = kMessage;
-    t.reset             = "\x1b[0m\x1b[48;2;18;19;20m"; // reset + restaura fondo #121314
-    t.accentNavegacion  = kAccentDark;
-    t.accentInteraccion = kAccentDark;
-    t.accentSeleccion   = kAccentDark;
-    t.accentComando     = kAccentDark;
-    t.accentBuffers     = kAccentDark;
-    t.accentGuardar     = kAccentDark;
-    t.accentAbrir       = kAccentDark;
-    t.syntaxKeyword      = "\x1b[38;5;81m";
-    t.syntaxType         = "\x1b[38;5;141m";
-    t.syntaxPreprocessor = "\x1b[38;5;208m";
-    t.syntaxString       = "\x1b[38;5;114m";
-    t.syntaxCharacter    = "\x1b[38;5;114m";
-    t.syntaxNumber       = "\x1b[38;5;214m";
-    t.syntaxComment      = "\x1b[38;5;242m";
-    t.bracketMatch       = "\x1b[48;5;221m\x1b[38;5;235m";
+    t.id = p.id;
+    t.background = bg(p.background);
+    t.foreground = fg(p.defaultFg);
+    t.lineNumber = fgFor(themeFgFor(p, StyleRole::Gutter));
+    t.gutterCurrent = (p.gutterCurrentBold ? "\x1b[1m" : "") +
+                      styleFor(themeStyleFor(p, StyleRole::GutterCurrent, true));
+    t.marker = fgFor(themeFgFor(p, StyleRole::Marker));
+    t.currentLine = styleFor(themeStyleFor(p, StyleRole::CurrentLine, true));
+    t.selection = styleFor(themeStyleFor(p, StyleRole::Selection, false));
+    t.listSelected = styleFor(themeStyleFor(p, StyleRole::ListSelected, false));
+    t.statusBar = fgFor(themeFgFor(p, StyleRole::StatusBase)) +
+                  bg(p.statusBackground);
+    t.statusBarName = (p.statusNameBold ? "\x1b[1m" : "") +
+                      fgFor(themeFgFor(p, StyleRole::StatusName));
+    t.statusBarPath = fgFor(themeFgFor(p, StyleRole::StatusPath));
+    t.statusBarAccent = (p.statusAccentBold ? "\x1b[1m" : "") +
+                        fgFor(themeFgFor(p, StyleRole::StatusAccentDefault));
+    t.statusBarModified = (p.statusModifiedBold ? "\x1b[1m" : "") +
+                          fgFor(themeFgFor(p, StyleRole::StatusModified));
+    t.message = fgFor(themeFgFor(p, StyleRole::MsgInfo));
+    t.prompt = (p.promptBold ? "\x1b[1m" : "") +
+               fgFor(themeFgFor(p, StyleRole::MsgPrompt));
+    t.success = fgFor(themeFgFor(p, StyleRole::MsgSuccess));
+    t.warning = fgFor(themeFgFor(p, StyleRole::MsgWarning));
+    t.error = fgFor(themeFgFor(p, StyleRole::MsgError));
+    t.reset = "\x1b[0m" + t.background + t.foreground;
+
+    const std::string accentPrefix = p.accentsBold ? "\x1b[1m" : "";
+    t.accentNavegacion = accentPrefix +
+                         fgFor(themeFgFor(p, StyleRole::AccentNavegacion));
+    t.accentInteraccion = accentPrefix +
+                          fgFor(themeFgFor(p, StyleRole::AccentInteraccion));
+    t.accentSeleccion = accentPrefix +
+                        fgFor(themeFgFor(p, StyleRole::AccentSeleccion));
+    t.accentComando = accentPrefix +
+                      fgFor(themeFgFor(p, StyleRole::AccentComando));
+    t.accentBuffers = accentPrefix +
+                      fgFor(themeFgFor(p, StyleRole::AccentBuffers));
+    t.accentGuardar = accentPrefix +
+                      fgFor(themeFgFor(p, StyleRole::AccentGuardar));
+    t.accentAbrir = accentPrefix +
+                    fgFor(themeFgFor(p, StyleRole::AccentAbrir));
+    t.syntaxKeyword = fgFor(themeFgFor(p, StyleRole::SyntaxKeyword));
+    t.syntaxType = fgFor(themeFgFor(p, StyleRole::SyntaxType));
+    t.syntaxPreprocessor = fgFor(themeFgFor(p, StyleRole::SyntaxPreprocessor));
+    t.syntaxString = fgFor(themeFgFor(p, StyleRole::SyntaxString));
+    t.syntaxCharacter = fgFor(themeFgFor(p, StyleRole::SyntaxCharacter));
+    t.syntaxNumber = fgFor(themeFgFor(p, StyleRole::SyntaxNumber));
+    t.syntaxComment = fgFor(themeFgFor(p, StyleRole::SyntaxComment));
+    t.bracketMatch = styleFor(themeStyleFor(p, StyleRole::BracketMatch, false));
     return t;
 }
 
-inline TtyTheme lightTheme() {
-    constexpr const char* kLightMessage  = "\x1b[38;5;240m";
-    constexpr const char* kLightAccent   = "\x1b[1m\x1b[38;5;25m";
+inline TtyTheme darkTheme() {
+    return ttyThemeFrom(darkPalette());
+}
 
-    TtyTheme t;
-    t.id = 1;
-    t.background        = "\x1b[48;5;255m";
-    t.foreground        = "\x1b[38;5;235m";
-    t.lineNumber        = "\x1b[38;5;245m";
-    t.gutterCurrent     = "\x1b[1m\x1b[38;5;240;48;5;254m";
-    t.marker            = "\x1b[38;5;102m";
-    t.currentLine       = "\x1b[48;5;254m";
-    t.selection         = "\x1b[48;5;189m";
-    t.listSelected      = "\x1b[48;5;253m";
-    t.statusBar         = "\x1b[38;5;235m\x1b[48;5;252m";
-    t.statusBarName     = "\x1b[1m\x1b[38;5;235m";
-    t.statusBarPath     = "\x1b[38;5;243m";
-    t.statusBarAccent   = "\x1b[1m\x1b[38;5;25m";
-    t.statusBarModified = "\x1b[1;38;5;160m";
-    t.message           = "";
-    t.prompt            = "\x1b[1m";
-    t.success           = kLightMessage;
-    t.warning           = kLightMessage;
-    t.error             = kLightMessage;
-    t.reset             = "\x1b[0m\x1b[48;5;255m\x1b[38;5;235m";
-    t.accentNavegacion  = kLightAccent;
-    t.accentInteraccion = kLightAccent;
-    t.accentSeleccion   = kLightAccent;
-    t.accentComando     = kLightAccent;
-    t.accentBuffers     = kLightAccent;
-    t.accentGuardar     = kLightAccent;
-    t.accentAbrir       = kLightAccent;
-    t.syntaxKeyword     = "\x1b[38;5;25m";
-    t.syntaxType        = "\x1b[38;5;55m";
-    t.syntaxPreprocessor= "\x1b[38;5;130m";
-    t.syntaxString      = "\x1b[38;5;22m";
-    t.syntaxCharacter   = "\x1b[38;5;22m";
-    t.syntaxNumber      = "\x1b[38;5;166m";
-    t.syntaxComment     = "\x1b[38;5;242m";
-    t.bracketMatch      = "\x1b[48;5;221m\x1b[38;5;235m";
-    return t;
+inline TtyTheme lightTheme() {
+    return ttyThemeFrom(lightPalette());
 }
 
 inline TtyTheme defaultTheme() {
@@ -140,17 +150,9 @@ inline bool operator==(const TtyTheme& a, const TtyTheme& b) {
 }
 
 inline bool operator!=(const TtyTheme& a, const TtyTheme& b) {
-    return !(a == b); 
+    return !(a == b);
 }
 
-// ---------------------------------------------------------------------------
-// Frontier (7): TtyTheme → Style.
-//
-// El TtyTheme es la tabla ANSI del backend TTY; StyleRole es el vocabulario
-// común del Frame. Este mapeo es la ÚNICA dirección permitida
-// (TtyTheme conoce Style, nunca al revés; Style.h sigue puro sin ANSI).
-// TtyEncoder::ansiFor delega acá.
-// ---------------------------------------------------------------------------
 inline const std::string& themeAnsiFor(const TtyTheme& t, StyleRole role) {
     static const std::string kEmpty;
     switch (role) {

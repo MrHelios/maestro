@@ -6,34 +6,40 @@
 // Fuente unica para los tests que verifican colores ANSI: test_renderer,
 // test_theme y los tests de interaction via test_support.h (que incluye
 // este helper en vez de redefinirlas).
-constexpr const char* kCurrentLineStyle = "\x1b[48;5;237m";
-constexpr const char* kListSelectedStyle = "\x1b[48;5;237m";
-constexpr const char* kSelectionStyle = "\x1b[48;5;60m";
-constexpr const char* kLineNumberStyle = "\x1b[38;5;242m";
-constexpr const char* kGutterCurrentStyle = "\x1b[1m\x1b[38;5;81;48;5;237m";
-constexpr const char* kMarkerStyle = "\x1b[38;5;65m";
+constexpr const char* kCurrentLineStyle =
+    "\x1b[38;2;212;212;212m\x1b[48;2;58;58;58m";
+constexpr const char* kListSelectedStyle =
+    "\x1b[38;2;255;255;255m\x1b[48;2;58;58;58m";
+constexpr const char* kSelectionStyle =
+    "\x1b[38;2;255;255;255m\x1b[48;2;95;95;135m";
+constexpr const char* kLineNumberStyle = "\x1b[38;2;108;108;108m";
+constexpr const char* kGutterCurrentStyle =
+    "\x1b[1m\x1b[38;2;81;175;239m\x1b[48;2;58;58;58m";
+constexpr const char* kMarkerStyle = "\x1b[38;2;95;135;95m";
 constexpr const char* kEditorBackground = "\x1b[48;2;18;19;20m";
 constexpr const char* kDarkBackground = "\x1b[48;2;18;19;20m";
-constexpr const char* kDarkReset = "\x1b[0m\x1b[48;2;18;19;20m";
+constexpr const char* kDarkReset =
+    "\x1b[0m\x1b[48;2;18;19;20m\x1b[38;2;212;212;212m";
 constexpr const char* kStatusBarBackground = "\x1b[48;2;25;26;27m";
 constexpr const char* kUiGrayText = "\x1b[38;2;140;140;140m";
 constexpr const char* kStatusBarStyle = "\x1b[38;2;140;140;140m\x1b[48;2;25;26;27m";
 constexpr const char* kStatusBarName = "\x1b[38;2;140;140;140m";
 constexpr const char* kStatusBarPath = "\x1b[38;2;140;140;140m";
-constexpr const char* kStatusBarCommand = "\x1b[1m\x1b[38;5;178m";
-constexpr const char* kStatusBarModified = "\x1b[1;38;5;221m";
-constexpr const char* kPromptStyle = "\x1b[1m";
-constexpr const char* kMessageSuccess = "\x1b[38;5;250m";
-constexpr const char* kMessageWarning = "\x1b[38;5;250m";
-constexpr const char* kMessageError = "\x1b[38;5;250m";
+constexpr const char* kStatusBarCommand = "\x1b[1m\x1b[38;2;81;175;239m";
+constexpr const char* kStatusBarModified = "\x1b[1m\x1b[38;2;221;221;0m";
+constexpr const char* kPromptStyle = "\x1b[1m\x1b[38;2;255;255;255m";
+constexpr const char* kMessageInfo = "\x1b[38;2;212;212;212m";
+constexpr const char* kMessageSuccess = "\x1b[38;2;212;212;212m";
+constexpr const char* kMessageWarning = "\x1b[38;2;212;212;212m";
+constexpr const char* kMessageError = "\x1b[38;2;212;212;212m";
 constexpr const char* kMessageReset = "\x1b[0m";
-constexpr const char* kAccentNavegacion = "\x1b[1m\x1b[38;5;81m";
-constexpr const char* kAccentInteraccion = "\x1b[1m\x1b[38;5;81m";
-constexpr const char* kAccentSeleccion = "\x1b[1m\x1b[38;5;81m";
-constexpr const char* kAccentComando = "\x1b[1m\x1b[38;5;81m";
-constexpr const char* kAccentBuffers = "\x1b[1m\x1b[38;5;81m";
-constexpr const char* kAccentGuardar = "\x1b[1m\x1b[38;5;81m";
-constexpr const char* kAccentAbrir = "\x1b[1m\x1b[38;5;81m";
+constexpr const char* kAccentNavegacion = "\x1b[1m\x1b[38;2;81;175;239m";
+constexpr const char* kAccentInteraccion = "\x1b[1m\x1b[38;2;81;175;239m";
+constexpr const char* kAccentSeleccion = "\x1b[1m\x1b[38;2;81;175;239m";
+constexpr const char* kAccentComando = "\x1b[1m\x1b[38;2;81;175;239m";
+constexpr const char* kAccentBuffers = "\x1b[1m\x1b[38;2;81;175;239m";
+constexpr const char* kAccentGuardar = "\x1b[1m\x1b[38;2;81;175;239m";
+constexpr const char* kAccentAbrir = "\x1b[1m\x1b[38;2;81;175;239m";
 
 namespace testutil {
 

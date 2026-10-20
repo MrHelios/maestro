@@ -9,10 +9,9 @@ const std::string& TtyEncoder::ansiFor(StyleRole role) const {
 }
 
 // NOTA: la política de fondos (qué familia toca a cada rol en la línea
-// actual) vive una sola vez en rendering/Style.h::rowBgKindFor, que la GUI
-// consume directo. Estas ramas por rol están congeladas byte a byte (los
-// códigos del TtyTheme combinan fg+bg y no se pueden reexpresar sin cambiar
-// bytes): el test de paridad TTY↔GUI congela que ambas deciden lo mismo.
+// actual) vive una sola vez en rendering/Style.h::rowBgKindFor y el mapeo
+// rol/familia -> color en rendering/Theme.h. Estas ramas solo deciden cómo
+// emitir cada rol; el test de paridad TTY↔GUI congela que ambas coinciden.
 
 std::string TtyEncoder::encodeRow(const StyledRow& row) const {
     std::string out;

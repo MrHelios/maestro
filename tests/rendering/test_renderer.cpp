@@ -15,8 +15,8 @@
 #include "layout/Gutter.h"
 
 // Secuencias ANSI usadas por el renderer.
-#define ANSI_INV "\x1b[48;5;60m"   // seleccion azul grisáceo (kSelectionStyle)
-#define ANSI_RESET "\x1b[0m\x1b[48;2;18;19;20m" // reset + fondo dark #121314 (kDarkReset)
+#define ANSI_INV "\x1b[38;2;255;255;255m\x1b[48;2;95;95;135m"   // seleccion (kSelectionStyle)
+#define ANSI_RESET "\x1b[0m\x1b[48;2;18;19;20m\x1b[38;2;212;212;212m" // reset + fondo dark #121314 (kDarkReset)
 
 namespace {
 

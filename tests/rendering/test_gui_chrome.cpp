@@ -864,6 +864,61 @@ TEST(gui_sdl_fondo_contenido_y_linea_actual) {
 #endif
 }
 
+// Regresión end-to-end del bug: en tema claro el StatusBar renderizado pinta
+// la tinta real de [*] en rojo (no amarillo). Localiza el segmento [*] con la
+// misma composición que usa el pintor y muestrea esa celda en el framebuffer.
+TEST(gui_sdl_status_modified_light_pinta_tinta_roja) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.hasFont()) SKIP("sin fuente");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    if (gui.isDarkTheme()) gui.toggleTheme();
+    CHECK(!gui.isDarkTheme());
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola"});
+    Viewport vp = makeVp(10, 40);
+    Cursor cur;
+    Message msg{std::string(""), MessageKind::Info, std::nullopt};
+    gui.renderScreenDiff(doc, cur, vp, "x.cc", true,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    const Layout lo = gui.lastLayout();
+    const auto segs = guichrome::statusSegments(
+        gui.lastChrome().statusBar, StyleRole::AccentNavegacion,
+        lo.chrome.width);
+    int markerCol = -1;
+    int col = 0;
+    for (const auto& s : segs) {
+        const size_t at = s.text.find("[*]");
+        if (at != std::string::npos) {
+            markerCol = col + colWidth(s.text.substr(0, at));
+            break;
+        }
+        col += colWidth(s.text);
+    }
+    CHECK(markerCol >= 0);
+    const int cw = gui.cellW(), ch = gui.cellH();
+    bool redInk = false;
+    for (int c = markerCol; c < markerCol + 3 && !redInk; ++c)
+        for (int dx = 0; dx < cw && !redInk; ++dx)
+            for (int dy = 0; dy < ch && !redInk; ++dy) {
+                GuiColor p{};
+                if (!readPixel(sdl.ren, (lo.chrome.col + c) * cw + dx,
+                               lo.chrome.row * ch + dy, p))
+                    break;
+                if (p.r > p.g + 25 && p.r > p.b + 25) redInk = true;
+            }
+    CHECK(redInk);
+#endif
+}
+
 // La selección se pinta con su fondo en píxeles, sin píxeles negros puros
 // (ningún color legítimo lo es en ningún tema: el más oscuro es el fondo
 // 0x12,0x13,0x14; el blended correcto solo mezcla). Es invariante anti
@@ -2617,7 +2672,7 @@ TEST(gui_cursor_rects_e_ime_en_celda) {
 // No se exige `dark != light` por rol: hay colapsos y excepciones
 // intencionales. Se congelan las invariantes que importan:
 //   - fondos/primarios que deben adaptarse cambian de tema;
-//   - excepciones fijas (bracket, StatusModified) NO cambian;
+//   - excepciones fijas (bracket) NO cambian;
 //   - accents colapsan dentro del tema; mensajes base colapsan por diseño;
 //   - fondos resuelven vía rowBgKindFor (contrato compartido con TTY).
 // ---------------------------------------------------------------------------
@@ -2643,10 +2698,10 @@ TEST(gui_tema_invariantes_por_familia) {
           guichrome::colorFor(StyleRole::SyntaxString, false));
     CHECK(guichrome::colorFor(StyleRole::SyntaxNumber, true) !=
           guichrome::colorFor(StyleRole::SyntaxNumber, false));
-    // 2. Excepciones fijas documentadas: NO cambian de tema.
+    // 2. Excepción fija documentada: el bracket NO cambia de tema.
     CHECK(guichrome::bracketBackground() ==
           guichrome::bracketBackground());
-    CHECK(guichrome::colorFor(StyleRole::StatusModified, true) ==
+    CHECK(guichrome::colorFor(StyleRole::StatusModified, true) !=
           guichrome::colorFor(StyleRole::StatusModified, false));
     CHECK(guichrome::styleFor(StyleRole::BracketMatch, false, true).bg ==
           guichrome::styleFor(StyleRole::BracketMatch, false, false).bg);
@@ -3346,7 +3401,7 @@ TEST(gui_paleta_valores_congelados_headless) {
     CHECK(guichrome::colorFor(StyleRole::StatusBase, true) ==
           rgb(0x8C, 0x8C, 0x8C));
     CHECK(guichrome::colorFor(StyleRole::StatusBase, false) ==
-          rgb(0xEB, 0xEB, 0xEB));
+          rgb(0x26, 0x26, 0x26));
     CHECK(guichrome::colorFor(StyleRole::StatusName, true) ==
           rgb(0x8C, 0x8C, 0x8C));
     CHECK(guichrome::colorFor(StyleRole::StatusName, false) ==
@@ -3358,7 +3413,7 @@ TEST(gui_paleta_valores_congelados_headless) {
     CHECK(guichrome::colorFor(StyleRole::StatusModified, true) ==
           rgb(0xDD, 0xDD, 0x00));
     CHECK(guichrome::colorFor(StyleRole::StatusModified, false) ==
-          rgb(0xDD, 0xDD, 0x00));
+          rgb(0xD7, 0x00, 0x00));
     for (StyleRole a :
          {StyleRole::StatusAccentDefault, StyleRole::AccentNavegacion,
           StyleRole::AccentInteraccion, StyleRole::AccentSeleccion,
@@ -3436,6 +3491,61 @@ TEST(gui_paleta_valores_congelados_headless) {
         CHECK(s.fg == rgb(0x1E, 0x1E, 0x1E));
         CHECK(s.bg == rgb(0xFF, 0xFF, 0xFF));
     }
+}
+
+// Paridad semántica TTY↔GUI: los roles de contenido que tienen fg y bg
+// propios deben emitir en TTY exactamente los mismos RGB que resuelve la
+// GUI, en ambos temas. Caza justo la regresión histórica en la que TTY
+// ignoraba currentLineFg/selectionFg/listSelectedFg y solo pintaba fondos.
+TEST(tty_gui_fg_y_bg_paridad_en_contenido) {
+    auto seq = [](const char* kind, const GuiColor& c) {
+        return std::string("\x1b[") + kind + ";2;" +
+               std::to_string(c.r) + ";" + std::to_string(c.g) + ";" +
+               std::to_string(c.b) + "m";
+    };
+    struct Case {
+        StyleRole role;
+        bool current;
+    };
+    const Case cases[] = {
+        {StyleRole::CurrentLine, true},  {StyleRole::Selection, true},
+        {StyleRole::BracketMatch, true}, {StyleRole::ListSelected, false},
+        {StyleRole::GutterCurrent, true},
+    };
+    for (bool dark : {true, false}) {
+        const TtyTheme t = dark ? darkTheme() : lightTheme();
+        for (const Case& c : cases) {
+            const std::string tty = themeAnsiFor(t, c.role);
+            const guichrome::GuiStyle gs =
+                guichrome::styleFor(c.role, c.current, dark);
+            CHECK(contains(tty, seq("38", gs.fg)));
+            CHECK(contains(tty, seq("48", gs.bg)));
+        }
+    }
+}
+
+// Regresión explícita del bug: [*] en tema claro es rojo en ambos backends.
+TEST(tty_gui_status_modified_light_es_rojo) {
+    const GuiColor guiLight =
+        guichrome::colorFor(StyleRole::StatusModified, false);
+    CHECK_EQ(guiLight.r, 0xD7);
+    CHECK_EQ(guiLight.g, 0x00);
+    CHECK_EQ(guiLight.b, 0x00);
+    CHECK(guiLight.r > guiLight.g);
+    CHECK(guiLight.r > guiLight.b);
+
+    const TtyTheme ttyLight = lightTheme();
+    CHECK(contains(ttyLight.statusBarModified, "\x1b[38;2;215;0;0m"));
+    CHECK(!contains(ttyLight.statusBarModified, "221;221;0"));
+
+    // Y la paridad también se exige en oscuro (amarillo).
+    const GuiColor guiDark =
+        guichrome::colorFor(StyleRole::StatusModified, true);
+    const TtyTheme ttyDark = darkTheme();
+    const std::string fg =
+        std::string("\x1b[38;2;") + std::to_string(guiDark.r) + ";" +
+        std::to_string(guiDark.g) + ";" + std::to_string(guiDark.b) + "m";
+    CHECK(contains(ttyDark.statusBarModified, fg));
 }
 
 // P2-4: contraste texto/fondo con umbral absoluto (no basta la opacidad ni el

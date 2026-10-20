@@ -60,10 +60,9 @@ enum class StyleRole {
 // Responde "¿de qué familia es el fondo de este segmento?" sin saber de
 // ANSI ni de RGB: cada backend mapea la familia a su representación
 // (TtyTheme como tabla ANSI en TtyEncoder, GuiColor en GuiChrome).
-// TtyEncoder conserva sus ramas por rol congeladas byte a byte (el theme
-// combina fg+bg en un solo código para varios roles y no se puede
-// reexpresar sin cambiar bytes); el test de paridad TTY↔GUI congela que
-// ambas implementaciones deciden lo mismo para cada (rol, línea actual).
+// El mapeo rol/familia -> color vive una sola vez en Theme.h; TtyEncoder
+// conserva sus ramas de emisión por rol. El test de paridad TTY↔GUI congela
+// que ambas implementaciones deciden lo mismo para cada (rol, línea actual).
 //
 // Precedencia (igual que el merge de FrameBuilder, que fusiona selección
 // y highlight de búsqueda en Selection): Selection > BracketMatch >
