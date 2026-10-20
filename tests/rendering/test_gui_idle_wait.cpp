@@ -74,6 +74,26 @@ struct CountingGuiRenderer : public GuiRenderer {
         std::lock_guard<std::mutex> lk(samplesMutex);
         return renderedCursors;
     }
+    // Ultimo path dibujado por el explorador (FileBrowser/SaveAs). Se usa
+    // para observar en que directorio quedo tras un lote de Enter.
+    std::mutex filePathMutex;
+    std::string lastFileListPath_;
+    void renderFileList(const std::vector<FileListItem>& items, int selected,
+                        int scroll, const std::string& path,
+                        const MessageBarData& message, int width, int height,
+                        Sink& sink) override {
+        ++renderCount;
+        {
+            std::lock_guard<std::mutex> lk(filePathMutex);
+            lastFileListPath_ = path;
+        }
+        GuiRenderer::renderFileList(items, selected, scroll, path, message,
+                                    width, height, sink);
+    }
+    std::string lastFileListPath() {
+        std::lock_guard<std::mutex> lk(filePathMutex);
+        return lastFileListPath_;
+    }
 };
 
 // Watcher con compuerta: el primer poll se bloquea hasta release(). El
@@ -1486,6 +1506,99 @@ TEST(gui_runloop_enter_repetido_inserta_filas) {
     const auto samples = h.gui->cursorSamples();
     CHECK(!samples.empty());
     if (!samples.empty()) CHECK_EQ(samples.back().first, expected - 1);
+}
+
+TEST(gui_runloop_enter_repetido_en_explorador_no_entra_varias_veces) {
+    // Complemento del caso Interaccion: en FileBrowser Enter confirma
+    // "entrar a la carpeta" y el estado sigue siendo FileBrowser. Si los
+    // repeats de Enter no se filtraran (allowRepeatedNewline siempre true),
+    // cada repeticion volveria a confirmar y el explorador terminaria en
+    // otro directorio. Con el contexto correcto solo el Enter inicial
+    // (repeat=false) entra a level2.
+    {
+        VideoProbe probe;
+        if (!probe.ok) SKIP("sin video dummy");
+    }
+    SdlDummyDrivers env;
+
+    testfw::TempDir tmp("/tmp/edit_test_gui_enter_repeat_" +
+                        std::to_string(static_cast<long>(::getpid())));
+    const std::string level1 = tmp.path + "/level1";
+    const std::string level2 = level1 + "/level2";
+    std::filesystem::create_directories(level2);
+
+    auto watcher = std::make_unique<BlockingWatcher>();
+    BlockingWatcher* raw = watcher.get();
+    Harness h = makeHarness(std::move(watcher));
+    auto& b = h.ed->getActiveBufferForTesting();
+    // startFileBrowser arranca en el directorio del archivo activo.
+    b.filename = level1 + "/seed.txt";
+    h.ed->executeCommand("buffer.abrir");
+    CHECK_EQ(static_cast<int>(h.ed->getStateForTesting()),
+             static_cast<int>(State::FileBrowser));
+
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer([raw] { raw->release(); }, runner);
+
+    // Compuerta: el loop esta vivo y en espera antes de encolar el lote.
+    int lastRender = -1, stable = 0;
+    bool idle = false;
+    for (int i = 0; i < 500 && !idle; ++i) {
+        const int r = h.gui->renderCount.load();
+        if (raw->pollCount.load() >= 1 && r == lastRender) {
+            if (++stable >= 10) idle = true;
+        } else {
+            stable = 0;
+        }
+        lastRender = r;
+        if (!idle) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(idle);
+    raw->arm();
+    const bool blocked = raw->waitBlocked();
+    CHECK(blocked);
+    if (!blocked) return;
+
+    auto pushKey = [](SDL_Keycode sym, bool repeat) {
+        SDL_Event ev{};
+        ev.type = SDL_KEYDOWN;
+        ev.key.keysym.sym = sym;
+        ev.key.keysym.mod = KMOD_NONE;
+        ev.key.state = SDL_PRESSED;
+        ev.key.repeat = repeat ? 1 : 0;
+        CHECK(SDL_PushEvent(&ev) == 1);
+    };
+    // level1 contiene ".." (indice 0) y "level2" (indice 1).
+    const int baseRenders = h.gui->renderCount.load();
+    pushKey(SDLK_DOWN, false);
+    pushKey(SDLK_RETURN, false);
+    constexpr int kRepeats = 3;
+    for (int i = 0; i < kRepeats; ++i) pushKey(SDLK_RETURN, true);
+    raw->release();
+
+    bool rendered = false;
+    for (int i = 0; i < 2000 && !rendered; ++i) {
+        rendered = h.gui->renderCount.load() > baseRenders;
+        if (!rendered) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(rendered);
+    if (!rendered) return;
+    raw->rearm();
+    const bool blockedAfterBatch = raw->waitBlocked();
+    CHECK(blockedAfterBatch);
+    if (!blockedAfterBatch) return;
+
+    const bool quitPushed = pushQuitOrForceStop(*raw, *h.ed);
+    runner.join();
+    closer.dismiss();
+    CHECK(rc == 0);
+    CHECK(quitPushed);
+    // Join garantiza que el loop dejo de tocar el Editor: el ultimo render
+    // del explorador confirma que quedo en level2 (no volvio a confirmar).
+    CHECK_EQ(h.gui->lastFileListPath(), level2);
+    CHECK_EQ(static_cast<int>(h.ed->getStateForTesting()),
+             static_cast<int>(State::FileBrowser));
 }
 
 #endif
