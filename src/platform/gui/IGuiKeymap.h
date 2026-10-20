@@ -20,17 +20,21 @@ public:
     // KEYDOWN es comandos/navegación/modificadores; el texto Unicode va
     // por SDL_TEXTINPUT (InsertChar por celda), nunca por aquí.
     // std::nullopt = tecla no enlazada (incluye: imprimible sin Ctrl, cuyo
-    // texto llega por SDL_TEXTINPUT; repetición suprimida por isRepeatable;
-    // Tab sin enlazar por paridad TTY).
-    virtual std::optional<InputEventType> mapKey(const GuiKeyPress& press) const = 0;
-    // Política de repetición (SDL_KEYDOWN con repeat != 0): solo
+    // texto llega por SDL_TEXTINPUT; repetición suprimida por
+    // isRepeatable/contexto; Tab sin enlazar por paridad TTY).
+    // `allowRepeatedNewline` es contexto de política, no estado: GuiRunLoop
+    // lo pone en true solo si Enter inserta una fila en el estado actual
+    // (Interaccion). El keymap no conoce modos.
+    virtual std::optional<InputEventType> mapKey(
+        const GuiKeyPress& press,
+        bool allowRepeatedNewline = false) const = 0;
+    // Política base de repetición (SDL_KEYDOWN con repeat != 0): solo
     // navegación (flechas, Home/End, PgUp/PgDn) y borrado (Backspace,
     // Delete) repiten; todo lo demás (Enter, Escape, Prefix, Save, SaveAs,
-    // Quit, Undo/Redo) no. mapKey ya la aplica: con repeat == true las
-    // acciones no repetibles devuelven std::nullopt. Se expone para tests
-    // y documentación. Si algún día se quiere que Enter repita al
-    // mantenerlo, será una decisión deliberada y probada, no un default
-    // silencioso.
+    // Quit, Undo/Redo) no. mapKey la aplica: con repeat == true las
+    // acciones no repetibles devuelven std::nullopt, salvo InsertNewline
+    // cuando allowRepeatedNewline indica que el estado lo permite. Se
+    // expone para tests y documentación.
     virtual bool isRepeatable(InputEventType type) const = 0;
     // Remapeo en tiempo de ejecución (misma frontera que
     // Terminal::keymapIface() -> ITtyKeymap): el Editor nunca cambia aunque

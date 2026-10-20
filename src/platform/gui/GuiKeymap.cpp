@@ -158,7 +158,8 @@ bool GuiKeymap::isRepeatable(InputEventType type) const {
     }
 }
 
-std::optional<InputEventType> GuiKeymap::mapKey(const GuiKeyPress& press) const {
+std::optional<InputEventType> GuiKeymap::mapKey(
+    const GuiKeyPress& press, bool allowRepeatedNewline) const {
     // Resolución única por tabla con la normalización de arriba: la
     // navegación acepta cualquier modificador pero consulta el enlace
     // remapeado; las letras solo resuelven con su (ctrl, alt, shift)
@@ -167,6 +168,8 @@ std::optional<InputEventType> GuiKeymap::mapKey(const GuiKeyPress& press) const 
                                 press.mods.shift);
     auto it = keys_.find(b);
     if (it == keys_.end()) return std::nullopt;
-    if (press.repeat && !isRepeatable(it->second)) return std::nullopt;
+    if (press.repeat && !isRepeatable(it->second) &&
+        !(allowRepeatedNewline && it->second == InputEventType::InsertNewline))
+        return std::nullopt;
     return it->second;
 }

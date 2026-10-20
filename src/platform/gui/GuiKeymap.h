@@ -37,7 +37,9 @@ class GuiKeymap : public IGuiKeymap {
 public:
     GuiKeymap();
 
-    std::optional<InputEventType> mapKey(const GuiKeyPress& press) const override;
+    std::optional<InputEventType> mapKey(
+        const GuiKeyPress& press,
+        bool allowRepeatedNewline = false) const override;
     bool isRepeatable(InputEventType type) const override;
 
     // Alias local del vocabulario compartido (GuiKey.h): la interfaz habla

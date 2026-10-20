@@ -21,6 +21,9 @@
 //     SDL_TEXTINPUT. Otros layouts/plataformas pueden variar.
 //   - KEYDOWN es comandos/navegación/modificadores; TEXTINPUT es texto
 //     Unicode confirmado (el loop lo trocea en InsertChar por celda).
+//   - La repetición de KEYDOWN se conserva (press.repeat) y la filtra el
+//     keymap: navegación/borrado repiten siempre; Enter solo en estados
+//     donde inserta una fila (contexto que aporta GuiRunLoop).
 //   - Letras 'A'-'Z' se normalizan a minúscula lógica (KeyA..KeyZ) ANTES
 //     de buscar el binding: la representación real con Shift held llega
 //     como mayúscula ('S' con KMOD_SHIFT en varios layouts/drivers, no
@@ -292,7 +295,8 @@ inline Uint32 guiWindowFlags(bool hidpi) {
     return flags;
 }
 
-inline GuiKeyPress guiKeyFromSdl(SDL_Keycode sym, Uint16 mod, bool repeat) {
+inline GuiKeyPress guiKeyFromSdl(SDL_Keycode sym, Uint16 mod,
+                                  bool repeat = false) {
     GuiKeyPress p;
     p.repeat = repeat;
     p.mods.ctrl = (mod & KMOD_CTRL) != 0;

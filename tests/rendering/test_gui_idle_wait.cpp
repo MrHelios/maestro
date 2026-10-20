@@ -46,6 +46,10 @@ using clk = std::chrono::steady_clock;
 // vez de comparar snapshots visuales.
 struct CountingGuiRenderer : public GuiRenderer {
     std::atomic<int> renderCount{0};
+    // Últimas líneas del Document vistas por un render. Se escribe en el
+    // hilo del loop; leerlo tras join (o vía atómico) evita tocar el Buffer
+    // desde el hilo del test mientras el loop lo está mutando.
+    std::atomic<int> lastDocLineCount{0};
     // Cursor/viewport que vio cada render (protegido: el loop escribe desde
     // otro hilo y los tests de lote leen antes del join para no esperar).
     std::mutex samplesMutex;
@@ -57,6 +61,7 @@ struct CountingGuiRenderer : public GuiRenderer {
                           const std::optional<Selection>& searchHighlight,
                           const std::optional<BracketPair>& bracketPair) override {
         ++renderCount;
+        lastDocLineCount.store(doc.lineCount());
         {
             std::lock_guard<std::mutex> lk(samplesMutex);
             renderedCursors.emplace_back(cursor.line, viewport.top);
@@ -75,6 +80,9 @@ struct CountingGuiRenderer : public GuiRenderer {
 // loop llama al watcher al tope de cada vuelta, ANTES de drenar SDL, así
 // que la compuerta deja el hilo detenido con la cola intacta: el test
 // puede encolar un lote completo y liberar para que se procese de una vez.
+// rearm() habilita una segunda compuerta: cuando vuelve a bloquear, el
+// lote anterior ya se drenó/renderizó y el loop no toca el Editor, así el
+// test puede inspeccionarlo sin data race.
 struct BlockingWatcher : public FileWatcher {
     std::atomic<int> pollCount{0};
     std::atomic<bool> armed{false};
@@ -106,6 +114,11 @@ struct BlockingWatcher : public FileWatcher {
         std::lock_guard<std::mutex> lk(m);
         released = true;
         cv.notify_all();
+    }
+    void rearm() {
+        std::lock_guard<std::mutex> lk(m);
+        blocked = false;
+        released = false;
     }
 };
 
@@ -657,6 +670,23 @@ struct MaxBatchMsGuard {
     MaxBatchMsGuard(const MaxBatchMsGuard&) = delete;
     MaxBatchMsGuard& operator=(const MaxBatchMsGuard&) = delete;
 };
+
+// Cierra el loop con el hilo detenido en la compuerta. Intenta SDL_QUIT
+// (ruta normal); si la cola no lo acepta, fuerza la salida del Editor
+// mientras el loop está bloqueado en pollEvents (sin acceso concurrente) y
+// recién después libera la compuerta. Devuelve si el QUIT se encoló.
+bool pushQuitOrForceStop(BlockingWatcher& raw, Editor& ed) {
+    bool quitPushed = false;
+    for (int i = 0; i < 500 && !quitPushed; ++i) {
+        SDL_Event q{};
+        q.type = SDL_QUIT;
+        if (SDL_PushEvent(&q) == 1) quitPushed = true;
+        else std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (!quitPushed) ed.requestQuit(true);
+    raw.release();
+    return quitPushed;
+}
 }  // namespace
 
 TEST(sdl_dummy_drivers_restaura_entorno_al_salir) {
@@ -1302,6 +1332,160 @@ TEST(gui_runloop_batch_tope_de_tiempo_evita_inanicion) {
     runner.join();
     closer.dismiss();
     CHECK(rc == 0);
+}
+
+TEST(gui_runloop_ctrl_k_repetido_no_cancela_prefix) {
+    // Ctrl+K repetido NO debe alternar/cancelar el prefijo: la repetición se
+    // filtra en el keymap (Prefix no es repetible). El SDL_QUIT va detrás en
+    // la misma cola FIFO: si los dos Ctrl+K se procesaran, el segundo
+    // cancelaría el prefijo y el estado final sería Navegacion.
+    {
+        VideoProbe probe;
+        if (!probe.ok) SKIP("sin video dummy");
+    }
+    SdlDummyDrivers env;
+
+    auto watcher = std::make_unique<BlockingWatcher>();
+    BlockingWatcher* raw = watcher.get();
+    Harness h = makeHarness(std::move(watcher));
+
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer([raw] { raw->release(); }, runner);
+
+    int lastRender = -1, stable = 0;
+    bool idle = false;
+    for (int i = 0; i < 500 && !idle; ++i) {
+        const int r = h.gui->renderCount.load();
+        if (raw->pollCount.load() >= 1 && r == lastRender) {
+            if (++stable >= 10) idle = true;
+        } else {
+            stable = 0;
+        }
+        lastRender = r;
+        if (!idle) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(idle);
+    raw->arm();
+    const bool blocked = raw->waitBlocked();
+    CHECK(blocked);
+    if (!blocked) return;
+
+    auto pushCtrlK = [](bool repeat) {
+        SDL_Event ev{};
+        ev.type = SDL_KEYDOWN;
+        ev.key.keysym.sym = SDLK_k;
+        ev.key.keysym.mod = KMOD_CTRL;
+        ev.key.state = SDL_PRESSED;
+        ev.key.repeat = repeat ? 1 : 0;
+        CHECK(SDL_PushEvent(&ev) == 1);
+    };
+    pushCtrlK(false);
+    pushCtrlK(true);
+    const bool quitPushed = pushQuitOrForceStop(*raw, *h.ed);
+
+    runner.join();
+    closer.dismiss();
+    CHECK(rc == 0);
+    CHECK(quitPushed);
+    CHECK_EQ(static_cast<int>(h.ed->cursorViewSnapshot().state),
+             static_cast<int>(State::Prefix));
+}
+
+TEST(gui_runloop_enter_repetido_inserta_filas) {
+    // Regresión: en Interaccion cada SDL_KEYDOWN de Enter con repeat=1 debe
+    // insertar una fila (el keymap recibe allowRepeatedNewline=true desde
+    // GuiRunLoop). Sin esa excepción contextual los repetidos se
+    // descartaban y mantener Enter en la última fila no avanzaba.
+    {
+        VideoProbe probe;
+        if (!probe.ok) SKIP("sin video dummy");
+    }
+    SdlDummyDrivers env;
+
+    auto watcher = std::make_unique<BlockingWatcher>();
+    BlockingWatcher* raw = watcher.get();
+    Harness h = makeHarness(std::move(watcher));
+    auto& b = h.ed->getActiveBufferForTesting();
+    b.document.restore(std::vector<std::string>{"a", "b", "c"});
+    b.cursor.line = 2;  // última fila
+    b.cursor.col = 0;
+    b.viewport.top = 0;
+    h.ed->handleEvent(insertCharEv("i"));  // Navegacion -> Interaccion
+    const int baseLines = b.document.lineCount();
+
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer([raw] { raw->release(); }, runner);
+
+    // Compuerta: el loop está vivo y en espera antes de encolar el lote.
+    int lastRender = -1, stable = 0;
+    bool idle = false;
+    for (int i = 0; i < 500 && !idle; ++i) {
+        const int r = h.gui->renderCount.load();
+        if (raw->pollCount.load() >= 1 && r == lastRender) {
+            if (++stable >= 10) idle = true;
+        } else {
+            stable = 0;
+        }
+        lastRender = r;
+        if (!idle) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(idle);
+    raw->arm();
+    const bool blocked = raw->waitBlocked();
+    CHECK(blocked);
+    if (!blocked) return;
+
+    constexpr int kRepeats = 6;
+    auto pushEnter = [](bool repeat) {
+        SDL_Event ev{};
+        ev.type = SDL_KEYDOWN;
+        ev.key.keysym.sym = SDLK_RETURN;
+        ev.key.keysym.mod = KMOD_NONE;
+        ev.key.state = SDL_PRESSED;
+        ev.key.repeat = repeat ? 1 : 0;
+        CHECK(SDL_PushEvent(&ev) == 1);
+    };
+    const int baseRenders = h.gui->renderCount.load();
+    pushEnter(false);
+    for (int i = 0; i < kRepeats; ++i) pushEnter(true);
+    raw->release();
+
+    // El render del lote confirma que el loop drenó y aplicó TODOS los
+    // Enter encolados. Recién después se rearma la compuerta; cuando vuelve
+    // a bloquear, el loop ya terminó el render y no toca el Editor. Desde
+    // ese punto el hilo del test puede leer/escribir el Buffer sin carreras.
+    bool rendered = false;
+    for (int i = 0; i < 2000 && !rendered; ++i) {
+        rendered = h.gui->renderCount.load() > baseRenders;
+        if (!rendered) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    CHECK(rendered);
+    if (!rendered) return;
+    raw->rearm();
+    const bool blockedAfterBatch = raw->waitBlocked();
+    CHECK(blockedAfterBatch);
+    if (!blockedAfterBatch) return;
+
+    const int expected = baseLines + kRepeats + 1;
+
+    // El buffer quedó modificado: limpiar con el loop detenido para que
+    // SDL_QUIT cierre sin prompt de "archivos sin guardar". No se lee el
+    // Buffer acá: los valores se verifican tras el join, usando lo que
+    // capturó el renderer en el hilo del loop.
+    b.modified = false;
+    const bool quitPushed = pushQuitOrForceStop(*raw, *h.ed);
+    runner.join();
+    closer.dismiss();
+    CHECK(rc == 0);
+    CHECK(quitPushed);
+    // Join garantiza que el loop dejó de tocar el Editor: recién ahora se
+    // comprueba el estado capturado en el último render del lote.
+    CHECK_EQ(h.gui->lastDocLineCount.load(), expected);
+    const auto samples = h.gui->cursorSamples();
+    CHECK(!samples.empty());
+    if (!samples.empty()) CHECK_EQ(samples.back().first, expected - 1);
 }
 
 #endif

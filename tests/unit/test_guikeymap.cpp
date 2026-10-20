@@ -24,7 +24,9 @@
 //   - Letras sin Ctrl/Alt NUNCA mapean (el texto viene por SDL_TEXTINPUT).
 //   - Ctrl+Z = Undo en GUI (nunca Suspend: no hay job-control).
 //   - Tab sin enlazar (paridad TTY); keypad mínimo (solo KeyPadEnter).
-//   - Repetición: navega/borra repiten; acciones únicas no.
+//   - Repetición: navegación/borrado repiten; acciones (Save, Quit, Undo,
+//     Prefix, Escape) se suprimen con repeat; Enter repetido solo pasa con
+//     contexto allowRepeatedNewline (Interaccion), nunca en prompts.
 
 #include "platform/gui/GuiKeymap.h"
 #include "platform/gui/IGuiKeymap.h"
@@ -611,8 +613,8 @@ TEST(guikeymap_repeat_nav_repeats_actions_suppress) {
              static_cast<int>(InputEventType::PageDown));
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Backspace, false, false, false, true))),
              static_cast<int>(InputEventType::Backspace));
-    // Mantener Enter/Escape: no repite (una sola InsertNewline por
-    // pulsación; la repetición al mantenerlo sería decisión futura).
+    // Mantener Enter/Escape: no repite salvo el contexto explícito de
+    // InsertNewline (ver guikeymap_repeat_enter_solo_con_contexto).
     CHECK(!km.mapKey(key(GuiKeySym::Enter, false, false, false, true)).has_value());
     // Mantener Ctrl+K/S/Q/U/Y/Z/Escape: no repite (evita reabrir el prefijo
     // o ejecutar guardar/salir/deshacer en ráfaga por accidente).
@@ -622,6 +624,66 @@ TEST(guikeymap_repeat_nav_repeats_actions_suppress) {
     CHECK(!km.mapKey(key(GuiKeySym::KeyQ, true, false, false, true)).has_value());
     CHECK(!km.mapKey(key(GuiKeySym::KeyU, true, false, false, true)).has_value());
     CHECK(!km.mapKey(key(GuiKeySym::Escape, false, false, false, true)).has_value());
+}
+
+TEST(guikeymap_repeat_enter_solo_con_contexto) {
+    GuiKeymap km;
+    // Sin contexto (prompts/selectores/confirmaciones), Enter repetido se
+    // descarta: no confirma dos veces.
+    CHECK(!km.mapKey(key(GuiKeySym::Enter, false, false, false, true)).has_value());
+    CHECK(!km.mapKey(key(GuiKeySym::KeyPadEnter, false, false, false, true))
+               .has_value());
+    // Con contexto de Interaccion, Enter repetido inserta filas.
+    CHECK_EQ(static_cast<int>(
+                 *km.mapKey(key(GuiKeySym::Enter, false, false, false, true), true)),
+             static_cast<int>(InputEventType::InsertNewline));
+    CHECK_EQ(static_cast<int>(
+                 *km.mapKey(key(GuiKeySym::KeyPadEnter, false, false, false, true),
+                            true)),
+             static_cast<int>(InputEventType::InsertNewline));
+    // El contexto solo habilita InsertNewline; el resto sigue suprimido.
+    CHECK(!km.mapKey(key(GuiKeySym::Escape, false, false, false, true), true)
+               .has_value());
+    CHECK(!km.mapKey(key(GuiKeySym::KeyK, true, false, false, true), true)
+               .has_value());
+    CHECK(!km.mapKey(key(GuiKeySym::KeyS, true, false, false, true), true)
+               .has_value());
+    CHECK(!km.mapKey(key(GuiKeySym::KeyQ, true, false, false, true), true)
+               .has_value());
+    CHECK(!km.mapKey(key(GuiKeySym::KeyU, true, false, false, true), true)
+               .has_value());
+}
+
+TEST(guikeymap_enter_repetido_inserta_filas) {
+    GuiKeymap km;
+    Editor ed;
+    ed.handleEvent(insertStr("i"));  // Interaccion
+
+    // Pulsación inicial y repetida (repeat=true) con el contexto real de
+    // Interaccion: ambas resuelven a InsertNewline; sin contexto la repetida
+    // se suprimiría (cubierto en guikeymap_repeat_enter_solo_con_contexto).
+    const auto initial = km.mapKey(key(GuiKeySym::Enter, false, false, false,
+                                       false));
+    const auto repeated = km.mapKey(key(GuiKeySym::Enter, false, false, false,
+                                        true),
+                                    true);
+    CHECK(initial.has_value());
+    CHECK(repeated.has_value());
+    if (!initial || !repeated) return;
+    CHECK_EQ(static_cast<int>(*initial),
+             static_cast<int>(InputEventType::InsertNewline));
+    CHECK_EQ(static_cast<int>(*repeated),
+             static_cast<int>(InputEventType::InsertNewline));
+
+    InputEvent enter;
+    enter.type = *initial;
+    ed.handleEvent(enter);
+    enter.type = *repeated;
+    for (int i = 0; i < 4; ++i) ed.handleEvent(enter);
+    const Buffer& b = ed.getActiveBufferForTesting();
+    CHECK_EQ(b.document.lineCount(), 6);
+    CHECK_EQ(b.cursor.line, 5);
+    CHECK_EQ(b.cursor.col, 0);
 }
 
 // --- Remapeo y defaults ---
@@ -944,14 +1006,15 @@ TEST(guitext_enter_is_keydown_not_textinput) {
     (void)e;
 }
 
-// --- Headless extra (GUI sin ventana): política de repetición exhaustiva ---
+// --- Headless extra (GUI sin ventana): vocabulario completo ---
 // P2-3: lista CENTRALIZADA de los 27 InputEventType + comprobación de
-// cantidad. Si se agrega un valor al enum sin actualizar kAllEventTypes, el
-// CHECK_EQ(size, 26) falla; si se actualiza la lista pero no se decide su
-// repetibilidad, falla la partición (todo valor debe estar exactamente en un
-// lado: repetible o no). Solo navegación/borrado repiten; TODO lo demás
-// (incluidos eventos que el keymap nunca produce pero isRepeatable debe negar
-// por contrato) no.
+// cantidad. Si se agrega un valor al enum sin actualizar la lista, el
+// CHECK_EQ(size, 27) falla a propósito; si se actualiza la lista pero no se
+// decide su repetibilidad, falla la partición (todo valor debe estar
+// exactamente en un lado: repetible o no). Solo navegación/borrado repiten;
+// InsertNewline tiene una excepción contextual (Interaccion) que no cambia
+// esta política base. Todo lo demás (incluidos eventos que el keymap nunca
+// produce pero isRepeatable debe negar por contrato) no.
 namespace {
 const std::vector<InputEventType>& allEventTypes() {
     static const std::vector<InputEventType> v = {
@@ -1077,6 +1140,12 @@ TEST(guikeymap_no_repeat_exhaustivo_headless) {
                .has_value());
     CHECK(!km.mapKey(key(GuiKeySym::Unknown, false, false, false, true))
                .has_value());
+    // Enter repetido solo pasa con el contexto explícito de Interaccion.
+    CHECK(!km.mapKey(key(GuiKeySym::Enter, false, false, false, true))
+               .has_value());
+    CHECK_EQ(static_cast<int>(
+                 *km.mapKey(key(GuiKeySym::Enter, false, false, false, true), true)),
+             static_cast<int>(InputEventType::InsertNewline));
     // ...y los repetibles sí pasan con repeat ( Delete/Home/End incluidos ).
     CHECK(km.mapKey(key(GuiKeySym::Delete, false, false, false, true)).has_value());
     CHECK(km.mapKey(key(GuiKeySym::Home, false, false, false, true)).has_value());

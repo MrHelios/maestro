@@ -502,18 +502,21 @@ int GuiRunLoop::run() {
                 case SDL_KEYDOWN: {
                     // Teclado completo vía GuiKeymap: SDL_Keysym se adapta
                     // a vocabulario propio (GuiKey.h, sin SDL) en el límite
-                    // SDL y el keymap traduce a InputEvent semántico. La
-                    // política de repetición vive en el keymap (flechas,
-                    // Home/End, PgUp/PgDn y borrado repiten; Enter, Escape,
-                    // Prefix/Save/SaveAs/Quit/Undo/Redo no).
+                    // SDL y el keymap traduce a InputEvent semántico.
+                    // La repetición se conserva y el keymap la filtra:
+                    // navegación/borrado repiten siempre; Enter solo si el
+                    // estado actual inserta una fila (Interaccion). En
+                    // prompts/selectores Enter repetido sigue suprimido.
                     // KEYDOWN nunca lleva texto imprimible (sin doble
                     // inserción: el texto viene por SDL_TEXTINPUT).
                     InputEvent ie;
                     bool send = false;
+                    const bool enterInsertsLine =
+                        editor_.cursorViewSnapshot().state == State::Interaccion;
                     const GuiKeyPress press = guiKeyFromSdl(
                         ev.key.keysym.sym, ev.key.keysym.mod,
                         ev.key.repeat != 0);
-                    if (auto t = keymap_.mapKey(press)) {
+                    if (auto t = keymap_.mapKey(press, enterInsertsLine)) {
                         ie.type = *t;
                         send = true;
                     }

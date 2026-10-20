@@ -88,9 +88,10 @@ struct GuiModifiers {
 
 // Pulsación normalizada: tecla lógica + modificadores (sin Caps/Num) +
 // flag de repetición de SDL_KEYDOWN (repeat != 0). El consumidor decide la
-// política de repetición vía IGuiKeymap::isRepeatable (GuiRunLoop la aplica
-// dentro de GuiKeymap::mapKey: las acciones no repetibles devuelven
-// std::nullopt cuando repeat == true).
+// política de repetición vía IGuiKeymap::isRepeatable y el contexto:
+// navegación/borrado repiten siempre; Enter solo cuando el Editor está en
+// un estado donde inserta una fila (Interaccion). GuiRunLoop calcula ese
+// contexto y lo pasa a mapKey, que no conoce modos.
 struct GuiKeyPress {
     GuiKeySym sym = GuiKeySym::Unknown;
     GuiModifiers mods;
