@@ -417,10 +417,11 @@ TEST(terminal_resume_repaints_full_frame) {
     }
     ChildReaper reaper(pid);
 
-    // Loop corriendo en raw; el primer frame ya quedó pintado.
+    // Loop corriendo en raw; esperar a que el primer frame quede pintado
+    // (bajo carga, raw mode puede activarse antes de la primera salida).
     CHECK(termiosIs(master, false, 5000));
-    const size_t s0 = fileSize(outFd);
-    CHECK(s0 > 1000);
+    size_t s0 = 0;
+    CHECK(pollFileGrowth(outFd, 1000, &s0, 5000));
 
     // Suspender y reanudar.
     CHECK(writeByteRetry(master, 26));  // Ctrl+Z como byte
