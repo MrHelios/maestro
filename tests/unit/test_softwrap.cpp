@@ -55,6 +55,8 @@ TEST(softwrap_rows_and_boundary_affinity) {
     // y positionAt(row0, width) es la última columna VÁLIDA de la fila 0.
     CHECK(idx.positionAt(d, 1, 0) == (Position{0, 5}));
     CHECK(idx.positionAt(d, 0, 5) == (Position{0, 4}));
+    // En la última fila de la línea sí se alcanza el fin exclusivo.
+    CHECK(idx.positionAt(d, 1, 5) == (Position{0, 10}));
 }
 
 TEST(softwrap_incremental_update_shifts_later_lines) {

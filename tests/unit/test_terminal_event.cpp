@@ -4,6 +4,9 @@
 #include "platform/InputEvent.h"
 #include "platform/tty/Terminal.h"
 #include "test_framework.h"
+#define private public
+#include "app/Editor.h"
+#undef private
 
 // ---------------------------------------------------------------------------
 // Paso 9: traduccion de secuencias de escape de la terminal a eventos.
@@ -369,4 +372,32 @@ TEST(parse_mouse_sgr_direct_down_with_ctrl) {
     InputEvent e;
     Terminal::parseMouseSgr("[<81;10;5M", e);
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollDown));
+}
+
+// Terminal (bytes) -> TtyKeymap -> Editor (con soft-wrap .md): End llega
+// al final exclusivo de la línea en la última fila visual.
+TEST(terminal_end_key_reaches_line_end_in_markdown) {
+    // Configurar Editor con .md y soft-wrap (ancho ~12 columnas).
+    Editor ed;
+    ed.active().filename = "notes.md";
+    ed.active().document.restore({std::string(30, 'a')});
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 0;
+    ed.resize(10, 19);  // gutter 7 -> textWidth 12
+
+    // Inyectar secuencia ESC [ F (End) via pipe al Terminal parser.
+    PipedStdin p;
+    p.feed("\x1b[F");
+    Terminal t;
+
+    // Posicionar cursor en la última fila visual (columna 24).
+    ed.active().cursor.col = 24;
+    InputEvent e = t.readEvent();
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveEnd));
+    ed.handleEvent(e);
+
+    // Debe alcanzar col 30 (lineLength), no 29.
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 30);
+    CHECK_EQ(ed.active().cursor.col, ed.active().document.lineLength(0));
 }

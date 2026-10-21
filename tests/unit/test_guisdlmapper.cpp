@@ -126,6 +126,9 @@ TEST(guimouse_press_release_factories_carry_cell) {
 
 #include "platform/gui/GuiKeymap.h"
 #include "platform/InputEvent.h"
+#define private public
+#include "app/Editor.h"
+#undef private
 #endif
 
 TEST(guisdl_letters_case_and_digits) {
@@ -179,6 +182,42 @@ TEST(guisdl_control_keys) {
              static_cast<int>(GuiKeySym::PageUp));
     CHECK_EQ(static_cast<int>(guiKeyFromSdl(SDLK_PAGEDOWN, 0, false).sym),
              static_cast<int>(GuiKeySym::PageDown));
+#endif
+}
+
+// SDL -> GuiKeyPress -> GuiKeymap -> Editor (con soft-wrap .md): End llega
+// al final exclusivo de la línea en la última fila visual.
+TEST(guisdl_end_key_reaches_line_end_in_markdown) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    // Configurar Editor con .md y soft-wrap (ancho ~12 columnas).
+    Editor ed;
+    ed.active().filename = "notes.md";
+    ed.active().document.restore({std::string(30, 'a')});
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 0;
+    ed.resize(10, 19);  // gutter 7 -> textWidth 12
+
+    // SDLK_END -> GuiKeyPress -> GuiKeymap -> InputEvent -> Editor.
+    GuiKeyPress gp = guiKeyFromSdl(SDLK_END, 0, false);
+    CHECK_EQ(static_cast<int>(gp.sym), static_cast<int>(GuiKeySym::End));
+
+    GuiKeymap km;
+    const auto type = km.mapKey(gp);
+    CHECK(type.has_value());
+    if (!type) return;
+
+    // Posicionar cursor en la última fila visual (columna 24).
+    ed.active().cursor.col = 24;
+    InputEvent e;
+    e.type = *type;
+    ed.handleEvent(e);
+
+    // Debe alcanzar col 30 (lineLength), no 29.
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 30);
+    CHECK_EQ(ed.active().cursor.col, ed.active().document.lineLength(0));
 #endif
 }
 

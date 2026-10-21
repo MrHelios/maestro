@@ -196,7 +196,11 @@ public:
         int targetAbs = vr.columnBegin + colInRow;
         if (targetAbs <= vr.columnBegin) return {vr.docLine, vr.byteBegin};
         if (targetAbs >= vr.columnEnd) {
-            // Fin de fila visual: devolver la última posición VÁLIDA de esta fila
+            // Fin de la línea lógica: el cursor puede quedar en la posición
+            // exclusiva (lineLength), igual que sin soft-wrap.
+            if (vr.lastOfLine) return {vr.docLine, vr.byteEnd};
+            // Fin de una fila visual intermedia: no cruzar el límite, quedar
+            // en la última posición válida de esta fila.
             int lastAbs = vr.columnEnd - 1;
             int byte = utf8::byteForColumn(line, lastAbs);
             byte = utf8::alignStart(line, byte);

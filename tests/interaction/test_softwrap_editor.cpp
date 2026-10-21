@@ -3,6 +3,8 @@
 
 #include "test_support.h"
 #include "helpers/spy_screen_renderer.h"
+#include "platform/gui/GuiKeymap.h"
+#include "platform/tty/TtyKeymap.h"
 
 namespace {
 
@@ -30,11 +32,11 @@ TEST(softwrap_vertical_keeps_preferred_column) {
 
     press(ed, InputEventType::MoveDown);
     CHECK_EQ(ed.active().cursor.line, 0);
-    CHECK_EQ(ed.active().cursor.col, 29); // fila corta: se limita
+    CHECK_EQ(ed.active().cursor.col, 30); // fila corta: fin de línea (exclusivo)
 
     press(ed, InputEventType::MoveDown);
     CHECK_EQ(ed.active().cursor.line, 1);
-    CHECK_EQ(ed.active().cursor.col, 4);  // "short" también es corta
+    CHECK_EQ(ed.active().cursor.col, 5);  // "short" también es corta: fin de línea
 
     // La preferencia original (8) sobrevive a las filas cortas.
     press(ed, InputEventType::MoveDown);
@@ -58,11 +60,11 @@ TEST(softwrap_vertical_up_keeps_preferred_column) {
 
     press(ed, InputEventType::MoveUp);
     CHECK_EQ(ed.active().cursor.line, 1);
-    CHECK_EQ(ed.active().cursor.col, 4);
+    CHECK_EQ(ed.active().cursor.col, 5);
 
     press(ed, InputEventType::MoveUp);
     CHECK_EQ(ed.active().cursor.line, 0);
-    CHECK_EQ(ed.active().cursor.col, 29);
+    CHECK_EQ(ed.active().cursor.col, 30);
 
     press(ed, InputEventType::MoveUp);
     CHECK_EQ(ed.active().cursor.line, 0);
@@ -81,13 +83,76 @@ TEST(softwrap_home_end_stay_inside_intermediate_row) {
     CHECK_EQ(ed.active().cursor.col, 23); // fin de la fila 1
 
     press(ed, InputEventType::MoveDown);   // a la fila 2 (última)
-    CHECK_EQ(ed.active().cursor.col, 29);
+    CHECK_EQ(ed.active().cursor.col, 30); // columna preferida 11: fin de línea
 
     press(ed, InputEventType::MoveHome);
     CHECK_EQ(ed.active().cursor.col, 24); // inicio de la fila 2
 
     press(ed, InputEventType::MoveEnd);
-    CHECK_EQ(ed.active().cursor.col, 29); // fin de la última fila
+    CHECK_EQ(ed.active().cursor.col, 30); // fin de la línea (posición exclusiva)
+}
+
+// End en un .md debe llegar al final EXCLUSIVO de la línea (col ==
+// lineLength), no a la última celda. El bug se manifestaba en el camino con
+// soft-wrap, que solo se activa para .md: se comprueba el evento End tal como
+// llega desde cada frontend (GUI por GuiKeymap, TUI por TtyKeymap).
+//
+// Dos casos:
+// 1. Línea corta (sin wrap): la única fila visual es también la última.
+// 2. Línea larga (con wrap): el cursor empieza en la última fila visual
+//    y End debe alcanzar el final exclusivo de la línea (col 30).
+
+namespace {
+void testEndOnLastVisualRow(Editor& ed, InputEventType endEvent) {
+    // Línea de 30 'a': 3 filas visuales (12 + 12 + 6).
+    // Posicionamos en la última fila visual (columna 24).
+    (void)ed.wrapIndex();
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 24;
+    press(ed, endEvent);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 30);
+    CHECK_EQ(ed.active().cursor.col, ed.active().document.lineLength(0));
+}
+
+void testEndOnSingleRow(Editor& ed, InputEventType endEvent) {
+    // Línea de 10 chars: una sola fila visual (no hay wrap real).
+    ed.active().document.restore({"hola mundo"});
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 0;
+    press(ed, endEvent);
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 10);
+    CHECK_EQ(ed.active().cursor.col, ed.active().document.lineLength(0));
+}
+} // namespace
+
+TEST(softwrap_markdown_end_gui_reaches_line_end) {
+    Editor ed;
+    setupWrapEditor(ed, {std::string(30, 'a')});
+
+    GuiKeyPress key;
+    key.sym = GuiKeySym::End;
+    GuiKeymap keymap;
+    const auto type = keymap.mapKey(key);
+    CHECK(type.has_value());
+    if (type) {
+        testEndOnLastVisualRow(ed, *type);
+        testEndOnSingleRow(ed, *type);
+    }
+}
+
+TEST(softwrap_markdown_end_tui_reaches_line_end) {
+    Editor ed;
+    setupWrapEditor(ed, {std::string(30, 'a')});
+
+    TtyKeymap keymap;
+    const auto type = keymap.sequence("[F");
+    CHECK(type.has_value());
+    if (type) {
+        testEndOnLastVisualRow(ed, *type);
+        testEndOnSingleRow(ed, *type);
+    }
 }
 
 TEST(softwrap_home_at_continuation_boundary_stays_on_row) {
@@ -112,6 +177,35 @@ TEST(softwrap_zero_text_width_uses_identity_navigation) {
     press(ed, InputEventType::MoveDown);
     CHECK_EQ(ed.active().cursor.line, 1);
     CHECK_EQ(ed.active().cursor.col, 3);
+}
+
+// Click en la última celda visual de una línea .md corta (una sola fila
+// visual) debe colocar el cursor en el final exclusivo (col == lineLength).
+TEST(softwrap_mouse_click_at_line_end_places_cursor_at_exclusive_end) {
+    Editor ed;
+    ed.active().filename = "notes.md";
+    ed.active().document.restore({"hola mundo"}); // 10 chars, 1 visual row
+    ed.resize(7, 20); // gutter 7, content width 13
+    ed.active().viewport.top = 0;
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 0;
+
+    // Click en la celda después del último carácter (columna visual 10 = gutter + 10).
+    // gutter=7, text cols 0..9 ocupan celdas 7..16. Click en celda 17 -> visualColInRow=10.
+    InputEvent press;
+    press.type = InputEventType::MousePress;
+    press.cell = CellPos{17, 0}; // gutter 7 + textWidth 10 = 17
+    ed.handleEvent(press);
+
+    InputEvent release;
+    release.type = InputEventType::MouseRelease;
+    release.cell = CellPos{17, 0};
+    ed.handleEvent(release);
+
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 10); // final exclusivo
+    CHECK_EQ(ed.active().cursor.col, ed.active().document.lineLength(0));
+    CHECK(!ed.hasSelection());
 }
 
 TEST(softwrap_mouse_drag_beyond_eof_selects_last_char) {
