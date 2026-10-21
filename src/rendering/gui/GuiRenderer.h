@@ -134,6 +134,18 @@ public:
         wrapIndex_ = idx;
     }
 
+    // Solo tests: fuerza a fallar la adquisición de framebuffer número
+    // `skips` (0-based) contada desde la próxima llamada a acquireFb.
+    // `skips == 0` hace fallar la inmediata; `skips == 1` deja pasar una y
+    // hace fallar la siguiente. Se consume una vez. `-1` desactiva.
+    // Ejercita las rutas de recuperación (fallback sin superficie o
+    // invalidación de caché) sin depender de un OOM real.
+    void setFramebufAcquireFailAfterForTests(int skips);
+    // Solo tests: destruye las dos superficies persistentes de contenido
+    // (como si el renderer/tamaño las hubiera invalidado) para forzar su
+    // recreación en el próximo render.
+    void dropContentFramebuffersForTests();
+
     // Tema claro/oscuro: conmuta `dark_` y libera el caché de texturas
     // (ahorro de memoria, no corrección: el color ya va en la clave de
     // GuiFont, ver GuiFont.h). ADEMÁS invalida el caché diferencial (los
@@ -517,6 +529,8 @@ private:
     int contentFbActive_ = 0;
     FrameSurface listFb_;
     int framebufTarget_ = 0;  // 0 = sin probar, 1 = soportado, -1 = no
+    // Ver setFramebufAcquireFailAfterForTests: -1 desactiva.
+    int framebufFailAfter_ = -1;
     void destroyFb(FrameSurface& s);
     void destroyFramebuf();
     void* acquireFb(FrameSurface& s, void* sdlRenderer, int wPx, int hPx,

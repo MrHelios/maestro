@@ -236,9 +236,17 @@ TEST(bench_perf_gui_sdl_scroll_checked) {
         fx.frame();
     }
     CHECK_EQ(fx.gui.totalFull(), 1);  // ningún full en la sesión
-    CHECK_EQ(fx.gui.fontCacheSize(), fx.gui.fontMaxCacheSize());
-    const unsigned long long m0 = fx.gui.fontCacheMisses();
-    const unsigned long long e0 = fx.gui.fontCacheEvictions();
+    // La LRU solo existe/está operativa si se cargó una fuente. Sin SDL_ttf
+    // o sin fuente del sistema el render es degradado (solo fills): el
+    // scroll sigue siendo válido, pero cacheSize()/misses() no aplican.
+    const bool fontReady = fx.gui.hasFont();
+    if (fontReady) {
+        CHECK_EQ(fx.gui.fontCacheSize(), fx.gui.fontMaxCacheSize());
+    }
+    const unsigned long long m0 =
+        fontReady ? fx.gui.fontCacheMisses() : 0;
+    const unsigned long long e0 =
+        fontReady ? fx.gui.fontCacheEvictions() : 0;
     perf_time::bench_ns("sdl scroll +-1 (blit O1 + chrome)", 400, [&] {
         fx.viewport.top += dir;
         fx.cursor.line += dir;
@@ -254,19 +262,26 @@ TEST(bench_perf_gui_sdl_scroll_checked) {
         }
     });
     const double missPerFrame =
-        static_cast<double>(fx.gui.fontCacheMisses() - m0) / 400.0;
+        fontReady ? static_cast<double>(fx.gui.fontCacheMisses() - m0) / 400.0
+                  : 0.0;
     const double evictPerFrame =
-        static_cast<double>(fx.gui.fontCacheEvictions() - e0) / 400.0;
+        fontReady ? static_cast<double>(fx.gui.fontCacheEvictions() - e0) / 400.0
+                  : 0.0;
     perf_arch::reportVerbose(
-        "%-46s %6.1f misses/frame %6.1f evict/frame (cache %zu/%zu)\n",
-        "sdl scroll raster", missPerFrame, evictPerFrame,
-        fx.gui.fontCacheSize(), fx.gui.fontMaxCacheSize());
+        "%-46s %s\n", "sdl scroll raster",
+        fontReady ? "cache de fuentes activo" : "(degradado, sin LRU)");
+    if (fontReady) {
+        perf_arch::reportVerbose(
+            "%-46s %6.1f misses/frame %6.1f evict/frame (cache %zu/%zu)\n",
+            "", missPerFrame, evictPerFrame,
+            fx.gui.fontCacheSize(), fx.gui.fontMaxCacheSize());
+        CHECK_EQ(fx.gui.fontCacheSize(), fx.gui.fontMaxCacheSize());
+        // Entrante + gutter + chrome de posición: puñado de rasters, no
+        // cientos (con el viejo flush total habría picos de 512+misses/frame).
+        CHECK(missPerFrame <= 12.0);
+        CHECK(evictPerFrame <= 12.0);
+    }
     CHECK_EQ(fx.gui.totalFull(), 1);
-    CHECK_EQ(fx.gui.fontCacheSize(), fx.gui.fontMaxCacheSize());
-    // Entrante + gutter + chrome de posición: puñado de rasters, no cientos
-    // (con el viejo flush total habría picos de 512+misses por frame).
-    CHECK(missPerFrame <= 12.0);
-    CHECK(evictPerFrame <= 12.0);
     CHECK(g_sink > 0);
 #endif
 }

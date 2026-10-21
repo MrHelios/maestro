@@ -17,6 +17,8 @@
 #include "base/utf8.h"
 #include "diagnostics/Instrument.h"
 #include "document/Selection.h"
+#include "layout/Gutter.h"
+#include "layout/SoftWrap.h"
 #include "platform/gui/GuiRunLoop.h"
 #include "platform/gui/GuiSdlMapper.h"
 #include "rendering/Sink.h"
@@ -60,6 +62,24 @@ void renderDoc(GuiRenderer& gui, NullTestSink& sink, Document& doc,
 
 bool contains(const std::string& hay, const std::string& needle) {
     return hay.find(needle) != std::string::npos;
+}
+
+// Contenido con líneas que ocupan varias filas visuales con textWidth 17:
+// L0 y L2/L3 usan 3 filas; la línea corta usa 1. Viewport 6 de alto deja
+// visibles continuaciones de L0 y el comienzo de L2.
+std::vector<std::string> softWrapLines() {
+    return {std::string(40, 'a'), "corta", std::string(40, 'b'),
+            std::string(40, 'c')};
+}
+
+void captureContent(GuiRenderer& gui, std::vector<std::string>& plain,
+                    std::vector<bool>& current) {
+    plain.clear();
+    current.clear();
+    for (const auto& row : gui.lastContentRows()) {
+        plain.push_back(row.plain());
+        current.push_back(row.isCurrentLine);
+    }
 }
 
 #ifdef HAVE_SDL2
@@ -933,6 +953,421 @@ TEST(gui_sdl_scroll_paridad_pixeles_con_full) {
     std::vector<GuiColor> full;
     CHECK(readSurfaceLocal(gui, full));
     CHECK(full == parcial);
+#endif
+}
+
+// Scroll de una fila en AMBAS direcciones con el cursor Block pegado al
+// borde del viewport: el blit debe dejar exactamente los mismos píxeles que
+// el frame completo, incluida la fila de borde (borrado del cursor viejo y
+// dibujado del nuevo), que el desplazamiento de región puede dejar residual.
+TEST(gui_sdl_scroll_bordes_cursor_block_paridad_pixeles) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummyLocal sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 20; ++i)
+        lines.push_back("linea " + std::to_string(i) + " de prueba");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    Cursor cur;
+
+    auto paridad = [&](int fromTop, int fromLine, int toTop, int toLine,
+                       int filaCursorEsperada) -> bool {
+        gui.invalidateCache();
+        vp.top = fromTop;
+        cur.line = fromLine;
+        renderDoc(gui, sink, doc, cur, vp, navChrome());
+        CHECK(gui.lastWasFull());
+        CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
+        CHECK_EQ(gui.lastCursor().cell.row, fromLine - fromTop);
+        vp.top = toTop;
+        cur.line = toLine;
+        renderDoc(gui, sink, doc, cur, vp, navChrome());
+        CHECK(!gui.lastWasFull());  // scroll ±1 por el camino rápido
+        CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
+        CHECK_EQ(gui.lastCursor().cell.row, filaCursorEsperada);
+        std::vector<GuiColor> parcial;
+        if (!readSurfaceLocal(gui, parcial)) return false;
+        gui.invalidateCache();
+        vp.top = toTop;
+        cur.line = toLine;
+        renderDoc(gui, sink, doc, cur, vp, navChrome());
+        CHECK(gui.lastWasFull());
+        std::vector<GuiColor> full;
+        CHECK(readSurfaceLocal(gui, full));
+        CHECK(full == parcial);
+        return true;
+    };
+
+    // +1 con el cursor Block en la última fila visible.
+    if (!paridad(4, 13, 5, 14, 9)) SKIP("ReadPixels no disponible");
+    // -1 con el cursor Block en la primera fila visible.
+    if (!paridad(5, 5, 4, 4, 0)) SKIP("ReadPixels no disponible");
+#endif
+}
+
+// Framebuffer: si falla SOLO la adquisición del destino del scroll-blit, el
+// origen sigue vigente y la rama de recuperación repinta todo el contenido
+// sobre él. El frame actual NO se queda con la imagen vieja (ni sin pintar):
+// los píxeles deben igualar al frame completo del estado nuevo.
+TEST(gui_sdl_scroll_dst_fb_falla_repinta_frame_actual) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummyLocal sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    gui.setFramebufAcquireFailAfterForTests(-1);
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 20; ++i)
+        lines.push_back("linea " + std::to_string(i) + " de prueba");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    vp.top = 4;
+    Cursor cur;
+    cur.line = 4;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+
+    vp.top = 5;
+    cur.line = 5;
+    gui.setFramebufAcquireFailAfterForTests(1);  // deja pasar el origen
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(!gui.lastWasFull());
+    std::vector<GuiColor> reparado;
+    if (!readSurfaceLocal(gui, reparado)) SKIP("ReadPixels no disponible");
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    std::vector<GuiColor> full;
+    CHECK(readSurfaceLocal(gui, full));
+    CHECK(reparado == full);
+    gui.setFramebufAcquireFailAfterForTests(-1);
+#endif
+}
+
+// Framebuffer: si falla la adquisición en el camino rápido de cursor, la
+// caché se invalida y el frame actual queda pendiente, pero el SIGUIENTE ya
+// debe ser completo y correcto (nada a medio pintar entre frames).
+TEST(gui_sdl_fb_falla_reconstruye_siguiente_frame) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummyLocal sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    gui.setFramebufAcquireFailAfterForTests(-1);
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"linea 0", "linea 1", "linea 2", "linea 3", "linea 4",
+                 "linea 5", "linea 6", "linea 7"});
+    Viewport vp = makeVp(10, 40);
+    vp.top = 0;
+    Cursor cur;
+    cur.line = 3;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+
+    // Movimiento de cursor (mismo top): tryFastCursorMove adquiere una sola
+    // superficie; el hook la hace fallar y la caché se invalida.
+    cur.line = 4;
+    gui.setFramebufAcquireFailAfterForTests(0);
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(!gui.hasContentCache());
+
+    gui.setFramebufAcquireFailAfterForTests(-1);
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    CHECK(gui.hasContentCache());
+    std::vector<GuiColor> recompuesto;
+    if (!readSurfaceLocal(gui, recompuesto)) SKIP("ReadPixels no disponible");
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    std::vector<GuiColor> full;
+    CHECK(readSurfaceLocal(gui, full));
+    CHECK(recompuesto == full);
+#endif
+}
+
+// Framebuffer: si falla la adquisición del ORIGEN del scroll-blit no hay
+// imagen vigente desde la que desplazar. La caché se invalida y el frame
+// siguiente debe ser completo e idéntico a un render limpio.
+TEST(gui_sdl_scroll_src_fb_falla_invalida_y_reconstruye) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummyLocal sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    gui.setFramebufAcquireFailAfterForTests(-1);
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 20; ++i)
+        lines.push_back("linea " + std::to_string(i) + " de prueba");
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 40);
+    vp.top = 4;
+    Cursor cur;
+    cur.line = 4;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+
+    vp.top = 5;
+    cur.line = 5;
+    gui.setFramebufAcquireFailAfterForTests(0);  // falla el origen
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(!gui.hasContentCache());
+
+    gui.setFramebufAcquireFailAfterForTests(-1);
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    CHECK(gui.hasContentCache());
+    std::vector<GuiColor> recompuesto;
+    if (!readSurfaceLocal(gui, recompuesto)) SKIP("ReadPixels no disponible");
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    std::vector<GuiColor> full;
+    CHECK(readSurfaceLocal(gui, full));
+    CHECK(recompuesto == full);
+#endif
+}
+
+// Framebuffer: recreación de las superficies persistentes (resize/renderer).
+// El próximo render debe repintar la imagen completa aunque el diff lógico
+// diga "sin filas sucias": la superficie vieja (y su contenido) ya no existe.
+TEST(gui_sdl_framebuffer_recreado_repinta_imagen_completa) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummyLocal sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"linea 0", "linea 1", "linea 2", "linea 3", "linea 4",
+                 "linea 5", "linea 6", "linea 7"});
+    Viewport vp = makeVp(10, 40);
+    vp.top = 0;
+    Cursor cur;
+    cur.line = 3;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    std::vector<GuiColor> ref;
+    if (!readSurfaceLocal(gui, ref)) SKIP("ReadPixels no disponible");
+
+    gui.dropContentFramebuffersForTests();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    std::vector<GuiColor> recreado;
+    CHECK(readSurfaceLocal(gui, recreado));
+    CHECK(recreado == ref);  // imagen completa, no una superficie en blanco
+
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(!gui.lastWasFull());
+    CHECK_EQ(gui.lastRepainted(), 0);
+    std::vector<GuiColor> steady;
+    CHECK(readSurfaceLocal(gui, steady));
+    CHECK(steady == ref);
+#endif
+}
+
+// Soft Wrap: el camino rápido de cursor-move no puede mapear
+// `docLine - viewport.top` a filas visuales. Al moverse dentro de una línea
+// larga cambian de CurrentLine TODAS sus continuaciones, no solo una fila.
+// También al saltar entre líneas lógicas el mapeo deja de ser 1:1. El fast
+// path debe declinar y el resultado (DTO) coincidir con el frame completo.
+TEST(gui_diff_softwrap_cursor_move_fuerza_completo_y_paridad_dto) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    doc.restore(softWrapLines());
+    Viewport vp = makeVp(6, 24);
+    Cursor cur;
+    const int textWidth = vp.width - gutterWidth(doc.lineCount(), vp.width);
+    softwrap::Index idx;
+    CHECK(idx.ensure(doc, textWidth, true));
+    CHECK(idx.enabled());
+    gui.setWrapIndex(&idx);
+
+    renderDoc(gui, sink, doc, cur, vp, navChrome());  // full inicial
+    CHECK(gui.lastWasFull());
+    CHECK_EQ(gui.lastContentRows().size(), static_cast<size_t>(6));
+
+    // Movimiento dentro de L0: de la primera fila visual a su continuación.
+    instrument::enable(true);
+    instrument::resetFrame();
+    cur.col = 20;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    auto moved = instrument::snapshotAndReset();
+    instrument::enable(false);
+    CHECK_EQ(moved.renderEditorRow, 6u);  // frame completo, no O(1)
+    CHECK(gui.lastContentRows()[1].isCurrentLine);
+    CHECK(gui.lastContentRows()[2].isCurrentLine);
+    std::vector<std::string> fastPlain;
+    std::vector<bool> fastCur;
+    captureContent(gui, fastPlain, fastCur);
+    const std::vector<GuiContentRow> fastRows = gui.lastContentRows();
+    const ChromeData fastChrome = gui.lastChrome();
+    const FrameCursor fastCursor = gui.lastCursor();
+
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    CHECK_EQ(gui.lastContentRows().size(), fastPlain.size());
+    CHECK_EQ(gui.lastContentRows().size(), static_cast<size_t>(6));
+    // Paridad fila a fila: segmentos, roles y CurrentLine de TODAS las filas
+    // visuales (no solo el texto aplanado).
+    CHECK(gui.lastContentRows() == fastRows);
+    for (size_t i = 0; i < fastPlain.size(); ++i) {
+        CHECK_EQ(gui.lastContentRows()[i].plain(), fastPlain[i]);
+        CHECK_EQ(gui.lastContentRows()[i].isCurrentLine, fastCur[i]);
+    }
+    CHECK(gui.lastChrome() == fastChrome);
+    CHECK(gui.lastCursor().visible == fastCursor.visible);
+    CHECK(gui.lastCursor().shape == fastCursor.shape);
+    CHECK(gui.lastCursor().cell == fastCursor.cell);
+
+    // Movimiento entre líneas lógicas (L0 -> L1, una sola fila visual).
+    instrument::enable(true);
+    instrument::resetFrame();
+    cur.line = 1;
+    cur.col = 0;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    moved = instrument::snapshotAndReset();
+    instrument::enable(false);
+    CHECK_EQ(moved.renderEditorRow, 6u);
+    captureContent(gui, fastPlain, fastCur);
+    const std::vector<GuiContentRow> fastRowsL1 = gui.lastContentRows();
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    CHECK_EQ(gui.lastContentRows().size(), fastPlain.size());
+    CHECK(gui.lastContentRows() == fastRowsL1);
+    for (size_t i = 0; i < fastPlain.size(); ++i) {
+        CHECK_EQ(gui.lastContentRows()[i].plain(), fastPlain[i]);
+        CHECK_EQ(gui.lastContentRows()[i].isCurrentLine, fastCur[i]);
+    }
+}
+
+// Soft Wrap + scroll de una fila: `viewport.top` avanza una FILA VISUAL.
+// Rotar snapshots como docLine+1 y construir `top + H - 1` como línea
+// documental reconstruiría la fila equivocada (y perdería continuaciones).
+// El camino rápido debe declinar y coincidir con el frame completo.
+TEST(gui_diff_softwrap_scroll_fuerza_completo_y_paridad_dto) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    doc.restore(softWrapLines());
+    Viewport vp = makeVp(6, 24);
+    Cursor cur;
+    cur.col = 20;  // continuación de L0
+    const int textWidth = vp.width - gutterWidth(doc.lineCount(), vp.width);
+    softwrap::Index idx;
+    CHECK(idx.ensure(doc, textWidth, true));
+    CHECK(idx.enabled());
+    gui.setWrapIndex(&idx);
+
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    CHECK(gui.lastContentRows()[1].isCurrentLine);
+    CHECK(gui.lastContentRows()[2].isCurrentLine);
+
+    instrument::enable(true);
+    instrument::resetFrame();
+    vp.top = 1;  // scroll +1 en filas visuales
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    auto scrolled = instrument::snapshotAndReset();
+    instrument::enable(false);
+    CHECK_EQ(scrolled.renderEditorRow, 6u);  // frame completo, no O(1)
+    // La nueva fila 0 es la continuación L0 en columnBegin 17, no L0 desde 0.
+    CHECK(gui.lastContentRows()[0].isCurrentLine);
+    CHECK(contains(gui.lastContentRows()[0].plain(), std::string(16, 'a')));
+    CHECK(contains(gui.lastContentRows()[2].plain(), "corta"));
+    std::vector<std::string> fastPlain;
+    std::vector<bool> fastCur;
+    captureContent(gui, fastPlain, fastCur);
+    const std::vector<GuiContentRow> fastRowsScrolled = gui.lastContentRows();
+
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    CHECK_EQ(gui.lastContentRows().size(), fastPlain.size());
+    CHECK_EQ(gui.lastContentRows().size(), static_cast<size_t>(6));
+    CHECK(gui.lastContentRows() == fastRowsScrolled);
+    for (size_t i = 0; i < fastPlain.size(); ++i) {
+        CHECK_EQ(gui.lastContentRows()[i].plain(), fastPlain[i]);
+        CHECK_EQ(gui.lastContentRows()[i].isCurrentLine, fastCur[i]);
+    }
+}
+
+// Paridad de píxeles con Soft Wrap: movimiento dentro de una línea larga
+// (continuaciones visibles) y scroll visual +1. Si el fast path tratara las
+// filas como líneas documentales, el parcial diferiría del frame completo.
+TEST(gui_sdl_softwrap_fast_paths_paridad_pixeles_con_full) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummyLocal sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    NullTestSink sink;
+    Document doc;
+    doc.restore(softWrapLines());
+    Viewport vp = makeVp(6, 24);
+    Cursor cur;
+    const int textWidth = vp.width - gutterWidth(doc.lineCount(), vp.width);
+    softwrap::Index idx;
+    CHECK(idx.ensure(doc, textWidth, true));
+    CHECK(idx.enabled());
+    gui.setWrapIndex(&idx);
+
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+
+    // Movimiento a la continuación de L0.
+    cur.col = 20;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    const std::vector<GuiContentRow> movedRows = gui.lastContentRows();
+    std::vector<GuiColor> movedPx;
+    if (!readSurfaceLocal(gui, movedPx)) SKIP("ReadPixels no disponible");
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    CHECK_EQ(gui.lastContentRows().size(), static_cast<size_t>(6));
+    CHECK(gui.lastContentRows() == movedRows);  // todas las filas visuales
+    std::vector<GuiColor> movedFull;
+    CHECK(readSurfaceLocal(gui, movedFull));
+    CHECK(movedFull == movedPx);
+
+    // Scroll visual +1, con la continuación de L0 como primera fila.
+    vp.top = 1;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    const std::vector<GuiContentRow> scrolledRows = gui.lastContentRows();
+    std::vector<GuiColor> scrolledPx;
+    if (!readSurfaceLocal(gui, scrolledPx)) SKIP("ReadPixels no disponible");
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    CHECK_EQ(gui.lastContentRows().size(), static_cast<size_t>(6));
+    CHECK(gui.lastContentRows() == scrolledRows);  // todas las filas visuales
+    std::vector<GuiColor> scrolledFull;
+    CHECK(readSurfaceLocal(gui, scrolledFull));
+    CHECK(scrolledFull == scrolledPx);
 #endif
 }
 

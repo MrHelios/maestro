@@ -39,6 +39,15 @@ void* GuiRenderer::acquireFb(FrameSurface& s, void* sdlRenderer, int wPx,
     fresh = false;
 #ifdef HAVE_SDL2
     if (!sdlRenderer || wPx <= 0 || hPx <= 0) return nullptr;
+    // Hook de tests (ver setFramebufAcquireFailAfterForTests): simula OOM de
+    // SDL_CreateTexture sin tocar el estado de la superficie.
+    if (framebufFailAfter_ >= 0) {
+        if (framebufFailAfter_ == 0) {
+            framebufFailAfter_ = -1;
+            return nullptr;
+        }
+        --framebufFailAfter_;
+    }
     SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer);
     if (framebufTarget_ == 0)
         framebufTarget_ = SDL_RenderTargetSupported(r) ? 1 : -1;
@@ -127,6 +136,16 @@ bool GuiRenderer::readLastSurfacePixels(std::vector<GuiColor>& out, int& wPx,
 #else
     return false;
 #endif
+}
+
+void GuiRenderer::setFramebufAcquireFailAfterForTests(int skips) {
+    framebufFailAfter_ = skips;
+}
+
+void GuiRenderer::dropContentFramebuffersForTests() {
+    destroyFb(contentFb_[0]);
+    destroyFb(contentFb_[1]);
+    contentFbActive_ = 0;
 }
 
 void GuiRenderer::ensureFontPixels(int desiredPixels) {
@@ -1310,6 +1329,11 @@ bool GuiRenderer::tryFastCursorMove(
     // false SIN mutar nada: el caller cae al camino completo existente.
     // No basta con pintar menos filas después de buildFrame(): este camino
     // tampoco CONSTRUYE ni copia los segmentos de las filas que no cambiaron.
+    // Con Soft Wrap una línea lógica ocupa varias filas visuales y el mapeo
+    // `fila relativa = docLine - viewport.top` deja de ser válido; el camino
+    // rápido no puede reconstruir las continuaciones que cambian de
+    // CurrentLine. Se desactiva hasta implementar rangos por índice visual.
+    if (frameBuilder_.isWrapEnabled(wrapIndex_)) return false;
     if (!contentHasCache_) return false;
     if (selection.has_value() || searchHighlight.has_value() ||
         contentSelection_.has_value() || contentSearch_.has_value()) {
@@ -1540,6 +1564,11 @@ bool GuiRenderer::tryFastScrollLine(
     // Precondiciones (etapa scroll ±1). Si alguna falla, false SIN mutar:
     // el caller cae al camino completo. Deltas != ±1 (saltos, páginas),
     // edición, cambios visuales o geometría incompatible van por full.
+    // Con Soft Wrap `viewport.top` es una fila visual, no una línea
+    // documental: rotar `contentRows_` como docLine+1 y construir "la línea
+    // entrante" produciría filas incorrectas. Se desactiva hasta implementar
+    // rangos por índice visual.
+    if (frameBuilder_.isWrapEnabled(wrapIndex_)) return false;
     if (!contentHasCache_) return false;
     const int delta = viewport.top - contentTop_;
     if (delta != 1 && delta != -1) return false;
@@ -1741,17 +1770,22 @@ bool GuiRenderer::tryFastScrollLine(
             acquireFb(contentFb_[srcIdx], sdlRenderer_, wPx, hPx, srcFresh));
         SDL_Texture* dstFb = static_cast<SDL_Texture*>(
             acquireFb(contentFb_[dstIdx], sdlRenderer_, wPx, hPx, dstFresh));
-        if (!srcFb || !dstFb || srcFresh) {
-            // Sin destino (OOM) o sin origen válido: se invalida y el próximo
-            // frame será completo. El destino fresco NO invalida: el blit lo
-            // cubre entero (contenido desplazado + entrante) más chrome.
-            if (!dstFb || srcFresh) {
-                invalidateCache();
-                return true;
-            }
-            // Fallback sin blit (solo si el destino falló pero el origen
-            // vale): repintado desde caché sobre la activa, como la etapa
-            // anterior. No conmuta.
+        // Tres casos distintos de recuperación:
+        //  - origen inválido o recién creado: no contiene la imagen vigente,
+        //    así que no hay nada seguro de donde blitear ni repintar. Se
+        //    invalida y el próximo frame será completo;
+        //  - destino inválido (OOM): no se puede blitear, pero el origen SÍ
+        //    es válido. Se repinta TODO el contenido desde el caché sobre el
+        //    origen, se presenta y se conserva como activo (no se conmuta);
+        //  - destino recién creado: su contenido es indefinido, pero el blit
+        //    cubre entera la región de contenido y el chrome se repinta
+        //    siempre; se puede usar el camino normal.
+        const bool srcUsable = srcFb && !srcFresh;
+        if (!srcUsable) {
+            invalidateCache();
+            return true;
+        }
+        if (!dstFb) {
             SDL_SetRenderTarget(r, srcFb);
             for (int i = 0; i < H; ++i) {
                 paintSnapshotRow(r, font_, dark_, g.layout, i,
@@ -1813,21 +1847,20 @@ void GuiRenderer::renderScreenDiff(
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
     (void)sink;  // la GUI pinta en el SDL_Renderer, no en el Sink de bytes.
-    // Con wrap activo, desactivar fast paths (el FrameBuilder maneja filas visuales)
-    const bool wrapEnabled = frameBuilder_.isWrapEnabled(wrapIndex_);
 
     // Camino rápido (etapa ↑/↓ sin scroll): evita buildFrame() completo si
     // solo se movió el cursor sobre el mismo viewport sin cambios. Si lo
     // resuelve, ya actualizó cachés/stats/snapshots y pintó; si no, se cae al
-    // camino completo de abajo sin haber mutado nada.
-    if (!wrapEnabled && tryFastCursorMove(doc, cursor, viewport, filename, modified, chrome,
+    // camino completo de abajo sin haber mutado nada. Los fast paths se
+    // autodescartan con Soft Wrap activo (ver sus precondiciones).
+    if (tryFastCursorMove(doc, cursor, viewport, filename, modified, chrome,
                           selection, searchHighlight, bracketPair)) {
         return;
     }
     // Camino rápido (etapa scroll ±1): rota snapshots y construye O(1) filas.
     // Mismas garantías de equivalencia; el repintado sigue saliendo del caché
     // hasta la etapa scroll-blit.
-    if (!wrapEnabled && tryFastScrollLine(doc, cursor, viewport, filename, modified, chrome,
+    if (tryFastScrollLine(doc, cursor, viewport, filename, modified, chrome,
                           selection, searchHighlight, bracketPair)) {
         return;
     }
