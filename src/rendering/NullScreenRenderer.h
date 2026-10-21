@@ -37,6 +37,7 @@ class NullScreenRenderer : public ScreenRenderer {
 public:
     void invalidateCache() override {}
     void setExternalSyntaxCache(SyntaxCache*) override {}
+    void setWrapIndex(const softwrap::Index*) override {}
     void toggleTheme() override { dark_ = !dark_; }
     bool isDarkTheme() const override { return dark_; }
 

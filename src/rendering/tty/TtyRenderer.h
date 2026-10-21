@@ -147,6 +147,9 @@ public:
     void setExternalSyntaxCache(SyntaxCache* c) override {
         renderer_.setExternalSyntaxCache(c);
     }
+    void setWrapIndex(const softwrap::Index* idx) override {
+        wrapIndex_ = idx;
+    }
     SyntaxCache* externalSyntaxCache() const {
         return renderer_.externalSyntaxCache();
     }
@@ -185,6 +188,7 @@ private:
     TtyEncoder encoder_;
     TtyThemeProvider provider_;
     TtyDiff diff_;
+    const softwrap::Index* wrapIndex_ = nullptr;
 
     void renderBufferListContent(std::string& out,
                                  const std::vector<std::string>& names,

@@ -8,6 +8,7 @@
 #include "document/Selection.h"
 #include "layout/BracketMatcher.h"
 #include "layout/Layout.h"
+#include "layout/SoftWrap.h"
 #include "layout/Viewport.h"
 #include "platform/CellPos.h"
 #include "rendering/ChromeRequest.h"
@@ -36,6 +37,8 @@ public:
     struct EditorGeometry {
         Layout layout;
         int gutterW = 0;
+        bool wrapEnabled = false;
+        const softwrap::Index* wrapIndex = nullptr;
     };
 
     Frame buildFrame(const Document& doc,
@@ -46,7 +49,8 @@ public:
                      const ChromeRequest& chrome,
                      const std::optional<Selection>& selection = std::nullopt,
                      const std::optional<Selection>& searchHighlight = std::nullopt,
-                     const std::optional<BracketPair>& bracketPair = std::nullopt) const;
+                     const std::optional<BracketPair>& bracketPair = std::nullopt,
+                     const softwrap::Index* wrapIndex = nullptr) const;
 
     // Una sola fila de contenido (para patches incrementales del backend).
     // Las selecciones ya vienen normalizadas (ver normalizeBracketPair).
@@ -61,8 +65,24 @@ public:
                               int gutterW,
                               int textWidth) const;
 
+    // Nueva sobrecarga que usa fila visual (para soft-wrap)
+    StyledRow buildContentRow(const Document& doc,
+                              const Cursor& cursor,
+                              const Viewport& viewport,
+                              const std::optional<Normalized>& sel,
+                              const std::optional<Normalized>& searchSel,
+                              const std::optional<Normalized>& bracketOpen,
+                              const std::optional<Normalized>& bracketClose,
+                              const softwrap::VisualRow& vrow,
+                              int gutterW,
+                              int textWidth) const;
+
+    // La geometría incorpora el índice de wrap desde el inicio, de modo que
+    // todos los consumidores (contenido, cursor, cache de sintaxis) usen la
+    // misma proyección visual sin depender de que el caller complete campos.
     EditorGeometry editorGeometry(const Document& doc,
-                                   const Viewport& viewport) const;
+                                   const Viewport& viewport,
+                                   const softwrap::Index* wrapIndex = nullptr) const;
     // Resuelve el cursor lógico a CellPos 0-based (col=X, row=Y).
     // Contrato explícito (sin clamp silencioso):
     //   return true  -> `out` es la posición visual real (válida).
@@ -78,12 +98,17 @@ public:
     bool editorCursorPos(const Document& doc,
                          const Cursor& cursor,
                          const Viewport& viewport,
-                         CellPos& out) const;
+                         CellPos& out,
+                         const softwrap::Index* wrapIndex = nullptr) const;
     bool editorCursorPos(const Document& doc,
                          const Cursor& cursor,
                          const Viewport& viewport,
                          const EditorGeometry& g,
                          CellPos& out) const;
+
+    // Soft-wrap: acceso al índice y mapeo de cursor (usa índice externo si se provee)
+    bool isWrapEnabled(const softwrap::Index* external) const { return external && external->enabled(); }
+    const softwrap::Index& wrapIndex(const softwrap::Index* external) const { return *external; }
 
     Layout calculateLayout(int contentRows, int width) const;
 

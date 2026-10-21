@@ -72,7 +72,7 @@ std::string TtyRenderer::buildScreen(
     const std::optional<BracketPair>& bracketPair) {
     Frame f = renderer_.frameBuilder().buildFrame(
         doc, cursor, viewport, filename, modified, chrome, selection,
-        searchHighlight, bracketPair);
+        searchHighlight, bracketPair, wrapIndex_);
     std::string out;
     encoder_.appendFrame(out, f);
     return out;
@@ -110,9 +110,8 @@ std::string TtyRenderer::buildDiffFrame(
     const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
-    return diff_.buildDiffFrame(doc, cursor, viewport, filename, modified,
-                                 chrome, selection, searchHighlight,
-                                 bracketPair);
+    return diff_.buildDiffFrame(doc, cursor, viewport, filename, modified, chrome,
+                                 selection, searchHighlight, bracketPair, wrapIndex_);
 }
 
 void TtyRenderer::renderEditorContent(
@@ -122,13 +121,33 @@ void TtyRenderer::renderEditorContent(
     instrument::ScopedTimer _t(instrument::renderEditorContentTimer());
     if (instrument::isEnabled()) instrument::onRenderEditorContent();
     int textWidth = std::max(0, area.width - gutterW);
-    for (int row = 0; row < area.height; ++row) {
-        int docLine = viewport.top + row;
-        // Sin string intermedio por fila (mismo patrón que renderChrome).
-        encoder_.appendRow(out, renderer_.frameBuilder().buildContentRow(
-            doc, cursor, viewport, sel, std::nullopt, std::nullopt,
-            std::nullopt, docLine, gutterW, textWidth));
-        out += "\r\n";
+
+    const FrameBuilder& fb = renderer_.frameBuilder();
+    bool wrap = fb.isWrapEnabled(wrapIndex_);
+
+    if (wrap) {
+        const softwrap::Index& idx = fb.wrapIndex(wrapIndex_);
+        int visualTop = viewport.top;
+        const int maxVisualTop = std::max(0, idx.totalRows() - area.height);
+        if (visualTop > maxVisualTop) visualTop = maxVisualTop;
+        if (visualTop < 0) visualTop = 0;
+
+        for (int row = 0; row < area.height; ++row) {
+            int visualRow = visualTop + row;
+            softwrap::VisualRow vr = idx.rowAt(visualRow);
+            encoder_.appendRow(out, fb.buildContentRow(
+                doc, cursor, viewport, sel, std::nullopt, std::nullopt,
+                std::nullopt, vr, gutterW, textWidth));
+            out += "\r\n";
+        }
+    } else {
+        for (int row = 0; row < area.height; ++row) {
+            int docLine = viewport.top + row;
+            encoder_.appendRow(out, fb.buildContentRow(
+                doc, cursor, viewport, sel, std::nullopt, std::nullopt,
+                std::nullopt, docLine, gutterW, textWidth));
+            out += "\r\n";
+        }
     }
 }
 

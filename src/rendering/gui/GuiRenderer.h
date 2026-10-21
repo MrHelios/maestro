@@ -130,6 +130,9 @@ public:
     void setExternalSyntaxCache(SyntaxCache* c) override {
         frameBuilder_.setExternalSyntaxCache(c);
     }
+    void setWrapIndex(const softwrap::Index* idx) override {
+        wrapIndex_ = idx;
+    }
 
     // Tema claro/oscuro: conmuta `dark_` y libera el caché de texturas
     // (ahorro de memoria, no corrección: el color ya va en la clave de
@@ -152,7 +155,8 @@ public:
                      bool modified, const ChromeRequest& chrome,
                      const std::optional<Selection>& selection = std::nullopt,
                      const std::optional<Selection>& searchHighlight = std::nullopt,
-                     const std::optional<BracketPair>& bracketPair = std::nullopt);
+                     const std::optional<BracketPair>& bracketPair = std::nullopt,
+                     const softwrap::Index* wrapIndex = nullptr);
 
     // ChromeData de las pantallas de listas (misma composicion que
     // TtyRenderer: nombre/estado/right + MessageBar). Publico para tests.
@@ -517,4 +521,5 @@ private:
     void destroyFramebuf();
     void* acquireFb(FrameSurface& s, void* sdlRenderer, int wPx, int hPx,
                      bool& fresh);
+    const softwrap::Index* wrapIndex_ = nullptr;
 };

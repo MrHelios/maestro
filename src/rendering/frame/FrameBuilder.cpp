@@ -6,6 +6,7 @@
 #include "base/utf8.h"
 #include "diagnostics/Instrument.h"
 #include "layout/Gutter.h"
+#include "layout/SoftWrap.h"
 #include "rendering/RenderUtil.h"
 #include "syntax/SyntaxLanguage.h"
 
@@ -137,26 +138,55 @@ Layout FrameBuilder::calculateLayout(int contentRows, int width) const {
 }
 
 FrameBuilder::EditorGeometry FrameBuilder::editorGeometry(
-    const Document& doc, const Viewport& viewport) const {
+    const Document& doc, const Viewport& viewport,
+    const softwrap::Index* wrapIndex) const {
     EditorGeometry g;
     g.layout = calculateLayout(viewport.height, viewport.width);
     g.gutterW = gutterWidth(doc.lineCount(), viewport.width);
+    g.wrapIndex = wrapIndex;
+    g.wrapEnabled = wrapIndex && wrapIndex->enabled();
     return g;
 }
 
 bool FrameBuilder::editorCursorPos(const Document& doc,
-                                   const Cursor& cursor,
-                                   const Viewport& viewport,
-                                   CellPos& out) const {
-    const EditorGeometry g = editorGeometry(doc, viewport);
+                                    const Cursor& cursor,
+                                    const Viewport& viewport,
+                                    CellPos& out,
+                                    const softwrap::Index* wrapIndex) const {
+    const EditorGeometry g = editorGeometry(doc, viewport, wrapIndex);
     return editorCursorPos(doc, cursor, viewport, g, out);
 }
 
 bool FrameBuilder::editorCursorPos(const Document& doc,
-                                   const Cursor& cursor,
-                                   const Viewport& viewport,
-                                   const EditorGeometry& g,
-                                   CellPos& out) const {
+                                    const Cursor& cursor,
+                                    const Viewport& viewport,
+                                    const EditorGeometry& g,
+                                    CellPos& out) const {
+    if (g.wrapEnabled) {
+        const softwrap::Index* idx = g.wrapIndex;
+        if (!idx) return false;
+        int vr = idx->visualRowOf({cursor.line, cursor.col});
+        // Mismo clamp vertical que usa buildFrame para el contenido: si el
+        // viewport quedó por debajo del máximo válido, cursor y filas deben
+        // compartir el top efectivo.
+        int top = viewport.top;
+        const int contentH = g.layout.content.height;
+        const int maxTop = std::max(0, idx->totalRows() - contentH);
+        if (top > maxTop) top = maxTop;
+        int row = vr - top;
+        int vc = idx->visualColumnOf(doc, {cursor.line, cursor.col});
+        int col = g.gutterW + vc + g.layout.content.col;
+        const int rowLo = g.layout.content.row;
+        const int rowHi = rowLo + g.layout.content.height - 1;
+        const int colLo = g.layout.content.col;
+        const int colHi = colLo + std::max(1, g.layout.content.width) - 1;
+        if (row < rowLo || row > rowHi || col < colLo || col > colHi) {
+            out = CellPos{};
+            return false;
+        }
+        out = CellPos(col, row);
+        return true;
+    }
     // Todo 0-based (celdas, no CUP): el +1 a terminal vive en el borde TTY.
     const int row = cursor.line - viewport.top;
     const int absoluteCol = cursor.visualColumn(doc);
@@ -186,11 +216,33 @@ StyledRow FrameBuilder::buildContentRow(
     int docLine,
     int gutterW,
     int textWidth) const {
+    // Wrapper para compatibilidad: crea VisualRow con el rango correcto
+    // basado en viewport.left (comportamiento original sin wrap).
+    int absStart = viewport.left;
+    int absEnd = absStart + textWidth;
+    softwrap::VisualRow vr{docLine, 0, 0, absStart, absEnd, true, true};
+    return buildContentRow(doc, cursor, viewport, sel, searchSel, bracketOpen,
+                           bracketClose, vr, gutterW, textWidth);
+}
+
+// Nueva sobrecarga que usa fila visual (para soft-wrap)
+StyledRow FrameBuilder::buildContentRow(
+    const Document& doc,
+    const Cursor& cursor,
+    const Viewport& viewport,
+    const std::optional<Normalized>& sel,
+    const std::optional<Normalized>& searchSel,
+    const std::optional<Normalized>& bracketOpen,
+    const std::optional<Normalized>& bracketClose,
+    const softwrap::VisualRow& vrow,
+    int gutterW,
+    int textWidth) const {
+    (void)viewport;
     instrument::ScopedTimer _t(instrument::renderEditorRowTimer());
     if (instrument::isEnabled()) instrument::onRenderEditorRow();
     StyledRow row;
-    const bool isCurrentLine = (docLine == cursor.line);
-    row.isCurrentLine = isCurrentLine && docLine < doc.lineCount();
+    const bool isCurrentLine = (vrow.docLine == cursor.line);
+    row.isCurrentLine = isCurrentLine && vrow.docLine < doc.lineCount();
     // Una sola reserva por fila (1 alloc): gutter + bytes visibles (UTF-8 y
     // tabs expanden más allá de las columnas) + pad. Los segmentos se
     // registran como offsets y RowEmit los vuelve vistas al final.
@@ -198,7 +250,7 @@ StyledRow FrameBuilder::buildContentRow(
         std::max(0, gutterW) + (std::max(0, textWidth) + 16) * 4 + 32));
     RowEmit emit(row);
 
-    if (docLine >= doc.lineCount()) {
+    if (vrow.docLine >= doc.lineCount()) {
         size_t s = row.arena.size();
         row.arena.append(static_cast<size_t>(std::max(0, gutterW)), ' ');
         emit.emitAt(s, StyleRole::GutterBlank);
@@ -211,11 +263,11 @@ StyledRow FrameBuilder::buildContentRow(
     }
 
     auto& cache = activeCache();
-    if (!cache.isValidThrough(docLine + 1))
-        const_cast<SyntaxCache&>(cache).ensureValid(doc, docLine + 1);
-    const auto& spans = cache.spansFor(docLine);
+    if (!cache.isValidThrough(vrow.docLine + 1))
+        const_cast<SyntaxCache&>(cache).ensureValid(doc, vrow.docLine + 1);
+    const auto& spans = cache.spansFor(vrow.docLine);
 
-    const std::string& line = doc.lineAt(docLine);
+    const std::string& line = doc.lineAt(vrow.docLine);
 
     std::pair<int, int> intervals[2];
     int intervalCount = 0;
@@ -223,12 +275,12 @@ StyledRow FrameBuilder::buildContentRow(
 
     auto addInterval = [&](const std::optional<Normalized>& nrm) {
         if (!nrm.has_value()) return;
-        if (docLine < nrm->start.line || docLine > nrm->end.line) return;
+        if (vrow.docLine < nrm->start.line || vrow.docLine > nrm->end.line) return;
         if (nrm->start.line == nrm->end.line) {
             intervals[intervalCount++] = {nrm->start.col, nrm->end.col};
-        } else if (docLine == nrm->start.line) {
+        } else if (vrow.docLine == nrm->start.line) {
             intervals[intervalCount++] = {nrm->start.col, static_cast<int>(line.size())};
-        } else if (docLine == nrm->end.line) {
+        } else if (vrow.docLine == nrm->end.line) {
             intervals[intervalCount++] = {0, nrm->end.col};
         } else {
             intervals[intervalCount++] = {0, static_cast<int>(line.size())};
@@ -241,7 +293,7 @@ StyledRow FrameBuilder::buildContentRow(
     int bracketCount = 0;
     auto addBracket = [&](const std::optional<Normalized>& nrm) {
         if (!nrm.has_value()) return;
-        if (docLine < nrm->start.line || docLine > nrm->end.line) return;
+        if (vrow.docLine < nrm->start.line || vrow.docLine > nrm->end.line) return;
         if (nrm->start.line == nrm->end.line) {
             bracketIntervals[bracketCount++] = {nrm->start.col, nrm->end.col};
         }
@@ -251,9 +303,9 @@ StyledRow FrameBuilder::buildContentRow(
 
     auto isLineBreak = [&](const std::optional<Normalized>& nrm) -> bool {
         if (!nrm.has_value() || !line.empty()) return false;
-        if (docLine < nrm->start.line || docLine > nrm->end.line) return false;
+        if (vrow.docLine < nrm->start.line || vrow.docLine > nrm->end.line) return false;
         bool singleLine = (nrm->start.line == nrm->end.line);
-        bool endsAtStart = (docLine == nrm->end.line && nrm->end.col == 0);
+        bool endsAtStart = (vrow.docLine == nrm->end.line && nrm->end.col == 0);
         return !singleLine && !endsAtStart;
     };
     if (isLineBreak(sel) || isLineBreak(searchSel)) lineBreakSelected = true;
@@ -263,7 +315,7 @@ StyledRow FrameBuilder::buildContentRow(
 
     if (line.empty() && lineBreakSelected) {
         size_t s = row.arena.size();
-        appendGutterCell(row.arena, docLine + 1, gutterW);
+        appendGutterCell(row.arena, vrow.docLine + 1, gutterW);
         emit.emitAt(s, gutterRole);
         s = row.arena.size();
         row.arena.append(static_cast<size_t>(std::max(0, textWidth)), ' ');
@@ -285,23 +337,28 @@ StyledRow FrameBuilder::buildContentRow(
                 std::max(merged[mergedCount - 1].second, p.second);
     }
 
+    // Gutter: número de línea solo en primera fila visual de la línea
     {
         size_t s = row.arena.size();
-        appendGutterCell(row.arena, docLine + 1, gutterW);
+        if (vrow.firstOfLine) {
+            appendGutterCell(row.arena, vrow.docLine + 1, gutterW);
+        } else {
+            row.arena.append(static_cast<size_t>(std::max(0, gutterW)), ' ');
+        }
         emit.emitAt(s, gutterRole);
     }
 
-    int absoluteVisStart = viewport.left;
-    int absoluteVisEnd = absoluteVisStart + textWidth;
+    // Para wrap: viewport.left = 0, rango visual es la fila visual completa
+    int absoluteVisStart = vrow.columnBegin;
+    int absoluteVisEnd = vrow.columnEnd;
+    if (absoluteVisEnd <= absoluteVisStart) absoluteVisEnd = absoluteVisStart + textWidth;
     instrument::setTag(instrument::Utf8Tag::RangeVisibleRaw);
     std::string_view visibleRaw = utf8::range(line, absoluteVisStart, absoluteVisEnd);
     instrument::clearTag();
     instrument::setTag(instrument::Utf8Tag::ExpandTabs);
     const size_t vstart = row.arena.size();
-    utf8::expandTabsInto(row.arena, visibleRaw);
+    utf8::expandTabsInto(row.arena, visibleRaw, absoluteVisStart);
     instrument::clearTag();
-    // Vista sobre la arena: válida hasta el próximo append, y todos los usos
-    // están antes del relleno final (los segmentos se guardan como offsets).
     const std::string_view visible(row.arena.data() + vstart,
                                    row.arena.size() - vstart);
 
@@ -354,7 +411,6 @@ StyledRow FrameBuilder::buildContentRow(
     }
 
     if (visibleSelCount == 0 && visibleBracketCount == 0 && synVis.empty()) {
-        // Camino rápido (viejo renderPlainLine): una sola envoltura.
         if (isCurrentLine) {
             instrument::setTag(instrument::Utf8Tag::TruncateFilled);
             std::string truncated = utf8::truncate(visible, textWidth);
@@ -485,7 +541,7 @@ FrameBuilder::ChromePayload FrameBuilder::buildChrome(
     return p;
 }
 
-Frame FrameBuilder::buildFrame(    const Document& doc,
+Frame FrameBuilder::buildFrame(const Document& doc,
     const Cursor& cursor,
     const Viewport& viewport,
     const std::string& filename,
@@ -493,7 +549,8 @@ Frame FrameBuilder::buildFrame(    const Document& doc,
     const ChromeRequest& chrome,
     const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
-    const std::optional<BracketPair>& bracketPair) const {
+    const std::optional<BracketPair>& bracketPair,
+    const softwrap::Index* wrapIndex) const {
     if (instrument::isEnabled()) {
         instrument::resetFrame();
         instrument::onBuildScreen();
@@ -511,7 +568,7 @@ Frame FrameBuilder::buildFrame(    const Document& doc,
     std::optional<Normalized> bracketOpen, bracketClose;
     normalizeBracketPair(bracketPair, bracketOpen, bracketClose);
 
-    const EditorGeometry g = editorGeometry(doc, viewport);
+    const EditorGeometry g = editorGeometry(doc, viewport, wrapIndex);
     const int contentH = g.layout.content.height;
     const int gutterW = g.gutterW;
     const int textWidth = std::max(0, g.layout.content.width - gutterW);
@@ -519,21 +576,52 @@ Frame FrameBuilder::buildFrame(    const Document& doc,
     Frame f;
     f.layout = g.layout;
     f.gutterW = gutterW;
-    {
-        auto& cache = activeCache();
-        int need = viewport.top + contentH;
-        if (need > doc.lineCount()) need = doc.lineCount();
-        if (need > 0 && !cache.isValidThrough(need))
-            const_cast<SyntaxCache&>(cache).ensureValid(doc, need);
+
+    const softwrap::Index* idx = g.wrapIndex;
+    bool wrap = g.wrapEnabled;
+
+    if (wrap) {
+        int totalVisualRows = idx->totalRows();
+        int maxVisualTop = std::max(0, totalVisualRows - contentH);
+        int visualTop = viewport.top;
+        if (visualTop > maxVisualTop) visualTop = maxVisualTop;
+
+        int maxDocLineNeeded = 0;
+        for (int r = 0; r < contentH; ++r) {
+            int visualRow = visualTop + r;
+            if (visualRow >= totalVisualRows) break;
+            const softwrap::VisualRow& vr = idx->rowAt(visualRow);
+            if (vr.docLine >= doc.lineCount()) continue;
+            if (vr.docLine > maxDocLineNeeded) maxDocLineNeeded = vr.docLine;
+        }
+        {
+            auto& cache = activeCache();
+            int need = maxDocLineNeeded + 1;
+            if (need > 0 && !cache.isValidThrough(need))
+                const_cast<SyntaxCache&>(cache).ensureValid(doc, need);
+        }
+
+        f.contentRows.reserve(static_cast<size_t>(std::max(0, contentH)));
+        for (int r = 0; r < contentH; ++r) {
+            int visualRow = visualTop + r;
+            softwrap::VisualRow vr = idx->rowAt(visualRow);
+            f.contentRows.push_back(buildContentRow(doc, cursor, viewport, sel,
+                                                    searchSel, bracketOpen,
+                                                    bracketClose, vr, gutterW,
+                                                    textWidth));
+        }
+    } else {
+        // Sin wrap: una fila por línea de documento
+        f.contentRows.reserve(static_cast<size_t>(std::max(0, contentH)));
+        for (int r = 0; r < contentH; ++r) {
+            int docLine = viewport.top + r;
+            f.contentRows.push_back(buildContentRow(doc, cursor, viewport, sel,
+                                                    searchSel, bracketOpen,
+                                                    bracketClose, docLine, gutterW,
+                                                    textWidth));
+        }
     }
-    f.contentRows.reserve(static_cast<size_t>(std::max(0, contentH)));
-    for (int r = 0; r < contentH; ++r) {
-        int docLine = viewport.top + r;
-        f.contentRows.push_back(buildContentRow(doc, cursor, viewport, sel,
-                                                searchSel, bracketOpen,
-                                                bracketClose, docLine, gutterW,
-                                                textWidth));
-    }
+
     auto payload = buildChrome(filename, modified, cursor,
                                doc.lineCount(), chrome);
     f.chrome = std::move(payload.data);

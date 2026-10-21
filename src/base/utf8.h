@@ -245,8 +245,9 @@ inline std::string truncate(std::string_view line, int maxCols) {
 // final de la linea devuelve hasta el ultimo byte.
 // Agrega a `out` los bytes de `line` con tabs expandidos (misma lógica que
 // expandTabs, pero sin string temporal: el caller amortiza el buffer).
-inline void expandTabsInto(std::string& out, std::string_view line) {
-    int col = 0;
+// `startCol` es la columna absoluta donde comienza `line` (para tabs correctos).
+inline void expandTabsInto(std::string& out, std::string_view line, int startCol = 0) {
+    int col = startCol;
     int n = static_cast<int>(line.size());
     int i = 0;
     while (i < n) {

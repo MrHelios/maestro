@@ -8,6 +8,7 @@
 #include "document/Document.h"
 #include "document/Selection.h"
 #include "layout/BracketMatcher.h"
+#include "layout/SoftWrap.h"
 #include "layout/Viewport.h"
 #include "rendering/ChromeRequest.h"
 #include "rendering/Sink.h"
@@ -62,6 +63,10 @@ public:
     // Tema como estado opaco del backend.
     virtual void toggleTheme() = 0;
     virtual bool isDarkTheme() const = 0;
+
+    // Establece el índice de soft-wrap para el buffer activo.
+    // Se usa por FrameBuilder para renderizado con wrap.
+    virtual void setWrapIndex(const softwrap::Index* idx) = 0;
 
     // Presentación: frame/listas ya resueltos, entregados vía Sink.
     virtual void renderScreenDiff(const Document& doc,

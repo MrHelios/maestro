@@ -58,6 +58,7 @@ public:
         hasCache_ = false;
         hasLastChromeData_ = false;
         lastGutterW_ = -1;
+        lastWrapEnabled_ = false;
     }
 
     // Observabilidad para tests (solo lectura): estado del cache diferencial.
@@ -74,7 +75,8 @@ public:
                                const ChromeRequest& chrome,
                                const std::optional<Selection>& selection = std::nullopt,
                                const std::optional<Selection>& searchHighlight = std::nullopt,
-                               const std::optional<BracketPair>& bracketPair = std::nullopt);
+                               const std::optional<BracketPair>& bracketPair = std::nullopt,
+                               const softwrap::Index* wrapIndex = nullptr);
 
     // Requiere rowCache_[i] <=> línea viewport.top+i y size==contentH.
     std::string buildScrollFrame(const Document& doc,
@@ -112,6 +114,7 @@ private:
     // los fast paths (scroll de region) solo repintan filas puntuales, asi
     // que el cambio de ancho fuerza rebuild total (ver buildDiffFrame).
     int lastGutterW_ = -1;
+    bool lastWrapEnabled_ = false;
     ChromeData lastChromeData_;
     bool hasLastChromeData_ = false;
     std::optional<BracketPair> lastBracketPair_;
@@ -129,7 +132,8 @@ private:
                       bool modified, const ChromeRequest& chrome,
                       const std::optional<Selection>& selection,
                       const std::optional<Selection>& searchHighlight,
-                      const std::optional<BracketPair>& bracketPair);
+                      const std::optional<BracketPair>& bracketPair,
+                      const softwrap::Index* wrapIndex);
 
     bool patchContentRow(std::string& out, const Document& doc,
                          const Cursor& cursor, const Viewport& viewport,

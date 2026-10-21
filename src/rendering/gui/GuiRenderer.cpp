@@ -322,10 +322,11 @@ Frame GuiRenderer::buildFrame(
     const std::string& filename, bool modified, const ChromeRequest& chrome,
     const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
-    const std::optional<BracketPair>& bracketPair) {
+    const std::optional<BracketPair>& bracketPair,
+    const softwrap::Index* wrapIndex) {
     return frameBuilder_.buildFrame(doc, cursor, viewport, filename, modified,
                                     chrome, selection, searchHighlight,
-                                    bracketPair);
+                                    bracketPair, wrapIndex);
 }
 
 ChromeData GuiRenderer::bufferListChrome(
@@ -1812,23 +1813,26 @@ void GuiRenderer::renderScreenDiff(
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
     (void)sink;  // la GUI pinta en el SDL_Renderer, no en el Sink de bytes.
+    // Con wrap activo, desactivar fast paths (el FrameBuilder maneja filas visuales)
+    const bool wrapEnabled = frameBuilder_.isWrapEnabled(wrapIndex_);
+
     // Camino rápido (etapa ↑/↓ sin scroll): evita buildFrame() completo si
     // solo se movió el cursor sobre el mismo viewport sin cambios. Si lo
     // resuelve, ya actualizó cachés/stats/snapshots y pintó; si no, se cae al
     // camino completo de abajo sin haber mutado nada.
-    if (tryFastCursorMove(doc, cursor, viewport, filename, modified, chrome,
+    if (!wrapEnabled && tryFastCursorMove(doc, cursor, viewport, filename, modified, chrome,
                           selection, searchHighlight, bracketPair)) {
         return;
     }
     // Camino rápido (etapa scroll ±1): rota snapshots y construye O(1) filas.
     // Mismas garantías de equivalencia; el repintado sigue saliendo del caché
     // hasta la etapa scroll-blit.
-    if (tryFastScrollLine(doc, cursor, viewport, filename, modified, chrome,
+    if (!wrapEnabled && tryFastScrollLine(doc, cursor, viewport, filename, modified, chrome,
                           selection, searchHighlight, bracketPair)) {
         return;
     }
     Frame f = buildFrame(doc, cursor, viewport, filename, modified, chrome,
-                         selection, searchHighlight, bracketPair);
+                         selection, searchHighlight, bracketPair, wrapIndex_);
     const bool havePrevContent = contentHasCache_;
     const FrameCursor prevContent = contentCursor_;
     lastChrome_ = f.chrome;
