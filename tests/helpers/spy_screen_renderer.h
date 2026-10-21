@@ -31,6 +31,9 @@ struct SpyScreenRenderer : public ScreenRenderer {
     int renderFileListCount = 0;
     int renderSaveAsFileListCount = 0;
 
+    // Último índice de soft-wrap recibido (nullptr = modo identidad).
+    const softwrap::Index* lastWrapIndex = nullptr;
+
     // Theme
     int toggleCount = 0;
     bool dark = true;
@@ -68,6 +71,8 @@ struct SpyScreenRenderer : public ScreenRenderer {
         if (!c) ++setCacheNullCount;
         lastCache = c;
     }
+
+    void setWrapIndex(const softwrap::Index* idx) override { lastWrapIndex = idx; }
 
     void toggleTheme() override {
         ++toggleCount;
