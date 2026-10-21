@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <vector>
 #include "layout/BracketMatcher.h"
+#include "layout/SoftWrap.h"
 #include "document/Buffer.h"
 #include "document/BufferManager.h"
 #include "syntax/SyntaxSpan.h"
@@ -257,6 +258,10 @@ public:
         assert(sink_ != nullptr && "Editor::setSink() antes del primer render");
         return *sink_;
     }
+
+    // Acceso al índice de soft-wrap para el buffer activo
+    softwrap::Index& wrapIndex() { return wrapIndex_; }
+    const softwrap::Index& wrapIndex() const { return wrapIndex_; }
 
     // Inyección tardía del backend de presentación (tests que afirman
     // bytes; main.cpp ya construye con el renderer en un paso).
@@ -657,6 +662,17 @@ private:
 
     std::unique_ptr<FileWatcher> watcher_;
     std::unordered_set<std::string> watchedFiles_;
+    mutable softwrap::Index wrapIndex_;  // cache de wrap para el buffer activo
+    std::optional<int> preferredVisualCol_;  // columna visual preferida para navegación vertical en wrap
+    // Invalida la preferencia cuando el cursor cambia por una intención que
+    // no es vertical (mouse, búsqueda, edición, cambio de buffer, etc.).
+    // PageUp/PageDown y las flechas verticales NO la reinician.
+    void resetPreferredVisualColumn() { preferredVisualCol_.reset(); }
+    // Fuerza reconstrucción completa del índice en el próximo ensure(). Se usa
+    // en mutaciones que no marcan todas las líneas afectadas (undo/redo,
+    // pegar, indentar, recargas, cambios de buffer, etc.): las marcas dirty
+    // son una optimización, nunca una excusa para devolver filas obsoletas.
+    void invalidateWrapIndex() { wrapIndex_.invalidate(); }
     void watchFile(const std::string& path);
     void unwatchFile(const std::string& path);
     // Recarga de archivos cambiados en disco. Solo la invoca

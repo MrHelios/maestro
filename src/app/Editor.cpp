@@ -78,6 +78,56 @@ inline int textWidthFor(const Viewport& vp, int totalLines) {
     return w < 0 ? 0 : w;
 }
 
+// Helpers de soft-wrap para el Editor.
+// Condición EFECTIVA compartida por navegación, mouse y renderizado: un
+// archivo Markdown no usa soft-wrap si no queda ancho útil para el texto.
+// El índice aplica la misma regla (wantWrap = enabled && textWidth > 0).
+inline bool isWrapEnabledFor(const Buffer& b) {
+    return softwrap::isMarkdownFilename(b.filename) &&
+           textWidthFor(b.viewport, b.document.lineCount()) > 0;
+}
+
+// Asegura que el índice de wrap del buffer activo esté actualizado.
+inline const softwrap::Index& wrapFor(Editor* ed, const Buffer& b) {
+    int tw = textWidthFor(b.viewport, b.document.lineCount());
+    ed->wrapIndex().ensure(b.document, tw, isWrapEnabledFor(b));
+    return ed->wrapIndex();
+}
+
+// Marca una línea como modificada para actualización incremental del índice de wrap
+inline void markWrapLineDirty(Editor* ed, int line) {
+    ed->wrapIndex().markLineDirty(line);
+}
+
+// Columna visual relativa dentro de la fila visual (0..columns-1)
+inline int visualColumnOf(const softwrap::Index& idx, const Document& doc, const Position& pos) {
+    return idx.visualColumnOf(doc, pos);
+}
+
+// screenToCursor con wrap: mapea celda visual -> posicion logica
+inline std::optional<Position> screenToCursorWrap(const softwrap::Index& idx,
+                                                   CellPos cell,
+                                                   const Layout& layout,
+                                                   const Viewport& viewport,
+                                                   const Document& doc,
+                                                   int gutterW) {
+    const int relRow = cell.row - layout.content.row;
+    const int relCol = cell.col - layout.content.col;
+    if (relRow < 0 || relRow >= layout.content.height) return std::nullopt;
+    if (relCol < 0) return std::nullopt;
+
+    int visualRow = viewport.top + relRow;
+    if (visualRow >= idx.totalRows()) return std::nullopt;
+
+    if (relCol < gutterW) {
+        // Click en gutter: inicio de la fila visual
+        return idx.positionAt(doc, visualRow, 0);
+    }
+
+    int visualColInRow = relCol - gutterW;  // viewport.left es 0 en wrap
+    return idx.positionAt(doc, visualRow, visualColInRow);
+}
+
 inline void updateModified(Buffer& b) {
     b.recalcModified();
 }
@@ -94,6 +144,14 @@ inline void updateModified(Buffer& b) {
 // Requiere doc.lineCount() > 0, h > 0 y totalW > 0 (los callers lo
 // garantizan). La linea se clampdea a [0, count): en filas `~` eso da
 // EOF sin codigo especial.
+// EOF lógico de una selección: una posición DESPUÉS del último carácter.
+// Distinto de la posición que devuelve End/positionAt para el cursor (última
+// celda de texto): un extremo de selección half-open necesita este byte.
+inline Position dragEofPosition(const Document& doc) {
+    const int line = doc.lineCount() - 1;
+    return Position{line, doc.lineLength(line)};
+}
+
 inline Position dragEdgePosition(int relRow, int relCol, const Viewport& vp,
                                  const Document& doc, int h, int totalW) {
     const int count = doc.lineCount();
@@ -221,6 +279,8 @@ void Editor::handleFileChange(const FileChangeEvent& ev) {
                         if (b.cursor.line >= b.document.lineCount()) b.cursor.line = b.document.lineCount() - 1;
                         if (b.cursor.line < 0) b.cursor.line = 0;
                         b.cursor.clampToLine(b.document);
+                        invalidateWrapIndex();
+                        resetPreferredVisualColumn();
                         setActionMessage("Archivo recargado desde disco.", MessageKind::Success);
                     } else if (res == LoadResult::NotFound) {
                         setActionMessage("El archivo '" + b.filename + "' fue eliminado del disco.", MessageKind::Error);
@@ -250,6 +310,8 @@ void Editor::handleFileChange(const FileChangeEvent& ev) {
             if (b.cursor.line >= b.document.lineCount()) b.cursor.line = b.document.lineCount() - 1;
             if (b.cursor.line < 0) b.cursor.line = 0;
             b.cursor.clampToLine(b.document);
+            invalidateWrapIndex();
+            resetPreferredVisualColumn();
             setActionMessage("Archivo recargado desde disco.", MessageKind::Success);
         } else if (res == LoadResult::NotFound) {
             setActionMessage("El archivo '" + b.filename + "' fue eliminado del disco.", MessageKind::Error);
@@ -365,6 +427,8 @@ void Editor::registerCommands() {
         e.edits.push_back({EditType::Insert, {insLine, insCol}, end, *maybe});
         b.cursor.line = end.line;
         b.cursor.col = end.col;
+        invalidateWrapIndex();
+        resetPreferredVisualColumn();
         updateModified(b);
         clearSelection();
         state_ = State::Navegacion;
@@ -373,9 +437,11 @@ void Editor::registerCommands() {
     });
     commands_.registerCommand("navegacion.palabra.atras", [this] {
         active().cursor.moveToPreviousWord(active().document);
+        resetPreferredVisualColumn();
     });
     commands_.registerCommand("navegacion.palabra.adelante", [this] {
         active().cursor.moveToNextWord(active().document);
+        resetPreferredVisualColumn();
     });
     commands_.registerCommand("seleccion.total", [this] {
         Buffer& b = active();
@@ -443,6 +509,8 @@ void Editor::registerCommands() {
             e.edits.push_back({EditType::Delete, sel->start, sel->end, text});
             b.cursor.line = sel->start.line;
             b.cursor.col = sel->start.col;
+            invalidateWrapIndex();
+            resetPreferredVisualColumn();
             updateModified(b);
             b.commitHistoryEntry(std::move(e));
         }
@@ -540,6 +608,7 @@ void Editor::registerCommands() {
         b.cursor.line = target->line;
         b.cursor.col = target->col;
         b.cursor.clampToLine(b.document);
+        resetPreferredVisualColumn();
     
         centerViewportOnCursor();
         clearSelection();
@@ -577,10 +646,13 @@ void Editor::registerCommands() {
             beginSelection();
             b.cursor.moveLeft(b.document);
             updateSelectionPosition();
+            // Movimiento horizontal: reiniciar columna visual preferida
+            resetPreferredVisualColumn();
             return;
         }
         if (state_ == State::Navegacion || state_ == State::Interaccion) {
             b.cursor.moveLeft(b.document);
+            resetPreferredVisualColumn();
         }
     });
     commands_.registerCommand("cursor.mover.derecha", [this] {
@@ -593,68 +665,165 @@ void Editor::registerCommands() {
             beginSelection();
             b.cursor.moveRight(b.document);
             updateSelectionPosition();
+            resetPreferredVisualColumn();
             return;
         }
         if (state_ == State::Navegacion || state_ == State::Interaccion) {
             b.cursor.moveRight(b.document);
+            resetPreferredVisualColumn();
         }
     });
     commands_.registerCommand("cursor.mover.arriba", [this] {
         Buffer& b = active();
         if (state_ == State::Seleccion && b.selectAllActive) {
-            jumpSelectAllEdge(false);  // BOF, como flecha en seleccion total
+            jumpSelectAllEdge(false);
             return;
         }
-        if (state_ == State::Seleccion) {
-            beginSelection();
-            b.cursor.moveUp(b.document);
-            updateSelectionPosition();
-            return;
-        }
-        if (state_ == State::Navegacion || state_ == State::Interaccion) {
-            b.cursor.moveUp(b.document);
+        if (isWrapEnabledFor(b)) {
+            const softwrap::Index& idx = wrapFor(this, b);
+            int visRow = idx.visualRowOf({b.cursor.line, b.cursor.col});
+            int totalRows = idx.totalRows();
+            if (visRow == 0 && totalRows > 0) {
+                // Ya en la primera fila visual: no hacer nada
+            } else {
+                int targetVisRow = std::max(0, visRow - 1);
+                if (targetVisRow < totalRows) {
+                    // Conservar la preferencia ORIGINAL durante toda la
+                    // secuencia vertical: positionAt puede devolver una
+                    // columna menor (fila corta) sin destruir la preferencia.
+                    int prefCol = preferredVisualCol_.value_or(
+                        visualColumnOf(idx, b.document, {b.cursor.line, b.cursor.col}));
+                    preferredVisualCol_ = prefCol;
+                    Position np = idx.positionAt(b.document, targetVisRow, prefCol);
+                    if (state_ == State::Seleccion) {
+                        beginSelection();
+                        b.cursor.line = np.line;
+                        b.cursor.col = np.col;
+                        updateSelectionPosition();
+                    } else if (state_ == State::Navegacion || state_ == State::Interaccion) {
+                        b.cursor.line = np.line;
+                        b.cursor.col = np.col;
+                    }
+                }
+            }
+        } else {
+            if (state_ == State::Seleccion) {
+                beginSelection();
+                b.cursor.moveUp(b.document);
+                updateSelectionPosition();
+                return;
+            }
+            if (state_ == State::Navegacion || state_ == State::Interaccion) {
+                b.cursor.moveUp(b.document);
+            }
         }
     });
     commands_.registerCommand("cursor.mover.abajo", [this] {
         Buffer& b = active();
         if (state_ == State::Seleccion && b.selectAllActive) {
-            jumpSelectAllEdge(true);  // EOF, como flecha en seleccion total
+            jumpSelectAllEdge(true);
             return;
         }
-        if (state_ == State::Seleccion) {
-            beginSelection();
-            b.cursor.moveDown(b.document);
-            updateSelectionPosition();
-            return;
-        }
-        if (state_ == State::Navegacion || state_ == State::Interaccion) {
-            b.cursor.moveDown(b.document);
+        if (isWrapEnabledFor(b)) {
+            const softwrap::Index& idx = wrapFor(this, b);
+            int visRow = idx.visualRowOf({b.cursor.line, b.cursor.col});
+            int totalRows = idx.totalRows();
+            if (visRow >= totalRows - 1 && totalRows > 0) {
+                // Ya en la última fila visual: no hacer nada
+            } else {
+                int targetVisRow = std::min(visRow + 1, totalRows - 1);
+                // Conservar la preferencia ORIGINAL durante toda la
+                // secuencia vertical (ver movimiento hacia arriba).
+                int prefCol = preferredVisualCol_.value_or(
+                    visualColumnOf(idx, b.document, {b.cursor.line, b.cursor.col}));
+                preferredVisualCol_ = prefCol;
+                Position np = idx.positionAt(b.document, targetVisRow, prefCol);
+                if (state_ == State::Seleccion) {
+                    beginSelection();
+                    b.cursor.line = np.line;
+                    b.cursor.col = np.col;
+                    updateSelectionPosition();
+                } else if (state_ == State::Navegacion || state_ == State::Interaccion) {
+                    b.cursor.line = np.line;
+                    b.cursor.col = np.col;
+                }
+            }
+        } else {
+            if (state_ == State::Seleccion) {
+                beginSelection();
+                b.cursor.moveDown(b.document);
+                updateSelectionPosition();
+                return;
+            }
+            if (state_ == State::Navegacion || state_ == State::Interaccion) {
+                b.cursor.moveDown(b.document);
+            }
         }
     });
     commands_.registerCommand("cursor.mover.inicio", [this] {
         Buffer& b = active();
-        if (state_ == State::Seleccion && b.selectAllActive) return;  // no-op, como el teclado
-        if (state_ == State::Seleccion) {
-            beginSelection();
-            b.cursor.moveHome();
-            updateSelectionPosition();
-            return;
-        }
-        if (state_ == State::Navegacion || state_ == State::Interaccion) {
-            b.cursor.moveHome();
+        if (state_ == State::Seleccion && b.selectAllActive) return;
+        if (isWrapEnabledFor(b)) {
+            const softwrap::Index& idx = wrapFor(this, b);
+            int vr = idx.visualRowOf({b.cursor.line, b.cursor.col});
+            if (state_ == State::Seleccion) {
+                beginSelection();
+                Position np = idx.positionAt(b.document, vr, 0);
+                b.cursor.line = np.line;
+                b.cursor.col = np.col;
+                updateSelectionPosition();
+                resetPreferredVisualColumn();
+            } else if (state_ == State::Navegacion || state_ == State::Interaccion) {
+                Position np = idx.positionAt(b.document, vr, 0);
+                b.cursor.line = np.line;
+                b.cursor.col = np.col;
+                resetPreferredVisualColumn();
+            }
+        } else {
+            if (state_ == State::Seleccion) {
+                beginSelection();
+                b.cursor.moveHome();
+                updateSelectionPosition();
+                return;
+            }
+            if (state_ == State::Navegacion || state_ == State::Interaccion) {
+                b.cursor.moveHome();
+            }
         }
     });
     commands_.registerCommand("cursor.mover.fin", [this] {
         Buffer& b = active();
-        if (state_ == State::Seleccion && b.selectAllActive) return;  // no-op, como el teclado
-        if (state_ == State::Seleccion) {
-            beginSelection();
-            b.cursor.moveEnd(b.document);
-            updateSelectionPosition();
-            return;
-        }
-        if (state_ == State::Navegacion || state_ == State::Interaccion) {
-            b.cursor.moveEnd(b.document);
+        if (state_ == State::Seleccion && b.selectAllActive) return;
+        if (isWrapEnabledFor(b)) {
+            const softwrap::Index& idx = wrapFor(this, b);
+            int vr = idx.visualRowOf({b.cursor.line, b.cursor.col});
+            if (state_ == State::Seleccion) {
+                beginSelection();
+                const softwrap::VisualRow& row = idx.rowAt(vr);
+                int width = row.columnEnd - row.columnBegin;
+                Position np = idx.positionAt(b.document, vr, width);
+                b.cursor.line = np.line;
+                b.cursor.col = np.col;
+                updateSelectionPosition();
+                resetPreferredVisualColumn();
+            } else if (state_ == State::Navegacion || state_ == State::Interaccion) {
+                const softwrap::VisualRow& row = idx.rowAt(vr);
+                int width = row.columnEnd - row.columnBegin;
+                Position np = idx.positionAt(b.document, vr, width);
+                b.cursor.line = np.line;
+                b.cursor.col = np.col;
+                resetPreferredVisualColumn();
+            }
+        } else {
+            if (state_ == State::Seleccion) {
+                beginSelection();
+                b.cursor.moveEnd(b.document);
+                updateSelectionPosition();
+                return;
+            }
+            if (state_ == State::Navegacion || state_ == State::Interaccion) {
+                b.cursor.moveEnd(b.document);
+            }
         }
     });
     commands_.registerCommand("cursor.pagina.arriba", [this] {
@@ -662,7 +831,6 @@ void Editor::registerCommands() {
         if (state_ == State::Seleccion) {
             beginSelection();
             applyPage(-1);
-            updateSelectionPosition();
             return;
         }
         if (state_ == State::Navegacion || state_ == State::Interaccion) {
@@ -674,7 +842,6 @@ void Editor::registerCommands() {
         if (state_ == State::Seleccion) {
             beginSelection();
             applyPage(+1);
-            updateSelectionPosition();
             return;
         }
         if (state_ == State::Navegacion || state_ == State::Interaccion) {
@@ -782,6 +949,8 @@ bool Editor::loadIntoActiveBuffer(const std::string& path) {
     b.savedIdentity = (result == LoadResult::Success) ? captureIdentity(b.filename) : Buffer::FileIdentity{};
     b.cursor.line = 0;
     b.cursor.col = 0;
+    invalidateWrapIndex();
+    resetPreferredVisualColumn();
     b.selection.reset();
     b.selectAllActive = false;
     b.selectAllPrevious.reset();
@@ -824,6 +993,8 @@ void Editor::syncViewportSize(Buffer& b) {
 }
 
 void Editor::createBuffer() {
+    invalidateWrapIndex();
+    resetPreferredVisualColumn();
     const int rows = currentRows_, cols = currentCols_;
     // El nuevo buffer se vuelve activo y pasa al frente de la MRU
     // automaticamente en BufferManager::createBuffer.
@@ -833,6 +1004,8 @@ void Editor::createBuffer() {
 }
 
 void Editor::closeActiveBuffer() {
+    invalidateWrapIndex();
+    resetPreferredVisualColumn();
     Buffer& cur = active();
     std::string oldPath = cur.filename;
     const int rows = currentRows_, cols = currentCols_;
@@ -861,6 +1034,8 @@ void Editor::closeActiveBuffer() {
 }
 
 void Editor::activateBuffer(int idx) {
+    invalidateWrapIndex();
+    resetPreferredVisualColumn();
     const bool hasSelection = buffers.activateIndex(idx);
     state_ = hasSelection ? State::Seleccion : State::Navegacion;
     setStatusMessage("");
@@ -868,6 +1043,8 @@ void Editor::activateBuffer(int idx) {
 }
 
 void Editor::activateBufferAtMruPosition(int pos) {
+    invalidateWrapIndex();
+    resetPreferredVisualColumn();
     const bool hasSelection = buffers.activateMruPosition(pos);
     state_ = hasSelection ? State::Seleccion : State::Navegacion;
     setStatusMessage("");
@@ -1048,6 +1225,8 @@ void Editor::openFileInBuffer(const std::string& path) {
     nuevo.savedIdentity = (result == LoadResult::Success) ? captureIdentity(filePath) : Buffer::FileIdentity{};
     nuevo.cursor.line = 0;
     nuevo.cursor.col = 0;
+    invalidateWrapIndex();
+    resetPreferredVisualColumn();
     nuevo.selection.reset();
     nuevo.selectAllActive = false;
     nuevo.selectAllPrevious.reset();
@@ -1230,16 +1409,45 @@ void Editor::renderFrame() {
             renderer_->setExternalSyntaxCache(&b.syntaxCache);
         }
 
+        bool wrap = isWrapEnabledFor(b);
+        if (wrap) {
+            // En wrap: forzar left=0 y clamp top a filas visuales
+            b.viewport.left = 0;
+            const softwrap::Index& idx = wrapFor(this, b);
+            int totalVisualRows = idx.totalRows();
+            int contentH = b.viewport.height;
+            if (contentH > 0) {
+                int maxTop = std::max(0, totalVisualRows - contentH);
+                if (b.viewport.top > maxTop) b.viewport.top = maxTop;
+            }
+        }
+
         // IMPORTANTE: scroll antes que bracket highlight.
         // Si no, tras un page/jump el cursor puede quedar fuera del rango de scan.
         if (suppressScrollToCursor_) {
             suppressScrollToCursor_ = false;
         } else {
-            b.viewport.scrollToCursor(
-                b.cursor,
-                b.document,
-                textWidthFor(b.viewport, b.document.lineCount())
-            );
+            if (wrap) {
+                const softwrap::Index& idx = wrapFor(this, b);
+                int vr = idx.visualRowOf({b.cursor.line, b.cursor.col});
+                // scrollToCursor visual
+                int contentH = b.viewport.height;
+                if (contentH > 0) {
+                    if (vr < b.viewport.top) {
+                        b.viewport.top = vr;
+                    } else if (vr >= b.viewport.top + contentH) {
+                        b.viewport.top = vr - contentH + 1;
+                    }
+                    int maxTop = std::max(0, idx.totalRows() - contentH);
+                    if (b.viewport.top > maxTop) b.viewport.top = maxTop;
+                }
+            } else {
+                b.viewport.scrollToCursor(
+                    b.cursor,
+                    b.document,
+                    textWidthFor(b.viewport, b.document.lineCount())
+                );
+            }
         }
 
         // Bracket highlight: viewport-acotado.
@@ -1252,6 +1460,13 @@ void Editor::renderFrame() {
 
         std::optional<BracketPair> toRender =
             (state_ == State::Seleccion) ? std::nullopt : bracketPair_;
+
+        if (wrap) {
+            const softwrap::Index& idx = wrapFor(this, b);
+            renderer_->setWrapIndex(&idx);
+        } else {
+            renderer_->setWrapIndex(nullptr);
+        }
 
         renderer_->renderScreenDiff(
             b.document,
@@ -1276,12 +1491,18 @@ void Editor::handleMousePress(const InputEvent& event) {
         return;
     }
     Buffer& b = active();
-    // Misma reconstruccion que Renderer::calculateLayout: viewport.height
-    // es altura de CONTENIDO, computeLayout espera filas totales.
     const Layout layout =
         computeLayout(b.viewport.height + kChromeRows, b.viewport.width);
-    auto pos = screenToCursor(event.cell, layout,
-                              b.viewport, b.document);
+
+    std::optional<Position> pos;
+    if (isWrapEnabledFor(b)) {
+        const softwrap::Index& idx = wrapFor(this, b);
+        int gutterW = gutterWidth(b.document.lineCount(), layout.content.width);
+        pos = screenToCursorWrap(idx, event.cell, layout, b.viewport, b.document, gutterW);
+    } else {
+        pos = screenToCursor(event.cell, layout, b.viewport, b.document);
+    }
+
     if (!pos.has_value()) {
         if (state_ == State::Seleccion) {
             clearSelection();
@@ -1309,6 +1530,7 @@ void Editor::handleMousePress(const InputEvent& event) {
     b.cursor.line = pos->line;
     b.cursor.col = pos->col;
     b.cursor.clampToLine(b.document);
+    resetPreferredVisualColumn();
     dragAnchor_ = *pos;
     pressState_ = state_;
     mouseGestureActive_ = true;
@@ -1323,14 +1545,19 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
     const int h = layout.content.height;
     const int totalW = layout.content.width;
     if (h <= 0 || totalW <= 0) return std::nullopt;
-    const int count = b.document.lineCount();
-    if (count <= 0) return std::nullopt;
 
     const int relRow = cell.row - layout.content.row;
     const int relCol = cell.col - layout.content.col;
-    const int gutterW = gutterWidth(count, totalW);
-    const int textW = totalW - gutterW;
-    const int maxTop = (count - h) > 0 ? (count - h) : 0;
+    const int gutterW = gutterWidth(b.document.lineCount(), totalW);
+
+    bool wrap = isWrapEnabledFor(b);
+    const softwrap::Index* idx = nullptr;
+    if (wrap) {
+        idx = &wrapFor(this, b);
+    }
+    int totalVisualRows = wrap ? idx->totalRows() : b.document.lineCount();
+    int textW = wrap ? 0 : totalW - gutterW;  // wrap no usa scroll horizontal
+    int maxTop = std::max(0, totalVisualRows - h);
 
     // Intencion de autoscroll temporal (solo vertical, solo gesto de mouse:
     // unico llamador con gesto armado, mas el tick que re-ejecuta fuera).
@@ -1365,38 +1592,51 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
     }
 
     // Fila `~` dentro del content (mas alla del EOF pero sin salir del
-    // viewport): sin scroll, se extiende hasta EOF via el clamp de linea
-    // del helper (top + relRow >= count -> count - 1).
+    // viewport): sin scroll, se extiende hasta EOF.
     const bool insideRows = relRow >= 0 && relRow < h;
-    if (insideRows && b.viewport.top + relRow >= count) {
-        return dragEdgePosition(relRow, relCol, b.viewport, b.document, h,
-                                totalW);
+    if (insideRows) {
+        int visualRow = b.viewport.top + relRow;
+        if (visualRow >= totalVisualRows) {
+            // Más allá del EOF: el extremo de selección debe ser el EOF
+            // lógico (después del último carácter), no la última celda que
+            // devolvería positionAt() para un cursor/End.
+            if (wrap) {
+                return dragEofPosition(b.document);
+            } else {
+                return dragEdgePosition(relRow, relCol, b.viewport, b.document, h, totalW);
+            }
+        }
     }
 
     // Fuera del contenido en vertical y ya en el limite: scroll imposible,
     // pero la intencion de seleccionar hacia el borde sigue siendo valida.
-    // Se devuelve la posicion clampada al borde (mismo helper, unica copia
-    // de la logica de columnas) en lugar de caer en screenToCursor()
+    // Se devuelve la posicion clampada al borde en lugar de caer en screenToCursor()
     // (nullopt). Solo activo durante seleccion por mouse: esta funcion solo
     // se llama desde handleMouseDrag con gesto armado (press previo valido).
-    // Por lado, no por top: con archivo menor que el viewport (maxTop==0)
-    // relRow<0 da la primera linea y relRow>=h da la ultima.
     if (relRow < 0 && b.viewport.top <= 0) {
-        return dragEdgePosition(relRow, relCol, b.viewport, b.document, h,
-                                totalW);
+        if (wrap && idx) {
+            return idx->positionAt(b.document, 0, std::max(0, relCol - gutterW));
+        }
+        return dragEdgePosition(relRow, relCol, b.viewport, b.document, h, totalW);
     }
     if (relRow >= h && b.viewport.top >= maxTop) {
-        return dragEdgePosition(relRow, relCol, b.viewport, b.document, h,
-                                totalW);
+        if (wrap && idx) {
+            const int lastRow = totalVisualRows - 1;
+            const int visualCol = std::max(0, relCol - gutterW);
+            const softwrap::VisualRow& row = idx->rowAt(lastRow);
+            const int rowWidth = row.columnEnd - row.columnBegin;
+            if (visualCol >= rowWidth) return dragEofPosition(b.document);
+            return idx->positionAt(b.document, lastRow, visualCol);
+        }
+        return dragEdgePosition(relRow, relCol, b.viewport, b.document, h, totalW);
     }
 
     // Autoscroll por bordes (1 linea / 1 celda por evento). Asimetrico en
     // vertical como el armado de arriba: la primera fila (relRow == 0, que
     // ES contenido) scrollea por la misma DECISION sustituta —el fuera
     // hacia arriba no es reportable—; la ultima fila es exclusiva (el
-    // fuera real es el chrome inferior, relRow >= h). Coordenadas fuera del
-    // contenido por abajo (chrome inferior) scrollean mientras quede contenido
-    // por revelar; al llegar al limite las cubren los retornos de arriba.
+    // fuera real es el chrome inferior, relRow >= h). En wrap no hay
+    // scroll horizontal.
     bool scrolled = false;
     if (relRow <= 0 && b.viewport.top > 0) {
         b.viewport.top--;
@@ -1405,23 +1645,25 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
         b.viewport.top++;
         scrolled = true;
     }
-    if (relCol <= gutterW && b.viewport.left > 0) {
-        b.viewport.left--;
-        if (b.viewport.left < 0) b.viewport.left = 0;
-        scrolled = true;
-    } else if (relCol >= totalW - 1 && textW > 0) {
-        // Guard contra deriva infinita en lineas cortas: solo scroll a la
-        // derecha si la linea borde tiene contenido oculto mas alla del
-        // viewport (ancho visual > left + textW).
-        int probeLine = b.viewport.top +
-                        std::min(std::max(relRow, 0), h - 1);
-        if (probeLine < 0) probeLine = 0;
-        if (probeLine >= count) probeLine = count - 1;
-        const std::string& ls = b.document.lineAt(probeLine);
-        const int visWidth = utf8::columnOf(ls, static_cast<int>(ls.size()));
-        if (visWidth > b.viewport.left + textW) {
-            b.viewport.left++;
+    if (!wrap) {
+        if (relCol <= gutterW && b.viewport.left > 0) {
+            b.viewport.left--;
+            if (b.viewport.left < 0) b.viewport.left = 0;
             scrolled = true;
+        } else if (relCol >= totalW - 1 && textW > 0) {
+            // Guard contra deriva infinita en lineas cortas: solo scroll a la
+            // derecha si la linea borde tiene contenido oculto mas alla del
+            // viewport (ancho visual > left + textW).
+            int probeLine = b.viewport.top +
+                            std::min(std::max(relRow, 0), h - 1);
+            if (probeLine < 0) probeLine = 0;
+            if (probeLine >= b.document.lineCount()) probeLine = b.document.lineCount() - 1;
+            const std::string& ls = b.document.lineAt(probeLine);
+            const int visWidth = utf8::columnOf(ls, static_cast<int>(ls.size()));
+            if (visWidth > b.viewport.left + textW) {
+                b.viewport.left++;
+                scrolled = true;
+            }
         }
     }
 
@@ -1430,12 +1672,19 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
         // contenido, en el chrome inferior, que
         // aqui ya se trato como borde inferior si habia scroll posible;
         // si no habia scroll posible se ignora el evento).
-        return screenToCursor(cell, layout, b.viewport,
-                              b.document);
+        if (wrap && idx) {
+            return screenToCursorWrap(*idx, cell, layout, b.viewport, b.document, gutterW);
+        }
+        return screenToCursor(cell, layout, b.viewport, b.document);
     }
 
     // Tras scrollear, la posicion es el borde visible (mismo helper que
     // el camino tilde: una sola copia de la logica de columnas).
+    if (wrap && idx) {
+        int visualRow = std::clamp(b.viewport.top + relRow, 0, totalVisualRows - 1);
+        int visualCol = std::max(0, relCol - gutterW);
+        return idx->positionAt(b.document, visualRow, visualCol);
+    }
     return dragEdgePosition(relRow, relCol, b.viewport, b.document, h,
                             totalW);
 }
@@ -1455,6 +1704,7 @@ void Editor::applyMouseDragPosition(const Position& pos) {
         b.cursor.line = pos.line;
         b.cursor.col = pos.col;
         b.cursor.clampToLine(b.document);
+        resetPreferredVisualColumn();
         // La posicion ya viene normalizada por byteForColumn+alignStart;
         // se re-sincroniza por seguridad tras el clamp.
         b.selection->position = {b.cursor.line, b.cursor.col};
@@ -1464,6 +1714,7 @@ void Editor::applyMouseDragPosition(const Position& pos) {
     b.cursor.line = pos.line;
     b.cursor.col = pos.col;
     b.cursor.clampToLine(b.document);
+    resetPreferredVisualColumn();
     if (b.selection.has_value()) {
         b.selection->position = {b.cursor.line, b.cursor.col};
     } else {
@@ -1755,6 +2006,8 @@ void Editor::handleInteraccionEvent(const InputEvent& event) {
                 b.cursor.col = end.col;
                 updateModified(b);
                 b.commitHistoryEntry(std::move(e));
+                markWrapLineDirty(this, start.line);
+                if (end.line != start.line) markWrapLineDirty(this, end.line);
             } else {
                 Position start{b.cursor.line, b.cursor.col};
                 Position end = b.document.insertText(start.line, start.col,
@@ -1763,7 +2016,10 @@ void Editor::handleInteraccionEvent(const InputEvent& event) {
                 b.cursor.line = end.line;
                 b.cursor.col = end.col;
                 updateModified(b);
+                markWrapLineDirty(this, start.line);
+                if (end.line != start.line) markWrapLineDirty(this, end.line);
             }
+            resetPreferredVisualColumn();
             break;
 
         case InputEventType::InsertNewline: {
@@ -1780,6 +2036,8 @@ void Editor::handleInteraccionEvent(const InputEvent& event) {
             b.document.splitLine(at.line, at.col);
             e.edits.push_back({EditType::SplitLine, at,
                                {at.line + 1, 0}, ""});
+            markWrapLineDirty(this, at.line);
+            markWrapLineDirty(this, at.line + 1);
             if (!indent.empty()) {
                 // Nueva línea = I + ltrim(sufijo): evita duplicar cuando
                 // el corte cae dentro del propio indent o en solo-blancos.
@@ -1794,14 +2052,15 @@ void Editor::handleInteraccionEvent(const InputEvent& event) {
                     b.document.deleteRange(newLine, 0, newLine,
                                            static_cast<int>(k));
                     e.edits.push_back({EditType::Delete,
-                                       {newLine, 0},
-                                       {newLine, static_cast<int>(k)},
-                                       removed});
+                                        {newLine, 0},
+                                        {newLine, static_cast<int>(k)},
+                                        removed});
+                    markWrapLineDirty(this, newLine);
                 }
                 Position end =
                     b.document.insertText(newLine, 0, indent);
                 e.edits.push_back({EditType::Insert,
-                                   {newLine, 0}, end, indent});
+                                    {newLine, 0}, end, indent});
                 b.cursor.line = newLine;
                 b.cursor.col = static_cast<int>(indent.size());
             } else {
@@ -1810,6 +2069,7 @@ void Editor::handleInteraccionEvent(const InputEvent& event) {
             }
             updateModified(b);
             b.commitHistoryEntry(std::move(e));
+            resetPreferredVisualColumn();
             break;
         }
 
@@ -1832,6 +2092,8 @@ void Editor::handleInteraccionEvent(const InputEvent& event) {
                     b.cursor.line--;
                     b.cursor.col = prevLineLen;
                     updateModified(b);
+                    markWrapLineDirty(this, nl.line);
+                    markWrapLineDirty(this, nl.line + 1);
                 } else {
                     int line = b.cursor.line, col = b.cursor.col;
                     // Smart-backspace: si [0, col) es todo indentación
@@ -1863,6 +2125,7 @@ void Editor::handleInteraccionEvent(const InputEvent& event) {
                                                    {line, col}, removed});
                                 b.cursor.col -= n;
                                 updateModified(b);
+                                markWrapLineDirty(this, line);
                             }
                         }
                     } else {
@@ -1874,6 +2137,7 @@ void Editor::handleInteraccionEvent(const InputEvent& event) {
                                                {line, col}, removed});
                             b.cursor.col -= deleted;
                             updateModified(b);
+                            markWrapLineDirty(this, line);
                         }
                     }
                 }
@@ -1888,15 +2152,19 @@ void Editor::handleInteraccionEvent(const InputEvent& event) {
                         e.edits.push_back({EditType::Delete, {line, col},
                                            {line, col + deleted}, removed});
                         updateModified(b);
+                        markWrapLineDirty(this, line);
                     }
                 } else if (line + 1 < b.document.lineCount()) {
                     b.document.mergeLine(line);
                     e.edits.push_back({EditType::MergeLine, {line, col},
                                        {line + 1, 0}, ""});
                     updateModified(b);
+                    markWrapLineDirty(this, line);
+                    markWrapLineDirty(this, line + 1);
                 }
             }
             b.commitHistoryEntry(std::move(e));
+            resetPreferredVisualColumn();
             break;
         }
 
@@ -2033,6 +2301,8 @@ void Editor::handleSeleccionEvent(const InputEvent& event) {
                 e.edits.push_back({EditType::Insert, start, end, event.text});
                 b.cursor.line = end.line;
                 b.cursor.col = end.col;
+                invalidateWrapIndex();
+                resetPreferredVisualColumn();
                 updateModified(b);
                 clearSelection();
                 state_ = State::Interaccion;
@@ -2482,6 +2752,19 @@ void Editor::clearSearchHighlight() {
 
 void Editor::centerViewportOnCursor() {
     Buffer& b = active();
+    if (isWrapEnabledFor(b)) {
+        const softwrap::Index& idx = wrapFor(this, b);
+        int totalRows = idx.totalRows();
+        int h = b.viewport.height;
+        if (h <= 0) return;
+        int vr = idx.visualRowOf({b.cursor.line, b.cursor.col});
+        int maxTop = std::max(0, totalRows - h);
+        int desiredTop = vr - h / 2;
+        desiredTop = std::max(0, std::min(desiredTop, maxTop));
+        b.viewport.top = desiredTop;
+        b.viewport.left = 0;
+        return;
+    }
     int h = b.viewport.height;
     if (h > 0) {
         int totalLines = b.document.lineCount();
@@ -2525,6 +2808,7 @@ void Editor::updateSearch() {
     Position target = (it != matches.end()) ? *it : matches.front();
     b.cursor.line = target.line;
     b.cursor.col = target.col;
+    resetPreferredVisualColumn();
     setSearchHighlight(target, static_cast<int>(searchQuery_.size()));
     centerViewportOnCursor();
     updateSearchMessage(true, idx + 1, static_cast<int>(matches.size()));
@@ -2541,6 +2825,7 @@ void Editor::navigateSearch(int dir) {
     if (matches.size() == 1) {
         active().cursor.line = matches[0].line;
         active().cursor.col = matches[0].col;
+        resetPreferredVisualColumn();
         setSearchHighlight(matches[0], static_cast<int>(searchQuery_.size()));
         centerViewportOnCursor();
         updateSearchMessage(true, 1, static_cast<int>(matches.size()));
@@ -2560,6 +2845,7 @@ void Editor::navigateSearch(int dir) {
                          : (idx - 1 + static_cast<int>(matches.size())) % static_cast<int>(matches.size());
     b.cursor.line = matches[next].line;
     b.cursor.col = matches[next].col;
+    resetPreferredVisualColumn();
     setSearchHighlight(matches[next], static_cast<int>(searchQuery_.size()));
     centerViewportOnCursor();
     updateSearchMessage(true, next + 1, static_cast<int>(matches.size()));
@@ -2595,6 +2881,7 @@ void Editor::handleBusquedaEvent(const InputEvent& event) {
             b.cursor.line = searchOrigin_.line;
             b.cursor.col = searchOrigin_.col;
             b.cursor.clampToLine(b.document);
+            resetPreferredVisualColumn();
             clearSearchHighlight();
             centerViewportOnCursor();
             searchQuery_.clear();
@@ -2636,6 +2923,43 @@ void Editor::updateSelectionPosition() {
 
 void Editor::applyPage(int dir) {
     Buffer& b = active();
+    if (isWrapEnabledFor(b)) {
+        const softwrap::Index& idx = wrapFor(this, b);
+        int totalRows = idx.totalRows();
+        int h = b.viewport.height;
+        if (h <= 0) return;
+        int prefVisualCol = preferredVisualCol_.value_or(
+            visualColumnOf(idx, b.document, {b.cursor.line, b.cursor.col}));
+        // Página es navegación vertical: conserva la preferencia entre pasos.
+        preferredVisualCol_ = prefVisualCol;
+
+        Position target;
+        if (h >= totalRows) {
+            b.viewport.top = 0;
+            int targetRow = (dir < 0) ? 0 : totalRows - 1;
+            target = idx.positionAt(b.document, targetRow, prefVisualCol);
+        } else {
+            int vr = idx.visualRowOf({b.cursor.line, b.cursor.col});
+            int rel = vr - b.viewport.top;
+            int maxTop = totalRows - h;
+            if (dir < 0) {
+                bool alreadyAtTop = (b.viewport.top == 0);
+                b.viewport.top = std::max(0, b.viewport.top - h);
+                target = idx.positionAt(b.document,
+                    alreadyAtTop ? 0 : b.viewport.top + rel, prefVisualCol);
+            } else {
+                bool alreadyAtBottom = (b.viewport.top == maxTop);
+                b.viewport.top = std::min(maxTop, b.viewport.top + h);
+                target = idx.positionAt(b.document,
+                    alreadyAtBottom ? totalRows - 1 : b.viewport.top + rel,
+                    prefVisualCol);
+            }
+        }
+        b.cursor.line = target.line;
+        b.cursor.col = target.col;
+        if (state_ == State::Seleccion) updateSelectionPosition();
+        return;
+    }
     const int count = b.document.lineCount(); // >= 1: siempre hay una linea
     const int h = b.viewport.height;
 
@@ -2645,6 +2969,7 @@ void Editor::applyPage(int dir) {
         b.viewport.top = 0;
         b.cursor.line = (dir < 0) ? 0 : count - 1;
         b.cursor.clampToLine(b.document);
+        if (state_ == State::Seleccion) updateSelectionPosition();
         return;
     }
 
@@ -2676,10 +3001,22 @@ void Editor::applyPage(int dir) {
     // Clamp final de seguridad: el cursor nunca queda fuera de los limites.
     b.cursor.line = std::min(std::max(b.cursor.line, 0), count - 1);
     b.cursor.clampToLine(b.document);
+    if (state_ == State::Seleccion) updateSelectionPosition();
 }
 
 void Editor::applyScroll(int delta) {
     Buffer& b = active();
+    if (isWrapEnabledFor(b)) {
+        const softwrap::Index& idx = wrapFor(this, b);
+        int totalRows = idx.totalRows();
+        int h = b.viewport.height;
+        if (h <= 0) return;
+        int maxTop = std::max(0, totalRows - h);
+        int oldTop = b.viewport.top;
+        b.viewport.top = std::min(std::max(b.viewport.top + delta, 0), maxTop);
+        if (b.viewport.top != oldTop) suppressScrollToCursor_ = true;
+        return;
+    }
     const int count = b.document.lineCount();
     const int h = b.viewport.height;
     if (h <= 0) return;
@@ -2705,6 +3042,7 @@ void Editor::jumpSelectAllEdge(bool toEnd) {
     }
     b.selection = Selection{{b.cursor.line, b.cursor.col},
                             {b.cursor.line, b.cursor.col}};
+    resetPreferredVisualColumn();
     b.selectAllActive = false;
     b.selectAllPrevious.reset();
     setStatusMessage("SELECCION");
@@ -2744,10 +3082,14 @@ bool Editor::deleteSelection() {
     b.document.deleteRange(sel->start.line, sel->start.col,
                            sel->end.line, sel->end.col);
     e.edits.push_back({EditType::Delete, sel->start, sel->end,
-                       blockToString(removed)});
+                        blockToString(removed)});
     b.cursor.line = sel->start.line;
     b.cursor.col = sel->start.col;
+    resetPreferredVisualColumn();
     updateModified(b);
+    for (int l = sel->start.line; l <= sel->end.line; ++l) {
+        markWrapLineDirty(this, l);
+    }
     clearSelection();
     b.commitHistoryEntry(std::move(e));
     return true;
@@ -2797,6 +3139,8 @@ void Editor::indentSelection(bool indent) {
             if (b.selection->position.line == l) b.selection->position.col = shiftColumn(b.selection->position.col, delta);
         }
     }
+    invalidateWrapIndex();
+    resetPreferredVisualColumn();
     updateModified(b);
     b.commitHistoryEntry(std::move(e));
     setActionMessage(indent ? "Tabulado." : "Tabulacion quitada.",
@@ -2822,6 +3166,8 @@ void Editor::indentCurrentLine(bool indent) {
     e.edits.push_back(makeIndentEditForLine(line, delta, before));
     b.cursor.col = shiftColumn(b.cursor.col, delta);
 
+    invalidateWrapIndex();
+    resetPreferredVisualColumn();
     updateModified(b);
     b.commitHistoryEntry(std::move(e));
     setActionMessage(indent ? "Tabulado." : "Tabulacion quitada.",
@@ -2842,6 +3188,8 @@ void Editor::undo() {
     // La seleccion restaurada vuelve a estar VIGENTE. Importante: el modo
     // Seleccion solo debe activarse si el rango restaurado es realmente NO
     // vacio. Compartimos el criterio con hasSelection() (anchor != position).
+    invalidateWrapIndex();
+    resetPreferredVisualColumn();
     state_ = (b.selection.has_value() && b.selection->anchor != b.selection->position)
            ? State::Seleccion
            : State::Navegacion;
@@ -2859,6 +3207,8 @@ void Editor::redo() {
         return;
     }
 
+    invalidateWrapIndex();
+    resetPreferredVisualColumn();
     state_ = (b.selection.has_value() && b.selection->anchor != b.selection->position)
             ? State::Seleccion
             : State::Navegacion;
@@ -2910,6 +3260,7 @@ void Editor::handleIrAFilaEvent(const InputEvent& event) {
                         b.cursor.line = lineNum - 1; // Las líneas internas son 0-indexed
                         b.cursor.col = 0;
                         b.cursor.clampToLine(b.document);
+                        resetPreferredVisualColumn();
                         centerViewportOnCursor();
 
                         state_ = State::Navegacion;
@@ -3153,16 +3504,38 @@ void Editor::updateBracketHighlight() {
     Buffer& b = active();
     Position cur{b.cursor.line, b.cursor.col};
 
-    const int top = std::max(0, b.viewport.top);
-    const int height = std::max(0, b.viewport.height);
-    const int bottom = std::min(b.document.lineCount(), top + height);
+    bool wrap = isWrapEnabledFor(b);
+    int top, bottom;
+    if (wrap) {
+        const softwrap::Index& idx = wrapFor(this, b);
+        int vtop = b.viewport.top;
+        int height = b.viewport.height;
+        int vbottom = std::min(vtop + height, idx.totalRows());
+        // Convertir filas visuales a rango de líneas lógicas
+        int firstLine = idx.rowAt(vtop).docLine;
+        int lastLine = idx.rowAt(std::max(0, vbottom - 1)).docLine;
+        top = std::max(0, firstLine);
+        bottom = std::min(b.document.lineCount(), lastLine + 1);
+        // Para cache, usar viewport top visual
+        if (cur == lastBracketCursor_ &&
+            b.document.version() == lastBracketVersion_ &&
+            b.document.instanceId() == lastBracketInstanceId_ &&
+            b.viewport.top == lastBracketViewportTop_ &&
+            vbottom == lastBracketViewportBottom_) {
+            return;
+        }
+    } else {
+        top = std::max(0, b.viewport.top);
+        int height = std::max(0, b.viewport.height);
+        bottom = std::min(b.document.lineCount(), top + height);
 
-    if (cur == lastBracketCursor_ &&
-        b.document.version() == lastBracketVersion_ &&
-        b.document.instanceId() == lastBracketInstanceId_ &&
-        top == lastBracketViewportTop_ &&
-        bottom == lastBracketViewportBottom_) {
-        return;
+        if (cur == lastBracketCursor_ &&
+            b.document.version() == lastBracketVersion_ &&
+            b.document.instanceId() == lastBracketInstanceId_ &&
+            top == lastBracketViewportTop_ &&
+            bottom == lastBracketViewportBottom_) {
+            return;
+        }
     }
 
     SyntaxLanguage lang = languageFromFilename(b.filename);
@@ -3193,25 +3566,53 @@ void Editor::updateBracketHighlight() {
     lastBracketCursor_ = cur;
     lastBracketVersion_ = b.document.version();
     lastBracketInstanceId_ = b.document.instanceId();
-    lastBracketViewportTop_ = top;
-    lastBracketViewportBottom_ = bottom;
+    if (wrap) {
+        const softwrap::Index& idx = wrapFor(this, b);
+        lastBracketViewportTop_ = b.viewport.top;
+        lastBracketViewportBottom_ = std::min(b.viewport.top + b.viewport.height, idx.totalRows());
+    } else {
+        lastBracketViewportTop_ = top;
+        lastBracketViewportBottom_ = bottom;
+    }
 }
 
 void Editor::refreshBracketAfterJump() {
     Buffer& b = active();
     Position cur{b.cursor.line, b.cursor.col};
 
-    const int top = std::max(0, b.viewport.top);
-    const int height = std::max(0, b.viewport.height);
-    const int bottom = std::min(b.document.lineCount(), top + height);
+    bool wrap = isWrapEnabledFor(b);
+    int top, bottom;
+    if (wrap) {
+        const softwrap::Index& idx = wrapFor(this, b);
+        int vtop = b.viewport.top;
+        int height = b.viewport.height;
+        int vbottom = std::min(vtop + height, idx.totalRows());
+        int firstLine = idx.rowAt(vtop).docLine;
+        int lastLine = idx.rowAt(std::max(0, vbottom - 1)).docLine;
+        top = std::max(0, firstLine);
+        bottom = std::min(b.document.lineCount(), lastLine + 1);
 
-    // Fast path O(1): incluye top y bottom para detectar resizes
-    if (cur == lastBracketCursor_ &&
-        b.document.version() == lastBracketVersion_ &&
-        b.document.instanceId() == lastBracketInstanceId_ &&
-        top == lastBracketViewportTop_ &&
-        bottom == lastBracketViewportBottom_) {
-        return;
+        // Fast path O(1): incluye top y bottom para detectar resizes
+        if (cur == lastBracketCursor_ &&
+            b.document.version() == lastBracketVersion_ &&
+            b.document.instanceId() == lastBracketInstanceId_ &&
+            b.viewport.top == lastBracketViewportTop_ &&
+            vbottom == lastBracketViewportBottom_) {
+            return;
+        }
+    } else {
+        top = std::max(0, b.viewport.top);
+        int height = std::max(0, b.viewport.height);
+        bottom = std::min(b.document.lineCount(), top + height);
+
+        // Fast path O(1): incluye top y bottom para detectar resizes
+        if (cur == lastBracketCursor_ &&
+            b.document.version() == lastBracketVersion_ &&
+            b.document.instanceId() == lastBracketInstanceId_ &&
+            top == lastBracketViewportTop_ &&
+            bottom == lastBracketViewportBottom_) {
+            return;
+        }
     }
 
     SyntaxLanguage lang = languageFromFilename(b.filename);
@@ -3231,8 +3632,14 @@ void Editor::refreshBracketAfterJump() {
     lastBracketCursor_ = cur;
     lastBracketVersion_ = b.document.version();
     lastBracketInstanceId_ = b.document.instanceId();
-    lastBracketViewportTop_ = top;
-    lastBracketViewportBottom_ = bottom;
+    if (wrap) {
+        const softwrap::Index& idx = wrapFor(this, b);
+        lastBracketViewportTop_ = b.viewport.top;
+        lastBracketViewportBottom_ = std::min(b.viewport.top + b.viewport.height, idx.totalRows());
+    } else {
+        lastBracketViewportTop_ = top;
+        lastBracketViewportBottom_ = bottom;
+    }
 }
 
 
