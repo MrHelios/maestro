@@ -7,7 +7,7 @@
 namespace {
 
 void setupWrapEditor(Editor& ed, const std::vector<std::string>& lines,
-                     int cols = 15) {
+                     int cols = 19) {
     ed.active().filename = "notes.md";
     ed.active().document.restore(lines);
     ed.active().cursor.line = 0;
@@ -17,7 +17,7 @@ void setupWrapEditor(Editor& ed, const std::vector<std::string>& lines,
 
 } // namespace
 
-// El test usa textWidth = 12 (15 columnas - gutter 3). Una línea de 30
+// El test usa textWidth = 12 (19 columnas - gutter 7). Una línea de 30
 // caracteres ocupa tres filas visuales (12 + 12 + 6).
 TEST(softwrap_vertical_keeps_preferred_column) {
     Editor ed;
@@ -125,14 +125,14 @@ TEST(softwrap_mouse_drag_beyond_eof_selects_last_char) {
 
     InputEvent press;
     press.type = InputEventType::MousePress;
-    press.cell = CellPos{3, 0}; // gutter 3, visual 0 -> línea 0, col 0
+    press.cell = CellPos{7, 0}; // gutter 7, primera celda de texto -> línea 0, col 0
     ed.handleEvent(press);
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 0);
 
     InputEvent drag;
     drag.type = InputEventType::MouseDrag;
-    drag.cell = CellPos{3, 3}; // primera fila ~ después del EOF
+    drag.cell = CellPos{7, 3}; // primera fila ~ después del EOF
     ed.handleEvent(drag);
 
     CHECK(ed.hasSelection());
@@ -156,7 +156,7 @@ TEST(softwrap_mouse_drag_below_content_at_bottom_selects_eof) {
 
     InputEvent press;
     press.type = InputEventType::MousePress;
-    press.cell = CellPos{3, 0};
+    press.cell = CellPos{7, 0};
     ed.handleEvent(press);
 
     InputEvent drag;

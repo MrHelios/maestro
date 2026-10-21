@@ -36,18 +36,24 @@ ChromeData editorChromeData(const std::string& filename, bool modified,
 }
 
 // Celda de número de línea agregada a `out` (sin temporaries): número
-// alineado a la derecha + espacio de separación, con la misma cota de ancho
-// del viejo renderGutterCell (conserva la COLA del número).
-void appendGutterCell(std::string& out, int lineNumber1Based, int gutterW) {
-    if (gutterW <= 0) return;
+// centrado en el campo numérico + separador. Si el número no cabe en el
+// campo (viewport muy angosto) se conserva la COLA, igual que el formato
+// historico alineado a la derecha.
+void appendGutterCell(std::string& out, int lineNumber1Based,
+                      const GutterMetrics& gm) {
+    if (gm.total <= 0) return;
     std::string numStr = std::to_string(lineNumber1Based); // SSO, sin heap
-    const int maxNumCols = std::max(0, gutterW - 1);
-    if (static_cast<int>(numStr.size()) > maxNumCols)
-        numStr = numStr.substr(numStr.size() - static_cast<size_t>(maxNumCols));
-    const int pad = std::max(0, gutterW - 1 - static_cast<int>(numStr.size()));
-    out.append(static_cast<size_t>(pad), ' ');
-    out += numStr;
-    out += ' ';
+    if (gm.numberField > 0) {
+        if (static_cast<int>(numStr.size()) > gm.numberField)
+            numStr = numStr.substr(
+                numStr.size() - static_cast<size_t>(gm.numberField));
+        const int pad = std::max(0, gm.numberField - static_cast<int>(numStr.size()));
+        const int left = pad / 2;
+        out.append(static_cast<size_t>(left), ' ');
+        out += numStr;
+        out.append(static_cast<size_t>(pad - left), ' ');
+    }
+    if (gm.gap > 0) out.append(static_cast<size_t>(gm.gap), ' ');
 }
 
 // Referencia a un tramo ya agregado a la arena (offsets, no punteros: las
@@ -312,10 +318,11 @@ StyledRow FrameBuilder::buildContentRow(
 
     const StyleRole gutterRole =
         isCurrentLine ? StyleRole::GutterCurrent : StyleRole::Gutter;
+    const GutterMetrics gutter = gutterMetrics(doc.lineCount(), gutterW);
 
     if (line.empty() && lineBreakSelected) {
         size_t s = row.arena.size();
-        appendGutterCell(row.arena, vrow.docLine + 1, gutterW);
+        appendGutterCell(row.arena, vrow.docLine + 1, gutter);
         emit.emitAt(s, gutterRole);
         s = row.arena.size();
         row.arena.append(static_cast<size_t>(std::max(0, textWidth)), ' ');
@@ -341,7 +348,7 @@ StyledRow FrameBuilder::buildContentRow(
     {
         size_t s = row.arena.size();
         if (vrow.firstOfLine) {
-            appendGutterCell(row.arena, vrow.docLine + 1, gutterW);
+            appendGutterCell(row.arena, vrow.docLine + 1, gutter);
         } else {
             row.arena.append(static_cast<size_t>(std::max(0, gutterW)), ' ');
         }

@@ -30,13 +30,13 @@ TEST(mouse_autoscroll_outside_top_at_limit) {
 
     InputEvent press;
     press.type = InputEventType::MousePress;
-    press.cell = CellPos{3, 2}; // gutter=3 visual 0; relRow=2 -> linea doc 2
+    press.cell = CellPos{7, 2}; // gutter=7, texto col 0; relRow=2 -> linea doc 2
     ed.handleEvent(press);
     CHECK_EQ(ed.active().cursor.line, 2);
 
     InputEvent drag;
     drag.type = InputEventType::MouseDrag;
-    drag.cell = CellPos{3, -1}; // fuera del contenido, por arriba
+    drag.cell = CellPos{7, -1}; // fuera del contenido, por arriba
     ed.handleEvent(drag);
 
     // Auto-scroll hacia arriba: entra en Seleccion y marca hasta el borde.
@@ -68,13 +68,13 @@ TEST(mouse_autoscroll_outside_bottom_at_limit) {
 
     InputEvent press;
     press.type = InputEventType::MousePress;
-    press.cell = CellPos{3, 1}; // gutter=3 visual 0; relRow=1 -> linea doc 5
+    press.cell = CellPos{7, 1}; // gutter=7, texto col 0; relRow=1 -> linea doc 5
     ed.handleEvent(press);
     CHECK_EQ(ed.active().cursor.line, 5);
 
     InputEvent drag;
     drag.type = InputEventType::MouseDrag;
-    drag.cell = CellPos{3, 4}; // h=4 -> relRow=4: statusbar, fuera del contenido
+    drag.cell = CellPos{7, 4}; // h=4 -> relRow=4: statusbar, fuera del contenido
     ed.handleEvent(drag);
 
     // Auto-scroll hacia abajo: entra en Seleccion y marca hasta el borde.

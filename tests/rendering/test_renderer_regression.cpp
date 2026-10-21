@@ -247,7 +247,12 @@ TEST(regression_utf8_content) {
             std::string row = rows[i];
             CHECK(validUtf8(row));
             std::string textPart = row.size() > (size_t)gw ? row.substr(gw) : "";
-            std::string expected = utf8::truncate(lines[i], tw);
+            // La fila actual se trunca y se rellena; las demas usan
+            // utf8::range, que puede incluir una celda ancha que empieza
+            // antes del borde (misma semantica que FrameBuilder).
+            std::string expected = ((int)i == 0)
+                                       ? utf8::truncate(lines[i], tw)
+                                       : std::string(utf8::range(lines[i], 0, tw));
             if ((int)i == 0) {
                 std::string padded = expected;
                 int pad = tw - colWidth(expected);
@@ -263,7 +268,7 @@ TEST(regression_utf8_content) {
 }
 
 // ---------------------------------------------------------------------------
-// Terminal MUY pequena: el gutter (minimo 3) no puede desbordarse en anchos
+// Terminal MUY pequena: el gutter no puede desbordarse en anchos
 // menores que el. Es el caso que antes del fix podia escribir fuera de la
 // terminal en la fila de documentos con numeros de linea.
 // ---------------------------------------------------------------------------
@@ -298,10 +303,10 @@ TEST(regression_terminal_large) {
 
 // ---------------------------------------------------------------------------
 // Gutter y recorte de columnas: con 100 lineas y una terminal estrecha, el
-// numero de linea (de 3 digitos) no debe desbordar; con el fix, el gutter se
-// recorta al ancho disponible y la fila sigue dentro de la cota.
-// Verifica especificamente que el gutter esta recortado (cola del numero)
-// y no desborda, no solo el invariante global.
+// numero de linea no debe desbordar; el gutter se recorta al ancho
+// disponible (priorizando el campo numerico sobre el gap) y la fila sigue
+// dentro de la cota.
+// Verifica especificamente el centrado y el recorte (cola del numero).
 // ---------------------------------------------------------------------------
 TEST(regression_gutter_clamped_at_narrow_width) {
     std::vector<std::string> doc;
@@ -310,16 +315,18 @@ TEST(regression_gutter_clamped_at_narrow_width) {
         std::string f = frameEditor(doc, 6, width);
         checkFrameWithinBounds(f, 6, width);
         const auto rows = visibleRows(f);
-        int gw = gutterWidth((int)doc.size(), width);
+        const GutterMetrics gm = gutterMetrics((int)doc.size(), width);
         for (int row = 0; row < 6; ++row) {
             CHECK(colWidth(rows[row]) <= width);
             std::string numStr = std::to_string(row + 1);
-            int maxNumCols = std::max(0, gw - 1);
-            if ((int)numStr.size() > maxNumCols)
-                numStr = numStr.substr(numStr.size() - (size_t)maxNumCols);
-            int pad = std::max(0, gw - 1 - (int)numStr.size());
-            std::string expectedGutter = std::string(pad, ' ') + numStr + ' ';
-            std::string actualGutter = rows[row].size() >= (size_t)gw ? rows[row].substr(0, gw) : rows[row];
+            if ((int)numStr.size() > gm.numberField)
+                numStr = numStr.substr(numStr.size() - (size_t)gm.numberField);
+            int pad = std::max(0, gm.numberField - (int)numStr.size());
+            int left = pad / 2;
+            std::string expectedGutter = std::string(left, ' ') + numStr +
+                                         std::string(pad - left, ' ') +
+                                         std::string(gm.gap, ' ');
+            std::string actualGutter = rows[row].size() >= (size_t)gm.total ? rows[row].substr(0, gm.total) : rows[row];
             CHECK_EQ(actualGutter, expectedGutter);
         }
     }
@@ -342,16 +349,18 @@ TEST(regression_gutter_clamped_at_narrow_width) {
             std::string f = frameAt(top);
             checkFrameWithinBounds(f, 6, width);
             const auto rows = visibleRows(f);
-            int gw = gutterWidth((int)doc1000.size(), width);
+            const GutterMetrics gm = gutterMetrics((int)doc1000.size(), width);
             for (int row = 0; row < 6; ++row) {
                 int docLine = top + row + 1;
                 std::string numStr = std::to_string(docLine);
-                int maxNumCols = std::max(0, gw - 1);
-                if ((int)numStr.size() > maxNumCols)
-                    numStr = numStr.substr(numStr.size() - (size_t)maxNumCols);
-                int pad = std::max(0, gw - 1 - (int)numStr.size());
-                std::string expectedGutter = std::string(pad, ' ') + numStr + ' ';
-                std::string actualGutter = rows[row].size() >= (size_t)gw ? rows[row].substr(0, gw) : rows[row];
+                if ((int)numStr.size() > gm.numberField)
+                    numStr = numStr.substr(numStr.size() - (size_t)gm.numberField);
+                int pad = std::max(0, gm.numberField - (int)numStr.size());
+                int left = pad / 2;
+                std::string expectedGutter = std::string(left, ' ') + numStr +
+                                             std::string(pad - left, ' ') +
+                                             std::string(gm.gap, ' ');
+                std::string actualGutter = rows[row].size() >= (size_t)gm.total ? rows[row].substr(0, gm.total) : rows[row];
                 CHECK_EQ(actualGutter, expectedGutter);
                 CHECK(colWidth(rows[row]) <= width);
             }

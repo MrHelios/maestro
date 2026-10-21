@@ -1166,8 +1166,8 @@ TEST(currentline_no_selection_full_width) {
     std::string out = curRowFrame("hello", 20, 0);
     CHECK(contains(out, std::string(kCurrentLineStyle) + "hello"));
     // El relleno llega al ancho completo del AREA DE TEXTO (20 - gutter de
-    // 3 = 17) con el estilo aplicado.
-    CHECK_EQ(rowText(out, 1), "hello" + std::string(12, ' '));
+    // 7 = 13) con el estilo aplicado.
+    CHECK_EQ(rowText(out, 1), "hello" + std::string(8, ' '));
 }
 
 TEST(currentline_selection_wins_over_row_style) {
@@ -1187,8 +1187,8 @@ TEST(currentline_partial_selection_unselected_keeps_style) {
     std::string out = curRowFrame("hello world", 20, 0, selAt({0, 6}, {0, 11}));
     CHECK(contains(out, std::string(kCurrentLineStyle) + "hello "));
     CHECK(contains(out, ANSI_INV "world" ANSI_RESET));
-    // "world" son 5 cols; la fila se rellena hasta el area de texto (17).
-    CHECK_EQ(rowText(out, 1), "hello world" + std::string(6, ' '));
+    // "world" son 5 cols; la fila se rellena hasta el area de texto (13).
+    CHECK_EQ(rowText(out, 1), "hello world" + std::string(2, ' '));
 }
 
 TEST(currentline_line_without_cursor_unaffected) {
@@ -1214,14 +1214,14 @@ TEST(currentline_tilde_row_never_highlighted) {
 
 // ---------------------------------------------------------------------------
 // Gutter de numeros de linea (Paso 3). Reglas:
-//   - numeros alineados a la derecha en un gutter de ancho `digitos+1`
-//     (minimo 3), con un espacio de separacion antes del texto;
+//   - numero centrado en un campo de max(5, digitos) columnas + 2 espacios
+//     de separacion antes del texto;
 //   - las filas "~" (fuera del documento) llevan gutter en blanco del mismo
 //     ancho, sin numero;
 //   - el cursor real de terminal se posiciona tras el gutter (columna visual
 //     0 = columna de terminal gutterW+1);
-//   - al cruzar un umbral de digitos (9 -> 10 lineas) el gutter crece y
-//     todas las filas se re-renderizan con el nuevo ancho.
+//   - al cruzar el umbral de 5 digitos (99999 -> 100000 lineas) el gutter
+//     crece y todas las filas se re-renderizan con el nuevo ancho.
 // ---------------------------------------------------------------------------
 namespace {
 
@@ -1258,20 +1258,20 @@ TEST(gutter_shows_correct_numbers_when_scrolled) {
     TtyRenderer r;
     std::string out = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt);
     
-    // Para 100 líneas, gutterWidth(100, 20) devuelve 4.
-    // El formato es: número alineado a la derecha en (ancho-1) + 1 espacio.
-    // Para ancho 4 y línea 50: "%3d " -> " 50 "
+    // Para 100 líneas, gutterWidth(100, 20) devuelve 7:
+    // campo de 5 columnas centrado + 2 espacios de separación.
+    // Para la línea 50: " 50  " + "  " -> " 50    ".
     
     std::string row0 = plainRow(out, 0);
-    CHECK(row0.substr(0, 4) == " 50 "); 
+    CHECK(row0.substr(0, 7) == " 50    ");
     
-    // MEJORA: Comparamos solo los 5 caracteres de "linea", ignorando el relleno de espacios 
+    // Comparamos solo los 5 caracteres de "linea", ignorando el relleno de espacios
     // que el renderer agrega hasta llegar a vp.width (20 columnas).
-    CHECK(row0.substr(4, 5) == "linea");   
+    CHECK(row0.substr(7, 5) == "linea");
     
     // La segunda fila visible debe mostrar la línea 51
     std::string row1 = plainRow(out, 1);
-    CHECK(row1.substr(0, 4) == " 51 ");
+    CHECK(row1.substr(0, 7) == " 51    ");
 }
 
 TEST(gutter_tilde_rows_blank) {
@@ -1282,13 +1282,13 @@ TEST(gutter_tilde_rows_blank) {
     TtyRenderer r;
     std::string out = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
                                     std::nullopt);
-    CHECK(plainRow(out, 1) == std::string(3, ' ') + "~");
-    CHECK(plainRow(out, 2) == std::string(3, ' ') + "~");
+    CHECK(plainRow(out, 1) == std::string(7, ' ') + "~");
+    CHECK(plainRow(out, 2) == std::string(7, ' ') + "~");
 }
 
 TEST(gutter_cursor_col_starts_after_gutter) {
-    // Con gutter de ancho 3 y cursor en la columna visual 0, el cursor real
-    // de terminal se posiciona en la columna 4 (no en la 1).
+    // Con gutter de ancho 7 y cursor en la columna visual 0, el cursor real
+    // de terminal se posiciona en la columna 8 (no en la 1).
     Document doc; doc.restore({"hello"});
     Viewport vp; vp.top = 0; vp.height = 1; vp.width = 20;
     Cursor cur; cur.line = 0; cur.col = 0;
@@ -1298,30 +1298,34 @@ TEST(gutter_cursor_col_starts_after_gutter) {
     size_t pos = out.rfind("\x1b[1;");
     CHECK(pos != std::string::npos);
     size_t end = out.find('H', pos);
-    CHECK(out.substr(pos + 4, end - pos - 4) == "4");
+    CHECK(out.substr(pos + 4, end - pos - 4) == "8");
 }
 
 TEST(gutter_width_grows_at_digit_threshold) {
-    // De 99 a 100 lineas el gutter pasa de 3 a 4 (numeros de 3 digitos).
-    // Hasta 99 (2 digitos) el gutter se mantiene en el minimo de 3.
-    Viewport vp; vp.top = 0; vp.height = 100; vp.width = 40;
-    Cursor cur; cur.line = 0; cur.col = 0;
+    // Hasta 99999 lineas el gutter se mantiene en el minimo (campo 5 + gap 2).
+    // Al pasar a 100000 lineas el campo crece a 6 digitos (total 8).
+    Viewport vp; vp.width = 40;
+    Cursor cur; cur.col = 0;
     TtyRenderer r;
 
-    Document doc99; doc99.restore(std::vector<std::string>(99, "x"));
-    std::string out99 = r.buildScreen(doc99, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
-                                      std::nullopt);
-    // 99 lineas -> gutter 3: la ultima fila de documento lleva "99 ".
-    CHECK(plainRow(out99, 98).substr(0, 3) == "99 ");
-    // La fila 99 ya es "~" (fuera del documento): gutter en blanco de 3.
-    CHECK(plainRow(out99, 99) == std::string(3, ' ') + "~");
+    Document doc99999; doc99999.restore(std::vector<std::string>(99999, "x"));
+    vp.top = 99996;
+    vp.height = 4;
+    cur.line = vp.top;
+    std::string out99999 = r.buildScreen(doc99999, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
+                                         std::nullopt);
+    CHECK(plainRow(out99999, 2).substr(0, 7) == "99999  ");
+    // La fila 3 ya es "~" (fuera del documento): gutter en blanco de 7.
+    CHECK(plainRow(out99999, 3) == std::string(7, ' ') + "~");
 
-    Document doc100; doc100.restore(std::vector<std::string>(100, "x"));
-    std::string out100 = r.buildScreen(doc100, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
-                                       std::nullopt);
-    // 100 lineas -> gutter 4: la fila 99 (linea 100 del doc) se
-    // re-renderiza con el nuevo ancho: "100 " (numero + separador).
-    CHECK(plainRow(out100, 99).substr(0, 4) == "100 ");
+    Document doc100000; doc100000.restore(std::vector<std::string>(100000, "x"));
+    vp.top = 99997;
+    cur.line = vp.top;
+    std::string out100000 = r.buildScreen(doc100000, cur, vp, "t", false, makeChromeRequest("", State::Navegacion),
+                                          std::nullopt);
+    // 100000 lineas -> gutter 8: el numero llena el campo de 6 y agrega gap.
+    CHECK(plainRow(out100000, 2).substr(0, 8) == "100000  ");
+    CHECK(plainRow(out100000, 3) == std::string(8, ' ') + "~");
 }
 
 TEST(selection_empty_line_marks_crossed_line_break) {
@@ -1330,7 +1334,7 @@ TEST(selection_empty_line_marks_crossed_line_break) {
     std::string out = frame({"a", "", "b"}, selAt({0, 0}, {2, 1}));
     CHECK(contains(out, std::string(ANSI_INV) + " "));
     CHECK(!contains(out, ANSI_INV + std::string("\xc2\xb6")));
-    CHECK_EQ(plainRow(out, 1).substr(0, 3), " 2 ");
+    CHECK_EQ(plainRow(out, 1).substr(0, 7), "  2    ");
     // Las filas con texto se seleccionan como siempre.
     CHECK(contains(out, std::string(ANSI_INV) + "a" + ANSI_RESET));
     CHECK(contains(out, std::string(ANSI_INV) + "b" + ANSI_RESET));
@@ -1340,7 +1344,7 @@ TEST(selection_empty_line_not_in_selection_no_mark) {
     // La fila vacia no cae dentro de la seleccion: sin marca alguna.
     std::string out = frame({"a", "", "b"}, selAt({0, 0}, {0, 1}));
     CHECK(!contains(out, std::string(ANSI_INV) + " "));
-    CHECK_EQ(plainRow(out, 1), " 2 ");
+    CHECK_EQ(plainRow(out, 1), "  2    ");
 }
 
 TEST(selection_empty_line_collapsed_no_mark) {
@@ -1348,7 +1352,7 @@ TEST(selection_empty_line_collapsed_no_mark) {
     // la fila queda limpia.
     std::string out = frame({"a", "", "b"}, selAt({1, 0}, {1, 0}));
     CHECK(!contains(out, std::string(ANSI_INV) + " "));
-    CHECK_EQ(plainRow(out, 1), " 2 ");
+    CHECK_EQ(plainRow(out, 1), "  2    ");
 }
 
 TEST(selection_empty_line_as_end_no_mark) {
@@ -1356,7 +1360,7 @@ TEST(selection_empty_line_as_end_no_mark) {
     // incluido, asi que no se marca.
     std::string out = frame({"a", "", "b"}, selAt({0, 1}, {1, 0}));
     CHECK(!contains(out, std::string(ANSI_INV) + " "));
-    CHECK_EQ(plainRow(out, 1), " 2 ");
+    CHECK_EQ(plainRow(out, 1), "  2    ");
 }
 
 TEST(selection_empty_line_as_start_marks) {
@@ -1365,7 +1369,7 @@ TEST(selection_empty_line_as_start_marks) {
     std::string out = frame({"a", "", "b"}, selAt({1, 0}, {2, 1}));
     CHECK(contains(out, std::string(ANSI_INV) + " "));
     CHECK(!contains(out, ANSI_INV + std::string("\xc2\xb6")));
-    CHECK_EQ(plainRow(out, 1).substr(0, 3), " 2 ");
+    CHECK_EQ(plainRow(out, 1).substr(0, 7), "  2    ");
 }
 
 TEST(renderer_cursor_cross_mark_width_two) {

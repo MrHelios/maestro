@@ -116,9 +116,9 @@ TEST(frontier_screen_to_cursor_cellpos) {
     vp.left = 0;
     vp.width = 80;
     vp.height = 22;
-    // CellPos 0-based: (col=3, row=0) = primera celda de texto
-    // (gutter=3, relCol=3 -> columna visual 0 -> byte 0 de la linea 0).
-    auto p = screenToCursor(CellPos{3, 0}, layout, vp, doc);
+    // CellPos 0-based: (col=7, row=0) = primera celda de texto
+    // (gutter=7, relCol=7 -> columna visual 0 -> byte 0 de la linea 0).
+    auto p = screenToCursor(CellPos{7, 0}, layout, vp, doc);
     CHECK(p.has_value());
     if (p) {
         CHECK_EQ(p->line, 0);
@@ -445,11 +445,11 @@ TEST(fase_c_event_path_does_not_autoscroll) {
 
     InputEvent press;
     press.type = InputEventType::MousePress;
-    press.cell = CellPos{3, 1}; // línea 11, arma gesto
+    press.cell = CellPos{7, 1}; // línea 11, arma gesto
     ed.handleEvent(press);
     InputEvent drag;
     drag.type = InputEventType::MouseDrag;
-    drag.cell = CellPos{3, 4}; // chrome: fuera por abajo
+    drag.cell = CellPos{7, 4}; // chrome: fuera por abajo
     ed.handleEvent(drag);
     CHECK(ed.getStateForTesting() == State::Seleccion);
     CHECK_EQ(ed.getActiveBufferForTesting().viewport.top, 11); // paso del evento

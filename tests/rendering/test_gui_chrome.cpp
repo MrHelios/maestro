@@ -952,8 +952,8 @@ TEST(gui_sdl_fondos_igualan_stylefor) {
     Message msg{std::string(""), MessageKind::Info, std::nullopt};
     Selection sel{{0, 1}, {0, 4}};    // "bcd": fondo Selection
     BracketPair pair{{0, 0}, {0, 5}};  // 'a' y 'f': fondo Bracket
-    // Línea 0 = actual; bloque aparcado en el relleno (celda 9, EOL),
-    // fuera de las celdas muestreadas salvo la 9, que se afirma como fill.
+    // Línea 0 = actual; bloque aparcado en el relleno (celda 13, EOL),
+    // fuera de las celdas muestreadas salvo la 13, que se afirma como fill.
     Cursor cur;
     cur.line = 0;
     cur.col = 100;  // clamp a EOL → celda 9 (espacio de relleno)
@@ -974,24 +974,24 @@ TEST(gui_sdl_fondos_igualan_stylefor) {
         CHECK(got == guichrome::styleFor(StyleRole::GutterCurrent, true,
                                          dark)
                          .bg);
-        CHECK(bgAt(3, 0, got));
+        CHECK(bgAt(7, 0, got));
         CHECK(got ==
               guichrome::styleFor(StyleRole::BracketMatch, true, dark).bg);
-        CHECK(bgAt(4, 0, got));
+        CHECK(bgAt(8, 0, got));
         CHECK(got == guichrome::styleFor(StyleRole::Selection, true, dark).bg);
-        CHECK(bgAt(7, 0, got));
+        CHECK(bgAt(11, 0, got));
         CHECK(got == guichrome::styleFor(StyleRole::CurrentLine, true,
                                          dark)
                          .bg);
-        CHECK(bgAt(8, 0, got));
+        CHECK(bgAt(12, 0, got));
         CHECK(got ==
               guichrome::styleFor(StyleRole::BracketMatch, true, dark).bg);
-        // Celda 9: el cursor (fill sobre espacio de relleno, sin glifo).
-        CHECK_EQ(gui.lastCursor().cell.col, 9);
-        CHECK(bgAt(9, 0, got));
+        // Celda 13: el cursor (fill sobre espacio de relleno, sin glifo).
+        CHECK_EQ(gui.lastCursor().cell.col, 13);
+        CHECK(bgAt(13, 0, got));
         CHECK(got == guichrome::cursorColor(dark));
         // Fila no actual: texto plano sobre fondo base.
-        CHECK(bgAt(3, 1, got));
+        CHECK(bgAt(7, 1, got));
         CHECK(got ==
               guichrome::styleFor(StyleRole::Default, false, dark).bg);
         if (firstTheme) gui.toggleTheme();
@@ -1531,7 +1531,7 @@ TEST(gui_sdl_cursor_block_en_tab_sin_desplazar) {
     const int cw = gui.cellW(), ch = gui.cellH();
     const GuiColor cc = guichrome::cursorColor(gui.isDarkTheme());
     const int gw = gutterWidth(doc.lineCount(), vp.width);
-    CHECK_EQ(gw, 3);
+    CHECK_EQ(gw, 7);
 
     // Sobre el byte del tab: visual = inicio de la expansión (1), celda de
     // espacio → fill sólido.
@@ -1637,7 +1637,7 @@ TEST(gui_sdl_cursor_block_en_bracket_usa_fallback_legible) {
                          std::nullopt, std::nullopt, pair);
     CHECK(gui.lastCursor().visible);
     CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
-    // Ambos lados del par llevan BracketMatch (gutter 3 + byte).
+    // Ambos lados del par llevan BracketMatch (gutter 7 + byte).
     {
         const auto& row = gui.lastContentRows()[0];
         CHECK(row.hasRole(StyleRole::BracketMatch));

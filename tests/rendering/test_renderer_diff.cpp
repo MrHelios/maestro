@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "test_framework.h"
+#include "layout/Gutter.h"
 #include "rendering/Sink.h"
 #include "platform/InputEvent.h"  // usa InputEvent común
 
@@ -566,18 +567,18 @@ TEST(render_diff_mismo_texto_distinto_kind_repinta) {
     CHECK(deltaExpiry.find(statusCup) == std::string::npos);
 }
 
-// Regresion BUG VISUAL gutter: al cruzar 99->100 lineas el ancho del gutter
-// pasa de 3 a 4 columnas. Con el viewport pegado al fondo, agregar la linea
-// produce deltaTop==1; antes entraba al fast path de scroll de region, que
-// solo repinta la fila entrante y deja las ya dibujadas con el gutter viejo
-// (numeros desalineados). El contrato es: cambio de ancho de gutter => rebuild
-// total del viewport.
+// Regresion BUG VISUAL gutter: al cruzar 99999->100000 lineas el ancho del
+// gutter pasa de 7 a 8 columnas. Con el viewport pegado al fondo, agregar la
+// linea produce deltaTop==1; antes entraba al fast path de scroll de region,
+// que solo repinta la fila entrante y deja las ya dibujadas con el gutter
+// viejo (numeros desalineados). El contrato es: cambio de ancho de gutter =>
+// rebuild total del viewport.
 TEST(render_diff_gutter_crece_repinta_viewport_completo) {
-    DiffHarness h(99);
+    DiffHarness h(99999);
     Buffer& b = h.buf();
 
     // Cursor en la ultima linea, viewport al fondo: InsertNewline scrollea +1.
-    b.cursor.line = 98;
+    b.cursor.line = b.document.lineCount() - 1;
     b.cursor.col = 0;
     b.viewport.scrollToCursor(b.cursor);
 
@@ -585,45 +586,47 @@ TEST(render_diff_gutter_crece_repinta_viewport_completo) {
     const std::string init = h.getDiffOutput();
     viaDiff.apply(init);
     viaFull.apply(init);
-    CHECK_EQ(b.document.lineCount(), 99);
-    // Con 99 lineas el gutter es el minimo de 3 columnas.
-    CHECK_EQ(h.r.lastGutterW(), 3);
+    CHECK_EQ(b.document.lineCount(), 99999);
+    // Con 99999 lineas el gutter es el minimo de 7 columnas (campo 5 + gap 2).
+    CHECK_EQ(h.r.lastGutterW(), 7);
 
     h.ed.handleEvent(move(InputEventType::InsertNewline));
     b.viewport.scrollToCursor(b.cursor);
-    CHECK_EQ(b.document.lineCount(), 100);
+    CHECK_EQ(b.document.lineCount(), 100000);
 
     const std::string delta = h.getDiffOutput();
     const std::string full = h.r.buildScreen(
         b.document, b.cursor, b.viewport, b.filename, b.modified,
         makeChromeRequest(Message(""), State::Navegacion), b.selection);
 
-    // 100 lineas => gutter de 4 columnas y rebuild total (no scroll parcial).
-    CHECK_EQ(h.r.lastGutterW(), 4);
+    // 100000 lineas => gutter de 8 columnas y rebuild total (no scroll parcial).
+    CHECK_EQ(h.r.lastGutterW(), 8);
     CHECK(delta.find("\x1b[2J\x1b[H") != std::string::npos);
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, /*allowFullClear=*/true);
 
-    // Todas las filas visibles (no solo la entrante) quedaron alineadas con el
-    // gutter nuevo. Se verifica el prefijo completo de cada numero: 99 debe ser
-    // " 99 " y 100 "100 ", ambos dentro de las mismas 4 columnas.
-    auto gutterPrefix = [](int lineNumber, int width) {
+    // Todas las filas visibles quedaron alineadas con el gutter nuevo. El
+    // prefijo incluye campo centrado + gap; 99999 y 100000 viven en 8 columnas.
+    auto gutterPrefix = [](int lineNumber, const GutterMetrics& gm) {
         std::string num = std::to_string(lineNumber);
-        const int numberCols = width - 1;
-        if (static_cast<int>(num.size()) > numberCols)
-            num = num.substr(num.size() - static_cast<size_t>(numberCols));
-        return std::string(static_cast<size_t>(numberCols - num.size()), ' ') +
-               num + ' ';
+        if (static_cast<int>(num.size()) > gm.numberField)
+            num = num.substr(num.size() - static_cast<size_t>(gm.numberField));
+        int pad = std::max(0, gm.numberField - static_cast<int>(num.size()));
+        int left = pad / 2;
+        return std::string(static_cast<size_t>(left), ' ') + num +
+               std::string(static_cast<size_t>(pad - left), ' ') +
+               std::string(static_cast<size_t>(gm.gap), ' ');
     };
+    const GutterMetrics gm = gutterMetrics(b.document.lineCount(), b.viewport.width);
     for (int row = 0; row < b.viewport.height; ++row) {
         const int lineNumber = b.viewport.top + row + 1;
         if (lineNumber > b.document.lineCount()) break;
-        CHECK_EQ(viaDiff.screen[static_cast<size_t>(row)].substr(0, 4),
-                 gutterPrefix(lineNumber, 4));
+        CHECK_EQ(viaDiff.screen[static_cast<size_t>(row)].substr(0, gm.total),
+                 gutterPrefix(lineNumber, gm));
     }
     CHECK_EQ(viaDiff.screen[static_cast<size_t>(b.viewport.height - 2)]
-                 .substr(0, 4),
-             " 99 ");
+                 .substr(0, 8),
+             "99999   ");
     CHECK_EQ(viaDiff.screen[static_cast<size_t>(b.viewport.height - 1)]
-                 .substr(0, 4),
-             "100 ");
+                 .substr(0, 8),
+             "100000  ");
 }

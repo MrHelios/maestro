@@ -105,8 +105,9 @@ struct CwdGuard{
     void enter(const std::string& p){ CHECK(::chdir(p.c_str()) == 0); }
 };
 // Columna VISUAL (1-based de "\x1b[1;<col>H") donde Renderer dibujaría el cursor.
-// buildScreen emite gutter+visual+1; para viewport de 1 línea el gutter mide 3, se resta.
-inline int cursorScreenCol(const std::string& line,int byteCol){ Document doc; doc.restore({line}); Viewport vp; vp.top=0; vp.height=1; vp.width=200; Cursor c; c.line=0; c.col=byteCol; TtyRenderer r; std::string f=r.buildScreen(doc,c,vp,"t",false,makeChromeRequest("",State::Navegacion),std::nullopt); size_t pos=f.rfind("\x1b[1;"); if(pos==std::string::npos) return -1; size_t end=f.find('H',pos); return std::stoi(f.substr(pos+4,end-pos-4))-3; }
+// buildScreen emite gutter+visual+1; para viewport de 1 línea el gutter
+// mide 7 (campo 5 + gap 2), se resta.
+inline int cursorScreenCol(const std::string& line,int byteCol){ Document doc; doc.restore({line}); Viewport vp; vp.top=0; vp.height=1; vp.width=200; Cursor c; c.line=0; c.col=byteCol; TtyRenderer r; std::string f=r.buildScreen(doc,c,vp,"t",false,makeChromeRequest("",State::Navegacion),std::nullopt); size_t pos=f.rfind("\x1b[1;"); if(pos==std::string::npos) return -1; size_t end=f.find('H',pos); return std::stoi(f.substr(pos+4,end-pos-4))-7; }
 // Verifica las invariantes globales del estado de Editor y del buffer activo.
 // Para todos los buffers, usar assertBuffersConsistent().
 // - documento no vacío;

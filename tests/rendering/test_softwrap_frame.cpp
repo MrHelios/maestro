@@ -28,9 +28,9 @@ TEST(softwrap_frame_cursor_uses_visual_row) {
     Document doc;
     doc.restore({"abcdefghij"});
     softwrap::Index idx;
-    CHECK(idx.ensure(doc, 7, true)); // textWidth = width(10) - gutter(3)
+    CHECK(idx.ensure(doc, 7, true)); // textWidth = width(14) - gutter(7)
 
-    Viewport vp = viewport(0, 5, 10);
+    Viewport vp = viewport(0, 5, 14);
     Cursor cursor;
     cursor.line = 0;
     cursor.col = 8; // segunda fila visual, columna relativa 1
@@ -42,7 +42,7 @@ TEST(softwrap_frame_cursor_uses_visual_row) {
 
     CHECK(f.cursor.visible);
     CHECK_EQ(f.cursor.cell.row, 1);
-    CHECK_EQ(f.cursor.cell.col, 4); // gutter 3 + columna relativa 1
+    CHECK_EQ(f.cursor.cell.col, 8); // gutter 7 + columna relativa 1
 }
 
 TEST(softwrap_frame_clamps_viewport_top_for_cursor) {
@@ -65,7 +65,7 @@ TEST(softwrap_frame_clamps_viewport_top_for_cursor) {
 
     CHECK(f.cursor.visible);
     CHECK_EQ(f.cursor.cell.row, 1);
-    CHECK_EQ(f.cursor.cell.col, 4);
+    CHECK_EQ(f.cursor.cell.col, 8);
 }
 
 TEST(softwrap_frame_cursor_at_boundary_starts_next_row) {
@@ -74,7 +74,7 @@ TEST(softwrap_frame_cursor_at_boundary_starts_next_row) {
     softwrap::Index idx;
     CHECK(idx.ensure(doc, 7, true));
 
-    Viewport vp = viewport(0, 5, 10);
+    Viewport vp = viewport(0, 5, 14);
     Cursor cursor;
     cursor.line = 0;
     cursor.col = 7; // límite exacto entre las dos filas visuales
@@ -86,7 +86,7 @@ TEST(softwrap_frame_cursor_at_boundary_starts_next_row) {
 
     CHECK(f.cursor.visible);
     CHECK_EQ(f.cursor.cell.row, 1);
-    CHECK_EQ(f.cursor.cell.col, 3); // inicio de la continuación
+    CHECK_EQ(f.cursor.cell.col, 7); // inicio de la continuación
 }
 
 TEST(softwrap_diff_reuses_cache_when_frame_unchanged) {
@@ -96,7 +96,7 @@ TEST(softwrap_diff_reuses_cache_when_frame_unchanged) {
     for (int i = 1; i < 12; ++i) lines.push_back(std::string(40, 'b'));
     doc.restore(lines);
 
-    Viewport vp = viewport(0, 5, 20); // gutter 3, textWidth 17
+    Viewport vp = viewport(0, 5, 24); // gutter 7, textWidth 17
     softwrap::Index idx;
     CHECK(idx.ensure(doc, 17, true));
     CHECK(idx.enabled());

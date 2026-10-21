@@ -267,7 +267,7 @@ TEST(viewport_utf8_visual_columns) {
     cur.col = 0;
     for(int i=0;i<5;i++) cur.moveRight(doc);
     absCol = utf8::columnOf(doc.lineAt(0), cur.col);
-    Viewport vp2; vp2.left=5; vp2.height=1; vp2.width=13;
+    Viewport vp2; vp2.left=5; vp2.height=1; vp2.width=17;
     vp2.scrollToCursor(cur, absCol, textWidth);
     CHECK(vp2.left >= 0);
     CHECK(absCol >= vp2.left);

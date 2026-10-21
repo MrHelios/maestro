@@ -34,7 +34,7 @@ InputEvent insertCh(char c) {
     return e;
 }
 
-// Geometria de test: viewport chico, gutter 3 (docs chicos), content en (0,0).
+// Geometria de test: viewport chico, gutter 7 (docs chicos), content en (0,0).
 // CellPos 0-based: celda = (relCol, relRow).
 Layout testLayout(const Viewport& vp) {
     return computeLayout(vp.height + kChromeRows, vp.width);
@@ -150,8 +150,8 @@ TEST(mouse_map_text_click) {
     d.restore({"hello", "world"});
     Viewport vp = testViewport();
     Layout lo = testLayout(vp);
-    // gutter=3: texto de fila 0 col visual 1 => relCol=4 => celda (4,0)
-    auto p = screenToCursor(CellPos{4, 0}, lo, vp, d);
+    // gutter=7: texto de fila 0 col visual 1 => relCol=8 => celda (8,0)
+    auto p = screenToCursor(CellPos{8, 0}, lo, vp, d);
     CHECK(p.has_value());
     CHECK_EQ(p->line, 0);
     CHECK_EQ(p->col, 1);
@@ -173,14 +173,14 @@ TEST(mouse_map_gutter_text_border) {
     d.restore({"hello"});
     Viewport vp = testViewport();
     Layout lo = testLayout(vp);
-    // gutterW=3: relCol 2 = ultima de gutter, relCol 3 = primera de texto
-    auto g = screenToCursor(CellPos{2, 0}, lo, vp, d);
+    // gutterW=7: relCol 6 = ultima de gutter, relCol 7 = primera de texto
+    auto g = screenToCursor(CellPos{6, 0}, lo, vp, d);
     CHECK(g.has_value());
     CHECK_EQ(g->col, 0);
-    auto t = screenToCursor(CellPos{3, 0}, lo, vp, d);
+    auto t = screenToCursor(CellPos{7, 0}, lo, vp, d);
     CHECK(t.has_value());
     CHECK_EQ(t->col, 0);
-    auto t1 = screenToCursor(CellPos{4, 0}, lo, vp, d);
+    auto t1 = screenToCursor(CellPos{8, 0}, lo, vp, d);
     CHECK(t1.has_value());
     CHECK_EQ(t1->col, 1);
 }
@@ -201,9 +201,9 @@ TEST(mouse_map_wide_char_both_cells) {
     d.restore({"abc\xF0\x9F\x98\x80" "def"}); // abc😀def, emoji = 2 celdas
     Viewport vp = testViewport();
     Layout lo = testLayout(vp);
-    // gutter=3: 'a'=relCol3, 'b'=4, 'c'=5, emoji celdas=6,7, 'd'=8
-    auto first = screenToCursor(CellPos{6, 0}, lo, vp, d);
-    auto second = screenToCursor(CellPos{7, 0}, lo, vp, d);
+    // gutter=7: 'a'=relCol7, 'b'=8, 'c'=9, emoji celdas=10,11, 'd'=12
+    auto first = screenToCursor(CellPos{10, 0}, lo, vp, d);
+    auto second = screenToCursor(CellPos{11, 0}, lo, vp, d);
     CHECK(first.has_value());
     CHECK(second.has_value());
     CHECK_EQ(first->col, 3); // byte inicio del emoji
@@ -215,13 +215,13 @@ TEST(mouse_map_tab_cells) {
     d.restore({"\tx"});
     Viewport vp = testViewport();
     Layout lo = testLayout(vp);
-    // TAB = 4 celdas visuales (relCol 3..6), 'x' en visual 4
-    for (int c = 3; c <= 6; ++c) {
+    // TAB = 4 celdas visuales (relCol 7..10), 'x' en visual 4
+    for (int c = 7; c <= 10; ++c) {
         auto p = screenToCursor(CellPos{c, 0}, lo, vp, d);
         CHECK(p.has_value());
         CHECK_EQ(p->col, 0); // dentro del tab => byte 0
     }
-    auto x = screenToCursor(CellPos{7, 0}, lo, vp, d);
+    auto x = screenToCursor(CellPos{11, 0}, lo, vp, d);
     CHECK(x.has_value());
     CHECK_EQ(x->col, 1);
 }
@@ -235,8 +235,8 @@ TEST(mouse_map_with_scroll_offsets) {
     vp.left = 2;
     Layout lo = testLayout(vp);
     // fila visible 0 = docLine 10; visual 0 => byte 2 ("c")
-    // SGR (Cx=4, Cy=1) -> CellPos{3, 0}
-    auto p = screenToCursor(CellPos{3, 0}, lo, vp, d);
+    // SGR (Cx=8, Cy=1) -> CellPos{7, 0}
+    auto p = screenToCursor(CellPos{7, 0}, lo, vp, d);
     CHECK(p.has_value());
     CHECK_EQ(p->line, 10);
     CHECK_EQ(p->col, 2);
@@ -247,10 +247,10 @@ TEST(mouse_map_first_last_visible_row) {
     d.restore({"a", "b", "c", "d", "e"});
     Viewport vp = testViewport(4, 20);
     Layout lo = testLayout(vp);
-    auto first = screenToCursor(CellPos{3, 0}, lo, vp, d);
+    auto first = screenToCursor(CellPos{7, 0}, lo, vp, d);
     CHECK(first.has_value());
     CHECK_EQ(first->line, 0);
-    auto last = screenToCursor(CellPos{3, 3}, lo, vp, d);
+    auto last = screenToCursor(CellPos{7, 3}, lo, vp, d);
     CHECK(last.has_value());
     CHECK_EQ(last->line, 3);
 }
@@ -280,7 +280,7 @@ TEST(mouse_editor_navegacion_moves) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(5, 2)); // fila 1, visual 1
+    ed.processEventForTesting(mousePress(9, 2)); // fila 1, visual 1
     CHECK_EQ(b.cursor.line, 1);
     CHECK_EQ(b.cursor.col, 1);
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
@@ -300,7 +300,7 @@ TEST(mouse_editor_seleccion_cancels_and_moves) {
              static_cast<int>(State::Seleccion));
     // Press en Seleccion: cancela el highlight EN EL PRESS (sin esperar
     // al release) y mueve el cursor a la posicion clickeada.
-    ed.processEventForTesting(mousePress(5, 2));
+    ed.processEventForTesting(mousePress(9, 2));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Navegacion));
     CHECK_EQ(b.cursor.line, 1);
@@ -308,7 +308,7 @@ TEST(mouse_editor_seleccion_cancels_and_moves) {
     CHECK(!b.selection.has_value());
     CHECK(!b.selectAllActive);
     // Release sin drag: no-op, sigue en Navegacion sin rango.
-    ed.processEventForTesting(mouseRelease(5, 2));
+    ed.processEventForTesting(mouseRelease(9, 2));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Navegacion));
     CHECK(!b.selection.has_value());
@@ -332,7 +332,7 @@ TEST(mouse_editor_modal_ignored) {
     ed.processEventForTesting(prefix);
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Prefix));
-    ed.processEventForTesting(mousePress(5, 2));
+    ed.processEventForTesting(mousePress(9, 2));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Prefix));
     CHECK_EQ(b.cursor.line, 0);
@@ -351,7 +351,7 @@ TEST(mouse_press_arms_without_mode_change) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(5, 2));
+    ed.processEventForTesting(mousePress(9, 2));
     // Mueve el cursor pero no entra a Seleccion ni crea rango.
     CHECK_EQ(b.cursor.line, 1);
     CHECK_EQ(b.cursor.col, 1);
@@ -373,15 +373,15 @@ TEST(mouse_click_after_mouse_drag_clears_on_other_text) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 1)); // anchor (0,0)
-    ed.processEventForTesting(mouseDrag(8, 2));  // (1,4)
-    ed.processEventForTesting(mouseRelease(8, 2));
+    ed.processEventForTesting(mousePress(8, 1)); // anchor (0,0)
+    ed.processEventForTesting(mouseDrag(12, 2));  // (1,4)
+    ed.processEventForTesting(mouseRelease(12, 2));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());
     // Click en otra parte: linea 2, visual 5 -> (2,5).
-    ed.processEventForTesting(mousePress(9, 3));
-    ed.processEventForTesting(mouseRelease(9, 3));
+    ed.processEventForTesting(mousePress(13, 3));
+    ed.processEventForTesting(mouseRelease(13, 3));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Navegacion));
     CHECK(!b.selection.has_value());
@@ -402,8 +402,8 @@ TEST(mouse_click_navegacion_preserves_historic_behavior) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(5, 2)); // fila 1, visual 1
-    ed.processEventForTesting(mouseRelease(5, 2));
+    ed.processEventForTesting(mousePress(9, 2)); // fila 1, visual 1
+    ed.processEventForTesting(mouseRelease(9, 2));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Navegacion));
     CHECK_EQ(b.cursor.line, 1);
@@ -422,8 +422,8 @@ TEST(mouse_drag_from_navegacion_enters_seleccion) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 1)); // fila 0, visual 0
-    ed.processEventForTesting(mouseDrag(6, 2));  // fila 1, visual 2
+    ed.processEventForTesting(mousePress(8, 1)); // fila 0, visual 0
+    ed.processEventForTesting(mouseDrag(10, 2));  // fila 1, visual 2
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK(b.selection.has_value());
@@ -444,8 +444,8 @@ TEST(mouse_drag_upwards_selects) {
     b.viewport.left = 0;
     b.cursor.line = 2;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 3)); // fila 2
-    ed.processEventForTesting(mouseDrag(4, 1));  // fila 0 (hacia arriba)
+    ed.processEventForTesting(mousePress(8, 3)); // fila 2
+    ed.processEventForTesting(mouseDrag(8, 1));  // fila 0 (hacia arriba)
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     auto sel = ed.selection();
@@ -463,21 +463,21 @@ TEST(mouse_drag_resets_existing_selection) {
     b.viewport.top = 0;
     b.viewport.left = 0;
     ed.processEventForTesting(insertCh('s')); // modo Seleccion
-    ed.processEventForTesting(mousePress(4, 1));
-    ed.processEventForTesting(mouseDrag(6, 1));
-    ed.processEventForTesting(mouseRelease(6, 1)); // primera seleccion
+    ed.processEventForTesting(mousePress(8, 1));
+    ed.processEventForTesting(mouseDrag(10, 1));
+    ed.processEventForTesting(mouseRelease(10, 1)); // primera seleccion
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK(b.selection.has_value());
     // Nuevo gesto: el press cancela el rango anterior de inmediato (el
     // highlight se borra al clickear, sin esperar al drag/release).
-    ed.processEventForTesting(mousePress(4, 3)); // fila 2
+    ed.processEventForTesting(mousePress(8, 3)); // fila 2
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Navegacion));
     CHECK(!b.selection.has_value());
     CHECK_EQ(b.cursor.line, 2);
     CHECK_EQ(b.cursor.col, 0);
-    ed.processEventForTesting(mouseDrag(5, 3));
+    ed.processEventForTesting(mouseDrag(9, 3));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.selection->anchor.line, 2);
@@ -496,9 +496,9 @@ TEST(mouse_release_after_drag_stays_in_seleccion) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 1));
-    ed.processEventForTesting(mouseDrag(6, 2));
-    ed.processEventForTesting(mouseRelease(6, 2));
+    ed.processEventForTesting(mousePress(8, 1));
+    ed.processEventForTesting(mouseDrag(10, 2));
+    ed.processEventForTesting(mouseRelease(10, 2));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK(b.selection.has_value());
@@ -515,7 +515,7 @@ TEST(mouse_drag_without_press_ignored) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mouseDrag(6, 2));
+    ed.processEventForTesting(mouseDrag(10, 2));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Navegacion));
     CHECK(!b.selection.has_value());
@@ -536,15 +536,15 @@ TEST(mouse_drag_last_visible_row_is_exact_no_scroll) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 1)); // fila 0
+    ed.processEventForTesting(mousePress(8, 1)); // fila 0
     CHECK_EQ(b.viewport.top, 0);
-    ed.processEventForTesting(mouseDrag(4, 4)); // ultima fila visible
+    ed.processEventForTesting(mouseDrag(8, 4)); // ultima fila visible
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.viewport.top, 0); // sin scroll: endpoint exacto
     CHECK_EQ(b.cursor.line, 3);
     // Continuidad del gesto: empujar al chrome si scrollea.
-    ed.processEventForTesting(mouseDrag(4, 5)); // statusbar (relRow=4)
+    ed.processEventForTesting(mouseDrag(8, 5)); // statusbar (relRow=4)
     CHECK_EQ(b.viewport.top, 1);
     CHECK_EQ(b.cursor.line, 4);
 }
@@ -559,9 +559,9 @@ TEST(mouse_drag_autoscroll_up) {
     b.viewport.left = 0;
     b.cursor.line = 7;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 4)); // fila doc 7
+    ed.processEventForTesting(mousePress(8, 4)); // fila doc 7
     CHECK_EQ(b.viewport.top, 4);
-    ed.processEventForTesting(mouseDrag(4, 1)); // primera fila visible
+    ed.processEventForTesting(mouseDrag(8, 1)); // primera fila visible
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.viewport.top, 3); // scrolleo 1 linea hacia arriba
@@ -573,18 +573,18 @@ TEST(mouse_drag_autoscroll_horizontal) {
     Buffer& b = ed.getActiveBufferForTesting();
     b.document.restore({"0123456789ABCDEFGHIJ0123456789"});
     b.viewport.height = 10;
-    b.viewport.width = 12; // gutter 3 + 9 de texto
+    b.viewport.width = 16; // gutter 7 + 9 de texto
     b.viewport.top = 0;
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 1)); // visual 0
-    const int lastCol = 12; // ultima celda visible (1-based)
+    ed.processEventForTesting(mousePress(8, 1)); // visual 0
+    const int lastCol = 16; // ultima celda visible (1-based)
     ed.processEventForTesting(mouseDrag(lastCol, 1));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.viewport.left, 1); // 1 celda de scroll horizontal
-    // visTarget = left(1) + (relCol(11) - gutter(3)) = 9, linea ASCII.
+    // visTarget = left(1) + (relCol(15) - gutter(7)) = 9, linea ASCII.
     CHECK_EQ(b.cursor.line, 0);
     CHECK_EQ(b.cursor.col, 9);
     CHECK(b.selection.has_value());
@@ -607,8 +607,8 @@ TEST(mouse_drag_chrome_scrolls_when_content_below) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 1)); // fila doc 0
-    ed.processEventForTesting(mouseDrag(4, 5));  // statusbar (relRow=4)
+    ed.processEventForTesting(mousePress(8, 1)); // fila doc 0
+    ed.processEventForTesting(mouseDrag(8, 5));  // statusbar (relRow=4)
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.viewport.top, 1); // hubo scroll, no se ignoro
@@ -632,12 +632,12 @@ TEST(mouse_drag_chrome_at_maxTop_clamps_to_edge) {
     b.viewport.left = 0;
     b.cursor.line = 7;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 4)); // fila doc 7, arma
-    ed.processEventForTesting(mouseDrag(4, 3));  // fila doc 6, inicia rango
+    ed.processEventForTesting(mousePress(8, 4)); // fila doc 7, arma
+    ed.processEventForTesting(mouseDrag(8, 3));  // fila doc 6, inicia rango
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.cursor.line, 6);
-    ed.processEventForTesting(mouseDrag(4, 5)); // chrome: clamp al borde
+    ed.processEventForTesting(mouseDrag(8, 5)); // chrome: clamp al borde
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.viewport.top, 4); // sin scroll: ya en el limite
@@ -663,16 +663,16 @@ TEST(mouse_drag_multiple_anchor_fixed_position_follows) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    // gutter=3: celda col = 3 + visual (0-based).
-    ed.processEventForTesting(mousePress(4, 1)); // anchor (0,0)
-    ed.processEventForTesting(mouseDrag(6, 2));  // (1,2)
+    // gutter=7: celda col = 7 + visual (0-based).
+    ed.processEventForTesting(mousePress(8, 1)); // anchor (0,0)
+    ed.processEventForTesting(mouseDrag(10, 2));  // (1,2)
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.selection->anchor.line, 0);
     CHECK_EQ(b.selection->anchor.col, 0);
     CHECK_EQ(b.selection->position.line, 1);
     CHECK_EQ(b.selection->position.col, 2);
-    ed.processEventForTesting(mouseDrag(8, 3)); // (2,4)
+    ed.processEventForTesting(mouseDrag(12, 3)); // (2,4)
     CHECK_EQ(b.selection->anchor.line, 0);
     CHECK_EQ(b.selection->anchor.col, 0);
     CHECK_EQ(b.selection->position.line, 2);
@@ -685,14 +685,14 @@ TEST(mouse_drag_multiple_anchor_fixed_position_follows) {
         CHECK_EQ(sel->end.line, 2);
         CHECK_EQ(sel->end.col, 4);
     }
-    ed.processEventForTesting(mouseDrag(5, 1)); // vuelta a (0,1)
+    ed.processEventForTesting(mouseDrag(9, 1)); // vuelta a (0,1)
     CHECK_EQ(b.selection->anchor.line, 0);
     CHECK_EQ(b.selection->anchor.col, 0);
     CHECK_EQ(b.selection->position.line, 0);
     CHECK_EQ(b.selection->position.col, 1);
     CHECK_EQ(b.cursor.line, 0);
     CHECK_EQ(b.cursor.col, 1);
-    ed.processEventForTesting(mouseRelease(5, 1));
+    ed.processEventForTesting(mouseRelease(9, 1));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK_EQ(b.selection->anchor.line, 0);
@@ -715,15 +715,15 @@ TEST(mouse_click_after_mouse_drag_clears_on_text) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 1)); // (0,0)
-    ed.processEventForTesting(mouseDrag(6, 2));  // (1,2)
-    ed.processEventForTesting(mouseRelease(6, 2));
+    ed.processEventForTesting(mousePress(8, 1)); // (0,0)
+    ed.processEventForTesting(mouseDrag(10, 2));  // (1,2)
+    ed.processEventForTesting(mouseRelease(10, 2));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());
     // Click en otro texto valido: debe limpiar y volver a Navegacion.
-    ed.processEventForTesting(mousePress(4, 1));
-    ed.processEventForTesting(mouseRelease(4, 1));
+    ed.processEventForTesting(mousePress(8, 1));
+    ed.processEventForTesting(mouseRelease(8, 1));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Navegacion));
     CHECK(!b.selection.has_value());
@@ -741,15 +741,15 @@ TEST(mouse_click_after_mouse_drag_on_tilde_clears) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 1)); // (0,0)
-    ed.processEventForTesting(mouseDrag(5, 1));  // (0,1)
-    ed.processEventForTesting(mouseRelease(5, 1));
+    ed.processEventForTesting(mousePress(8, 1)); // (0,0)
+    ed.processEventForTesting(mouseDrag(9, 1));  // (0,1)
+    ed.processEventForTesting(mouseRelease(9, 1));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());
     // Fila visible 4 = docLine 4 >= lineCount (2): fila `~`.
-    ed.processEventForTesting(mousePress(10, 5));
-    ed.processEventForTesting(mouseRelease(10, 5));
+    ed.processEventForTesting(mousePress(14, 5));
+    ed.processEventForTesting(mouseRelease(14, 5));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Navegacion));
     CHECK(!b.selection.has_value());
@@ -767,15 +767,15 @@ TEST(mouse_click_after_mouse_drag_on_chrome_clears) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 1)); // (0,0)
-    ed.processEventForTesting(mouseDrag(6, 2));  // (1,2)
-    ed.processEventForTesting(mouseRelease(6, 2));
+    ed.processEventForTesting(mousePress(8, 1)); // (0,0)
+    ed.processEventForTesting(mouseDrag(10, 2));  // (1,2)
+    ed.processEventForTesting(mouseRelease(10, 2));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());
     // Contenido = filas 1..10 (1-based); 11 es la primera de statusbar.
-    ed.processEventForTesting(mousePress(10, 11));
-    ed.processEventForTesting(mouseRelease(10, 11));
+    ed.processEventForTesting(mousePress(14, 11));
+    ed.processEventForTesting(mouseRelease(14, 11));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Navegacion));
     CHECK(!b.selection.has_value());
@@ -796,14 +796,14 @@ TEST(mouse_press_after_mouse_drag_clears_highlight_immediately) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
-    ed.processEventForTesting(mousePress(4, 1)); // anchor (0,0)
-    ed.processEventForTesting(mouseDrag(8, 2));  // (1,4)
-    ed.processEventForTesting(mouseRelease(8, 2));
+    ed.processEventForTesting(mousePress(8, 1)); // anchor (0,0)
+    ed.processEventForTesting(mouseDrag(12, 2));  // (1,4)
+    ed.processEventForTesting(mouseRelease(12, 2));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());
     // Click en otra posicion: solo el press, todavia sin release.
-    ed.processEventForTesting(mousePress(9, 3)); // (2,5)
+    ed.processEventForTesting(mousePress(13, 3)); // (2,5)
     CHECK_EQ(b.cursor.line, 2);
     CHECK_EQ(b.cursor.col, 5);
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
