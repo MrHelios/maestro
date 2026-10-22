@@ -48,7 +48,7 @@ TEST(gui_titlebar_botones_ventana_estrecha_hi_dpi) {
 // Regiones de redimensionado con solapamiento de esquinas y exclusión de
 // la franja superior de la barra.
 TEST(gui_window_edge_at_y_exclusion_barra) {
-    const int w = 400, h = 300, titleH = 28, border = 7;
+    const int w = 400, h = 300, border = 7;
     // Punto en la esquina superior-izquierda (x=3,y=3) -> TopLeft.
     CHECK(guiWindowEdgeAt(3, 3, w, h, border) ==
           GuiWindowEdge::TopLeft);

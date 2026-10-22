@@ -1257,21 +1257,21 @@ TEST(gutter_shows_correct_numbers_when_scrolled) {
     
     TtyRenderer r;
     std::string out = r.buildScreen(doc, cur, vp, "t", false, makeChromeRequest("", State::Navegacion), std::nullopt);
-    
+
     // Para 100 líneas, gutterWidth(100, 20) devuelve 7:
-    // campo de 5 columnas centrado + 2 espacios de separación.
-    // Para la línea 50: " 50  " + "  " -> " 50    ".
-    
+    // campo de 5 columnas alineado a la derecha + 2 espacios de separación.
+    // Para la línea 50: "   50" + "  " -> "   50  ".
+
     std::string row0 = plainRow(out, 0);
-    CHECK(row0.substr(0, 7) == " 50    ");
-    
+    CHECK(row0.substr(0, 7) == "   50  ");
+
     // Comparamos solo los 5 caracteres de "linea", ignorando el relleno de espacios
     // que el renderer agrega hasta llegar a vp.width (20 columnas).
     CHECK(row0.substr(7, 5) == "linea");
-    
+
     // La segunda fila visible debe mostrar la línea 51
     std::string row1 = plainRow(out, 1);
-    CHECK(row1.substr(0, 7) == " 51    ");
+    CHECK(row1.substr(0, 7) == "   51  ");
 }
 
 TEST(gutter_tilde_rows_blank) {
@@ -1334,7 +1334,7 @@ TEST(selection_empty_line_marks_crossed_line_break) {
     std::string out = frame({"a", "", "b"}, selAt({0, 0}, {2, 1}));
     CHECK(contains(out, std::string(ANSI_INV) + " "));
     CHECK(!contains(out, ANSI_INV + std::string("\xc2\xb6")));
-    CHECK_EQ(plainRow(out, 1).substr(0, 7), "  2    ");
+    CHECK_EQ(plainRow(out, 1).substr(0, 7), "    2  ");
     // Las filas con texto se seleccionan como siempre.
     CHECK(contains(out, std::string(ANSI_INV) + "a" + ANSI_RESET));
     CHECK(contains(out, std::string(ANSI_INV) + "b" + ANSI_RESET));
@@ -1344,7 +1344,7 @@ TEST(selection_empty_line_not_in_selection_no_mark) {
     // La fila vacia no cae dentro de la seleccion: sin marca alguna.
     std::string out = frame({"a", "", "b"}, selAt({0, 0}, {0, 1}));
     CHECK(!contains(out, std::string(ANSI_INV) + " "));
-    CHECK_EQ(plainRow(out, 1), "  2    ");
+    CHECK_EQ(plainRow(out, 1), "    2  ");
 }
 
 TEST(selection_empty_line_collapsed_no_mark) {
@@ -1352,7 +1352,7 @@ TEST(selection_empty_line_collapsed_no_mark) {
     // la fila queda limpia.
     std::string out = frame({"a", "", "b"}, selAt({1, 0}, {1, 0}));
     CHECK(!contains(out, std::string(ANSI_INV) + " "));
-    CHECK_EQ(plainRow(out, 1), "  2    ");
+    CHECK_EQ(plainRow(out, 1), "    2  ");
 }
 
 TEST(selection_empty_line_as_end_no_mark) {
@@ -1360,7 +1360,7 @@ TEST(selection_empty_line_as_end_no_mark) {
     // incluido, asi que no se marca.
     std::string out = frame({"a", "", "b"}, selAt({0, 1}, {1, 0}));
     CHECK(!contains(out, std::string(ANSI_INV) + " "));
-    CHECK_EQ(plainRow(out, 1), "  2    ");
+    CHECK_EQ(plainRow(out, 1), "    2  ");
 }
 
 TEST(selection_empty_line_as_start_marks) {
@@ -1369,7 +1369,7 @@ TEST(selection_empty_line_as_start_marks) {
     std::string out = frame({"a", "", "b"}, selAt({1, 0}, {2, 1}));
     CHECK(contains(out, std::string(ANSI_INV) + " "));
     CHECK(!contains(out, ANSI_INV + std::string("\xc2\xb6")));
-    CHECK_EQ(plainRow(out, 1).substr(0, 7), "  2    ");
+    CHECK_EQ(plainRow(out, 1).substr(0, 7), "    2  ");
 }
 
 TEST(renderer_cursor_cross_mark_width_two) {

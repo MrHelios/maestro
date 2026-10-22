@@ -605,15 +605,13 @@ TEST(render_diff_gutter_crece_repinta_viewport_completo) {
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, /*allowFullClear=*/true);
 
     // Todas las filas visibles quedaron alineadas con el gutter nuevo. El
-    // prefijo incluye campo centrado + gap; 99999 y 100000 viven en 8 columnas.
+    // prefijo incluye campo alineado a la derecha + gap; 99999 y 100000 viven en 8 columnas.
     auto gutterPrefix = [](int lineNumber, const GutterMetrics& gm) {
         std::string num = std::to_string(lineNumber);
         if (static_cast<int>(num.size()) > gm.numberField)
             num = num.substr(num.size() - static_cast<size_t>(gm.numberField));
         int pad = std::max(0, gm.numberField - static_cast<int>(num.size()));
-        int left = pad / 2;
-        return std::string(static_cast<size_t>(left), ' ') + num +
-               std::string(static_cast<size_t>(pad - left), ' ') +
+        return std::string(static_cast<size_t>(pad), ' ') + num +
                std::string(static_cast<size_t>(gm.gap), ' ');
     };
     const GutterMetrics gm = gutterMetrics(b.document.lineCount(), b.viewport.width);
@@ -625,7 +623,7 @@ TEST(render_diff_gutter_crece_repinta_viewport_completo) {
     }
     CHECK_EQ(viaDiff.screen[static_cast<size_t>(b.viewport.height - 2)]
                  .substr(0, 8),
-             "99999   ");
+             " 99999  ");
     CHECK_EQ(viaDiff.screen[static_cast<size_t>(b.viewport.height - 1)]
                  .substr(0, 8),
              "100000  ");

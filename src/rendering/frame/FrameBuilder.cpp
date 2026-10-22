@@ -48,10 +48,8 @@ void appendGutterCell(std::string& out, int lineNumber1Based,
             numStr = numStr.substr(
                 numStr.size() - static_cast<size_t>(gm.numberField));
         const int pad = std::max(0, gm.numberField - static_cast<int>(numStr.size()));
-        const int left = pad / 2;
-        out.append(static_cast<size_t>(left), ' ');
+        out.append(static_cast<size_t>(pad), ' ');
         out += numStr;
-        out.append(static_cast<size_t>(pad - left), ' ');
     }
     if (gm.gap > 0) out.append(static_cast<size_t>(gm.gap), ' ');
 }

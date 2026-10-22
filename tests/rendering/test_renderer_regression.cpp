@@ -322,9 +322,7 @@ TEST(regression_gutter_clamped_at_narrow_width) {
             if ((int)numStr.size() > gm.numberField)
                 numStr = numStr.substr(numStr.size() - (size_t)gm.numberField);
             int pad = std::max(0, gm.numberField - (int)numStr.size());
-            int left = pad / 2;
-            std::string expectedGutter = std::string(left, ' ') + numStr +
-                                         std::string(pad - left, ' ') +
+            std::string expectedGutter = std::string(pad, ' ') + numStr +
                                          std::string(gm.gap, ' ');
             std::string actualGutter = rows[row].size() >= (size_t)gm.total ? rows[row].substr(0, gm.total) : rows[row];
             CHECK_EQ(actualGutter, expectedGutter);
@@ -356,9 +354,7 @@ TEST(regression_gutter_clamped_at_narrow_width) {
                 if ((int)numStr.size() > gm.numberField)
                     numStr = numStr.substr(numStr.size() - (size_t)gm.numberField);
                 int pad = std::max(0, gm.numberField - (int)numStr.size());
-                int left = pad / 2;
-                std::string expectedGutter = std::string(left, ' ') + numStr +
-                                             std::string(pad - left, ' ') +
+                std::string expectedGutter = std::string(pad, ' ') + numStr +
                                              std::string(gm.gap, ' ');
                 std::string actualGutter = rows[row].size() >= (size_t)gm.total ? rows[row].substr(0, gm.total) : rows[row];
                 CHECK_EQ(actualGutter, expectedGutter);
