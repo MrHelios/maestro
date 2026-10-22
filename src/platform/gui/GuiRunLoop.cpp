@@ -40,6 +40,8 @@ void GuiRunLoop::idleStep(std::chrono::steady_clock::time_point now) {
     if (gui_) lastBlinkPhaseOn_ = gui_->blinkPhaseOn();
 }
 
+
+
 int GuiRunLoop::computeIdleWaitMs(
     std::chrono::steady_clock::time_point now) const {
     // Mínimo explícito entre deadlines reales: los ausentes no intervienen.
@@ -126,7 +128,10 @@ void GuiRunLoop::updateImeRect() const {
     // del uso junto a eventos en puntos). Con ALLOW_HIGHDPI a escala N hay
     // que bajar N× por eje; a escala 1 es identidad. Sin handles o con
     // medidas inválidas se pasa tal cual (comportamiento pre-HiDPI).
-    GuiImeRectPx pr{r.x, r.y, r.w, r.h};
+    // La geometría del cursor vive en la grilla de contenido, debajo de la
+    // barra propia: se desplaza al espacio del drawable completo antes de
+    // convertir a puntos de ventana.
+    GuiImeRectPx pr{r.x, r.y + titleBarHeightPx_, r.w, r.h};
     int x = pr.x, y = pr.y, w = pr.w, h = pr.h;
     if (sdlWin_ && sdlRen_) {
         int winW = 0, winH = 0, outW = 0, outH = 0;
@@ -208,6 +213,49 @@ public:
 inline void sdlCaptureMouseBestEffort(SDL_bool enabled) {
     if (SDL_CaptureMouse(enabled) != 0) SDL_ClearError();
 }
+
+
+
+SDL_HitTestResult SDLCALL guiTitleBarHitTest(SDL_Window*,
+                                             const SDL_Point* area, void* data) {
+    if (!area) return SDL_HITTEST_NORMAL;
+    auto* state = static_cast<GuiRunLoop::TitleBarHitState*>(data);
+    if (!state || state->winW <= 0 || state->winH <= 0) {
+        return SDL_HITTEST_NORMAL;
+    }
+    const int x = area->x;
+    const int y = area->y;
+    const int winW = state->winW;
+    const int winH = state->winH;
+    const int titleH = state->titleH;
+    // 1) Botones de la barra (tienen prioridad sobre cualquier borde).
+    if (titleH > 0 && y < titleH && state->titleBar &&
+        state->titleBar->buttonAt(x, y, winW, titleH) != GuiTitleBarButton::None) {
+        return SDL_HITTEST_NORMAL;
+    }
+    // 2) Esquinas y bordes de redimensionado (excluyendo la franja superior
+    // de la barra, que ya se gestionó con los botones).
+    const int border = std::max(4, std::min(8, titleH / 4));
+    const bool left = x >= 0 && x < border;
+    const bool right = x >= winW - border && x < winW;
+    const bool top = y >= 0 && y < border;
+    const bool bottom = y >= winH - border && y < winH;
+    // Esquinas: tienen prioridad sobre los lados.
+    if (top && left) return SDL_HITTEST_RESIZE_TOPLEFT;
+    if (top && right) return SDL_HITTEST_RESIZE_TOPRIGHT;
+    if (bottom && left) return SDL_HITTEST_RESIZE_BOTTOMLEFT;
+    if (bottom && right) return SDL_HITTEST_RESIZE_BOTTOMRIGHT;
+    // Lados: izquierda, derecha y fondo (no se ofrece RESIZE_TOP sobre la
+    // barra de título; el arrastre se gestiona abajo).
+    if (left) return SDL_HITTEST_RESIZE_LEFT;
+    if (right) return SDL_HITTEST_RESIZE_RIGHT;
+    if (bottom) return SDL_HITTEST_RESIZE_BOTTOM;
+    // 3) Arrastre de la barra de título (fuera de botones).
+    if (titleH > 0 && y < titleH) {
+        return SDL_HITTEST_DRAGGABLE;
+    }
+    return SDL_HITTEST_NORMAL;
+}
 #endif
 }  // namespace
 
@@ -245,7 +293,8 @@ int GuiRunLoop::run() {
     // testeado en test_guisdlmapper.cpp): --no-hidpi elimina
     // SDL_WINDOW_ALLOW_HIGHDPI y el cálculo de celdas sigue intacto (sin
     // HiDPI el drawable == ventana y la escala de guiScaledFontPixels es 1).
-    const Uint32 windowFlags = guiWindowFlags(options_.enableHiDpi);
+    // Borderless: la barra de título es propia (Phase 2) y sigue el tema.
+    const Uint32 windowFlags = guiWindowFlags(options_.enableHiDpi, true);
 
     int winW = options_.windowWidth.value_or(960);
     int winH = options_.windowHeight.value_or(600);
@@ -280,6 +329,10 @@ int GuiRunLoop::run() {
     // Handles para updateImeRect (rect IME a puntos de ventana, ver arriba).
     sdlWin_ = static_cast<void*>(win);
     sdlRen_ = static_cast<void*>(ren);
+    if (gui_) gui_->setTitleBar(&titleBar_);
+    // Pista nativa de tema ANTES del primer map (SDL_ShowWindow). La barra
+    // visible es la propia (GuiTitleBar); esto solo mantiene la propiedad
+    // coherente para el entorno/WM desde el arranque.
     // Abre la fuente y mide la celda real ANTES del primer resize: de acá
     // salen cols/filas = píxeles/celda (ya no estimados).
     // La base del CLI son píxeles lógicos (ver contrato de arriba): se escala
@@ -350,14 +403,34 @@ int GuiRunLoop::run() {
             cw = guiScaleSize(platform::kFallbackCellW, winW, outW);
             ch = guiScaleSize(platform::kFallbackCellH, winH, outH);
         }
-        return guiGridSize(outW, outH, cw, ch);
+        // Phase 2: la barra propia se mide en puntos lógicos (28px mínimo)
+        // y se lleva al drawable, así conserva el mismo tamaño visual con
+        // HiDPI. La grilla de contenido pierde exactamente esos píxeles.
+        const int cellHPoints = guiScaleCoord(ch, outH, winH);
+        int titleHPoints = GuiTitleBar::heightForCell(cellHPoints);
+        int titleHPx = guiScaleCoord(titleHPoints, winH, outH);
+        if (titleHPx >= outH) {
+            titleHPoints = 0;
+            titleHPx = 0;
+        }
+        titleBarHeightPx_ = titleHPx;
+        titleBarHeightPoints_ = titleHPoints;
+        if (gui_) gui_->setContentTopInset(titleBarHeightPx_);
+        hitState_.winW = winW;
+        hitState_.winH = winH;
+        hitState_.titleH = titleBarHeightPoints_;
+        hitState_.titleBar = &titleBar_;
+        const int contentH = std::max(1, outH - titleBarHeightPx_);
+        return guiGridSize(outW, contentH, cw, ch);
     };
     auto renderWithBlink = [&] {
         if (gui_) gui_->setBlinkNow(std::chrono::steady_clock::now());
         editor_.renderFrame();
         if (gui_) lastBlinkPhaseOn_ = gui_->blinkPhaseOn();
         updateImeRect();
-    };
+        // Cubre el toggle de tema desde cualquier origen (Ctrl+K l,
+        // theme.toggle, etc.) sin acoplar Editor -> plataforma.
+        };
     // LOTE DE EVENTOS: en vez de renderizar dentro de handleSdlEvent (lo
     // que hace un frame completo por cada KEYDOWN repetido), se acumulan
     // los efectos de estado y se pinta UNA vez al vaciar la cola SDL. El
@@ -367,6 +440,76 @@ int GuiRunLoop::run() {
     // dejar el KEYUP para después del render).
     bool renderNeeded = false;
     auto requestRender = [&] { renderNeeded = true; };
+    // Barra de título propia: hit-test en puntos -> drawable y acción de
+    // cada botón. Los botones NO se envían al Editor (no son celdas).
+    auto titleButtonAtPoint = [&](int ptX, int ptY) {
+        if (titleBarHeightPx_ <= 0) return GuiTitleBarButton::None;
+        int winW = 0, winH = 0, outW = 0, outH = 0;
+        SDL_GetWindowSize(win, &winW, &winH);
+        SDL_GetRendererOutputSize(ren, &outW, &outH);
+        const GuiDrawableSize fb = guiDrawableOrWindow(winW, winH, outW, outH);
+        const int pxX = guiScaleCoord(ptX, winW, fb.w);
+        const int pxY = guiScaleCoord(ptY, winH, fb.h);
+        if (pxY < 0 || pxY >= titleBarHeightPx_) {
+            return GuiTitleBarButton::None;
+        }
+        return titleBar_.buttonAt(pxX, pxY, fb.w, titleBarHeightPx_);
+    };
+    auto pointInTitleBar = [&](int ptY) {
+        return titleBarHeightPoints_ > 0 && ptY >= 0 &&
+               ptY < titleBarHeightPoints_;
+    };
+    // Fallback sin hit-test nativo: detecta el borde/corner en puntos de
+    // ventana con el mismo grosor visual que usa el callback SDL. Se evalúa
+    // ANTES que la barra de título para que el borde superior siga
+    // redimensionando.
+    auto borderPoints = [&] {
+        return std::max(4, std::min(8, titleBarHeightPoints_ / 4));
+    };
+    auto manualResizeEdgeAt = [&](int ptX, int ptY) {
+        if (hitTestEnabled_) return GuiWindowEdge::None;
+        int winW = 0, winH = 0;
+        SDL_GetWindowSize(win, &winW, &winH);
+        GuiWindowEdge edge = guiWindowEdgeAt(ptX, ptY, winW, winH, borderPoints());
+        // No ofrecer redimensionado por el borde superior dentro de la barra:
+        // esa zona es para arrastrar o botones.
+        if (ptY < titleBarHeightPoints_ &&
+            (edge == GuiWindowEdge::Top ||
+             edge == GuiWindowEdge::TopLeft ||
+             edge == GuiWindowEdge::TopRight)) {
+            return GuiWindowEdge::None;
+        }
+        return edge;
+    };
+    auto startManualResize = [&](GuiWindowEdge edge) {
+        manualResizeEdge_ = edge;
+        manualTitleDrag_ = false;
+        sdlCaptureMouseBestEffort(SDL_TRUE);
+        SDL_GetWindowPosition(win, &manualResizeWinX_, &manualResizeWinY_);
+        SDL_GetWindowSize(win, &manualResizeWinW_, &manualResizeWinH_);
+        SDL_GetGlobalMouseState(&manualResizeMouseX_, &manualResizeMouseY_);
+    };
+    auto activateTitleButton = [&](GuiTitleBarButton button) {
+        switch (button) {
+            case GuiTitleBarButton::Minimize:
+                SDL_MinimizeWindow(win);
+                break;
+            case GuiTitleBarButton::Maximize:
+                if (titleBar_.maximized() ||
+                    (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED) != 0) {
+                    SDL_RestoreWindow(win);
+                } else {
+                    SDL_MaximizeWindow(win);
+                }
+                break;
+            case GuiTitleBarButton::Close:
+                // Mismo camino que SDL_QUIT: respeta buffers modificados.
+                if (!editor_.requestQuit(false)) requestRender();
+                break;
+            case GuiTitleBarButton::None:
+                break;
+        }
+    };
     // Actividad de cursor/viewport DENTRO del lote: un AvPág + RePág deja
     // la misma celda final, pero el cursor sí se movió y el blink debe
     // reiniciarse (ver GuiRenderer::markCursorActivity).
@@ -405,10 +548,25 @@ int GuiRunLoop::run() {
         }
         const int pxX = guiScaleCoord(ptX, winW, outW);
         const int pxY = guiScaleCoord(ptY, winH, outH);
-        const platform::WindowSize g = guiGridSize(outW, outH, cw, ch);
-        return guiCellFromPixelsBounded(pxX, pxY, cw, ch, g.cols, g.rows);
+        // La grilla y la celda viven debajo de la barra propia: se descuenta
+        // su alto del drawable y del eje Y. Un click en la barra produce una
+        // celda inválida (nunca {0,0}).
+        const int contentH = std::max(1, outH - titleBarHeightPx_);
+        const platform::WindowSize g =
+            guiGridSize(outW, contentH, cw, ch);
+        return guiCellFromPixelsBounded(pxX, pxY - titleBarHeightPx_, cw, ch,
+                                        g.cols, g.rows);
     };
     editor_.resize(currentSize());
+    // Hit-test nativo: la franja de la barra (salvo botones) arrastra la
+    // ventana y los bordes/corners redimensionan; los botones quedan NORMAL
+    // para recibir clicks. El estado se pasa como userdata al callback
+    // (SDL_SetWindowHitTest sí admite userdata). Si el driver devuelve -1,
+    // el fallback manual cubre tanto arrastre como redimensionado
+    // (ver SDL_MOUSEBUTTONDOWN).
+    hitTestEnabled_ =
+        SDL_SetWindowHitTest(win, guiTitleBarHitTest, &hitState_) == 0;
+    if (!hitTestEnabled_) SDL_ClearError();
     // Tema inicial ya establecido en GuiRenderer constructor
     renderWithBlink();
 
@@ -474,6 +632,10 @@ int GuiRunLoop::run() {
                         // hay gesto armado; la celda no se usa en release).
                         // Sin esto, el autoscroll quedaría corriendo con el
                         // botón ya suelto hasta que el oráculo lo note.
+                        manualTitleDrag_ = false;
+                        manualResizeEdge_ = GuiWindowEdge::None;
+                        activeTitleButton_ = GuiTitleBarButton::None;
+                        titleBar_.setPressed(GuiTitleBarButton::None);
                         sdlCaptureMouseBestEffort(SDL_FALSE);
                         // Fábrica testeada (misma que el press/drag: tipo +
                         // celda en un solo punto de construcción).
@@ -481,6 +643,20 @@ int GuiRunLoop::run() {
                         editor_.handleEvent(ie);
                         const auto now = std::chrono::steady_clock::now();
                         editor_.clearExpiredMessages(now);
+                        requestRender();
+                    } else if (ev.window.event == SDL_WINDOWEVENT_LEAVE) {
+                        if (titleBar_.setHover(GuiTitleBarButton::None)) {
+                            requestRender();
+                        }
+                    } else if (ev.window.event ==
+                                   SDL_WINDOWEVENT_MAXIMIZED ||
+                               ev.window.event ==
+                                   SDL_WINDOWEVENT_RESTORED) {
+                        // El glyph de maximizar/restaurar sigue el estado
+                        // real del WM, que puede cambiar por doble click o
+                        // atajos externos, no solo por nuestros botones.
+                        titleBar_.setMaximized(
+                            ev.window.event == SDL_WINDOWEVENT_MAXIMIZED);
                         requestRender();
                     } else if (guiFocusRegainRefreshesIme(ev.window.event)) {
                         // Foco recuperado: el rect IME de SDL puede haber
@@ -569,6 +745,43 @@ int GuiRunLoop::run() {
                     break;
                 }
                 case SDL_MOUSEBUTTONDOWN: {
+                    // 1) Botones de la barra (prioridad sobre bordes/arrastre).
+                    if (pointInTitleBar(ev.button.y)) {
+                        const GuiTitleBarButton button =
+                            ev.button.button == SDL_BUTTON_LEFT
+                                ? titleButtonAtPoint(ev.button.x,
+                                                     ev.button.y)
+                                : GuiTitleBarButton::None;
+                        if (button != GuiTitleBarButton::None) {
+                            activeTitleButton_ = button;
+                            titleBar_.setPressed(button);
+                            titleBar_.setHover(button);
+                            sdlCaptureMouseBestEffort(SDL_TRUE);
+                            requestRender();
+                            break;
+                        }
+                    }
+                    // 2) Redimensionado manual (solo si no hay hit-test nativo).
+                    if (!hitTestEnabled_ && ev.button.button == SDL_BUTTON_LEFT) {
+                        const GuiWindowEdge edge =
+                            manualResizeEdgeAt(ev.button.x, ev.button.y);
+                        if (edge != GuiWindowEdge::None) {
+                            startManualResize(edge);
+                            break;
+                        }
+                    }
+                    // 3) Arrastre manual de la barra (fallback sin hit-test).
+                    if (!hitTestEnabled_ &&
+                        ev.button.button == SDL_BUTTON_LEFT &&
+                        pointInTitleBar(ev.button.y)) {
+                        manualTitleDrag_ = true;
+                        sdlCaptureMouseBestEffort(SDL_TRUE);
+                        SDL_GetWindowPosition(win, &manualDragWinX_,
+                                              &manualDragWinY_);
+                        SDL_GetGlobalMouseState(&manualDragMouseX_,
+                                                &manualDragMouseY_);
+                        break;
+                    }
                     // Click izquierdo -> MousePress en la celda (0-based).
                     // Medio/derecho -> nullopt (paridad TTY: se traducen a
                     // None, sin gesto). El Editor arma el gesto (cursor +
@@ -604,6 +817,27 @@ int GuiRunLoop::run() {
                     break;
                 }
                 case SDL_MOUSEBUTTONUP: {
+                    if (manualResizeEdge_ != GuiWindowEdge::None) {
+                        manualResizeEdge_ = GuiWindowEdge::None;
+                        sdlCaptureMouseBestEffort(SDL_FALSE);
+                        break;
+                    }
+                    if (activeTitleButton_ != GuiTitleBarButton::None) {
+                        const GuiTitleBarButton action = activeTitleButton_;
+                        const GuiTitleBarButton released =
+                            titleButtonAtPoint(ev.button.x, ev.button.y);
+                        activeTitleButton_ = GuiTitleBarButton::None;
+                        titleBar_.setPressed(GuiTitleBarButton::None);
+                        sdlCaptureMouseBestEffort(SDL_FALSE);
+                        if (released == action) activateTitleButton(action);
+                        requestRender();
+                        break;
+                    }
+                    if (manualTitleDrag_) {
+                        manualTitleDrag_ = false;
+                        sdlCaptureMouseBestEffort(SDL_FALSE);
+                        break;
+                    }
                     // Release izquierdo -> MouseRelease (cierra el gesto;
                     // sin drag previo es no-op, con drag permanece en
                     // Selección y apaga el autoscroll). Libera la captura
@@ -623,6 +857,60 @@ int GuiRunLoop::run() {
                     break;
                 }
                 case SDL_MOUSEMOTION: {
+                    const GuiTitleBarButton hovered =
+                        titleButtonAtPoint(ev.motion.x, ev.motion.y);
+                    const bool hoverChanged = titleBar_.setHover(hovered);
+                    if (manualResizeEdge_ != GuiWindowEdge::None) {
+                        if (!guiLeftHeld(ev.motion.state)) {
+                            manualResizeEdge_ = GuiWindowEdge::None;
+                            sdlCaptureMouseBestEffort(SDL_FALSE);
+                        } else {
+                            int gx = 0, gy = 0;
+                            SDL_GetGlobalMouseState(&gx, &gy);
+                            const GuiWindowRect start{
+                                manualResizeWinX_, manualResizeWinY_,
+                                manualResizeWinW_, manualResizeWinH_};
+                            const GuiWindowRect next = guiResizeWindowRect(
+                                start, manualResizeEdge_,
+                                gx - manualResizeMouseX_,
+                                gy - manualResizeMouseY_, 160, 120);
+                            if (next.x != start.x || next.y != start.y) {
+                                SDL_SetWindowPosition(win, next.x, next.y);
+                            }
+                            if (next.w != start.w || next.h != start.h) {
+                                SDL_SetWindowSize(win, next.w, next.h);
+                            }
+                        }
+                        if (hoverChanged) requestRender();
+                        break;
+                    }
+                    if (manualTitleDrag_) {
+                        if (!guiLeftHeld(ev.motion.state)) {
+                            manualTitleDrag_ = false;
+                        } else {
+                            int gx = 0, gy = 0;
+                            SDL_GetGlobalMouseState(&gx, &gy);
+                            SDL_SetWindowPosition(
+                                win,
+                                manualDragWinX_ + (gx - manualDragMouseX_),
+                                manualDragWinY_ + (gy - manualDragMouseY_));
+                        }
+                        if (hoverChanged) requestRender();
+                        break;
+                    }
+                    if (activeTitleButton_ != GuiTitleBarButton::None) {
+                        const GuiTitleBarButton pressed =
+                            hovered == activeTitleButton_
+                                ? activeTitleButton_
+                                : GuiTitleBarButton::None;
+                        if (titleBar_.pressed() != pressed) {
+                            titleBar_.setPressed(pressed);
+                            requestRender();
+                        }
+                        if (hoverChanged) requestRender();
+                        break;
+                    }
+                    if (hoverChanged) requestRender();
                     // Arrastre con izquierdo presionado -> MouseDrag por
                     // evento (1 línea / 1 celda + autoscroll en bordes en
                     // el Editor). Sin LMask no se emite nada: el Editor ya

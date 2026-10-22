@@ -4,7 +4,9 @@
 
 #include "platform/gui/GuiKeymap.h"
 #include "platform/gui/GuiOptions.h"
+#include "platform/gui/GuiWindowGeometry.h"
 #include "platform/gui/IGuiKeymap.h"
+#include "rendering/gui/GuiTitleBar.h"
 
 class Editor;
 
@@ -107,6 +109,12 @@ class GuiRenderer;
 
 class GuiRunLoop {
 public:
+    struct TitleBarHitState {
+        int winW = 0;
+        int winH = 0;
+        int titleH = 0;
+        GuiTitleBar* titleBar = nullptr;
+    };
     GuiRunLoop(Editor& editor, const GuiOptions& opts = GuiOptions{});
     void setGuiRenderer(GuiRenderer* r) { gui_ = r; }
     // Tabla tecla -> Evento que el SDL_KEYDOWN consulta (remapeable en
@@ -209,6 +217,33 @@ private:
     // teardown; fuera de run() son nullptr y updateImeRect es no-op.
     void* sdlWin_ = nullptr;
     void* sdlRen_ = nullptr;
+    // Phase 2: barra de título propia (ventana SDL_WINDOW_BORDERLESS). El
+    // alto se reserva en la grilla; los clicks de sus botones no llegan al
+    // Editor. `titleBarHeightPoints_` es la misma medida en puntos de
+    // ventana (hit-test y eventos), `titleBarHeightPx_` en drawable (IME).
+    GuiTitleBar titleBar_;
+    int titleBarHeightPx_ = 0;
+    int titleBarHeightPoints_ = 0;
+    GuiTitleBarButton activeTitleButton_ = GuiTitleBarButton::None;
+    // Arrastre y redimensionado manuales de respaldo cuando
+    // SDL_SetWindowHitTest no está disponible (p. ej. ciertos drivers). Con
+    // hit-test nativo el WM se encarga y estos quedan en None/false.
+    bool hitTestEnabled_ = false;
+    bool manualTitleDrag_ = false;
+    int manualDragMouseX_ = 0;
+    int manualDragMouseY_ = 0;
+    int manualDragWinX_ = 0;
+    int manualDragWinY_ = 0;
+    GuiWindowEdge manualResizeEdge_ = GuiWindowEdge::None;
+    int manualResizeMouseX_ = 0;
+    int manualResizeMouseY_ = 0;
+    int manualResizeWinX_ = 0;
+    int manualResizeWinY_ = 0;
+    int manualResizeWinW_ = 0;
+    int manualResizeWinH_ = 0;
+
+    TitleBarHitState hitState_;
+
     // Posiciona la ventana candidata del IME en la celda del cursor lógico
     // (no-op sin SDL2). Si no hay cursor válido conserva el último rect de
     // SDL a propósito (ver política en el comentario de clase): la

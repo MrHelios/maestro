@@ -120,6 +120,22 @@ el avance de `'M'`.
 | Doble click | Seleccionar palabra |
 | `Ctrl+K` luego `l` | Toggle tema (dark/light). Es una **secuencia**: prefijo `Ctrl+K`, seguido de `l` |
 
+#### Tema de la barra de título
+
+La barra de título es **client-side**: Maestro crea la ventana sin
+decoraciones del WM y dibuja su propia barra (icono, título centrado y
+botones minimizar/maximizar/cerrar) con los colores del tema activo. Se
+actualiza con `--theme` y con `Ctrl+K l` junto con el resto de la GUI, sin
+depender de que el gestor de ventanas respete `_GTK_THEME_VARIANT`.
+
+La franja de la barra se reserva en la grilla (el contenido y el cursor IME
+se desplazan debajo) y arrastrarla mueve la ventana. Los bordes y esquinas
+siguen redimensionando. En X11/XWayland se usa `SDL_SetWindowHitTest`; si el
+driver devuelve `-1`, el loop implementa arrastre y redimensionado manuales
+sobre los bordes de la ventana borderless. En Wayland nativo el compositor
+no permite mover ni redimensionar por posición absoluta de forma fiable: los
+botones funcionan, pero el arrastre/redimensionado manual puede no hacerlo.
+
 #### Ejemplos
 
 ```bash

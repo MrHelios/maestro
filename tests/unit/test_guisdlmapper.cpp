@@ -1237,6 +1237,12 @@ TEST(guiwindowflags_no_hidpi_elimina_flag_highdpi) {
              Uint32(SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE));
     CHECK((guiWindowFlags(true) & SDL_WINDOW_ALLOW_HIGHDPI) != 0);
     CHECK((guiWindowFlags(false) & SDL_WINDOW_ALLOW_HIGHDPI) == 0);
+    // Phase 2: la barra de título propia exige una ventana sin decoraciones
+    // del WM. El flag se pide explícitamente y no altera HiDPI/HIDDEN.
+    CHECK_EQ(guiWindowFlags(true, true) & ~Uint32(SDL_WINDOW_BORDERLESS),
+             guiWindowFlags(true));
+    CHECK((guiWindowFlags(true, true) & SDL_WINDOW_BORDERLESS) != 0);
+    CHECK((guiWindowFlags(false, true) & SDL_WINDOW_BORDERLESS) != 0);
     // El resto de la máscara no cambia con la opción: la única diferencia
     // entre ambas llamadas es el flag HiDPI.
     CHECK_EQ(guiWindowFlags(true) & ~Uint32(SDL_WINDOW_ALLOW_HIGHDPI),

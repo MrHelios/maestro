@@ -84,6 +84,8 @@ struct GuiPixelRect {
     bool valid = false;
 };
 
+class GuiTitleBar;
+
 class GuiRenderer : public ScreenRenderer {
 public:
     explicit GuiRenderer(const GuiOptions& opts = GuiOptions{});
@@ -183,6 +185,16 @@ public:
     // El loop GUI inyecta el SDL_Renderer* real (no-owned). Sin inyectar,
     // los render* son no-op seguros (útil en tests sin ventana).
     void setSdlRenderer(void* r);
+    // Phase 2: barra de título propia. El loop reserva `topInset` píxeles
+    // del drawable (la barra), reduce la grilla y el renderer desplaza el
+    // framebuffer hacia abajo, pinta la MessageBar sobre esa base y dibuja
+    // la barra en la franja superior antes de Present. Sin titleBar o con
+    // inset 0 el comportamiento es idéntico al de las decoraciones nativas.
+    void setTitleBar(GuiTitleBar* titleBar) { titleBar_ = titleBar; }
+    void setContentTopInset(int px) {
+        contentTopInset_ = px > 0 ? px : 0;
+    }
+    int contentTopInset() const { return contentTopInset_; }
     // Variante completa: inyecta renderer + abre la fuente y mide la celda.
     // Debe llamarse tras crear el SDL_Renderer y antes del primer resize.
     // `fontPixels` son PÍXELES DEL DRAWABLE (el loop ya escaló la base en
@@ -333,6 +345,10 @@ private:
     // SDL_Renderer* opaco (solo se toca en el .cpp bajo HAVE_SDL2).
     void* sdlRenderer_ = nullptr;
     GuiFont font_;
+    // Barra de título propia (no-owned) y alto reservado en píxeles del
+    // drawable. Ver setTitleBar/setContentTopInset.
+    GuiTitleBar* titleBar_ = nullptr;
+    int contentTopInset_ = 0;
 
     // Ultimo chrome/cursor calculados (para inspeccion en tests sin SDL y
     // para no recalcular en el pintado cuando hay SDL).
