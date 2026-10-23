@@ -1133,6 +1133,30 @@ void Editor::handleFileBrowserEvent(const InputEvent& event) {
             fileBrowser.moveDown();
             fileBrowser.clampScroll(active().viewport.height);
             break;
+        case InputEventType::MoveRight:
+            fileBrowserEnterDirectoryOnly();
+            if (fileBrowser.entries_.size() > 0 && fileBrowser.index_ < static_cast<int>(fileBrowser.entries_.size())) {
+                const FileBrowserEntry& e = fileBrowser.entries_[static_cast<size_t>(fileBrowser.index_)];
+                if (e.isDirectory) {
+                    const std::string err = fileBrowser.reload();
+                    if (!err.empty()) {
+                        setActionMessage(err, MessageKind::Error);
+                    } else {
+                        setStatusMessage(kHelpBufferSelector);
+                    }
+                }
+            }
+            break;
+        case InputEventType::MoveLeft:
+            if (fileBrowser.goUp()) {
+                const std::string err = fileBrowser.reload();
+                if (!err.empty()) {
+                    setActionMessage(err, MessageKind::Error);
+                } else {
+                    setStatusMessage(kHelpBufferSelector);
+                }
+            }
+            break;
         case InputEventType::ScrollUp:
             fileBrowser.moveUp();
             fileBrowser.clampScroll(active().viewport.height);
@@ -2561,6 +2585,17 @@ void Editor::handleSaveAsFileBrowserEvent(const InputEvent& event) {
             fileBrowser.moveDown();
             fileBrowser.clampScroll(active().viewport.height);
             break;
+        case InputEventType::MoveRight:
+            fileBrowserEnterDirectoryOnly();
+            break;
+        case InputEventType::MoveLeft:
+            if (fileBrowser.goUp()) {
+                const std::string err = fileBrowser.reload();
+                if (!err.empty()) {
+                    setActionMessage(err, MessageKind::Error);
+                }
+            }
+            break;
         case InputEventType::ScrollUp:
             fileBrowser.moveUp();
             fileBrowser.clampScroll(active().viewport.height);
@@ -2569,13 +2604,13 @@ void Editor::handleSaveAsFileBrowserEvent(const InputEvent& event) {
             fileBrowser.moveDown();
             fileBrowser.clampScroll(active().viewport.height);
             break;
-        case InputEventType::InsertNewline: // Enter: solo entra a carpetas
-            fileBrowserEnterDirectoryOnly();
+        case InputEventType::InsertNewline: // Enter: confirmar guardado
+            commitSaveAsFileBrowser();
             break;
         case InputEventType::InsertChar:
             // Contrato SaveAs: saveAsFileName_ es SOLO basename, sin path.
             // Se filtran '/' y '\' para que el input nunca se convierta en
-            // ruta: el directorio solo cambia navegando carpetas con Enter.
+            // ruta: el directorio solo cambia navegando carpetas con flecha derecha.
             // El filtrado es a nivel byte y seguro para UTF-8: 0x2F y 0x5C
             // nunca aparecen como bytes de continuacion multibyte.
             for (char ch : event.text) {
@@ -2584,7 +2619,7 @@ void Editor::handleSaveAsFileBrowserEvent(const InputEvent& event) {
             if (event.text.find('/') != std::string::npos ||
                 event.text.find('\\') != std::string::npos) {
                 setActionMessage("El nombre no puede contener rutas: "
-                                 "cambie de carpeta con Enter.",
+                                 "cambie de carpeta con flecha derecha.",
                                  MessageKind::Warning);
             }
             break;
@@ -2594,10 +2629,6 @@ void Editor::handleSaveAsFileBrowserEvent(const InputEvent& event) {
                                           static_cast<int>(saveAsFileName_.size()));
                 saveAsFileName_ = utf8::truncate(saveAsFileName_, cols - 1);
             }
-            break;
-        case InputEventType::Save:  // Ctrl+S: guardar
-        case InputEventType::SaveAs:  // Ctrl+Shift+S confirma igual
-            commitSaveAsFileBrowser();
             break;
         case InputEventType::Escape:
         case InputEventType::Prefix: // Ctrl+K dentro tambien cancela

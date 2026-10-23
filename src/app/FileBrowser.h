@@ -50,6 +50,10 @@ public:
     bool moveUp();
     bool moveDown();
 
+    // Sube al directorio padre (equivalente a seleccionar ".." y enter).
+    // Devuelve true si cambio de directorio.
+    bool goUp();
+
     // Enter sobre la entrada seleccionada.
     enum class EnterResult {
         None,               // no hay entradas

@@ -70,8 +70,8 @@ inline void typeBytes(Editor& ed, const std::string& s){ for(unsigned char c: s)
 // typePrompt(): escribe en el input del modal SaveAsFileBrowser (saveAsFileName_).
 inline void typePrompt(Editor& ed, const std::string& s){ typeBytes(ed, s); }
 inline void clearPrompt(Editor& ed){ while(!ed.saveAsFileName_.empty()) press(ed, InputEventType::Backspace); }
-// saveAsConfirm(): Ctrl+S en SaveAsFileBrowser para confirmar guardado.
-inline void saveAsConfirm(Editor& ed){ press(ed, InputEventType::Save); }
+// saveAsConfirm(): Enter en SaveAsFileBrowser para confirmar guardado.
+inline void saveAsConfirm(Editor& ed){ press(ed, InputEventType::InsertNewline); }
 // save(): Ctrl+K s (InsertChar 's') → guarda directo si tiene nombre, si no abre SaveAsFileBrowser.
 inline void save(Editor& ed){ press(ed, InputEventType::Prefix); InputEvent e; e.type=InputEventType::InsertChar; e.text="s"; ed.handleEvent(e); }
 inline void newBuffer(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('n')); }

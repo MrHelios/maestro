@@ -448,18 +448,20 @@ TEST(guikeymap_saveas_en_modales_noop_explicito) {
 // conservado. Con nombre nuevo, SaveAs escribe el archivo y vuelve al
 // estado previo, igual que Save.
 TEST(guikeymap_saveas_en_saveas_confirmacion_explicita) {
-    // Nombre vacío: ni SaveAs ni Save confirman nada.
+    // Nombre vacío: ni Enter ni Save confirman nada (Save ya no existe en SaveAsFileBrowser).
     {
         Editor ed;  // sin nombre: el prompt arranca vacío
         ed.executeCommand("buffer.guardar.como");
         CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
                  static_cast<int>(State::SaveAsFileBrowser));
         CHECK(ed.saveAsFileName_.empty());
-        ed.handleEvent(saveAsEvent());
+        InputEvent enter; enter.type = InputEventType::InsertNewline;
+        ed.handleEvent(enter);
         CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
                  static_cast<int>(State::SaveAsFileBrowser));
         CHECK(ed.saveAsFileName_.empty());
         CHECK(ed.isRunning());
+        // Save (Ctrl+S) también es no-op porque se removió de SaveAsFileBrowser.
         InputEvent s;
         s.type = InputEventType::Save;
         ed.handleEvent(s);
@@ -480,11 +482,55 @@ TEST(guikeymap_saveas_en_saveas_confirmacion_explicita) {
         const std::string dest = std::string("/tmp/") + name;
         CHECK(!std::filesystem::exists(dest));
         ed.saveAsFileName_ = name;
-        ed.handleEvent(saveAsEvent());
+        InputEvent enter; enter.type = InputEventType::InsertNewline;
+        ed.handleEvent(enter);
         CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
                  static_cast<int>(State::Navegacion));
         CHECK_EQ(ed.getActiveBufferForTesting().filename, dest);
         CHECK_EQ(readFileBytes(dest), "hola");
+        CHECK(!ed.getActiveBufferForTesting().modified);
+        std::remove(dest.c_str());
+        CHECK(!std::filesystem::exists(dest));
+    }
+
+    // Con nombre válido: Save (Ctrl+S) y SaveAs (Ctrl+Shift+S) NO confirman el guardado.
+    // Solo Enter confirma. El estado sigue siendo SaveAsFileBrowser.
+    {
+        Editor ed;
+        ed.getActiveBufferForTesting().document.restore({"contenido valido"});
+        ed.executeCommand("buffer.guardar.como");
+        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+                 static_cast<int>(State::SaveAsFileBrowser));
+        ed.fileBrowser.startAt("/tmp");
+        CHECK(ed.fileBrowser.reload().empty());
+        const std::string name = uniqueSaveAsName();
+        const std::string dest = std::string("/tmp/") + name;
+        CHECK(!std::filesystem::exists(dest));
+        ed.saveAsFileName_ = name;
+
+        // Ctrl+S (Save) no hace nada: estado e input conservados.
+        InputEvent saveEvt; saveEvt.type = InputEventType::Save;
+        ed.handleEvent(saveEvt);
+        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+                 static_cast<int>(State::SaveAsFileBrowser));
+        CHECK_EQ(ed.saveAsFileName_, name);
+        CHECK(!std::filesystem::exists(dest));
+
+        // Ctrl+Shift+S (SaveAs) no hace nada: estado e input conservados.
+        InputEvent saveAsEvt; saveAsEvt.type = InputEventType::SaveAs;
+        ed.handleEvent(saveAsEvt);
+        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+                 static_cast<int>(State::SaveAsFileBrowser));
+        CHECK_EQ(ed.saveAsFileName_, name);
+        CHECK(!std::filesystem::exists(dest));
+
+        // Enter SÍ confirma: sale del modal y guarda el archivo.
+        InputEvent enter; enter.type = InputEventType::InsertNewline;
+        ed.handleEvent(enter);
+        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+                 static_cast<int>(State::Navegacion));
+        CHECK_EQ(ed.getActiveBufferForTesting().filename, dest);
+        CHECK_EQ(readFileBytes(dest), "contenido valido");
         CHECK(!ed.getActiveBufferForTesting().modified);
         std::remove(dest.c_str());
         CHECK(!std::filesystem::exists(dest));
@@ -556,12 +602,13 @@ TEST(guikeymap_saveas_errores_en_saveas_explicito) {
         ed.fileBrowser.startAt("/tmp");
         CHECK(ed.fileBrowser.reload().empty());
         ed.saveAsFileName_ = name;
-        ed.handleEvent(saveAsEvent());  // 1.º: arma confirmación
+        InputEvent enter; enter.type = InputEventType::InsertNewline;
+        ed.handleEvent(enter);  // 1.º: arma confirmación
         CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
                  static_cast<int>(State::SaveAsFileBrowser));
         CHECK_EQ(ed.saveAsConfirmPath_, dest);
         CHECK_EQ(readFileBytes(dest), "viejo");  // aún sin escribir
-        ed.handleEvent(saveAsEvent());  // 2.º: confirma y sobrescribe
+        ed.handleEvent(enter);  // 2.º: confirma y sobrescribe
         CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
                  static_cast<int>(State::Navegacion));
         CHECK_EQ(ed.getActiveBufferForTesting().filename, dest);

@@ -140,3 +140,11 @@ FileBrowser::EnterResult FileBrowser::enterDirectoryOnly() {
     if (!e.isDirectory) return EnterResult::None;  // traba: archivos no se abren
     return enter();
 }
+
+bool FileBrowser::goUp() {
+    if (path_ == "/") return false;
+    path_ = parentPath(path_);
+    index_ = 0;
+    scroll_ = 0;
+    return true;
+}

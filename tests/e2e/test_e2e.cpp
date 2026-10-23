@@ -631,8 +631,8 @@ TEST(e2e_06_multibuffer_basic_byte_exact) {
     clearPrompt(ed);
     for (char c : std::filesystem::path(fileB.path).filename().string())
         ed.handleEvent(insert(c));
-    // Confirmar con Ctrl+S
-    InputEvent saveEvt; saveEvt.type = InputEventType::Save; ed.handleEvent(saveEvt);
+    // Confirmar con Enter
+    InputEvent enterEvt; enterEvt.type = InputEventType::InsertNewline; ed.handleEvent(enterEvt);
     CHECK_EQ(ed.active().filename, fileB.path);
     CHECK(!ed.active().modified);
 
@@ -927,7 +927,7 @@ TEST(e2e_09_new_buffer_save_as_byte_exact) {
     clearPrompt(ed);
     for (char c : std::filesystem::path(f.path).filename().string())
         ed.handleEvent(insert(c));
-    InputEvent saveEvt; saveEvt.type = InputEventType::Save; ed.handleEvent(saveEvt);  // Ctrl+S
+    InputEvent saveEvt; saveEvt.type = InputEventType::InsertNewline; ed.handleEvent(saveEvt);  // Enter confirma
 
     CHECK(ed.active().filename == f.path);
     CHECK(!ed.active().modified);
@@ -1252,12 +1252,12 @@ TEST(e2e_13_save_error_invalid_path) {
     CHECK_EQ(ed.active().document.lineAt(0), "AAA_world");
     CHECK(ed.active().modified);
 
-    // Save As a un nombre imposible: Ctrl+K Ctrl+S -> escribir -> Ctrl+S.
+    // Save As a un nombre imposible: Ctrl+K Ctrl+S -> escribir -> Enter.
     prefix(ed, InputEventType::Prefix, InputEventType::Save);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAsFileBrowser));
     clearPrompt(ed);
     typePrompt(ed, tooLongName);  // ENAMETOOLONG -> error de guardado
-    InputEvent saveEvt; saveEvt.type = InputEventType::Save; ed.handleEvent(saveEvt);
+    InputEvent enterEvt; enterEvt.type = InputEventType::InsertNewline; ed.handleEvent(enterEvt);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAsFileBrowser));
 
     // error visible
@@ -1284,7 +1284,7 @@ TEST(e2e_13_save_error_invalid_path) {
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAsFileBrowser));
     clearPrompt(ed);
     typePrompt(ed, std::filesystem::path(f.path).filename().string());
-    saveEvt.type = InputEventType::Save; ed.handleEvent(saveEvt);
+    enterEvt.type = InputEventType::InsertNewline; ed.handleEvent(enterEvt);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Interaccion));
     CHECK_EQ(ed.active().filename, f.path);
     CHECK(!ed.active().modified);

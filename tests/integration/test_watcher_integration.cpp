@@ -653,7 +653,7 @@ TEST(save_as_new_file_end_to_end_isNew_hadWatch) {
         InputEvent ch; ch.type = InputEventType::InsertChar; ch.text = std::string(1, c);
         ed.handleEvent(ch);
     }
-    { InputEvent s; s.type = InputEventType::Save; ed.handleEvent(s); }  // Ctrl+S confirma
+    { InputEvent s; s.type = InputEventType::InsertNewline; ed.handleEvent(s); }  // Enter confirma
     CHECK_EQ(ed.active().filename, std::filesystem::absolute(fNew.path).lexically_normal().string());
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().document.lineAt(0), "save_as_content");
@@ -719,7 +719,7 @@ TEST(save_as_existing_file_overwrites_and_updates_watch) {
         InputEvent ch; ch.type = InputEventType::InsertChar; ch.text = std::string(1, c);
         ed.handleEvent(ch);
     }
-    { InputEvent s; s.type = InputEventType::Save; ed.handleEvent(s); }  // 1er Ctrl+S: arma confirmación
+    { InputEvent s; s.type = InputEventType::InsertNewline; ed.handleEvent(s); }  // 1er Enter: arma confirmación
     CHECK(ed.statusMessage_.text.find("ya existe") != std::string::npos);
     {
         std::ifstream in(fExisting.path, std::ios::binary);
@@ -727,7 +727,7 @@ TEST(save_as_existing_file_overwrites_and_updates_watch) {
         CHECK_EQ(disk, "existing\n");
     }
     CHECK_EQ(ed.buffers.count(), 1);
-    { InputEvent s; s.type = InputEventType::Save; ed.handleEvent(s); }  // 2do Ctrl+S: confirma y sobrescribe
+    { InputEvent s; s.type = InputEventType::InsertNewline; ed.handleEvent(s); }  // 2do Enter: confirma y sobrescribe
     CHECK_EQ(ed.active().filename, newAbs);
     CHECK(!ed.active().modified);
     CHECK_EQ(ed.active().document.lineAt(0), "save_as_overwrite");
@@ -786,7 +786,7 @@ TEST(save_as_failure_keeps_buffer_and_watch) {
         InputEvent ch; ch.type = InputEventType::InsertChar; ch.text = std::string(1, c);
         ed.handleEvent(ch);
     }
-    { InputEvent s; s.type = InputEventType::Save; ed.handleEvent(s); }
+    { InputEvent s; s.type = InputEventType::InsertNewline; ed.handleEvent(s); }
     CHECK_EQ(ed.active().filename, oldFilename);
     CHECK(ed.active().modified);
     CHECK(ed.active().savedIdentity == oldIdentity);

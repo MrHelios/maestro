@@ -344,6 +344,65 @@ TEST(browser_unrecognized_keys_ignored) {
 }
 
 // ---------------------------------------------------------------------------
+// Flechas derecha/izquierda en FileBrowser (modo abrir archivo)
+// ---------------------------------------------------------------------------
+TEST(browser_move_right_on_file_is_noop_enter_opens) {
+    // Flecha derecha sobre un archivo NO lo abre (solo entra en directorios).
+    // Enter SÍ lo abre.
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    t.file("archivo.txt");
+    Editor ed;
+    openFileBrowser(ed);
+    // entries: .. , archivo.txt
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(2));
+    press(ed, InputEventType::MoveDown);   // -> archivo.txt
+    CHECK_EQ(ed.fileBrowser.index_, 1);
+    CHECK(!ed.fileBrowser.entries_[1].isDirectory);
+
+    // MoveRight sobre archivo: no-op, se queda en FileBrowser
+    press(ed, InputEventType::MoveRight);
+    CHECK(ed.state_ == State::FileBrowser);
+    CHECK_EQ(ed.fileBrowser.index_, 1);
+    CHECK_EQ(size_t(1), ed.buffers.count());  // no se abrio buffer
+
+    // Enter sobre archivo: SÍ lo abre
+    press(ed, InputEventType::InsertNewline);
+    CHECK(ed.state_ == State::Navegacion);
+    CHECK_EQ(size_t(2), ed.buffers.count());
+    CHECK_EQ(ed.active().filename, t.path + "/archivo.txt");
+}
+
+TEST(browser_move_right_on_dir_enters_move_left_goes_up) {
+    // Flecha derecha sobre carpeta entra; flecha izquierda sube.
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    t.dir("subdir");
+    t.file("subdir/inner.txt");
+    Editor ed;
+    openFileBrowser(ed);
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(2)); // .. , subdir/
+
+    press(ed, InputEventType::MoveDown);   // -> subdir
+    CHECK_EQ(ed.fileBrowser.index_, 1);
+
+    // MoveRight sobre carpeta: entra
+    press(ed, InputEventType::MoveRight);
+    CHECK(ed.state_ == State::FileBrowser);
+    CHECK_EQ(ed.fileBrowser.path_, t.path + "/subdir");
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.entries_.size(), size_t(2)); // .. , inner.txt
+
+    // MoveLeft: sube al padre
+    press(ed, InputEventType::MoveLeft);
+    CHECK(ed.state_ == State::FileBrowser);
+    CHECK_EQ(ed.fileBrowser.path_, t.path);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+}
+
+// ---------------------------------------------------------------------------
 // Navegacion por indice
 // ---------------------------------------------------------------------------
 TEST(browser_navigation_clamps) {
@@ -903,6 +962,23 @@ TEST(browser_at_root_has_no_parent) {
     }
     press(ed, InputEventType::Escape);
     CHECK(ed.state_ == State::Navegacion);
+}
+
+TEST(browser_go_up_at_root_returns_false_no_change) {
+    // goUp() en "/" devuelve false y no cambia path_/index_/scroll_.
+    CwdGuard g;
+    g.enter("/");
+    Editor ed;
+    openFileBrowser(ed);
+    CHECK_EQ(ed.fileBrowser.path_, "/");
+    const int idxBefore = ed.fileBrowser.index_;
+    const int scrollBefore = ed.fileBrowser.scroll_;
+
+    bool changed = ed.fileBrowser.goUp();
+    CHECK(!changed);                    // no hay padre
+    CHECK_EQ(ed.fileBrowser.path_, "/"); // sin cambio
+    CHECK_EQ(ed.fileBrowser.index_, idxBefore);
+    CHECK_EQ(ed.fileBrowser.scroll_, scrollBefore);
 }
 
 // ---------------------------------------------------------------------------

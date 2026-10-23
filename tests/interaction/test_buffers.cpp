@@ -1072,13 +1072,13 @@ TEST(save_as_unnamed_user_can_change_directory) {
     CHECK(dirIdx >= 0);
     while (ed.fileBrowser.index_ < dirIdx) press(ed, InputEventType::MoveDown);
     while (ed.fileBrowser.index_ > dirIdx) press(ed, InputEventType::MoveUp);
-    press(ed, InputEventType::InsertNewline);  // Enter: entra a sub
+    press(ed, InputEventType::MoveRight);  // Flecha derecha: entra a sub
     CHECK_EQ(ed.fileBrowser.path_, t.path + "/sub");
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
 
     clearPrompt(ed);
     typePrompt(ed, "copia.txt");
-    saveAsConfirm(ed);  // Ctrl+S
+    press(ed, InputEventType::InsertNewline);  // Enter: confirma guardado
     CHECK_EQ(ed.active().filename, t.path + "/sub/copia.txt");
     CHECK(!ed.active().modified);
     CHECK_EQ(fileContent(t.path + "/sub/copia.txt"), "data");

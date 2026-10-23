@@ -382,7 +382,7 @@ TEST(saveas_browser_enter_on_directory_enters) {
     CHECK(dirIdx >= 0);
     while (ed.fileBrowser.index_ < dirIdx) press(ed, InputEventType::MoveDown);
     while (ed.fileBrowser.index_ > dirIdx) press(ed, InputEventType::MoveUp);
-    press(ed, InputEventType::InsertNewline);  // Enter sobre carpeta
+    press(ed, InputEventType::MoveRight);  // Flecha derecha sobre carpeta
 
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
     CHECK_EQ(ed.buffers.count(), countBefore);  // entrar no abre buffers
@@ -422,13 +422,13 @@ TEST(saveas_browser_dotdot_navigates_up_and_saves_there) {
     };
 
     selectDotDot();
-    press(ed, InputEventType::InsertNewline);  // Enter en ".." -> temp/a
+    press(ed, InputEventType::MoveLeft);  // Flecha izquierda en ".." -> temp/a
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
     CHECK_EQ(ed.buffers.count(), countBefore);  // entrar no abre buffers
     CHECK_EQ(ed.fileBrowser.path_, t.path + "/a");
 
     selectDotDot();
-    press(ed, InputEventType::InsertNewline);  // Enter en ".." -> temp
+    press(ed, InputEventType::MoveLeft);  // Flecha izquierda en ".." -> temp
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
     CHECK_EQ(ed.buffers.count(), countBefore);
     CHECK_EQ(ed.fileBrowser.path_, t.path);
@@ -436,7 +436,7 @@ TEST(saveas_browser_dotdot_navigates_up_and_saves_there) {
     // Guardar en el directorio seleccionado tras navegar.
     clearPrompt(ed);
     typePrompt(ed, "subido.txt");
-    saveAsConfirm(ed);  // Ctrl+S
+    press(ed, InputEventType::InsertNewline);  // Enter: confirma guardado
     CHECK_EQ(ed.active().filename, t.path + "/subido.txt");
     CHECK(!ed.active().modified);
     CHECK_EQ(fileContent(t.path + "/subido.txt"), "x");
