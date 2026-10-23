@@ -161,7 +161,7 @@ TEST(rename_esc_saca_prompt_y_cursor_vuelve_al_archivo) {
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Renombrar));
     const std::string docSeq = expectedCursorSeq(ed);
     std::string during = fullFrame(ed, sink);
-    CHECK(contains(during, "Nombre del archivo:"));
+    CHECK(contains(during, "Nombre del Archivo: "));
     // Durante el prompt el cursor del documento se desactiva.
     CHECK(!contains(during, docSeq));
     CHECK_EQ(countOccurrences(during, Ansi::CURSOR_SHOW), 1);

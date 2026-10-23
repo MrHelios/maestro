@@ -285,7 +285,7 @@ TEST(messagebar_renombrar_editor_cursor_no_en_documento) {
     ed.handleEvent(insert('r'));
     CHECK(ed.getStateForTesting() == State::Renombrar);
     std::string during = fullFrame(ed, sink);
-    CHECK(contains(during, "Nombre del archivo:"));
+    CHECK(contains(during, "Nombre del Archivo: "));
     CHECK(!contains(during, expectedDocSeq(ed)));
     CHECK_EQ(countOccurrences(during, Ansi::CURSOR_SHOW), 1);
     CHECK(contains(during, Ansi::CURSOR_BLINK));

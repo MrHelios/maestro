@@ -22,19 +22,17 @@ namespace {
 // cambiar el texto sea tocar un solo lugar, no buscarlo repetido por el
 // archivo. Antes "ABRIR: ..." estaba duplicado en startFileBrowser() y
 // fileBrowserEnterSelected(); con esto solo hay una fuente de verdad.
-constexpr const char* kHelpBufferSelector =
-    "ENTER: open | ESC: cancel | \u2191/\u2193: move";
+constexpr const char* kHelpBufferSelector = "ENTER: open | ESC: cancel | \u2191/\u2193: move";
 constexpr const char* kHelpBusqueda = "Find: ";
 constexpr const char* kHelpNavegacion =
     "NAVEGACION: i escribir | s seleccionar | c/x copiar/cortar | p pegar | "
     "Ctrl+K buffer/guardar/salir | Ctrl+U/Y deshacer/rehacer";
 constexpr const char* kHelpEmpty = "";
-constexpr const char* kHelpPrefix =
-    "command: Ctrl+k";
+constexpr const char* kHelpPrefix = "command: Ctrl+k";
 constexpr const char* kHelpIrAFila = "ir a fila: ";
-constexpr const char* kHelpRenombrar = "Nombre del archivo: ";
-constexpr const char* kHelpSaveAsPrompt = "Nombre del Archivo: ";
-constexpr const char* kHelpSaveAsSuffix = " (Control+S para Guardar)";
+constexpr const char* kHelpNombrar = "Nombre del Archivo: ";
+constexpr const char* kHelpSaveAsSuffix = " (Enter para Guardar)";
+
 // Byte offset del cursor de edición al final del input de un prompt
 // (prompt + query), antes de cualquier decoración posterior
 // (" - not found", " (i/N)", " [max ...]", " (Control+S...)"): el input se
@@ -1409,11 +1407,11 @@ void Editor::renderFrame() {
         // El cursor va al final del nombre, antes del sufijo.
         Message shown = statusMessage_;
         if (shown.text.empty()) {
-            shown = Message{std::string(kHelpSaveAsPrompt) + saveAsFileName_ +
+            shown = Message{std::string(kHelpNombrar) + saveAsFileName_ +
                                 kHelpSaveAsSuffix,
                             MessageKind::Prompt, std::nullopt,
-                            promptCursor(kHelpSaveAsPrompt, saveAsFileName_),
-                            promptBoldPrefix(kHelpSaveAsPrompt)};
+                            promptCursor(kHelpNombrar, saveAsFileName_),
+                            promptBoldPrefix(kHelpNombrar)};
         }
         renderer_->renderSaveAsFileList(items,
                                         fileBrowser.index_, fileBrowser.scroll_,
@@ -3342,10 +3340,10 @@ void Editor::startRename() {
     renameQuery_ =
         std::filesystem::path(b.filename).filename().string();
     state_ = State::Renombrar;
-    setStatusMessage(std::string(kHelpRenombrar) + renameQuery_,
+    setStatusMessage(std::string(kHelpNombrar) + renameQuery_,
                      MessageKind::Prompt,
-                     promptCursor(kHelpRenombrar, renameQuery_),
-                     promptBoldPrefix(kHelpRenombrar));
+                     promptCursor(kHelpNombrar, renameQuery_),
+                     promptBoldPrefix(kHelpNombrar));
 }
 
 void Editor::handleRenameEvent(const InputEvent& event) {
@@ -3366,18 +3364,18 @@ void Editor::handleRenameEvent(const InputEvent& event) {
                 if (renameQuery_.size() + event.text.size() >
                     kMaxRenameBytes) {
                     setStatusMessage(
-                        std::string(kHelpRenombrar) + renameQuery_ +
+                        std::string(kHelpNombrar) + renameQuery_ +
                             " [max 255 bytes]",
                         MessageKind::Error,
-                        promptCursor(kHelpRenombrar, renameQuery_),
-                        promptBoldPrefix(kHelpRenombrar));
+                        promptCursor(kHelpNombrar, renameQuery_),
+                        promptBoldPrefix(kHelpNombrar));
                 } else {
                     renameQuery_ += event.text;
                     setStatusMessage(
-                        std::string(kHelpRenombrar) + renameQuery_,
+                        std::string(kHelpNombrar) + renameQuery_,
                         MessageKind::Prompt,
-                        promptCursor(kHelpRenombrar, renameQuery_),
-                        promptBoldPrefix(kHelpRenombrar));
+                        promptCursor(kHelpNombrar, renameQuery_),
+                        promptBoldPrefix(kHelpNombrar));
                 }
             }
             break;
@@ -3390,10 +3388,10 @@ void Editor::handleRenameEvent(const InputEvent& event) {
                 renameQuery_ =
                     utf8::truncate(renameQuery_, cols - 1);
                 setStatusMessage(
-                    std::string(kHelpRenombrar) + renameQuery_,
+                    std::string(kHelpNombrar) + renameQuery_,
                     MessageKind::Prompt,
-                    promptCursor(kHelpRenombrar, renameQuery_),
-                    promptBoldPrefix(kHelpRenombrar));
+                    promptCursor(kHelpNombrar, renameQuery_),
+                    promptBoldPrefix(kHelpNombrar));
             }
             break;
         case InputEventType::InsertNewline:
@@ -3415,27 +3413,27 @@ void Editor::commitRename() {
     Buffer& b = active();
     const std::string& q = renameQuery_;
     if (q.empty()) {
-        setStatusMessage(std::string(kHelpRenombrar) + "[nombre vacio]",
+        setStatusMessage(std::string(kHelpNombrar) + "[nombre vacio]",
                          MessageKind::Error,
-                         promptCursor(kHelpRenombrar, q),
-                         promptBoldPrefix(kHelpRenombrar));
+                         promptCursor(kHelpNombrar, q),
+                         promptBoldPrefix(kHelpNombrar));
         return;
     }
     if (q.size() > kMaxRenameBytes) {
-        setStatusMessage(std::string(kHelpRenombrar) + "[max 255 bytes]",
+        setStatusMessage(std::string(kHelpNombrar) + "[max 255 bytes]",
                          MessageKind::Error,
-                         promptCursor(kHelpRenombrar, q),
-                         promptBoldPrefix(kHelpRenombrar));
+                         promptCursor(kHelpNombrar, q),
+                         promptBoldPrefix(kHelpNombrar));
         return;
     }
     if (q == "." || q == ".." ||
         q.find('/') != std::string::npos ||
         q.find('\\') != std::string::npos) {
         setStatusMessage(
-            std::string(kHelpRenombrar) + "[nombre invalido: sin rutas]",
+            std::string(kHelpNombrar) + "[nombre invalido: sin rutas]",
             MessageKind::Error,
-            promptCursor(kHelpRenombrar, q),
-            promptBoldPrefix(kHelpRenombrar));
+            promptCursor(kHelpNombrar, q),
+            promptBoldPrefix(kHelpNombrar));
         return;
     }
     const std::string oldPath = b.filename;
