@@ -7,5 +7,16 @@ enum class SyntaxToken {
     String,
     Character,
     Number,
-    Comment
+    Comment,
+    Heading,
+    Bold,
+    Italic,
+    Code,
+    CodeBlock,
+    Link,
+    LinkUrl,
+    Image,
+    BlockQuote,
+    HorizontalRule,
+    ListItem
 };

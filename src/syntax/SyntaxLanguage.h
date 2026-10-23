@@ -6,7 +6,8 @@
 enum class SyntaxLanguage {
     None,
     C,
-    Cpp
+    Cpp,
+    Markdown
 };
 
 /**
@@ -27,5 +28,6 @@ inline SyntaxLanguage languageFromFilename(const std::string& filename) {
     if (ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".c++" ||
         ext == ".hpp" || ext == ".hh" || ext == ".hxx" || ext == ".h++" ||
         ext == ".h" || ext == ".ipp") return SyntaxLanguage::Cpp;
+    if (ext == ".md" || ext == ".markdown") return SyntaxLanguage::Markdown;
     return SyntaxLanguage::None;
 }

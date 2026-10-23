@@ -4,6 +4,7 @@
 #include "syntax/SyntaxLanguage.h"
 #include "syntax/SyntaxSpan.h"
 #include "syntax/CLikeHighlighter.h"
+#include "syntax/MarkdownHighlighter.h"
 
 /**
  * @file SyntaxHighlighter.h
@@ -11,6 +12,7 @@
  *
  * - Si lang==None no genera spans (early return, 0 alloc).
  * - Para C/Cpp delega en CLikeHighlighter con el mismo SyntaxState.
+ * - Para Markdown delega en MarkdownHighlighter.
  * - Ofrece dos familias: retorno por valor (conveniencia) y `out` reutilizable
  *   (path caliente en Renderer para evitar allocations por línea).
  */
@@ -34,4 +36,5 @@ public:
 private:
     SyntaxLanguage lang_ = SyntaxLanguage::None;
     CLikeHighlighter cLike_;
+    MarkdownHighlighter markdown_;
 };

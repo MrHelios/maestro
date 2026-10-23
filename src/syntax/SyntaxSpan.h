@@ -17,6 +17,10 @@ struct SyntaxState {
     char rawDelim[16] = {};
     uint8_t rawDelimLen = 0;
 
+    bool inCodeBlock = false;
+    char codeBlockDelimChar = 0;
+    uint16_t codeBlockDelimLen = 0;
+
     std::string_view rawDelimView() const { return std::string_view(rawDelim, rawDelimLen); }
     void setRawDelim(std::string_view v) {
         rawDelimLen = static_cast<uint8_t>(v.size() > 16 ? 16 : v.size());
@@ -26,6 +30,7 @@ struct SyntaxState {
     void clearRawDelim() { rawDelimLen = 0; rawDelim[0] = '\0'; }
     bool operator==(const SyntaxState& o) const {
         if (inBlockComment != o.inBlockComment || inRawString != o.inRawString || rawDelimLen != o.rawDelimLen) return false;
+        if (inCodeBlock != o.inCodeBlock || codeBlockDelimChar != o.codeBlockDelimChar || codeBlockDelimLen != o.codeBlockDelimLen) return false;
         return std::memcmp(rawDelim, o.rawDelim, rawDelimLen) == 0;
     }
     bool operator!=(const SyntaxState& o) const { return !(*this==o); }
