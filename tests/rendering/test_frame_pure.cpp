@@ -106,6 +106,22 @@ TEST(frame_sin_ansi_y_con_roles) {
     CHECK(hasSyntax);
 }
 
+TEST(frame_markdown_inline_sobre_heading) {
+    Document doc;
+    doc.restore({"# Head **bold**"});
+    Viewport vp = makeVp(0, 0, 1);
+    Cursor cur;
+
+    FrameBuilder b;
+    Frame f = b.buildFrame(doc, cur, vp, "a.md", false,
+                           makeChromeRequest(Message("", MessageKind::Info, std::nullopt),
+                                             State::Navegacion),
+                           std::nullopt);
+
+    CHECK(hasRole(f, StyleRole::SyntaxHeading));
+    CHECK(hasRole(f, StyleRole::SyntaxBold));
+}
+
 TEST(frame_busqueda_cursor_en_messagebar) {
     Document doc = makeDoc();
     Viewport vp = makeVp();
