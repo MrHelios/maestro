@@ -96,6 +96,17 @@ StyleRole FrameBuilder::syntaxRoleFor(SyntaxToken tok) {
         case SyntaxToken::Character:    return StyleRole::SyntaxCharacter;
         case SyntaxToken::Number:       return StyleRole::SyntaxNumber;
         case SyntaxToken::Comment:      return StyleRole::SyntaxComment;
+        case SyntaxToken::Heading:      return StyleRole::SyntaxHeading;
+        case SyntaxToken::Bold:         return StyleRole::SyntaxBold;
+        case SyntaxToken::Italic:       return StyleRole::SyntaxItalic;
+        case SyntaxToken::Code:         return StyleRole::SyntaxCode;
+        case SyntaxToken::CodeBlock:    return StyleRole::SyntaxCodeBlock;
+        case SyntaxToken::Link:         return StyleRole::SyntaxLink;
+        case SyntaxToken::LinkUrl:      return StyleRole::SyntaxLinkUrl;
+        case SyntaxToken::Image:        return StyleRole::SyntaxImage;
+        case SyntaxToken::BlockQuote:   return StyleRole::SyntaxBlockQuote;
+        case SyntaxToken::HorizontalRule: return StyleRole::SyntaxHorizontalRule;
+        case SyntaxToken::ListItem:     return StyleRole::SyntaxListItem;
     }
     return StyleRole::SyntaxKeyword;
 }
@@ -507,12 +518,17 @@ StyledRow FrameBuilder::buildContentRow(
         } else {
             SyntaxToken tok = SyntaxToken::Keyword;
             bool hasSyn = false;
-            for (auto& sv : synVis)
+            int bestLen = 0;
+            for (auto& sv : synVis) {
                 if (segS >= sv.s && segS < sv.e) {
-                    hasSyn = true;
-                    tok = sv.tok;
-                    break;
+                    int len = sv.e - sv.s;
+                    if (!hasSyn || len < bestLen) {
+                        hasSyn = true;
+                        bestLen = len;
+                        tok = sv.tok;
+                    }
                 }
+            }
             if (hasSyn) {
                 emit.emitPiece(seg, syntaxRoleFor(tok));
             } else {

@@ -189,6 +189,17 @@ inline const std::string& themeAnsiFor(const TtyTheme& t, StyleRole role) {
         case StyleRole::SyntaxCharacter:    return t.syntaxCharacter;
         case StyleRole::SyntaxNumber:       return t.syntaxNumber;
         case StyleRole::SyntaxComment:      return t.syntaxComment;
+        case StyleRole::SyntaxHeading:      return t.syntaxKeyword;
+        case StyleRole::SyntaxBold:         return t.syntaxKeyword;
+        case StyleRole::SyntaxItalic:       return t.syntaxType;
+        case StyleRole::SyntaxCode:         return t.syntaxString;
+        case StyleRole::SyntaxCodeBlock:    return t.syntaxString;
+        case StyleRole::SyntaxLink:         return t.syntaxString;
+        case StyleRole::SyntaxLinkUrl:      return t.syntaxPreprocessor;
+        case StyleRole::SyntaxImage:        return t.syntaxString;
+        case StyleRole::SyntaxBlockQuote:   return t.syntaxComment;
+        case StyleRole::SyntaxHorizontalRule: return t.syntaxComment;
+        case StyleRole::SyntaxListItem:     return t.syntaxKeyword;
     }
     return kEmpty;
 }

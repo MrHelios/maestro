@@ -151,6 +151,28 @@ inline std::optional<ThemeColor> themeFgFor(const ThemePalette& p,
             return p.syntaxNumber;
         case StyleRole::SyntaxComment:
             return p.syntaxComment;
+        case StyleRole::SyntaxHeading:
+            return p.syntaxKeyword;
+        case StyleRole::SyntaxBold:
+            return p.syntaxKeyword;
+        case StyleRole::SyntaxItalic:
+            return p.syntaxType;
+        case StyleRole::SyntaxCode:
+            return p.syntaxString;
+        case StyleRole::SyntaxCodeBlock:
+            return p.syntaxString;
+        case StyleRole::SyntaxLink:
+            return p.syntaxString;
+        case StyleRole::SyntaxLinkUrl:
+            return p.syntaxPreprocessor;
+        case StyleRole::SyntaxImage:
+            return p.syntaxString;
+        case StyleRole::SyntaxBlockQuote:
+            return p.syntaxComment;
+        case StyleRole::SyntaxHorizontalRule:
+            return p.syntaxComment;
+        case StyleRole::SyntaxListItem:
+            return p.syntaxKeyword;
     }
     return std::nullopt;
 }

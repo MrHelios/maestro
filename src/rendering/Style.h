@@ -52,6 +52,17 @@ enum class StyleRole {
     SyntaxCharacter,
     SyntaxNumber,
     SyntaxComment,
+    SyntaxHeading,
+    SyntaxBold,
+    SyntaxItalic,
+    SyntaxCode,
+    SyntaxCodeBlock,
+    SyntaxLink,
+    SyntaxLinkUrl,
+    SyntaxImage,
+    SyntaxBlockQuote,
+    SyntaxHorizontalRule,
+    SyntaxListItem,
 };
 
 // ---------------------------------------------------------------------------
@@ -88,6 +99,17 @@ inline bool isSyntaxRole(StyleRole r) {
         case StyleRole::SyntaxCharacter:
         case StyleRole::SyntaxNumber:
         case StyleRole::SyntaxComment:
+        case StyleRole::SyntaxHeading:
+        case StyleRole::SyntaxBold:
+        case StyleRole::SyntaxItalic:
+        case StyleRole::SyntaxCode:
+        case StyleRole::SyntaxCodeBlock:
+        case StyleRole::SyntaxLink:
+        case StyleRole::SyntaxLinkUrl:
+        case StyleRole::SyntaxImage:
+        case StyleRole::SyntaxBlockQuote:
+        case StyleRole::SyntaxHorizontalRule:
+        case StyleRole::SyntaxListItem:
             return true;
         default:
             return false;
