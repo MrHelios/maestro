@@ -2892,6 +2892,16 @@ void Editor::navigateSearch(int dir) {
 
 void Editor::handleBusquedaEvent(const InputEvent& event) {
     switch (event.type) {
+        case InputEventType::Paste: {
+            auto maybe = clipboard_->paste();
+            if (!maybe || maybe->empty()) {
+                break;
+            }
+        
+            searchQuery_ += *maybe;
+            updateSearch();
+            break;
+        }
         case InputEventType::InsertChar:
             searchQuery_ += event.text;
             updateSearch();

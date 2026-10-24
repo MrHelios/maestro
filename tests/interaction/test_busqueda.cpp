@@ -721,3 +721,105 @@ TEST(busqueda_property_random) {
         assertStateConsistent(ed);
     }
 }
+
+#include "helpers/FakeClipboard.h"
+
+// ---------------------------------------------------------
+// 1. Pegado durante la búsqueda (acumulativo y actualiza resultados)
+// ---------------------------------------------------------
+TEST(busqueda_paste_actualiza_query_y_resultados) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("mundo");
+    Editor ed(std::move(clipboard)); 
+    
+    ed.active().document.restore({"hola mundo", "adios"});
+    ed.active().cursor.line=0; ed.active().cursor.col=0;
+    ed.handleEvent(insert('f'));
+    typeBytes(ed, "hola "); 
+    
+    ed.handleEvent(ev(InputEventType::Paste)); 
+    
+    CHECK_EQ(ed.searchQuery_, "hola mundo");
+    CHECK_EQ(ed.active().cursor.line, 0);
+    CHECK_EQ(ed.active().cursor.col, 0); 
+    CHECK(ed.statusMessage_.text.find("(1/1)") != std::string::npos);
+}
+
+// ---------------------------------------------------------
+// 2. Documento intacto
+// ---------------------------------------------------------
+TEST(busqueda_paste_no_modifica_documento) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("xyz");
+    Editor ed(std::move(clipboard));
+    
+    ed.active().document.restore({"hola mundo"});
+    auto before = ed.active().document.snapshot();
+    size_t undoBefore = ed.active().undoStack.size();
+    
+    ed.handleEvent(insert('f'));
+    ed.handleEvent(ev(InputEventType::Paste));
+    
+    CHECK(before == ed.active().document.snapshot());
+    CHECK_EQ(ed.active().undoStack.size(), undoBefore);
+}
+
+// ---------------------------------------------------------
+// 3. Estado preservado
+// ---------------------------------------------------------
+TEST(busqueda_paste_mantiene_estado) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("hola");
+    Editor ed(std::move(clipboard));
+    
+    ed.active().document.restore({"hola"});
+    ed.handleEvent(insert('f'));
+    ed.handleEvent(ev(InputEventType::Paste));
+    
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Busqueda));
+}
+
+// ---------------------------------------------------------
+// 4. Portapapeles vacío / nulo
+// ---------------------------------------------------------
+TEST(busqueda_paste_vacio_no_modifica) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    // No llamamos a simulateExternalCopy ni copy -> paste() devolverá ""
+    // Si quisieras probar std::nullopt explícitamente: clipboard->setFailPaste(true);
+    Editor ed(std::move(clipboard));
+    
+    ed.active().document.restore({"hola"});
+    ed.handleEvent(insert('f'));
+    typeBytes(ed, "ho");
+    
+    ed.handleEvent(ev(InputEventType::Paste));
+    
+    CHECK_EQ(ed.searchQuery_, "ho"); 
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Busqueda));
+}
+
+// ---------------------------------------------------------
+// 5. Regresión de navegación
+// ---------------------------------------------------------
+TEST(navegacion_paste_inserta_en_documento) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("mundo");
+    Editor ed(std::move(clipboard));
+    
+    ed.active().document.restore({"hola "});
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 5;
+    size_t undoBefore = ed.active().undoStack.size();
+    
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    ed.handleEvent(ev(InputEventType::Paste));
+    
+    CHECK_EQ(ed.active().document.lineAt(0), "hola mundo");
+    CHECK_EQ(ed.active().cursor.col, 10);
+    CHECK(ed.active().undoStack.size() > undoBefore); 
+}
