@@ -1950,6 +1950,9 @@ void Editor::handleEvent(const InputEvent& event) {
 
 void Editor::handleNavegacionEvent(const InputEvent& event) {
     switch (event.type) {
+        case InputEventType::Paste:
+            commands_.execute("navegacion.pegar");
+            break;
         case InputEventType::InsertChar:
             // En navegacion no se escribe: las letras solo pueden ser
             // comandos de modo. 'i' entra a edicion; 's' a seleccion;
@@ -2011,6 +2014,7 @@ void Editor::handleInteraccionEvent(const InputEvent& event) {
         b.selection.reset();
     }
     switch (event.type) {
+        case InputEventType::Paste: commands_.execute("navegacion.pegar"); break;
         case InputEventType::InsertChar:
             // Edicion libre real: cualquier letra (incluida i/s/p/c/x)
             // se inserta como texto. Aqui no son comandos de modo.
@@ -2248,6 +2252,12 @@ void Editor::handleSeleccionEvent(const InputEvent& event) {
             commands_.execute("vista.scroll.arriba"); break;
         case InputEventType::ScrollDown:
             commands_.execute("vista.scroll.abajo"); break;
+        case InputEventType::Copy:
+            commands_.execute("seleccion.copiar"); break;
+        case InputEventType::Cut:
+            commands_.execute("seleccion.cortar"); break;
+        case InputEventType::Paste:
+            commands_.execute("navegacion.pegar"); break;
 
         // 'c' copia el rango al buffer y 'x' lo copia y lo borra; ambos
         // terminan la seleccion y vuelven a navegacion. Si la seleccion

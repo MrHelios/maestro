@@ -95,6 +95,9 @@ enum class InputEventType {
     // el Editor lo aplica tal cual (resize(rows, cols)) sin
     // consultar ningún backend ni provider.
     Resize,
+    Copy,
+    Cut,
+    Paste,
 };
 
 struct InputEvent {

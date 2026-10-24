@@ -1081,20 +1081,22 @@ TEST(guitext_enter_is_keydown_not_textinput) {
 namespace {
 const std::vector<InputEventType>& allEventTypes() {
     static const std::vector<InputEventType> v = {
-        InputEventType::None,        InputEventType::InsertChar,
+        InputEventType::None,          InputEventType::InsertChar,
         InputEventType::InsertNewline, InputEventType::MoveLeft,
-        InputEventType::MoveRight,   InputEventType::MoveUp,
-        InputEventType::MoveDown,    InputEventType::MoveHome,
-        InputEventType::MoveEnd,     InputEventType::PageUp,
-        InputEventType::PageDown,    InputEventType::Backspace,
-        InputEventType::Delete,      InputEventType::Undo,
-        InputEventType::Redo,        InputEventType::Quit,
-        InputEventType::Prefix,      InputEventType::Save,
-        InputEventType::SaveAs,      InputEventType::Suspend,
+        InputEventType::MoveRight,     InputEventType::MoveUp,
+        InputEventType::MoveDown,      InputEventType::MoveHome,
+        InputEventType::MoveEnd,       InputEventType::PageUp,
+        InputEventType::PageDown,      InputEventType::Backspace,
+        InputEventType::Delete,        InputEventType::Undo,
+        InputEventType::Redo,          InputEventType::Quit,
+        InputEventType::Prefix,        InputEventType::Save,
+        InputEventType::SaveAs,        InputEventType::Suspend,
         InputEventType::Escape,
-        InputEventType::ScrollUp,    InputEventType::ScrollDown,
-        InputEventType::MousePress,  InputEventType::MouseDrag,
-        InputEventType::MouseRelease, InputEventType::Resize,
+        InputEventType::ScrollUp,      InputEventType::ScrollDown,
+        InputEventType::MousePress,    InputEventType::MouseDrag,
+        InputEventType::MouseRelease,  InputEventType::Resize,
+        InputEventType::Copy,          InputEventType::Cut,
+        InputEventType::Paste,
     };
     return v;
 }
@@ -1152,7 +1154,7 @@ bool containsSym(const std::vector<GuiKeySym>& v, GuiKeySym s) {
 TEST(guikeymap_listas_centralizadas_cantidad_headless) {
     // Candados de cantidad: el enum no es contable por reflexión; si alguien
     // agrega un valor y no actualiza la lista central, esto falla a propósito.
-    CHECK_EQ(allEventTypes().size(), size_t(27));
+    CHECK_EQ(allEventTypes().size(), size_t(30));
     CHECK_EQ(repeatableEventTypes().size(), size_t(10));
     CHECK_EQ(allKeySyms().size(), size_t(41));
     CHECK_EQ(nonTextKeySyms().size(), size_t(14));
@@ -1184,7 +1186,7 @@ TEST(guikeymap_no_repeat_exhaustivo_headless) {
     // repite exactamente si está en repeatableEventTypes(). Un valor nuevo
     // del enum sin clasificar rompe el conteo de la lista (test anterior) o
     // cae aquí como no-clasificado.
-    CHECK_EQ(allEventTypes().size(), size_t(27));
+    CHECK_EQ(allEventTypes().size(), size_t(30));
     for (InputEventType t : allEventTypes()) {
         CHECK(km.isRepeatable(t) == containsType(repeatableEventTypes(), t));
     }
@@ -1402,4 +1404,33 @@ TEST(guikeymap_bindable_particion_por_familia_headless) {
                      InputEventType::InsertNewline));
     km.resetDefaults();
     CHECK(!km.mapKey(key(GuiKeySym::Tab)).has_value());
+}
+
+// ===========================================================================
+// GuiKeymap: Ctrl+C, Ctrl+X, Ctrl+V
+// ===========================================================================
+TEST(guikeymap_clipboard_shortcuts) {
+    GuiKeymap keymap;
+    keymap.resetDefaults();
+
+    // 1. Atajos estándar generan los eventos semánticos correctos
+    CHECK(keymap.mapKey(key(GuiKeySym::KeyC, true, false, false)) == InputEventType::Copy);
+    CHECK(keymap.mapKey(key(GuiKeySym::KeyX, true, false, false)) == InputEventType::Cut);
+    CHECK(keymap.mapKey(key(GuiKeySym::KeyV, true, false, false)) == InputEventType::Paste);
+
+    // 2. Sin modificadores, son caracteres normales (InsertChar) o no-op
+    // (dependiendo de cómo tu keymap maneje las letras sueltas, pero NUNCA
+    // deben ser Copy/Cut/Paste).
+    CHECK(keymap.mapKey(key(GuiKeySym::KeyC, false, false, false)) != InputEventType::Copy);
+    CHECK(keymap.mapKey(key(GuiKeySym::KeyX, false, false, false)) != InputEventType::Cut);
+    CHECK(keymap.mapKey(key(GuiKeySym::KeyV, false, false, false)) != InputEventType::Paste);
+
+    // 3. Modificadores adicionales (Shift/Alt) NO deben confundirse con los
+    // atajos estándar de portapapeles.
+    CHECK(keymap.mapKey(key(GuiKeySym::KeyC, true, true, false)) != InputEventType::Copy);   // Ctrl+Shift+C
+    CHECK(keymap.mapKey(key(GuiKeySym::KeyX, true, true, false)) != InputEventType::Cut);    // Ctrl+Shift+X
+    CHECK(keymap.mapKey(key(GuiKeySym::KeyV, true, true, false)) != InputEventType::Paste);  // Ctrl+Shift+V
+    
+    CHECK(keymap.mapKey(key(GuiKeySym::KeyC, true, false, true)) != InputEventType::Copy);   // Ctrl+Alt+C
+    CHECK(keymap.mapKey(key(GuiKeySym::KeyV, true, false, true)) != InputEventType::Paste);  // Ctrl+Alt+V
 }

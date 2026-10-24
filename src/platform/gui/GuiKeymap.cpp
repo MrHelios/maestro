@@ -111,6 +111,9 @@ void GuiKeymap::resetDefaults() {
     bindKey({GuiKeySym::KeyK, true, false, false}, InputEventType::Prefix);
     bindKey({GuiKeySym::KeyK, true, false, true}, InputEventType::Prefix);
     bindKey({GuiKeySym::KeyS, true, false, false}, InputEventType::Save);
+    bindKey({GuiKeySym::KeyC, true, false, false}, InputEventType::Copy);
+    bindKey({GuiKeySym::KeyX, true, false, false}, InputEventType::Cut);
+    bindKey({GuiKeySym::KeyV, true, false, false}, InputEventType::Paste);
     bindKey({GuiKeySym::KeyS, true, false, true}, InputEventType::SaveAs);
     bindKey({GuiKeySym::KeyQ, true, false, false}, InputEventType::Quit);
     bindKey({GuiKeySym::KeyQ, true, false, true}, InputEventType::Quit);

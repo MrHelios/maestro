@@ -1187,3 +1187,267 @@ TEST(interaction_save_switching_buffers_isolated_modified) {
     ed.activateBuffer(1);
     CHECK(!ed.active().modified);                      // B.modified=false
 }
+
+// ===========================================================================
+// P0: GUI Events - Copy, Cut, Paste (InputEventType::Copy/Cut/Paste)
+// ===========================================================================
+// Propósito: verificar que los eventos semánticos de la GUI (Ctrl+C, Ctrl+X,
+// Ctrl+V) dispatchean correctamente a los comandos internos y producen los
+// mismos resultados que sus contrapartes de teclado ('c', 'x', 'p'),
+// manteniendo la integridad del historial de Undo/Redo y del portapapeles.
+// ---------------------------------------------------------------------------
+
+// Helper para el evento Copy
+static void runCopyEventCase(
+    const std::vector<std::string>& lines,
+    Position a,
+    Position p,
+    const std::vector<std::string>& clipboard) {
+    Editor ed;
+    prepareScenario(ed, lines, a, p);
+    expectState(ed, lines, p, true, a, p, false);
+    
+    press(ed, InputEventType::Copy);
+    
+    // El documento y el cursor no cambian, pero la selección se limpia
+    // y el estado vuelve a Navegación (comportamiento de seleccion.copiar).
+    expectState(ed, lines, p, false, {0,0}, {0,0}, false);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK(ed.getClipboardBlock() == clipboard);
+}
+
+TEST(interaction_copy_event_selection_partial) {
+    runCopyEventCase(
+        {"hello world"},
+        {0, 6}, {0, 11},
+        {"world"});
+}
+
+TEST(interaction_copy_event_without_selection) {
+    Editor ed;
+    preparePaste(ed, {"hello world"}, {0, 5}); // Estado: Navegacion, sin selección
+    ed.setClipboardBlock({"previous"});
+    
+    press(ed, InputEventType::Copy);
+    
+    // El documento y el portapapeles no cambian (no hay nada que copiar).
+    CHECK(ed.active().document.lineAt(0) == "hello world");
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"previous"}));
+    CHECK(!ed.active().modified);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+}
+
+// Helper para el evento Cut
+static void runCutEventCase(
+    const std::vector<std::string>& lines,
+    Position a,
+    Position p,
+    const std::vector<std::string>& afterCut,
+    Position cursorAfterCut,
+    const std::vector<std::string>& clipboard) {
+    Editor ed;
+    prepareScenario(ed, lines, a, p);
+    expectState(ed, lines, p, true, a, p, false);
+    CHECK(ed.getClipboardBlock().empty());
+
+    press(ed, InputEventType::Cut);
+    expectState(ed, afterCut, cursorAfterCut, false, {0, 0}, {0, 0}, true);
+    CHECK(ed.getClipboardBlock() == clipboard);
+
+    press(ed, InputEventType::Undo);
+    expectState(ed, lines, p, true, a, p, false);
+    CHECK(ed.getClipboardBlock() == clipboard); // El clipboard no se deshace
+
+    press(ed, InputEventType::Redo);
+    expectState(ed, afterCut, cursorAfterCut, false, {0, 0}, {0, 0}, true);
+    CHECK(ed.getClipboardBlock() == clipboard);
+}
+
+TEST(interaction_cut_event_selection_partial) {
+    runCutEventCase(
+        {"hello world"},
+        {0, 6}, {0, 11},
+        {"hello "}, {0, 6},
+        {"world"});
+}
+
+TEST(interaction_cut_event_selection_multiline) {
+    runCutEventCase(
+        {"aaa", "bbb", "ccc"},
+        {0, 0}, {2, 2},
+        {"c"}, {0, 0},
+        {"aaa", "bbb", "cc"});
+}
+
+TEST(interaction_cut_event_without_selection) {
+    Editor ed;
+    preparePaste(ed, {"abc"}, {0, 1}); // Navegacion, sin selección
+    ed.setClipboardBlock({"previous"});
+    
+    press(ed, InputEventType::Cut);
+    
+    // El documento y el portapapeles no cambian.
+    CHECK(ed.active().document.lineAt(0) == "abc");
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{"previous"}));
+    CHECK(!ed.active().modified);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+}
+
+// Helper para el evento Paste
+static void runPasteEventCase(
+    const std::vector<std::string>& lines,
+    Position cursorPos,
+    const std::vector<std::string>& clipboard,
+    const std::vector<std::string>& afterPaste,
+    Position cursorAfterPaste) {
+    Editor ed;
+    preparePaste(ed, lines, cursorPos);
+    ed.setClipboardBlock(clipboard);
+    
+    press(ed, InputEventType::Paste);
+    expectState(ed, afterPaste, cursorAfterPaste, false, {0, 0}, {0, 0}, true);
+    CHECK(ed.getClipboardBlock() == clipboard);
+
+    press(ed, InputEventType::Undo);
+    expectState(ed, lines, cursorPos, false, {0, 0}, {0, 0}, false);
+    CHECK(ed.getClipboardBlock() == clipboard);
+}
+
+static void runPasteReplaceEventCase(
+    const std::vector<std::string>& lines,
+    Position a,
+    Position p,
+    const std::vector<std::string>& clipboard,
+    const std::vector<std::string>& afterPaste,
+    Position cursorAfterPaste) {
+    Editor ed;
+    prepareScenario(ed, lines, a, p);
+    ed.setClipboardBlock(clipboard);
+    
+    press(ed, InputEventType::Paste);
+    expectState(ed, afterPaste, cursorAfterPaste, false, {0, 0}, {0, 0}, true);
+    CHECK(ed.getClipboardBlock() == clipboard);
+
+    press(ed, InputEventType::Undo);
+    expectState(ed, lines, p, true, a, p, false);
+    CHECK(ed.getClipboardBlock() == clipboard);
+}
+
+TEST(interaction_paste_event_at_cursor_then_undo) {
+    runPasteEventCase(
+        {"abc"}, {0, 3},
+        {"XYZ"},
+        {"abcXYZ"}, {0, 6});
+}
+
+TEST(interaction_paste_event_replaces_selection_then_undo) {
+    runPasteReplaceEventCase(
+        {"hello world"},
+        {0, 6}, {0, 11},
+        {"XYZ"},
+        {"hello XYZ"}, {0, 9});
+}
+
+TEST(interaction_paste_event_multiline) {
+    runPasteEventCase(
+        {"abc"}, {0, 3},
+        {"line1", "line2"},
+        {"abcline1", "line2"}, {1, 5});
+}
+
+TEST(interaction_paste_event_utf8) {
+    const std::string line = "caf\xC3\xA9";
+    const std::string clip = "\xF0\x9F\x98\x80"; // 😀
+    runPasteEventCase(
+        {line}, {0, 5}, // Después de 'é'
+        {clip},
+        {"caf\xC3\xA9\xF0\x9F\x98\x80"}, {0, 9});
+}
+
+// ===========================================================================
+// Dispatch desde distintos estados
+// ===========================================================================
+
+TEST(interaction_paste_event_in_interaction) {
+    Editor ed;
+    ed.active().document.restore({"abc"});
+    ed.active().originalSnapshot_ = ed.active().document.snapshot();
+    ed.active().modified = false;
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 3;
+    ed.state_ = State::Interaccion;
+    ed.setClipboardBlock({"XYZ"});
+    
+    press(ed, InputEventType::Paste);
+    
+    CHECK(ed.active().document.lineAt(0) == "abcXYZ");
+    CHECK(ed.active().modified);
+    // Nota: navegacion.pegar fuerza el estado a Navegacion. 
+    // Si en el futuro se desea permanecer en Interaccion al pegar desde la GUI,
+    // se deberá crear un comando interaccion.pegar o modificar navegacion.pegar.
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+}
+
+TEST(interaction_paste_event_empty_clipboard) {
+    Editor ed;
+    preparePaste(ed, {"abc"}, {0, 3});
+    
+    // Capturar el estado del historial ANTES del intento de pegado
+    const size_t undoSizeBefore = ed.active().undoStack.size();
+    const size_t redoSizeBefore = ed.active().redoStack.size();
+    
+    press(ed, InputEventType::Paste);
+    
+    // 1. El documento y el estado no cambian
+    CHECK(ed.active().document.lineAt(0) == "abc");
+    CHECK(!ed.active().modified);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    
+    // 2. CONTRATO FUERTE: No se crea ninguna entrada de historial
+    CHECK_EQ(ed.active().undoStack.size(), undoSizeBefore);
+    CHECK_EQ(ed.active().redoStack.size(), redoSizeBefore);
+    
+    // 3. Intentar deshacer después no debe romper nada ni deshacer el "vacío"
+    press(ed, InputEventType::Undo);
+    CHECK(ed.active().document.lineAt(0) == "abc");
+    CHECK_EQ(ed.active().undoStack.size(), undoSizeBefore); // Sigue igual
+}
+
+// --- Cut: Documento completo vía evento GUI ---
+TEST(interaction_cut_event_selection_complete_document) {
+    runCutEventCase(
+        {"hola", "mundo"},
+        {0, 0}, {1, 5},           // todo el documento
+        {""}, {0, 0},
+        {"hola", "mundo"});       // clipboard = archivo entero
+}
+
+// --- Cut: UTF-8 vía evento GUI ---
+TEST(interaction_cut_event_selection_utf8) {
+    const std::string line = "caf\xC3\xA9"; // "café" ('é' = 2 bytes)
+    const std::string selText = "\xC3\xA9";
+    runCutEventCase(
+        {line},
+        {0, 3}, {0, 5},           // Selecciona solo 'é'
+        {"caf"}, {0, 3},
+        {selText});
+}
+
+// --- Copy: UTF-8 vía evento GUI ---
+TEST(interaction_copy_event_selection_utf8) {
+    const std::string line = "abc \xF0\x9F\x98\x80 xyz"; // emoji de 4 bytes
+    const std::string selText = "\xF0\x9F\x98\x80";
+    
+    Editor ed;
+    // Selecionamos el emoji: empieza en col 4, termina en col 8
+    prepareScenario(ed, {line}, {0, 4}, {0, 8});
+    expectState(ed, {line}, {0, 8}, true, {0, 4}, {0, 8}, false);
+    
+    press(ed, InputEventType::Copy);
+    
+    // El documento no cambia, pero el clipboard tiene los bytes exactos del emoji
+    CHECK(ed.active().document.lineAt(0) == line);
+    CHECK_EQ(ed.active().document.lineAt(0).size(), 12u); // Longitud en bytes intacta
+    CHECK(ed.getClipboardBlock() == (std::vector<std::string>{selText}));
+}
+
