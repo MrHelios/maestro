@@ -365,12 +365,12 @@ TEST(browser_move_right_on_file_is_noop_enter_opens) {
     press(ed, InputEventType::MoveRight);
     CHECK(ed.state_ == State::FileBrowser);
     CHECK_EQ(ed.fileBrowser.index_, 1);
-    CHECK_EQ(size_t(1), ed.buffers.count());  // no se abrio buffer
+    CHECK_EQ(1, ed.buffers.count());  // no se abrio buffer
 
     // Enter sobre archivo: SÍ lo abre
     press(ed, InputEventType::InsertNewline);
     CHECK(ed.state_ == State::Navegacion);
-    CHECK_EQ(size_t(2), ed.buffers.count());
+    CHECK_EQ(2, ed.buffers.count());
     CHECK_EQ(ed.active().filename, t.path + "/archivo.txt");
 }
 
