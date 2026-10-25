@@ -1,5 +1,6 @@
 #include "test_framework.h"
 #include "app/Editor.h"
+#include "helpers/FakeClipboard.h"
 #include "platform/InputEvent.h"
 #include "document/Document.h"
 #include <string>
@@ -105,6 +106,50 @@ TEST(go_to_line_last) {
     CHECK_EQ(static_cast<int>(editor.getStateForTesting()), static_cast<int>(State::Navegacion));
     CHECK_EQ(buffer.cursor.line, 99);
     CHECK_EQ(buffer.cursor.col, 0);
+}
+
+TEST(go_to_line_paste_digits) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("42");
+    Editor ed(std::move(clipboard));
+    setupDocumentWithLines(ed, 100);
+    ed.processEventForTesting(makeCharEvent("g"));
+    ed.processEventForTesting(makeKeyEvent(InputEventType::Paste));
+    CHECK_EQ(ed.getGoToLineQueryForTesting(), std::string("42"));
+}
+
+TEST(go_to_line_paste_filters_non_digits) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("línea 42");
+    Editor ed(std::move(clipboard));
+    setupDocumentWithLines(ed, 100);
+    ed.processEventForTesting(makeCharEvent("g"));
+    ed.processEventForTesting(makeKeyEvent(InputEventType::Paste));
+    CHECK_EQ(ed.getGoToLineQueryForTesting(), std::string("42"));
+}
+
+TEST(go_to_line_paste_noop_on_no_digits) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("abc");
+    Editor ed(std::move(clipboard));
+    setupDocumentWithLines(ed, 100);
+    ed.processEventForTesting(makeCharEvent("g"));
+    ed.processEventForTesting(makeKeyEvent(InputEventType::Paste));
+    CHECK_EQ(ed.getGoToLineQueryForTesting(), std::string(""));
+}
+
+TEST(go_to_line_paste_concatenates_digits) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("12\n34");
+    Editor ed(std::move(clipboard));
+    setupDocumentWithLines(ed, 100);
+    ed.processEventForTesting(makeCharEvent("g"));
+    ed.processEventForTesting(makeKeyEvent(InputEventType::Paste));
+    CHECK_EQ(ed.getGoToLineQueryForTesting(), std::string("1234"));
 }
 
 TEST(go_to_line_zero_invalid) {

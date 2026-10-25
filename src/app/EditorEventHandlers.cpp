@@ -1498,6 +1498,37 @@ void Editor::handleBusquedaEvent(const InputEvent& event) {
 
 void Editor::handleIrAFilaEvent(const InputEvent& event) {
     switch (event.type) {
+        case InputEventType::Paste: {
+            auto maybe = clipboard_->paste();
+            if (!maybe || maybe->empty()) {
+                break;
+            }
+
+            // El prompt de "Ir a fila" solo acepta dígitos.
+            // Del clipboard tomamos únicamente caracteres 0-9.
+            std::string digits;
+            digits.reserve(maybe->size());
+
+            for (char ch : *maybe) {
+                if (ch >= '0' && ch <= '9') {
+                    digits.push_back(ch);
+                }
+            }
+
+            if (digits.empty()) {
+                break;
+            }
+
+            goToLineQuery_ += digits;
+
+            setStatusMessage(
+                std::string(kHelpIrAFila) + goToLineQuery_,
+                MessageKind::Prompt,
+                promptCursor(kHelpIrAFila, goToLineQuery_),
+                promptBoldPrefix(kHelpIrAFila));
+
+            break;
+        }
         case InputEventType::InsertChar:
             // Solo aceptar dígitos, descartando cualquier otro carácter
             if (event.text.size() == 1 && event.text[0] >= '0' && event.text[0] <= '9') {
