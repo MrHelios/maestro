@@ -442,3 +442,46 @@ TEST(saveas_browser_dotdot_navigates_up_and_saves_there) {
     CHECK_EQ(fileContent(t.path + "/subido.txt"), "x");
     CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::Navegacion));
 }
+
+TEST(save_as_paste_agrega_nombre) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("backup.txt");
+    Editor ed(std::move(clipboard));
+    TempDir dir;
+    std::string orig = dir.file("a.txt");
+    CHECK(ed.loadIntoActiveBuffer(orig));
+    openSaveAs(ed);
+    clearPrompt(ed);
+    press(ed, InputEventType::Paste);
+    CHECK_EQ(ed.saveAsFileName_, std::string("backup.txt"));
+}
+
+TEST(save_as_paste_filtra_separadores) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("carpeta/backup.txt");
+    Editor ed(std::move(clipboard));
+    TempDir dir;
+    std::string orig = dir.file("a.txt");
+    CHECK(ed.loadIntoActiveBuffer(orig));
+    openSaveAs(ed);
+    clearPrompt(ed);
+    press(ed, InputEventType::Paste);
+    CHECK_EQ(ed.saveAsFileName_, std::string("carpetabackup.txt"));
+    CHECK(ed.statusMessage_.text.find("rutas") != std::string::npos);
+}
+
+TEST(save_as_paste_descarta_controles) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("backup.txt\n");
+    Editor ed(std::move(clipboard));
+    TempDir dir;
+    std::string orig = dir.file("a.txt");
+    CHECK(ed.loadIntoActiveBuffer(orig));
+    openSaveAs(ed);
+    clearPrompt(ed);
+    press(ed, InputEventType::Paste);
+    CHECK_EQ(ed.saveAsFileName_, std::string("backup.txt"));
+}

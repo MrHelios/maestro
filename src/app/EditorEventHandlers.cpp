@@ -1254,6 +1254,39 @@ void Editor::handleSaveAsFileBrowserEvent(const InputEvent& event) {
         case InputEventType::InsertNewline: // Enter: confirmar guardado
             commitSaveAsFileBrowser();
             break;
+        case InputEventType::Paste: {
+            auto maybe = clipboard_->paste();
+            if (!maybe || maybe->empty()) {
+                break;
+            }
+
+            bool sawPathSeparator = false;
+
+            for (char ch : *maybe) {
+                // Mismo contrato que InsertChar: '/' y '\' no entran al nombre.
+                if (ch == '/' || ch == '\\') {
+                    sawPathSeparator = true;
+                    continue;
+                }
+
+                // Evitar controles como \r, \n, \t, NUL, DEL, etc.
+                const unsigned char uc = static_cast<unsigned char>(ch);
+                if (uc < 0x20 || uc == 0x7F) {
+                    continue;
+                }
+
+                saveAsFileName_ += ch;
+            }
+
+            if (sawPathSeparator) {
+                setActionMessage(
+                    "El nombre no puede contener rutas: "
+                    "cambie de carpeta con flecha derecha.",
+                    MessageKind::Warning);
+            }
+
+            break;
+        }
         case InputEventType::InsertChar:
             // Contrato SaveAs: saveAsFileName_ es SOLO basename, sin path.
             // Se filtran '/' y '\' para que el input nunca se convierta en
