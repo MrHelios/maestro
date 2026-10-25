@@ -299,6 +299,70 @@ TEST(rename_mismo_nombre_es_noop) {
     CHECK(ed.statusMessage_.text.find("Sin cambios.") != std::string::npos);
 }
 
+TEST(rename_paste_nombre_limpio) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("informe.txt");
+    Editor ed(std::move(clipboard));
+
+    TempDir dir;
+    std::string orig = dir.file("a.txt");
+    CHECK(ed.loadIntoActiveBuffer(orig));
+    openRename(ed);
+    clearRename(ed);
+    press(ed, InputEventType::Paste);
+    CHECK_EQ(ed.renameQuery_, std::string("informe.txt"));
+}
+
+TEST(rename_paste_con_ruta_rechazado) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("docs/informe.txt");
+    Editor ed(std::move(clipboard));
+
+    TempDir dir;
+    std::string orig = dir.file("a.txt");
+    CHECK(ed.loadIntoActiveBuffer(orig));
+    openRename(ed);
+    clearRename(ed);
+    press(ed, InputEventType::Paste);
+    CHECK(ed.renameQuery_.empty());
+    CHECK(ed.statusMessage_.text.find("rutas") != std::string::npos);
+    CHECK(std::filesystem::exists(orig));
+    CHECK(!std::filesystem::exists(dir.path + "/docs"));
+}
+
+TEST(rename_paste_descarta_controles) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy("informe.txt\n");
+    Editor ed(std::move(clipboard));
+
+    TempDir dir;
+    std::string orig = dir.file("a.txt");
+    CHECK(ed.loadIntoActiveBuffer(orig));
+    openRename(ed);
+    clearRename(ed);
+    press(ed, InputEventType::Paste);
+    CHECK_EQ(ed.renameQuery_, std::string("informe.txt"));
+}
+
+TEST(rename_paste_respeta_limite_255) {
+    FakeClipboard::resetGlobal();
+    auto clipboard = std::make_unique<FakeClipboard>();
+    clipboard->simulateExternalCopy(std::string(256, 'x'));
+    Editor ed(std::move(clipboard));
+
+    TempDir dir;
+    std::string orig = dir.file("a.txt");
+    CHECK(ed.loadIntoActiveBuffer(orig));
+    openRename(ed);
+    clearRename(ed);
+    press(ed, InputEventType::Paste);
+    CHECK(ed.renameQuery_.empty());
+    CHECK(std::filesystem::exists(orig));
+}
+
 TEST(rename_executeCommand_puerta_gui) {
     // El comando debe funcionar via CommandMap directo (boton GUI), sin
     // pasar por Prefix: regla InputEvent/CommandMap de architecture.md.

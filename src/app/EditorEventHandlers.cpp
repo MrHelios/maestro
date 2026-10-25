@@ -1711,6 +1711,63 @@ void Editor::handleRenameEvent(const InputEvent& event) {
             }
             break;
         }
+        case InputEventType::Paste: {
+            auto maybe = clipboard_->paste();
+            if (!maybe || maybe->empty()) {
+                break;
+            }
+
+            const std::string& raw = *maybe;
+
+            // Mismo contrato que InsertChar: si el pegado contiene ruta,
+            // se rechaza entero. No se filtra parcialmente.
+            if (raw.find('/') != std::string::npos ||
+                raw.find('\\') != std::string::npos) {
+                setActionMessage("El nombre no puede contener rutas.",
+                                 MessageKind::Warning);
+                break;
+            }
+
+            // Un paste puede traer \r\n, \n, \t, NUL u otros controles.
+            // En un prompt de nombre eso no debería entrar.
+            // Se conservan bytes UTF-8 válidos (>= 0x80).
+            std::string clean;
+            clean.reserve(raw.size());
+
+            for (char ch : raw) {
+                const unsigned char uc = static_cast<unsigned char>(ch);
+
+                // Consideramos imprimibles/sanos desde 0x20, excluyendo DEL.
+                if (uc >= 0x20 && uc != 0x7F) {
+                    clean.push_back(ch);
+                }
+            }
+
+            if (clean.empty()) {
+                break;
+            }
+
+            // Respetar el límite actual del rename.
+            if (renameQuery_.size() + clean.size() > kMaxRenameBytes) {
+                setStatusMessage(
+                    std::string(kHelpNombrar) + renameQuery_ +
+                        " [max 255 bytes]",
+                    MessageKind::Error,
+                    promptCursor(kHelpNombrar, renameQuery_),
+                    promptBoldPrefix(kHelpNombrar));
+                break;
+            }
+
+            renameQuery_ += clean;
+
+            setStatusMessage(
+                std::string(kHelpNombrar) + renameQuery_,
+                MessageKind::Prompt,
+                promptCursor(kHelpNombrar, renameQuery_),
+                promptBoldPrefix(kHelpNombrar));
+
+            break;
+        }
         case InputEventType::Backspace:
             if (!renameQuery_.empty()) {
                 int cols = utf8::columnOf(
