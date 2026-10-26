@@ -241,11 +241,11 @@ void Editor::handleFileBrowserEvent(const InputEvent& event) {
             fileBrowser.moveDown();
             fileBrowser.clampScroll(active().viewport.height);
             break;
-        case InputEventType::MoveRight:
-            fileBrowserEnterDirectoryOnly();
+        case InputEventType::MoveRight: {
             if (fileBrowser.entries_.size() > 0 && fileBrowser.index_ < static_cast<int>(fileBrowser.entries_.size())) {
                 const FileBrowserEntry& e = fileBrowser.entries_[static_cast<size_t>(fileBrowser.index_)];
-                if (e.isDirectory) {
+                if (e.isDirectory  && e.name != "..") {
+                    fileBrowserEnterDirectoryOnly();
                     const std::string err = fileBrowser.reload();
                     if (!err.empty()) {
                         setActionMessage(err, MessageKind::Error);
@@ -255,16 +255,22 @@ void Editor::handleFileBrowserEvent(const InputEvent& event) {
                 }
             }
             break;
-        case InputEventType::MoveLeft:
-            if (fileBrowser.goUp()) {
-                const std::string err = fileBrowser.reload();
-                if (!err.empty()) {
-                    setActionMessage(err, MessageKind::Error);
-                } else {
-                    setStatusMessage(kHelpBufferSelector);
+        }
+        case InputEventType::MoveLeft: {
+            if (fileBrowser.entries_.size() > 0 && fileBrowser.index_ < static_cast<int>(fileBrowser.entries_.size())) {
+                const FileBrowserEntry& e = fileBrowser.entries_[static_cast<size_t>(fileBrowser.index_)];
+                if (e.name == "..") {
+                    fileBrowser.goUp();
+                    const std::string err = fileBrowser.reload();
+                    if (!err.empty()) {
+                        setActionMessage(err, MessageKind::Error);
+                    } else {
+                        setStatusMessage(kHelpBufferSelector);
+                    }
                 }
             }
             break;
+        }
         case InputEventType::ScrollUp:
             fileBrowser.moveUp();
             fileBrowser.clampScroll(active().viewport.height);
@@ -1232,17 +1238,23 @@ void Editor::handleSaveAsFileBrowserEvent(const InputEvent& event) {
             fileBrowser.moveDown();
             fileBrowser.clampScroll(active().viewport.height);
             break;
-        case InputEventType::MoveRight:
-            fileBrowserEnterDirectoryOnly();
+        case InputEventType::MoveRight: {
+            const FileBrowserEntry& e = fileBrowser.entries_[static_cast<size_t>(fileBrowser.index_)];
+            if(e.isDirectory && e.name != "..")
+                fileBrowserEnterDirectoryOnly();
             break;
-        case InputEventType::MoveLeft:
-            if (fileBrowser.goUp()) {
+        }
+        case InputEventType::MoveLeft: {
+            const FileBrowserEntry& e = fileBrowser.entries_[static_cast<size_t>(fileBrowser.index_)];
+            if (e.name == "..") {
+                fileBrowser.goUp();
                 const std::string err = fileBrowser.reload();
                 if (!err.empty()) {
                     setActionMessage(err, MessageKind::Error);
                 }
             }
             break;
+        }
         case InputEventType::ScrollUp:
             fileBrowser.moveUp();
             fileBrowser.clampScroll(active().viewport.height);
