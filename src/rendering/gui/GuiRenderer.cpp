@@ -66,6 +66,7 @@ void* GuiRenderer::acquireFb(FrameSurface& s, void* sdlRenderer, int wPx,
     }
     return s.tex;
 #else
+    (void)s;
     (void)sdlRenderer;
     (void)wPx;
     (void)hPx;
@@ -413,6 +414,7 @@ void snapshotFrameContent(const Frame& f,
     }
 }
 
+#ifdef HAVE_SDL2
 // ¿Vive este cursor como barra visible dentro del chrome? Solo esas barras
 // ensucian el chrome al dibujarse/borrarse (las de contenido ensucian su
 // fila vía markCursorRow; los bloques fijos se deciden por cambio de celda).
@@ -423,10 +425,12 @@ bool isChromeBar(const FrameCursor& c, const Layout& layout) {
     const int r0 = layout.chrome.row, r1 = r0 + layout.chrome.height;
     return c.cell.row >= r0 && c.cell.row < r1;
 }
+#endif
 
 // La composición de las líneas de los modales vive en
 // rendering/ListLines.h (compartida con TTY): acá solo se snapshot/pinta.
 
+#ifdef HAVE_SDL2
 // Glifo bajo el cursor Block para inversión (paridad visual con el TTY,
 // que mantiene el carácter legible sobre el bloque). Puro, sin SDL: se
 // resuelve desde el Frame / líneas del modal + Layout, sin leer píxeles.
@@ -652,6 +656,8 @@ BlockGlyph blockGlyphInSnapshot(const std::vector<GuiContentRow>& rows,
     }
     return g;
 }
+
+#endif
 
 // Igualdad de selecciones opcionales (el highlight es función de sus
 // extremos; dos renders con la misma selección pintan lo mismo por fila).
@@ -1501,12 +1507,14 @@ bool GuiRenderer::tryFastCursorMove(
     }
     int repainted = 0, skipped = 0;
     for (char d : dirty) (d ? repainted : skipped) += 1;
+#ifdef HAVE_SDL2
     bool paintChrome = chromeDirty;
     if (true) {
         const bool newBar = isChromeBar(next, g.layout);
         const bool oldBar = isChromeBar(prevContent, g.layout);
         if (newBar || (oldBar && cursorChanged)) paintChrome = true;
     }
+#endif
     noteStats(false, repainted, skipped, chromeDirty);
     // Publica snapshots y caché (solo las filas reconstruidas).
     lastChrome_ = payload.data;
@@ -1517,7 +1525,9 @@ bool GuiRenderer::tryFastCursorMove(
     lastListLines_.clear();
     lastListSelected_ = -1;
     lastListScroll_ = 0;
+#ifdef HAVE_SDL2
     const bool shown = cursorShown();
+#endif
     for (int k = 0; k < nRels; ++k) {
         contentRows_[static_cast<size_t>(rb[k].rel)] = rb[k].snap;
         lastContentRows_[static_cast<size_t>(rb[k].rel)] = rb[k].snap;
@@ -1755,12 +1765,14 @@ bool GuiRenderer::tryFastScrollLine(
     }
     int repainted = 0, skipped = 0;
     for (char d : dirty) (d ? repainted : skipped) += 1;
+#ifdef HAVE_SDL2
     bool paintChrome = chromeDirty;
     {
         const bool newBar = isChromeBar(next, g.layout);
         const bool oldBar = isChromeBar(prevContent, g.layout);
         if (newBar || (oldBar && cursorChanged)) paintChrome = true;
     }
+#endif
     noteStats(false, repainted, skipped, chromeDirty);
     lastChrome_ = payload.data;
     lastAccent_ = payload.statusAccent;
@@ -1770,7 +1782,9 @@ bool GuiRenderer::tryFastScrollLine(
     lastListLines_.clear();
     lastListSelected_ = -1;
     lastListScroll_ = 0;
+#ifdef HAVE_SDL2
     const bool shown = cursorShown();
+#endif
     contentChrome_ = payload.data;
     contentAccent_ = payload.statusAccent;
     contentLayout_ = g.layout;
@@ -1921,7 +1935,9 @@ void GuiRenderer::renderScreenDiff(
     lastListLines_.clear();
     lastListSelected_ = -1;
     lastListScroll_ = 0;
+#ifdef HAVE_SDL2
     const bool shown = cursorShown();
+#endif
 
     // --- Diff por línea contra el caché de contenido ---
     const int contentH = static_cast<int>(fresh.size());
@@ -1976,6 +1992,7 @@ void GuiRenderer::renderScreenDiff(
     // visibilidad), hay que restaurar fondo+texto aunque el nuevo ya no sea
     // barra (si no, queda una barra residual). Si el nuevo sigue siendo
     // barra en el chrome se repinta cada frame para animarla.
+#ifdef HAVE_SDL2
     bool paintChrome = chromeDirty;
     if (!full) {
         const bool newBar = isChromeBar(f.cursor, f.layout);
@@ -1987,6 +2004,7 @@ void GuiRenderer::renderScreenDiff(
             !(prevContent.cell == f.cursor.cell);
         if (newBar || (oldBar && cursorChanged)) paintChrome = true;
     }
+#endif
     noteStats(full, repainted, skipped, chromeDirty);
     contentChrome_ = f.chrome;
     contentAccent_ = f.statusAccent;
@@ -2099,7 +2117,9 @@ void GuiRenderer::renderListCommon(std::vector<ListLine> lines,
     lastListScroll_ = scrollSnapshot;
     noteCursorForBlink(next);
     lastCursor_ = next;
+#ifdef HAVE_SDL2
     const bool shown = cursorShown();
+#endif
 
     const int listH = static_cast<int>(lines.size());
     const int lcw = font_.cellW();
@@ -2142,6 +2162,7 @@ void GuiRenderer::renderListCommon(std::vector<ListLine> lines,
     }
     // P2: igual que en el contenido (ver renderScreenDiff): con el cursor
     // ANTERIOR y el nuevo. Vale para SaveAs, cuya barra vive en el chrome.
+#ifdef HAVE_SDL2
     bool paintChrome = chromeDirty;
     if (!full) {
         const bool newBar = isChromeBar(next, layout);
@@ -2152,6 +2173,7 @@ void GuiRenderer::renderListCommon(std::vector<ListLine> lines,
             prevList.shape != next.shape || !(prevList.cell == next.cell);
         if (newBar || (oldBar && listCursorMoved)) paintChrome = true;
     }
+#endif
     noteStats(full, repainted, skipped, chromeDirty);
     listChrome_ = chrome;
     listAccent_ = accent;
