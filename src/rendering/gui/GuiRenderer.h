@@ -84,6 +84,24 @@ struct GuiPixelRect {
     bool valid = false;
 };
 
+struct GuiScrollInfo {
+    int top = 0;
+    int visible = 0;
+    int total = 0;
+};
+
+struct GuiScrollbarPress {
+    bool handled = false;
+    bool onThumb = false;
+    int top = 0;
+    int grabOffsetPx = 0;
+};
+
+#ifdef HAVE_SDL2
+struct SDL_Renderer;
+struct SDL_Texture;
+#endif
+
 class GuiTitleBar;
 
 class GuiRenderer : public ScreenRenderer {
@@ -338,8 +356,20 @@ public:
                               int height,
                               Sink& sink) override;
 
+    void setScrollInfo(GuiScrollInfo info);
+    GuiScrollbarPress scrollbarPress(int pxX, int pxY);
+    int scrollbarTopFromY(int pxY, int grabOffsetPx) const;
+    bool scrollbarEnabled() const;
+    const GuiScrollInfo& scrollInfo() const { return scrollInfo_; }
+    // Debug: geometría del scrollbar para diagnóstico
+    GuiPixelRect scrollbarTrackRect(const Layout& layout) const;
+    GuiPixelRect scrollbarThumbRect(const Layout& layout) const;
+    int scrollbarThumbHeightPx(int trackH) const;
+    int scrollbarMaxTop() const;
+
 private:
     GuiOptions options_;
+    GuiScrollInfo scrollInfo_;
     bool dark_ = true;
     FrameBuilder frameBuilder_;
     // SDL_Renderer* opaco (solo se toca en el .cpp bajo HAVE_SDL2).
@@ -552,4 +582,16 @@ private:
     void* acquireFb(FrameSurface& s, void* sdlRenderer, int wPx, int hPx,
                      bool& fresh);
     const softwrap::Index* wrapIndex_ = nullptr;
+
+    int scrollbarThumbHeightPx(int trackH);
+    int scrollbarMaxTop();
+
+#ifdef HAVE_SDL2
+    void presentFramebuf(SDL_Renderer* r, SDL_Texture* fb,
+                         const GuiColor& bg, const Layout& layout, int ch,
+                         const ChromeData& chromeData,
+                         const FrameCursor& cursor, bool cursorShown);
+
+    void paintVerticalScrollbar(SDL_Renderer* r, const Layout& layout);
+#endif
 };

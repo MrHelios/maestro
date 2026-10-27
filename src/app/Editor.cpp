@@ -1798,4 +1798,56 @@ void Editor::refreshBracketAfterJump() {
     }
 }
 
+Editor::ScrollInfo Editor::scrollInfo() {
+    Buffer& b = active();
+
+    int total = b.document.lineCount();
+
+    if (isWrapEnabledFor(b)) {
+        const softwrap::Index& idx = wrapFor(this, b);
+        total = idx.totalRows();
+    }
+
+    return ScrollInfo{
+        b.viewport.top,
+        b.viewport.height,
+        total
+    };
+}
+
+void Editor::setViewportTop(int top) {
+    Buffer& b = active();
+    const ScrollInfo info = scrollInfo();
+
+    if (info.visible <= 0) {
+        b.viewport.top = 0;
+        return;
+    }
+
+    const int maxTop = std::max(0, info.total - info.visible);
+    top = std::clamp(top, 0, maxTop);
+
+    if (b.viewport.top == top) {
+        return;
+    }
+
+    b.viewport.top = top;
+    suppressScrollToCursor_ = true;
+
+    // Mover cursor a la primera línea visible del nuevo viewport
+    // para evitar que scrollToCursor lo traiga de vuelta en el próximo render.
+    if (isWrapEnabledFor(b)) {
+        const softwrap::Index& idx = wrapFor(this, b);
+        Position np = idx.positionAt(b.document, top, 0);
+        b.cursor.line = np.line;
+        b.cursor.col = np.col;
+    } else {
+        b.cursor.line = top;
+        b.cursor.col = 0;
+    }
+    b.cursor.clampToLine(b.document);
+    resetPreferredVisualColumn();
+    if (state_ == State::Seleccion) updateSelectionPosition();
+}
+
 

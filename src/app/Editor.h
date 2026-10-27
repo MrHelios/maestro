@@ -95,6 +95,19 @@ public:
     Editor(std::nullptr_t) = delete;
     ~Editor();
 
+    struct ScrollInfo {
+        int top = 0;
+        int visible = 0;
+        int total = 0;
+
+        bool enabled() const {
+            return visible > 0 && total > visible;
+        }
+    };
+
+    ScrollInfo scrollInfo();
+    void setViewportTop(int top);
+
     // v0.6.2: true si `path` existe y es una carpeta (absoluta o relativa).
     // Las carpetas no se pueden abrir todavia: solo archivos. Delega en
     // FileBrowser (que es quien sabe de paths).

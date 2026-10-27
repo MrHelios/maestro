@@ -26,6 +26,18 @@ void GuiRunLoop::setMaxBatchMsForTests(int ms) {
 GuiRunLoop::GuiRunLoop(Editor& editor, const GuiOptions& opts)
     : editor_(editor), options_(opts) {}
 
+void GuiRunLoop::syncScrollbarInfo() {
+    if (!gui_) {
+        return;
+    }
+
+    const Editor::ScrollInfo si = editor_.scrollInfo();
+
+    gui_->setScrollInfo(
+        GuiScrollInfo{si.top, si.visible, si.total}
+    );
+}
+
 void GuiRunLoop::idleStep(std::chrono::steady_clock::time_point now) {
     // Inyecta el tiempo de blink antes de pintar: la fase ON/OFF sale de
     // GuiRenderer (Bar parpadea, Block fijo; el ancla se resetea al mover el
@@ -35,6 +47,7 @@ void GuiRunLoop::idleStep(std::chrono::steady_clock::time_point now) {
     // llame idleStep() directo (tests) bombea antes vía
     // editor_.pollExternalEvents(), igual que run().
     if (gui_) gui_->setBlinkNow(now);
+    syncScrollbarInfo();
     editor_.tick(now);
     editor_.renderFrame();
     if (gui_) lastBlinkPhaseOn_ = gui_->blinkPhaseOn();
@@ -86,9 +99,6 @@ bool GuiRunLoop::idleOnTimeout(std::chrono::steady_clock::time_point now) {
     // Sin animación pendiente (Block/invisible/sin ancla) no hay fase que
     // seguir: se omite el render especulativo (el loop solo pinta al
     // vencer un deadline real).
-    // Sin animación pendiente (Block/invisible/sin ancla) no hay fase que
-    // seguir: se omite el render especulativo (el loop solo pinta al
-    // vencer un deadline real).
     if (gui_ && gui_->msUntilBlinkToggle(now).has_value()) {
         // Cambio de fase del blink: se informa el tiempo y se compara con
         // la fase del último render. Inyectar sin renderar es seguro: el
@@ -96,6 +106,7 @@ bool GuiRunLoop::idleOnTimeout(std::chrono::steady_clock::time_point now) {
         // consulta de deadline usa el ancla, no el tiempo inyectado.
         const bool phaseOn = gui_->blinkPhaseOn();
         if (phaseOn != lastBlinkPhaseOn_) {
+            syncScrollbarInfo();
             editor_.renderFrame();
             // Registrar DESPUÉS del render: noteCursorForBlink() puede
             // haber reseteado el ancla (celda/forma/visibilidad) y la fase
@@ -424,6 +435,7 @@ int GuiRunLoop::run() {
         return guiGridSize(outW, contentH, cw, ch);
     };
     auto renderWithBlink = [&] {
+        syncScrollbarInfo();
         if (gui_) gui_->setBlinkNow(std::chrono::steady_clock::now());
         editor_.renderFrame();
         if (gui_) lastBlinkPhaseOn_ = gui_->blinkPhaseOn();
@@ -557,6 +569,23 @@ int GuiRunLoop::run() {
         return guiCellFromPixelsBounded(pxX, pxY - titleBarHeightPx_, cw, ch,
                                         g.cols, g.rows);
     };
+
+    struct DrawablePoint {
+        int x = 0;
+        int y = 0;
+    };
+
+    auto toDrawablePoint = [&](int ptX, int ptY) {
+        DrawablePoint p;
+        int winW = 0, winH = 0, outW = 0, outH = 0;
+        SDL_GetWindowSize(win, &winW, &winH);
+        SDL_GetRendererOutputSize(ren, &outW, &outH);
+        const GuiDrawableSize mfb = guiDrawableOrWindow(winW, winH, outW, outH);
+        p.x = guiScaleCoord(ptX, winW, mfb.w);
+        p.y = guiScaleCoord(ptY, winH, mfb.h);
+        return p;
+    };
+
     editor_.resize(currentSize());
     // Hit-test nativo: la franja de la barra (salvo botones) arrastra la
     // ventana y los bordes/corners redimensionan; los botones quedan NORMAL
@@ -636,6 +665,7 @@ int GuiRunLoop::run() {
                         manualResizeEdge_ = GuiWindowEdge::None;
                         activeTitleButton_ = GuiTitleBarButton::None;
                         titleBar_.setPressed(GuiTitleBarButton::None);
+                        scrollbarDragging_ = false;
                         sdlCaptureMouseBestEffort(SDL_FALSE);
                         // Fábrica testeada (misma que el press/drag: tipo +
                         // celda en un solo punto de construcción).
@@ -761,7 +791,25 @@ int GuiRunLoop::run() {
                             break;
                         }
                     }
-                    // 2) Redimensionado manual (solo si no hay hit-test nativo).
+                    // 2) Hit-test del scrollbar (prioridad sobre redimensionado).
+                    if (ev.button.button == SDL_BUTTON_LEFT && gui_) {
+                        const DrawablePoint p = toDrawablePoint(ev.button.x, ev.button.y);
+                        const GuiScrollbarPress hit = gui_->scrollbarPress(p.x, p.y);
+
+                        if (hit.handled) {
+                            scrollbarDragging_ = true;
+                            scrollbarGrabOffsetPx_ = hit.grabOffsetPx;
+
+                            editor_.setViewportTop(hit.top);
+                            syncScrollbarInfo();
+
+                            sdlCaptureMouseBestEffort(SDL_TRUE);
+                            requestRender();
+
+                            break;
+                        }
+                    }
+                    // 3) Redimensionado manual (solo si no hay hit-test nativo).
                     if (!hitTestEnabled_ && ev.button.button == SDL_BUTTON_LEFT) {
                         const GuiWindowEdge edge =
                             manualResizeEdgeAt(ev.button.x, ev.button.y);
@@ -770,7 +818,7 @@ int GuiRunLoop::run() {
                             break;
                         }
                     }
-                    // 3) Arrastre manual de la barra (fallback sin hit-test).
+                    // 4) Arrastre manual de la barra (fallback sin hit-test).
                     if (!hitTestEnabled_ &&
                         ev.button.button == SDL_BUTTON_LEFT &&
                         pointInTitleBar(ev.button.y)) {
@@ -817,6 +865,11 @@ int GuiRunLoop::run() {
                     break;
                 }
                 case SDL_MOUSEBUTTONUP: {
+                    if (scrollbarDragging_ && ev.button.button == SDL_BUTTON_LEFT) {
+                        scrollbarDragging_ = false;
+                        sdlCaptureMouseBestEffort(SDL_FALSE);
+                        break;
+                    }
                     if (manualResizeEdge_ != GuiWindowEdge::None) {
                         manualResizeEdge_ = GuiWindowEdge::None;
                         sdlCaptureMouseBestEffort(SDL_FALSE);
@@ -857,6 +910,23 @@ int GuiRunLoop::run() {
                     break;
                 }
                 case SDL_MOUSEMOTION: {
+                    if (scrollbarDragging_) {
+                        const bool leftHeld = guiLeftHeld(ev.motion.state);
+                        const DrawablePoint p = toDrawablePoint(ev.motion.x, ev.motion.y);
+
+                        if (!leftHeld) {
+                            scrollbarDragging_ = false;
+                            sdlCaptureMouseBestEffort(SDL_FALSE);
+                        } else {
+                            const int top = gui_->scrollbarTopFromY(p.y, scrollbarGrabOffsetPx_);
+
+                            editor_.setViewportTop(top);
+                            syncScrollbarInfo();
+
+                            requestRender();
+                        }
+                        break;
+                    }
                     const GuiTitleBarButton hovered =
                         titleButtonAtPoint(ev.motion.x, ev.motion.y);
                     const bool hoverChanged = titleBar_.setHover(hovered);

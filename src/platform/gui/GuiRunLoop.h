@@ -250,4 +250,10 @@ private:
     // candidata queda anclada a la última celda válida. Se llama después
     // de cada render.
     void updateImeRect() const;
+
+    // Scrollbar state
+    bool scrollbarDragging_ = false;
+    int scrollbarGrabOffsetPx_ = 0;
+
+    void syncScrollbarInfo();
 };

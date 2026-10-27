@@ -1,6 +1,7 @@
 #include "rendering/gui/GuiRenderer.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string_view>
 #include <utility>
 
@@ -392,6 +393,12 @@ ChromeData GuiRenderer::fileListChrome(
 }
 
 namespace {
+
+constexpr int kScrollbarMinThumbPx = 24;
+
+int scrollbarWidthPx(int cellW) {
+    return std::max(8, cellW / 2);
+}
 
 // Snapshot puro del Frame (sin SDL): copia texto+rol por segmento para
 // tests sin ventana. Incluye Selection (selección o highlight de búsqueda,
@@ -1131,34 +1138,6 @@ void paintWindowChromeOverlays(SDL_Renderer* r, GuiFont& font, bool dark,
     }
 }
 
-// Vuelca el framebuffer a la ventana: vuelve al destino por defecto, limpia
-// el backbuffer, copia la textura completa, repinta la MessageBar sobre la
-// ventana (centrada, con la franja residual como parte de la barra) y
-// presenta. El backbuffer se trata como invalidado en cada Present (contrato
-// SDL2): nunca se lee de él, así el parcial no depende de que conserve
-// píxeles. La copia es 1:1; con barra de título propia el framebuffer baja
-// `topInset` píxeles (el framebuffer mide la grilla, no la ventana; un
-// stretch rompería las coordenadas de celda).
-void presentFramebuf(SDL_Renderer* r, GuiFont& font, SDL_Texture* fb,
-                     const GuiColor& bg, const Layout& layout, int ch,
-                     bool dark, const ChromeData& chromeData,
-                     const FrameCursor& cursor, bool cursorShown,
-                     int topInset, const GuiTitleBar* titleBar) {
-    SDL_SetRenderTarget(r, nullptr);
-    SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
-    SDL_RenderClear(r);
-    int w = 0, h = 0;
-    SDL_QueryTexture(fb, nullptr, nullptr, &w, &h);
-    SDL_Rect dst{0, topInset, w, h};
-    SDL_RenderCopy(r, fb, nullptr, &dst);
-    // Con el target de VENTANA activo: mide outH real y sobre-dibuja la
-    // banda de la MessageBar (cubre el texto/borde que haya traído el
-    // framebuffer en posición de grilla) y la barra de título propia.
-    paintWindowChromeOverlays(r, font, dark, layout, chromeData, cursor,
-                              cursorShown, ch, topInset, titleBar);
-    SDL_RenderPresent(r);
-}
-
 // Cursor del contenido resuelto desde el SNAPSHOT (GuiContentRow), sin Frame.
 // Espejo de la rama de contenido de paintCursorOnly (Bar 2px / Block con
 // glifo invertido vía blockGlyphInSnapshot): la usan los caminos rápidos,
@@ -1594,8 +1573,7 @@ bool GuiRenderer::tryFastCursorMove(
         // Cursor desde el snapshot (sin Frame en el camino rápido).
         paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
                                        contentRows_, next, shown);
-        presentFramebuf(r, font_, fb, bg, g.layout, ch, dark_, payload.data,
-                        next, shown, contentTopInset_, titleBar_);
+        presentFramebuf(r, fb, bg, g.layout, ch, payload.data, next, shown);
     }
 #else
     // Sin SDL2: no-op (el loop nunca llega acá).
@@ -1848,9 +1826,7 @@ bool GuiRenderer::tryFastScrollLine(
                                 payload.statusAccent);
             paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
                                            contentRows_, next, shown);
-            presentFramebuf(r, font_, srcFb, bg, g.layout, cch, dark_,
-                            payload.data, next, shown, contentTopInset_,
-                            titleBar_);
+            presentFramebuf(r, srcFb, bg, g.layout, cch, payload.data, next, shown);
             return true;
         }
         // Scroll-blit: desplaza la región de contenido ±1 fila hacia el
@@ -1883,9 +1859,7 @@ bool GuiRenderer::tryFastScrollLine(
                         payload.statusAccent);
         paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
                                        contentRows_, next, shown);
-        presentFramebuf(r, font_, dstFb, bg, g.layout, cch, dark_,
-                        payload.data, next, shown, contentTopInset_,
-                        titleBar_);
+        presentFramebuf(r, dstFb, bg, g.layout, cch, payload.data, next, shown);
         contentFbActive_ = dstIdx;
     }
 #else
@@ -2060,6 +2034,10 @@ void GuiRenderer::renderScreenDiff(
                                  -1);
             // Misma geometría de MessageBar que el camino con framebuffer
             // (target de ventana activo): sobre-dibuja la banda centrada.
+#ifdef HAVE_SDL2
+            SDL_RenderSetViewport(r, nullptr);
+            paintVerticalScrollbar(r, f.layout);
+#endif
             paintWindowChromeOverlays(r, font_, dark_, f.layout, f.chrome,
                                       f.cursor, shown, ch, contentTopInset_,
                                       titleBar_);
@@ -2086,8 +2064,7 @@ void GuiRenderer::renderScreenDiff(
                 paintCursorOnly(r, font_, dark_, f.layout, f.cursor, shown,
                                 &f, nullptr, -1);
             }
-            presentFramebuf(r, font_, fb, bg, f.layout, ch, dark_, f.chrome,
-                            f.cursor, shown, contentTopInset_, titleBar_);
+            presentFramebuf(r, fb, bg, f.layout, ch, f.chrome, f.cursor, shown);
         }
     }
 #else
@@ -2236,8 +2213,7 @@ void GuiRenderer::renderListCommon(std::vector<ListLine> lines,
                 paintCursorOnly(r, font_, dark_, layout, lastCursor_, shown,
                                 nullptr, &lines, selectedRow);
             }
-            presentFramebuf(r, font_, fb, bg, layout, lch, dark_, lastChrome_,
-                            lastCursor_, shown, contentTopInset_, titleBar_);
+            presentFramebuf(r, fb, bg, layout, lch, lastChrome_, lastCursor_, shown);
         }
     }
 #else
@@ -2346,3 +2322,209 @@ void GuiRenderer::renderSaveAsFileList(
         StyleRole::AccentGuardar, layout, next, selectedRow,
         okRow ? selected : -1, scroll);
 }
+
+void GuiRenderer::setScrollInfo(GuiScrollInfo info) {
+    scrollInfo_ = info;
+}
+
+int GuiRenderer::scrollbarMaxTop() const {
+    if (scrollInfo_.visible <= 0) {
+        return 0;
+    }
+    return std::max(0, scrollInfo_.total - scrollInfo_.visible);
+}
+
+bool GuiRenderer::scrollbarEnabled() const {
+    if (lastIsList_) {
+        return false;
+    }
+    if (scrollInfo_.visible <= 0) {
+        return false;
+    }
+    return scrollbarMaxTop() > 0;
+}
+
+GuiPixelRect GuiRenderer::scrollbarTrackRect(const Layout& layout) const {
+    const int cw = font_.cellW();
+    const int ch = font_.cellH();
+
+    if (cw <= 0 || ch <= 0) {
+        return {};
+    }
+
+    const int w = scrollbarWidthPx(cw);
+    const int x = (layout.content.col + layout.content.width) * cw - w;
+    const int y = contentTopInset_ + layout.content.row * ch;
+    const int h = layout.content.height * ch;
+
+    if (x < 0 || y < 0 || w <= 0 || h <= 0) {
+        return {};
+    }
+
+    GuiPixelRect r;
+    r.x = x; r.y = y; r.w = w; r.h = h; r.valid = true;
+    return r;
+}
+
+int GuiRenderer::scrollbarThumbHeightPx(int trackH) const {
+    if (trackH <= 0) {
+        return 0;
+    }
+    if (scrollInfo_.total <= 0 || scrollInfo_.visible <= 0) {
+        return 0;
+    }
+
+    const float ratio = static_cast<float>(scrollInfo_.visible) / static_cast<float>(scrollInfo_.total);
+    int h = static_cast<int>(ratio * static_cast<float>(trackH) + 0.5f);
+    h = std::max(kScrollbarMinThumbPx, h);
+    h = std::min(h, trackH);
+
+    return h;
+}
+
+GuiPixelRect GuiRenderer::scrollbarThumbRect(const Layout& layout) const {
+    if (!scrollbarEnabled()) {
+        return {};
+    }
+
+    const GuiPixelRect track = scrollbarTrackRect(layout);
+    if (track.h <= 0) {
+        return {};
+    }
+
+    const int thumbH = scrollbarThumbHeightPx(track.h);
+    if (thumbH <= 0) {
+        return {};
+    }
+
+    const int travel = track.h - thumbH;
+    const int maxTop = scrollbarMaxTop();
+    const int top = std::clamp(scrollInfo_.top, 0, maxTop);
+
+    int thumbY = track.y;
+    if (travel > 0 && maxTop > 0) {
+        const float pct = static_cast<float>(top) / static_cast<float>(maxTop);
+        thumbY = track.y + static_cast<int>(pct * static_cast<float>(travel) + 0.5f);
+    }
+
+    GuiPixelRect r;
+    r.x = track.x; r.y = thumbY; r.w = track.w; r.h = thumbH; r.valid = true;
+    return r;
+}
+
+GuiScrollbarPress GuiRenderer::scrollbarPress(int pxX, int pxY) {
+    GuiScrollbarPress res;
+
+    if (!scrollbarEnabled()) {
+        return res;
+    }
+
+    const GuiPixelRect track = scrollbarTrackRect(lastLayout_);
+    const GuiPixelRect thumb = scrollbarThumbRect(lastLayout_);
+
+    if (track.h <= 0 || thumb.h <= 0) {
+        return res;
+    }
+
+    if (pxX < track.x || pxX >= track.x + track.w) {
+        return res;
+    }
+    if (pxY < track.y || pxY >= track.y + track.h) {
+        return res;
+    }
+
+    res.handled = true;
+    res.onThumb = (pxY >= thumb.y && pxY < thumb.y + thumb.h);
+
+    if (res.onThumb) {
+        res.grabOffsetPx = pxY - thumb.y;
+    } else {
+        res.grabOffsetPx = thumb.h / 2;
+    }
+
+    res.top = scrollbarTopFromY(pxY, res.grabOffsetPx);
+    return res;
+}
+
+int GuiRenderer::scrollbarTopFromY(int pxY, int grabOffsetPx) const {
+    if (!scrollbarEnabled()) {
+        return std::clamp(scrollInfo_.top, 0, scrollbarMaxTop());
+    }
+
+    const GuiPixelRect track = scrollbarTrackRect(lastLayout_);
+    const int thumbH = scrollbarThumbHeightPx(track.h);
+    const int travel = track.h - thumbH;
+    const int maxTop = scrollbarMaxTop();
+
+    if (track.h <= 0 || thumbH <= 0 || travel <= 0 || maxTop <= 0) {
+        return 0;
+    }
+
+    const int desiredThumbY = pxY - grabOffsetPx;
+    const int rel = desiredThumbY - track.y;
+
+    int top = static_cast<int>(
+        (static_cast<float>(rel) / static_cast<float>(travel)) *
+        static_cast<float>(maxTop) + 0.5f
+    );
+
+    return std::clamp(top, 0, maxTop);
+}
+
+#ifdef HAVE_SDL2
+void GuiRenderer::paintVerticalScrollbar(SDL_Renderer* r, const Layout& layout) {
+    if (!r || !scrollbarEnabled()) {
+        return;
+    }
+
+    const GuiPixelRect track = scrollbarTrackRect(layout);
+    const GuiPixelRect thumb = scrollbarThumbRect(layout);
+
+    if (track.w <= 0 || track.h <= 0 || thumb.h <= 0) {
+        return;
+    }
+
+    SDL_BlendMode previousBlend;
+    Uint8 previousR, previousG, previousB, previousA;
+    SDL_GetRenderDrawBlendMode(r, &previousBlend);
+    SDL_GetRenderDrawColor(r, &previousR, &previousG, &previousB, &previousA);
+
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+
+    const GuiColor trackBg = dark_ ? GuiColor{0, 0, 0, 70} : GuiColor{0, 0, 0, 35};
+    SDL_SetRenderDrawColor(r, trackBg.r, trackBg.g, trackBg.b, trackBg.a);
+    SDL_Rect trackRect{static_cast<int>(track.x), static_cast<int>(track.y),
+                       static_cast<int>(track.w), static_cast<int>(track.h)};
+    SDL_RenderFillRect(r, &trackRect);
+
+    const GuiColor thumbBg = dark_ ? GuiColor{255, 255, 255, 110} : GuiColor{0, 0, 0, 120};
+    SDL_SetRenderDrawColor(r, thumbBg.r, thumbBg.g, thumbBg.b, thumbBg.a);
+    SDL_Rect thumbRect{static_cast<int>(thumb.x), static_cast<int>(thumb.y),
+                       static_cast<int>(thumb.w), static_cast<int>(thumb.h)};
+    SDL_RenderFillRect(r, &thumbRect);
+
+    SDL_SetRenderDrawColor(r, previousR, previousG, previousB, previousA);
+    SDL_SetRenderDrawBlendMode(r, previousBlend);
+}
+#endif
+
+#ifdef HAVE_SDL2
+void GuiRenderer::presentFramebuf(SDL_Renderer* r, SDL_Texture* fb,
+                                  const GuiColor& bg, const Layout& layout, int ch,
+                                  const ChromeData& chromeData,
+                                  const FrameCursor& cursor, bool cursorShown) {
+    SDL_SetRenderTarget(r, nullptr);
+    SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
+    SDL_RenderClear(r);
+    int w = 0, h = 0;
+    SDL_QueryTexture(fb, nullptr, nullptr, &w, &h);
+    SDL_Rect dst{0, contentTopInset_, w, h};
+    SDL_RenderCopy(r, fb, nullptr, &dst);
+    
+    SDL_RenderSetViewport(r, nullptr);
+    paintVerticalScrollbar(r, layout);
+    paintWindowChromeOverlays(r, font_, dark_, layout, chromeData, cursor,
+                              cursorShown, ch, contentTopInset_, titleBar_);
+    SDL_RenderPresent(r);
+}
+#endif
