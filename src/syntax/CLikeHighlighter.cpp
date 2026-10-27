@@ -33,6 +33,172 @@ bool isHexDigit(char c) {
 }
 bool isSpace(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v'; }
 
+bool isBinaryDigit(char c) {
+    return c == '0' || c == '1';
+}
+
+// Consume dígitos de una base, incluyendo separadores C++ como 1'000.
+// El apóstrofo solo se consume si está entre dos dígitos válidos.
+size_t consumeDigits(
+    std::string_view line,
+    size_t i,
+    bool (*isValidDigit)(char)
+) {
+    const size_t n = line.size();
+
+    while (i < n) {
+        if (isValidDigit(line[i])) {
+            ++i;
+            continue;
+        }
+
+        if (line[i] == '\'' &&
+            i > 0 &&
+            i + 1 < n &&
+            isValidDigit(line[i - 1]) &&
+            isValidDigit(line[i + 1])) {
+            ++i;
+            continue;
+        }
+
+        break;
+    }
+
+    return i;
+}
+
+size_t consumeIntegerSuffix(std::string_view line, size_t i) {
+    while (i < line.size()) {
+        const char c = line[i];
+        if (c != 'u' && c != 'U' &&
+            c != 'l' && c != 'L' &&
+            c != 'z' && c != 'Z') {
+            break;
+        }
+        ++i;
+    }
+    return i;
+}
+
+size_t consumeFloatSuffix(std::string_view line, size_t i) {
+    if (i < line.size() &&
+        (line[i] == 'f' || line[i] == 'F' ||
+         line[i] == 'l' || line[i] == 'L')) {
+        ++i;
+    }
+    return i;
+}
+
+size_t scanNumberEnd(std::string_view line, size_t start) {
+    const size_t n = line.size();
+
+    // Literal decimal que comienza con punto: .5, .25f
+    if (line[start] == '.') {
+        size_t i = consumeDigits(line, start + 1, isDigit);
+        return consumeFloatSuffix(line, i);
+    }
+
+    // Hexadecimal: enteros y flotantes como 0xFF, 0x1.fp+2.
+    if (line[start] == '0' &&
+        start + 1 < n &&
+        (line[start + 1] == 'x' || line[start + 1] == 'X')) {
+
+        size_t i = start + 2;
+        const size_t integerStart = i;
+        i = consumeDigits(line, i, isHexDigit);
+        const bool hasIntegerDigits = i > integerStart;
+
+        bool hasDot = false;
+        bool hasFractionDigits = false;
+
+        if (i < n && line[i] == '.' &&
+            !(i + 1 < n && line[i + 1] == '.')) {
+            hasDot = true;
+            ++i;
+
+            const size_t fractionStart = i;
+            i = consumeDigits(line, i, isHexDigit);
+            hasFractionDigits = i > fractionStart;
+        }
+
+        // Conserva el comportamiento existente: 0xG resalta solo el 0.
+        if (!hasIntegerDigits && !hasFractionDigits) {
+            return start + 1;
+        }
+
+        bool hasExponent = false;
+
+        if (i < n && (line[i] == 'p' || line[i] == 'P')) {
+            size_t exponentDigits = i + 1;
+
+            if (exponentDigits < n &&
+                (line[exponentDigits] == '+' ||
+                 line[exponentDigits] == '-')) {
+                ++exponentDigits;
+            }
+
+            // Un exponente solo se consume si tiene dígitos.
+            if (exponentDigits < n && isDigit(line[exponentDigits])) {
+                i = consumeDigits(line, exponentDigits, isDigit);
+                hasExponent = true;
+            }
+        }
+
+        if (hasDot || hasExponent) {
+            return consumeFloatSuffix(line, i);
+        }
+        return consumeIntegerSuffix(line, i);
+    }
+
+    // Binario: 0b1010, 0b10'10U.
+    if (line[start] == '0' &&
+        start + 1 < n &&
+        (line[start + 1] == 'b' || line[start + 1] == 'B')) {
+
+        size_t i = start + 2;
+        const size_t digitsStart = i;
+        i = consumeDigits(line, i, isBinaryDigit);
+
+        if (i == digitsStart) {
+            return start + 1;
+        }
+
+        return consumeIntegerSuffix(line, i);
+    }
+
+    // Decimal: enteros, flotantes y exponentes.
+    size_t i = consumeDigits(line, start, isDigit);
+    bool hasDot = false;
+    bool hasExponent = false;
+
+    if (i < n && line[i] == '.' &&
+        !(i + 1 < n && line[i + 1] == '.')) {
+        hasDot = true;
+        ++i;
+        i = consumeDigits(line, i, isDigit);
+    }
+
+    if (i < n && (line[i] == 'e' || line[i] == 'E')) {
+        size_t exponentDigits = i + 1;
+
+        if (exponentDigits < n &&
+            (line[exponentDigits] == '+' ||
+             line[exponentDigits] == '-')) {
+            ++exponentDigits;
+        }
+
+        if (exponentDigits < n && isDigit(line[exponentDigits])) {
+            i = consumeDigits(line, exponentDigits, isDigit);
+            hasExponent = true;
+        }
+    }
+
+    if (hasDot || hasExponent) {
+        return consumeFloatSuffix(line, i);
+    }
+    return consumeIntegerSuffix(line, i);
+}
+
 /**
  * @brief Tipos builtin; se chequean antes que keywords para no marcar "int" como Keyword.
  * @note "auto" se clasifica como Type incluso en C (donde es storage-class).
@@ -125,7 +291,8 @@ void CLikeHighlighter::highlight(std::string_view line, const SyntaxState& state
         std::string_view closingView(closing, 1 + delim.size() + 1);
         size_t end = line.find(closingView);
         if (end == std::string_view::npos) {
-            out.push_back({0, n, SyntaxToken::String});
+            if (n>0)
+                out.push_back({0, n, SyntaxToken::String});
             return;
         } else {
             out.push_back({0, end + closingView.size(), SyntaxToken::String});
@@ -138,7 +305,8 @@ void CLikeHighlighter::highlight(std::string_view line, const SyntaxState& state
     if (outNext.inBlockComment) {
         size_t end = line.find("*/");
         if (end == std::string_view::npos) {
-            out.push_back({0, n, SyntaxToken::Comment});
+            if (n>0)
+                out.push_back({0, n, SyntaxToken::Comment});
             outNext.inBlockComment = true;
             return;
         } else {
@@ -196,6 +364,45 @@ void CLikeHighlighter::highlight(std::string_view line, const SyntaxState& state
                 continue;
             }
         }
+        
+        // Literales con prefijo: u8"...", u"...", U"...", L"..."
+        // y sus equivalentes de carácter.
+        size_t quotePos = std::string_view::npos;
+        if (c == 'u' && i + 2 < n && line[i + 1] == '8' &&
+            (line[i + 2] == '"' || line[i + 2] == '\'')) {
+            quotePos = i + 2;
+        } else if ((c == 'u' || c == 'U' || c == 'L') &&
+                   i + 1 < n &&
+                   (line[i + 1] == '"' || line[i + 1] == '\'')) {
+            quotePos = i + 1;
+        }
+        
+        if (quotePos != std::string_view::npos) {
+            const size_t start = i;
+            const char quote = line[quotePos];
+            i = quotePos + 1;
+        
+            while (i < n) {
+                if (line[i] == '\\' && i + 1 < n) {
+                    i += 2;
+                    continue;
+                }
+        
+                if (line[i] == quote) {
+                    ++i;
+                    break;
+                }
+        
+                ++i;
+            }
+        
+            out.push_back({
+                start,
+                i,
+                quote == '"' ? SyntaxToken::String : SyntaxToken::Character
+            });
+            continue;
+        }
         // Limitación pragmática: strings normales intra-línea; un '"' sin cierre marca hasta EOL.
         if (c == '"') {
             size_t start = i;
@@ -250,57 +457,10 @@ void CLikeHighlighter::highlight(std::string_view line, const SyntaxState& state
         // - 0x + [hexDigits>=1] + sufijo ident (u/l) -> si 0 dígitos, solo '0'
         // - 0b + [binDigits>=1] + sufijo -> idem
         // - decimal: dígitos, punto opcional, exponente e/E, sufijos ' y ident
-        if (isDigit(c)) {
-            size_t start = i;
-            if (c == '0' && i + 1 < n && (line[i+1] == 'x' || line[i+1] == 'X')) {
-                size_t p = i + 2;
-                size_t hexStart = p;
-                while (p < n && isHexDigit(line[p])) ++p;
-                if (p == hexStart) {
-                    out.push_back({start, start + 1, SyntaxToken::Number});
-                    i = start + 1;
-                    continue;
-                }
-                i = p;
-                while (i < n && isIdentCont(line[i])) ++i;
-                out.push_back({start, i, SyntaxToken::Number});
-                continue;
-            }
-            if (c == '0' && i + 1 < n && (line[i+1] == 'b' || line[i+1] == 'B')) {
-                size_t p = i + 2;
-                size_t binStart = p;
-                while (p < n && (line[p] == '0' || line[p] == '1')) ++p;
-                if (p == binStart) {
-                    out.push_back({start, start + 1, SyntaxToken::Number});
-                    i = start + 1;
-                    continue;
-                }
-                i = p;
-                while (i < n && isIdentCont(line[i])) ++i;
-                out.push_back({start, i, SyntaxToken::Number});
-                continue;
-            }
-            bool hasDot = false;
-            bool hasExp = false;
-            ++i;
-            while (i < n) {
-                char d = line[i];
-                if (isDigit(d)) { ++i; continue; }
-                if (d == '.' && !hasDot && !hasExp) {
-                    if (i + 1 < n && isDigit(line[i+1])) { hasDot = true; ++i; continue; }
-                    if (i + 1 >= n || !isIdentCont(line[i+1])) { hasDot = true; ++i; continue; }
-                    break;
-                }
-                if ((d == 'e' || d == 'E') && !hasExp) {
-                    hasExp = true; ++i;
-                    if (i < n && (line[i] == '+' || line[i] == '-')) ++i;
-                    continue;
-                }
-                if ((d >= 'a' && d <= 'z') || (d >= 'A' && d <= 'Z') || d == '_' || d == '\'') {
-                    ++i; continue;
-                }
-                break;
-            }
+        if (isDigit(c) ||
+            (c == '.' && i + 1 < n && isDigit(line[i + 1]))) {
+            const size_t start = i;
+            i = scanNumberEnd(line, start);
             out.push_back({start, i, SyntaxToken::Number});
             continue;
         }
