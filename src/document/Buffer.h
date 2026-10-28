@@ -87,6 +87,10 @@ public:
     Document document;
     Cursor cursor;
     Viewport viewport;
+    // Scroll manual (scrollbar): si true, el viewport se desplazó por UI
+    // y NO debe seguirse el cursor hasta que este cambie de posición.
+    bool manualScroll = false;
+    Position manualScrollCursor{0, 0};
     // Ruta absoluta del archivo; vacia => buffer sin nombre.
     std::string filename;
     // Nombre asignado al buffer sin nombre ("SinNombre", "SinNombre1",

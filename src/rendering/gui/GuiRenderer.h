@@ -362,7 +362,9 @@ public:
     bool scrollbarEnabled() const;
     const GuiScrollInfo& scrollInfo() const { return scrollInfo_; }
     // Debug: geometría del scrollbar para diagnóstico
-    GuiPixelRect scrollbarTrackRect(const Layout& layout) const;
+    // `resizeBorderPx`: margen de redimensionado en píxeles del drawable
+// (a HiDPI 2×, 8 puntos = 16 px). 0 = sin margen (tests sin SDL).
+GuiPixelRect scrollbarTrackRect(const Layout& layout, int resizeBorderPx = 0) const;
     GuiPixelRect scrollbarThumbRect(const Layout& layout) const;
     int scrollbarThumbHeightPx(int trackH) const;
     int scrollbarMaxTop() const;
@@ -583,10 +585,7 @@ private:
                      bool& fresh);
     const softwrap::Index* wrapIndex_ = nullptr;
 
-    int scrollbarThumbHeightPx(int trackH);
-    int scrollbarMaxTop();
-
-#ifdef HAVE_SDL2
+    #ifdef HAVE_SDL2
     void presentFramebuf(SDL_Renderer* r, SDL_Texture* fb,
                          const GuiColor& bg, const Layout& layout, int ch,
                          const ChromeData& chromeData,

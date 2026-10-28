@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <mutex>
 
 #include "platform/gui/GuiKeymap.h"
 #include "platform/gui/GuiOptions.h"
@@ -109,14 +110,47 @@ class GuiRenderer;
 
 class GuiRunLoop {
 public:
+    // Rectángulo del track del scrollbar en PUNTOS DE VENTANA (no drawable).
+    // Inmutable: se publica atómicamente desde el hilo del loop y se lee
+    // desde el hilo del callback SDL (guiTitleBarHitTest).
+    struct ScrollbarHitRect {
+        int x = 0, y = 0, w = 0, h = 0;
+        bool valid() const { return w > 0 && h > 0; }
+    };
+    // Predicado puro: punto dentro del track del scrollbar (puntos de ventana).
+    // Semiabierto [x, x+w) × [y, y+h). Inválido si track.w <= 0 || track.h <= 0.
+    static inline bool pointInScrollbarTrack(const ScrollbarHitRect& r, int x, int y) {
+        if (!r.valid()) return false;
+        return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+    }
+    class ScrollbarHitSnapshot {
+    public:
+        void set(const ScrollbarHitRect& r) {
+            std::lock_guard<std::mutex> g(m_);
+            r_ = r;
+        }
+        void clear() { set({}); }
+        ScrollbarHitRect get() const {
+            std::lock_guard<std::mutex> g(m_);
+            return r_;
+        }
+    private:
+        mutable std::mutex m_;
+        ScrollbarHitRect r_{};
+    };
+
     struct TitleBarHitState {
         int winW = 0;
         int winH = 0;
         int titleH = 0;
         GuiTitleBar* titleBar = nullptr;
+        ScrollbarHitSnapshot scrollbar;
     };
     GuiRunLoop(Editor& editor, const GuiOptions& opts = GuiOptions{});
     void setGuiRenderer(GuiRenderer* r) { gui_ = r; }
+    // Getters para tests: acceso a handles SDL vivos durante run().
+    void* sdlWinForTesting() const { return sdlWin_; }
+    void* sdlRenForTesting() const { return sdlRen_; }
     // Tabla tecla -> Evento que el SDL_KEYDOWN consulta (remapeable en
     // tiempo de ejecución). Única vía pública: la interfaz GUI; el tipo
     // concreto GuiKeymap es detalle privado, nunca se expone.

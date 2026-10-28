@@ -9,6 +9,12 @@
 // dependen de SDL para poder testearse sin ventana.
 // ---------------------------------------------------------------------------
 
+// Grosor del borde de redimensionado en PUNTOS DE VENTANA.
+// Mismo valor que usa guiTitleBarHitTest() y guiWindowEdgeAt().
+// Debe coincidir con std::max(4, std::min(8, titleH / 4)) donde titleH >= 28.
+// Para titleH=28 -> 7; titleH=32 -> 8; titleH=40 -> 8.
+inline constexpr int kResizeBorderPx = 8;
+
 enum class GuiWindowEdge {
     None,
     Left,

@@ -2344,7 +2344,11 @@ bool GuiRenderer::scrollbarEnabled() const {
     return scrollbarMaxTop() > 0;
 }
 
-GuiPixelRect GuiRenderer::scrollbarTrackRect(const Layout& layout) const {
+// rectángulo de la pista del scrollbar en PÍXELES DEL DRAWABLE.
+// `resizeBorderPx` es el margen de redimensionado en píxeles del drawable
+// (p. ej., a HiDPI 2×, 8 puntos de ventana = 16 px del drawable).
+// Valor por defecto 0 para compatibilidad con tests sin SDL.
+GuiPixelRect GuiRenderer::scrollbarTrackRect(const Layout& layout, int resizeBorderPx) const {
     const int cw = font_.cellW();
     const int ch = font_.cellH();
 
@@ -2353,7 +2357,7 @@ GuiPixelRect GuiRenderer::scrollbarTrackRect(const Layout& layout) const {
     }
 
     const int w = scrollbarWidthPx(cw);
-    const int x = (layout.content.col + layout.content.width) * cw - w;
+    const int x = (layout.content.col + layout.content.width) * cw - w - resizeBorderPx;
     const int y = contentTopInset_ + layout.content.row * ch;
     const int h = layout.content.height * ch;
 

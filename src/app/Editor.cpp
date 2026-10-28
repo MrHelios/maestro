@@ -1006,29 +1006,49 @@ void Editor::renderFrame() {
 
         // IMPORTANTE: scroll antes que bracket highlight.
         // Si no, tras un page/jump el cursor puede quedar fuera del rango de scan.
-        if (suppressScrollToCursor_) {
-            suppressScrollToCursor_ = false;
-        } else {
-            if (wrap) {
-                const softwrap::Index& idx = wrapFor(this, b);
-                int vr = idx.visualRowOf({b.cursor.line, b.cursor.col});
-                // scrollToCursor visual
-                int contentH = b.viewport.height;
-                if (contentH > 0) {
-                    if (vr < b.viewport.top) {
-                        b.viewport.top = vr;
-                    } else if (vr >= b.viewport.top + contentH) {
-                        b.viewport.top = vr - contentH + 1;
-                    }
-                    int maxTop = std::max(0, idx.totalRows() - contentH);
-                    if (b.viewport.top > maxTop) b.viewport.top = maxTop;
-                }
+        // Scroll manual (scrollbar): si el viewport se desplazó manualmente y el
+        // cursor NO ha cambiado de posición, NO seguir al cursor.
+        bool preserveManualViewport = false;
+        if (b.manualScroll) {
+            const bool cursorUnchanged =
+                b.cursor.line == b.manualScrollCursor.line &&
+                b.cursor.col  == b.manualScrollCursor.col;
+
+            if (cursorUnchanged) {
+                preserveManualViewport = true;
             } else {
-                b.viewport.scrollToCursor(
-                    b.cursor,
-                    b.document,
-                    textWidthFor(b.viewport, b.document.lineCount())
-                );
+                // El cursor se movió: volver a seguirlo en este mismo render.
+                b.manualScroll = false;
+            }
+        }
+
+        if (!preserveManualViewport) {
+            // Aplicar la lógica existente de suppressScrollToCursor_
+            // y, cuando corresponda, desplazar hacia el cursor.
+            if (suppressScrollToCursor_) {
+                suppressScrollToCursor_ = false;
+            } else {
+                if (wrap) {
+                    const softwrap::Index& idx = wrapFor(this, b);
+                    int vr = idx.visualRowOf({b.cursor.line, b.cursor.col});
+                    // scrollToCursor visual
+                    int contentH = b.viewport.height;
+                    if (contentH > 0) {
+                        if (vr < b.viewport.top) {
+                            b.viewport.top = vr;
+                        } else if (vr >= b.viewport.top + contentH) {
+                            b.viewport.top = vr - contentH + 1;
+                        }
+                        int maxTop = std::max(0, idx.totalRows() - contentH);
+                        if (b.viewport.top > maxTop) b.viewport.top = maxTop;
+                    }
+                } else {
+                    b.viewport.scrollToCursor(
+                        b.cursor,
+                        b.document,
+                        textWidthFor(b.viewport, b.document.lineCount())
+                    );
+                }
             }
         }
 
@@ -1819,34 +1839,21 @@ void Editor::setViewportTop(int top) {
     Buffer& b = active();
     const ScrollInfo info = scrollInfo();
 
+    // Scroll manual: el viewport se desacopla del cursor hasta que este se mueva.
+    b.manualScroll = true;
+    b.manualScrollCursor = {b.cursor.line, b.cursor.col};
+
     if (info.visible <= 0) {
         b.viewport.top = 0;
         return;
     }
 
     const int maxTop = std::max(0, info.total - info.visible);
-    top = std::clamp(top, 0, maxTop);
+    b.viewport.top = std::clamp(top, 0, maxTop);
 
-    if (b.viewport.top == top) {
-        return;
-    }
-
-    b.viewport.top = top;
-    suppressScrollToCursor_ = true;
-
-    // Mover cursor a la primera línea visible del nuevo viewport
-    // para evitar que scrollToCursor lo traiga de vuelta en el próximo render.
-    if (isWrapEnabledFor(b)) {
-        const softwrap::Index& idx = wrapFor(this, b);
-        Position np = idx.positionAt(b.document, top, 0);
-        b.cursor.line = np.line;
-        b.cursor.col = np.col;
-    } else {
-        b.cursor.line = top;
-        b.cursor.col = 0;
-    }
-    b.cursor.clampToLine(b.document);
-    resetPreferredVisualColumn();
+    // NOTA: no se mueve el cursor. El scrollbar solo cambia el viewport.
+    // manualScroll evita que scrollToCursor devuelva el viewport
+    // a la posición del cursor en renders posteriores.
     if (state_ == State::Seleccion) updateSelectionPosition();
 }
 

@@ -8,6 +8,7 @@
 #include "base/utf8.h"
 #include "platform/MouseEvent.h"
 #include "platform/WindowSize.h"
+#include "platform/gui/GuiWindowGeometry.h"
 #include "rendering/Sink.h"
 #include "rendering/gui/GuiRenderer.h"
 
@@ -227,6 +228,7 @@ inline void sdlCaptureMouseBestEffort(SDL_bool enabled) {
 
 
 
+
 SDL_HitTestResult SDLCALL guiTitleBarHitTest(SDL_Window*,
                                              const SDL_Point* area, void* data) {
     if (!area) return SDL_HITTEST_NORMAL;
@@ -239,6 +241,13 @@ SDL_HitTestResult SDLCALL guiTitleBarHitTest(SDL_Window*,
     const int winW = state->winW;
     const int winH = state->winH;
     const int titleH = state->titleH;
+
+    // 0) Scrollbar: el track ya está desplazado hacia dentro (kResizeBorderPx)
+    // para no solapar con el borde de redimensionado. Snapshot atómico.
+    if (GuiRunLoop::pointInScrollbarTrack(state->scrollbar.get(), x, y)) {
+        return SDL_HITTEST_NORMAL;
+    }
+
     // 1) Botones de la barra (tienen prioridad sobre cualquier borde).
     if (titleH > 0 && y < titleH && state->titleBar &&
         state->titleBar->buttonAt(x, y, winW, titleH) != GuiTitleBarButton::None) {
@@ -246,7 +255,10 @@ SDL_HitTestResult SDLCALL guiTitleBarHitTest(SDL_Window*,
     }
     // 2) Esquinas y bordes de redimensionado (excluyendo la franja superior
     // de la barra, que ya se gestionó con los botones).
-    const int border = std::max(4, std::min(8, titleH / 4));
+    // kResizeBorderPx está en PUNTOS DE VENTANA. El track del scrollbar se
+    // desplaza hacia dentro la misma cantidad convertida a PÍXELES DEL DRAWABLE
+    // (ver renderWithBlink: resizeBorderPx = kResizeBorderPx * mfb.w / winW).
+    const int border = kResizeBorderPx;
     const bool left = x >= 0 && x < border;
     const bool right = x >= winW - border && x < winW;
     const bool top = y >= 0 && y < border;
@@ -440,6 +452,32 @@ int GuiRunLoop::run() {
         editor_.renderFrame();
         if (gui_) lastBlinkPhaseOn_ = gui_->blinkPhaseOn();
         updateImeRect();
+        // Actualizar geometría del scrollbar en PUNTOS DE VENTANA para el
+        // hit-test nativo (guiTitleBarHitTest). El layout ya está fresco
+        // tras renderFrame() (lastLayout_ actualizado en GuiRenderer).
+        if (gui_ && gui_->scrollbarEnabled()) {
+            // Margen de redimensionado en píxeles del drawable: kResizeBorderPx (puntos
+            // de ventana) convertido a píxeles del drawable.
+            int winW = 0, winH = 0, outW = 0, outH = 0;
+            SDL_GetWindowSize(win, &winW, &winH);
+            SDL_GetRendererOutputSize(ren, &outW, &outH);
+            const GuiDrawableSize mfb = guiDrawableOrWindow(winW, winH, outW, outH);
+            const int resizeBorderPx = (kResizeBorderPx * mfb.w) / std::max(1, winW);
+            const GuiPixelRect track = gui_->scrollbarTrackRect(gui_->lastLayout(), resizeBorderPx);
+            if (track.valid && track.w > 0 && track.h > 0) {
+                // Convertir drawable px -> puntos de ventana (misma fórmula que toDrawablePoint invertida).
+                GuiRunLoop::ScrollbarHitRect hr;
+                hr.x = (track.x * winW) / std::max(1, mfb.w);
+                hr.y = (track.y * winH) / std::max(1, mfb.h);
+                hr.w = (track.w * winW) / std::max(1, mfb.w);
+                hr.h = (track.h * winH) / std::max(1, mfb.h);
+                hitState_.scrollbar.set(hr);
+            } else {
+                hitState_.scrollbar.clear();
+            }
+        } else {
+            hitState_.scrollbar.clear();
+        }
         // Cubre el toggle de tema desde cualquier origen (Ctrl+K l,
         // theme.toggle, etc.) sin acoplar Editor -> plataforma.
         };
@@ -476,7 +514,7 @@ int GuiRunLoop::run() {
     // ANTES que la barra de título para que el borde superior siga
     // redimensionando.
     auto borderPoints = [&] {
-        return std::max(4, std::min(8, titleBarHeightPoints_ / 4));
+        return kResizeBorderPx;
     };
     auto manualResizeEdgeAt = [&](int ptX, int ptY) {
         if (hitTestEnabled_) return GuiWindowEdge::None;

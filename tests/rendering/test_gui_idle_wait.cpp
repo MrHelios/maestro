@@ -1601,4 +1601,283 @@ TEST(gui_runloop_enter_repetido_en_explorador_no_entra_varias_veces) {
              static_cast<int>(State::FileBrowser));
 }
 
+// ---------------------------------------------------------------------------
+// SDL_MOUSEMOTION durante arrastre cambia el viewport
+// ---------------------------------------------------------------------------
+
+TEST(gui_sdl_mousemotion_durante_arrastre_cambia_viewport) {
+    // Este test verifica que un evento SDL_MOUSEMOTION real (con botón
+    // izquierdo presionado) durante un arrastre de selección haga avanzar
+    // el viewport a través del camino completo: SDL -> GuiRunLoop ->
+    // Editor::handleEvent(MouseDrag) -> autoscroll.
+    //
+    // Se usa SdlDummy para evitar ventana real pero ejercer el decodificador
+    // de eventos SDL y el camino completo del loop.
+    {
+        VideoProbe probe;
+        if (!probe.ok) SKIP("sin video dummy");
+    }
+    SdlDummyDrivers env;
+
+    auto watcher = std::make_unique<NullFileWatcher>();
+    Harness h = makeHarness(std::move(watcher));
+
+    // Documento lo bastante largo para exceder el viewport real.
+    std::vector<std::string> lines;
+    for (int i = 0; i < 200; ++i) {
+        lines.push_back("line " + std::to_string(i));
+    }
+    h.ed->getActiveBufferForTesting().document.restore(lines);
+    h.ed->getActiveBufferForTesting().viewport.top = 0;
+    h.ed->getActiveBufferForTesting().viewport.left = 0;
+    h.ed->getActiveBufferForTesting().cursor.line = 0;
+    h.ed->getActiveBufferForTesting().cursor.col = 0;
+
+    // Entrar en modo Interacción (cursor Bar) para permitir selección
+    h.ed->handleEvent(insertCharEv("i"));
+
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer({}, runner);
+
+    // Esperar a que el video esté inicializado (ventana + renderer creados)
+    for (int i = 0; i < 200 && !(SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO); ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Esperar a que haya al menos un render (primer frame completo)
+    for (int i = 0; i < 200 && h.gui->renderCount.load() == 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Obtener tamaños de ventana y drawable para convertir coordenadas
+    SDL_Window* win = static_cast<SDL_Window*>(h.loop->sdlWinForTesting());
+    SDL_Renderer* ren = static_cast<SDL_Renderer*>(h.loop->sdlRenForTesting());
+    int winW = 0, winH = 0, outW = 0, outH = 0;
+    SDL_GetWindowSize(win, &winW, &winH);
+    SDL_GetRendererOutputSize(ren, &outW, &outH);
+    const int cellW = h.gui->cellW();  // en píxeles del drawable
+    const int cellH = h.gui->cellH();  // en píxeles del drawable
+
+    // Convertir celda drawable -> puntos de ventana
+    const int cellWPts = (cellW * winW) / std::max(1, outW);
+    const int cellHPts = (cellH * winH) / std::max(1, outH);
+    // Alto REAL de la barra propia: misma función que usa el loop. Un valor
+    // fijo (28) deja el press dentro de la barra cuando cellH+10 > 28
+    // (cellH=19 => 29) y el fallback de arrastre manual se lo traga.
+    const int titleBarH = GuiTitleBar::heightForCell(cellHPts);
+
+    // Dimensiones reales después del primer resize+render
+    const auto& buffer = h.ed->getActiveBufferForTesting();
+    const int visibleRows = buffer.viewport.height;
+
+    CHECK(visibleRows > 0);
+    CHECK(buffer.document.lineCount() > visibleRows);
+
+    // Primera fila fuera del viewport de contenido (chrome/statusbar)
+    const int relRowOutside = visibleRows;
+    const int yOutside = titleBarH + relRowOutside * cellHPts;
+
+    // Se encolan press + motions + QUIT de una sola vez para que el loop los
+    // drene en el mismo lote: mientras la cola tiene eventos no se toma el
+    // camino idle y el oráculo de autoscroll (SDL_GetGlobalMouseState) no
+    // interviene. Bajo el driver dummy ese oráculo nunca ve el botón
+    // apretado, así que un tick idle de por medio desarmaría el gesto como si
+    // el release se hubiera perdido; no es lo que este test quiere medir.
+    // El QUIT al final permite leer el viewport tras join, sin data race.
+    constexpr int kDragMotions = 4;
+
+    // 1. MousePress en la primera fila visible (relRow=0, fila 0).
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEBUTTONDOWN;
+        ev.button.button = SDL_BUTTON_LEFT;
+        ev.button.state = SDL_PRESSED;
+        ev.button.x = 4 * cellWPts;              // col 4 en puntos
+        ev.button.y = titleBarH + 0 * cellHPts;  // relRow=0
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+
+    // 2. Un SDL_MOUSEMOTION con el izquierdo apretado por cada paso esperado,
+    // siempre fuera del contenido (relRow = visibleRows -> chrome inferior).
+    for (int i = 0; i < kDragMotions; ++i) {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEMOTION;
+        ev.motion.state = SDL_BUTTON_LMASK;  // botón izquierdo presionado
+        ev.motion.x = 4 * cellWPts;
+        ev.motion.y = yOutside;  // fuera por abajo
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+
+    {
+        SDL_Event quit{};
+        quit.type = SDL_QUIT;
+        CHECK(SDL_PushEvent(&quit) == 1);
+    }
+    runner.join();
+    closer.dismiss();
+    CHECK(rc == 0);
+
+    // Cada MOUSEMOTION durante el arrastre da un paso de autoscroll por
+    // evento: el viewport avanza una línea por evento fuera del contenido.
+    const int topAfterDrag = h.ed->getActiveBufferForTesting().viewport.top;
+    CHECK(topAfterDrag >= 1);
+    CHECK_EQ(topAfterDrag, kDragMotions);
+}
+
+// ---------------------------------------------------------------------------
+// SDL_MOUSEBUTTONDOWN + SDL_MOUSEMOTION sobre el pulgar del scrollbar
+// ---------------------------------------------------------------------------
+
+TEST(gui_sdl_scrollbar_drag_cambia_viewport) {
+    // El test anterior hace clic lejos de la barra: nunca activa
+    // scrollbarDragging_. Este apunta al pulgar (geometría real del último
+    // render) para ejercer la rama del scrollbar del loop y verificar que el
+    // arrastre por SDL_MOUSEMOTION mueve el viewport y que el render posterior
+    // ve el valor actualizado.
+    //
+    // Usa BlockingWatcher para sincronizar: espera a que el loop esté en
+    // reposo (primer render completado + watcher servido), arma la compuerta,
+    // lee la geometría del scrollbar con el loop detenido en pollEvents(),
+    // encola los eventos de arrastre, libera la compuerta y verifica el
+    // resultado tras el join. Esto evita la carrera de datos entre
+    // renderCount (incrementado al inicio de renderScreenDiff) y la
+    // actualización de lastLayout_.
+    {
+        VideoProbe probe;
+        if (!probe.ok) SKIP("sin video dummy");
+    }
+    SdlDummyDrivers env;
+
+    auto watcher = std::make_unique<BlockingWatcher>();
+    BlockingWatcher* raw = watcher.get();
+    Harness h = makeHarness(std::move(watcher));
+
+    // Documento lo bastante largo para que el scrollbar esté habilitado
+    // (total > visible) después del resize del loop.
+    std::vector<std::string> lines;
+    for (int i = 0; i < 200; ++i) {
+        lines.push_back("line " + std::to_string(i));
+    }
+    h.ed->getActiveBufferForTesting().document.restore(lines);
+    h.ed->getActiveBufferForTesting().viewport.top = 0;
+    h.ed->getActiveBufferForTesting().viewport.left = 0;
+    h.ed->getActiveBufferForTesting().cursor.line = 0;
+    h.ed->getActiveBufferForTesting().cursor.col = 0;
+
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer([raw] { raw->release(); }, runner);
+
+    // Esperar a que el loop haya drenado los eventos de creación de la
+    // ventana y esté en reposo (render estable + watcher ya servido).
+    int lastRender = -1;
+    int stable = 0;
+    bool idle = false;
+    for (int i = 0; i < 500 && !idle; ++i) {
+        const int rcNow = h.gui->renderCount.load();
+        if (raw->pollCount.load() >= 1 && rcNow == lastRender) {
+            if (++stable >= 10) idle = true;
+        } else {
+            stable = 0;
+        }
+        lastRender = rcNow;
+        if (!idle) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(idle);
+
+    // Armar la compuerta: el loop se bloqueará en pollEvents() y el test
+    // puede leer la geometría del scrollbar sin carrera de datos.
+    raw->arm();
+    const bool blocked = raw->waitBlocked();
+    CHECK(blocked);
+    if (!blocked) return;
+
+    // Leer geometría con el loop detenido: lastLayout_ y scrollInfo_ están
+    // frescos del último render, y el loop no los va a mutar hasta que se
+    // libere la compuerta.
+    const Layout layout = h.gui->lastLayout();
+    const GuiPixelRect track = h.gui->scrollbarTrackRect(layout);
+    const GuiPixelRect thumb = h.gui->scrollbarThumbRect(layout);
+    const GuiScrollInfo si = h.gui->scrollInfo();
+
+    CHECK(track.valid);
+    CHECK(thumb.valid);
+    CHECK(si.total > si.visible);
+    if (!track.valid || !thumb.valid) return;
+
+    // Geometría en píxeles del drawable -> puntos de ventana (eventos SDL).
+    SDL_Window* win = static_cast<SDL_Window*>(h.loop->sdlWinForTesting());
+    SDL_Renderer* ren = static_cast<SDL_Renderer*>(h.loop->sdlRenForTesting());
+    int winW = 0, winH = 0, outW = 0, outH = 0;
+    SDL_GetWindowSize(win, &winW, &winH);
+    SDL_GetRendererOutputSize(ren, &outW, &outH);
+    auto toWinX = [&](int px) { return (px * winW) / std::max(1, outW); };
+    auto toWinY = [&](int px) { return (px * winH) / std::max(1, outH); };
+
+    const int dragX = thumb.x + thumb.w / 2;
+    const int dragStartY = thumb.y + thumb.h / 2;
+    const int dragEndY = track.y + track.h - 1;
+
+    // Encolar eventos de arrastre del pulgar.
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEBUTTONDOWN;
+        ev.button.button = SDL_BUTTON_LEFT;
+        ev.button.state = SDL_PRESSED;
+        ev.button.x = toWinX(dragX);
+        ev.button.y = toWinY(dragStartY);
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEMOTION;
+        ev.motion.state = SDL_BUTTON_LMASK;
+        ev.motion.x = toWinX(dragX);
+        ev.motion.y = toWinY(dragEndY);
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    // SDL_MOUSEBUTTONUP: completa el gesto y libera la captura del mouse.
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEBUTTONUP;
+        ev.button.button = SDL_BUTTON_LEFT;
+        ev.button.state = SDL_RELEASED;
+        ev.button.x = toWinX(dragX);
+        ev.button.y = toWinY(dragEndY);
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    // Fuerza otro render después de soltar la cola de eventos.
+    {
+        SDL_Event ev{};
+        ev.type = SDL_WINDOWEVENT;
+        ev.window.event = SDL_WINDOWEVENT_EXPOSED;
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    // SDL_QUIT para que el loop termine.
+    {
+        SDL_Event quit{};
+        quit.type = SDL_QUIT;
+        CHECK(SDL_PushEvent(&quit) == 1);
+    }
+    // Liberar la compuerta: el loop procesa los eventos y termina.
+    raw->release();
+
+    runner.join();
+    closer.dismiss();
+    CHECK(rc == 0);
+
+    const int top = h.ed->getActiveBufferForTesting().viewport.top;
+    const int maxTop = std::max(0, si.total - si.visible);
+    // El arrastre llevó el pulgar al extremo inferior de la pista.
+    CHECK(top > 0);
+    CHECK(top <= maxTop);
+    CHECK(top > maxTop / 2);
+
+    // El último render (posterior al movimiento) vio ese mismo top.
+    const auto samples = h.gui->cursorSamples();
+    CHECK(!samples.empty());
+    if (!samples.empty()) {
+        CHECK_EQ(samples.back().second, top);
+    }
+}
+
 #endif

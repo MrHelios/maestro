@@ -387,3 +387,152 @@ TEST(scroll_renderFrame_captures_diff) {
     CHECK(ed.active().viewport.top == 13);
     CHECK(ed.active().cursor.line == 12);
 }
+
+// ---------------------------------------------------------------------------
+// Editor ScrollInfo y setViewportTop (v0.x)
+// ---------------------------------------------------------------------------
+
+TEST(EditorScrollInfo_ReportsDocumentLinesWithoutWrap) {
+    Editor ed;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 50; ++i) lines.push_back("line " + std::to_string(i));
+    ed.active().document.restore(lines);
+    ed.active().viewport.height = 10;
+    ed.active().viewport.width = 80;
+    ed.active().viewport.top = 5;
+
+    auto info = ed.scrollInfo();
+
+    CHECK_EQ(info.top, 5);
+    CHECK_EQ(info.visible, 10);
+    CHECK_EQ(info.total, 50);  // document.lineCount(), no visual rows
+    CHECK(info.enabled());
+}
+
+TEST(EditorScrollInfo_UsesVisualRowsWithMarkdownWrap) {
+    Editor ed;
+    ed.active().filename = "notes.md";  // activa soft-wrap
+    // 3 líneas largas que harán wrap con ancho pequeño
+    ed.active().document.restore({
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",  // 40 chars -> 4 rows con width=10
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",  // 40 chars -> 4 rows
+        "cccccccccccccccccccccccccccccccccccccccc"   // 40 chars -> 4 rows
+    });
+    ed.active().viewport.height = 5;
+    ed.active().viewport.width = 20;  // gutter ~3, textWidth ~17 -> 3 rows por línea
+    ed.active().viewport.top = 0;
+
+    auto info = ed.scrollInfo();
+
+    // Con wrap: total = visual rows (idx.totalRows()), no document.lineCount()
+    CHECK_EQ(info.top, 0);
+    CHECK_EQ(info.visible, 5);
+    // 3 líneas * ~3 visual rows cada una = ~9 visual rows totales
+    CHECK(info.total > 3);  // más que lineCount()=3
+    CHECK(info.total <= 12); // razonable: 3 líneas * 4 rows máx
+    CHECK(info.enabled());
+}
+
+TEST(EditorScrollSetViewportTop_ClampsNegativeToZero) {
+    Editor ed;
+    std::vector<std::string> lines(30, "x");
+    ed.active().document.restore(lines);
+    ed.active().viewport.height = 7;
+    ed.active().viewport.width = 80;
+    ed.active().viewport.top = 10;
+
+    ed.setViewportTop(-5);
+
+    CHECK_EQ(ed.active().viewport.top, 0);
+}
+
+TEST(EditorScrollSetViewportTop_ClampsToLastScrollableRow) {
+    Editor ed;
+    std::vector<std::string> lines(30, "x");
+    ed.active().document.restore(lines);
+    ed.active().viewport.height = 7;
+    ed.active().viewport.width = 80;
+    ed.active().viewport.top = 0;
+
+    // maxTop = total - visible = 30 - 7 = 23
+    ed.setViewportTop(100);
+
+    CHECK_EQ(ed.active().viewport.top, 23);
+}
+
+TEST(EditorScrollSetViewportTop_DoesNotMoveCursor) {
+    // setViewportTop solo cambia el viewport, no mueve el cursor.
+    // suppressScrollToCursor_ evita que el render devuelva el viewport
+    // a la posición del cursor.
+    // Sin wrap: cursor queda donde estaba.
+    {
+        Editor ed;
+        std::vector<std::string> lines(30, "0123456789abcdef");   // col 10 válida
+        ed.active().document.restore(lines);
+        ed.active().viewport.height = 7;
+        ed.active().viewport.width = 80;
+        ed.active().viewport.top = 0;
+        ed.active().cursor.line = 15;
+        ed.active().cursor.col = 10;
+
+        ed.setViewportTop(10);
+
+        CHECK_EQ(ed.active().viewport.top, 10);
+        CHECK_EQ(ed.active().cursor.line, 15);  // cursor NO se mueve
+        CHECK_EQ(ed.active().cursor.col, 10);
+    }
+
+    // Con wrap: cursor también queda donde estaba.
+    {
+        Editor ed;
+        NullSink null;
+        ed.setSink(null);
+        ed.active().filename = "notes.md";
+        ed.active().document.restore({
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",  // 40 chars
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "cccccccccccccccccccccccccccccccccccccccc"
+        });
+        ed.active().viewport.height = 5;
+        ed.active().viewport.width = 21;
+        ed.active().viewport.top = 0;
+        ed.active().cursor.line = 0;
+        ed.active().cursor.col = 0;
+
+        // Forzar rebuild del wrap index
+        ed.wrapIndex().invalidate();
+        ed.renderFrame();  // asegura que el índice esté construido
+
+        ed.setViewportTop(3);
+
+        CHECK_EQ(ed.active().viewport.top, 3);
+        // Cursor permanece en la posición original
+        CHECK_EQ(ed.active().cursor.line, 0);
+        CHECK_EQ(ed.active().cursor.col, 0);
+    }
+}
+
+TEST(EditorScrollSetViewportTop_DoesNotSnapBackOnRender) {
+    Editor ed;
+    NullSink null;
+    ed.setSink(null);
+    std::vector<std::string> lines(100, "line");
+    ed.active().document.restore(lines);
+    ed.active().viewport.height = 10;
+    ed.active().viewport.width = 80;
+    ed.active().viewport.top = 0;
+    ed.active().cursor.line = 5;
+
+    // Desplazar viewport manualmente
+    ed.setViewportTop(20);
+    CHECK_EQ(ed.active().viewport.top, 20);
+    CHECK_EQ(ed.active().cursor.line, 5);  // cursor NO se mueve
+
+    // Varios renders consecutivos: el scroll manual debe mantenerse hasta
+    // que una acción de navegación justifique volver a seguir el cursor.
+    for (int i = 0; i < 3; ++i) {
+        ed.renderFrame();
+        CHECK_EQ(ed.active().viewport.top, 20);
+        CHECK_EQ(ed.active().cursor.line, 5);
+    }
+}
