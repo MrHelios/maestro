@@ -278,6 +278,26 @@ private:
 
     TitleBarHitState hitState_;
 
+    // Cursor de redimensionado en hover (sin click) - cache de cursors SDL
+    // Usamos void* para no incluir SDL en el header (opaco)
+    void* cursorSizeWE_ = nullptr;
+    void* cursorSizeNS_ = nullptr;
+    void* cursorSizeNWSE_ = nullptr;
+    void* cursorSizeNESW_ = nullptr;
+    void* cursorArrow_ = nullptr;
+    bool cursorArrowOwned_ = false;  // true si cursorArrow_ fue creado por nosotros (SDL_CreateSystemCursor)
+    void* currentCursor_ = nullptr;
+    bool resizeCursorsInitialized_ = false;
+
+    // Inicializa cursors de sistema SDL (lazy init en primer uso)
+    void initResizeCursors();
+    // Libera cursors SDL
+    void freeResizeCursors();
+    // Aplica cursor si cambió (evita llamadas redundantes a SDL_SetCursor)
+    void setCursorIfChanged(void* cursor);
+    // Mapea ResizeCursorType (de GuiWindowGeometry) -> cursor SDL de sistema (con fallback)
+    void* cursorForType(ResizeCursorType type) const;
+
     // Posiciona la ventana candidata del IME en la celda del cursor lógico
     // (no-op sin SDL2). Si no hay cursor válido conserva el último rect de
     // SDL a propósito (ver política en el comentario de clase): la

@@ -242,7 +242,7 @@ SDL_HitTestResult SDLCALL guiTitleBarHitTest(SDL_Window*,
     const int winH = state->winH;
     const int titleH = state->titleH;
 
-    // 0) Scrollbar: el track ya está desplazado hacia dentro (kResizeBorderPx)
+    // 0) Scrollbar: el track ya está desplazado hacia dentro (kResizeBorderPts)
     // para no solapar con el borde de redimensionado. Snapshot atómico.
     if (GuiRunLoop::pointInScrollbarTrack(state->scrollbar.get(), x, y)) {
         return SDL_HITTEST_NORMAL;
@@ -255,10 +255,10 @@ SDL_HitTestResult SDLCALL guiTitleBarHitTest(SDL_Window*,
     }
     // 2) Esquinas y bordes de redimensionado (excluyendo la franja superior
     // de la barra, que ya se gestionó con los botones).
-    // kResizeBorderPx está en PUNTOS DE VENTANA. El track del scrollbar se
+    // kResizeBorderPts está en PUNTOS DE VENTANA. El track del scrollbar se
     // desplaza hacia dentro la misma cantidad convertida a PÍXELES DEL DRAWABLE
-    // (ver renderWithBlink: resizeBorderPx = kResizeBorderPx * mfb.w / winW).
-    const int border = kResizeBorderPx;
+    // (ver renderWithBlink: resizeBorderPx = kResizeBorderPts * mfb.w / winW).
+    const int border = kResizeBorderPts;
     const bool left = x >= 0 && x < border;
     const bool right = x >= winW - border && x < winW;
     const bool top = y >= 0 && y < border;
@@ -268,12 +268,13 @@ SDL_HitTestResult SDLCALL guiTitleBarHitTest(SDL_Window*,
     if (top && right) return SDL_HITTEST_RESIZE_TOPRIGHT;
     if (bottom && left) return SDL_HITTEST_RESIZE_BOTTOMLEFT;
     if (bottom && right) return SDL_HITTEST_RESIZE_BOTTOMRIGHT;
-    // Lados: izquierda, derecha y fondo (no se ofrece RESIZE_TOP sobre la
-    // barra de título; el arrastre se gestiona abajo).
+    // Lados: izquierda, derecha, fondo y TAMBIÉN borde superior (en la franja
+    // de resize, antes de la zona de arrastre de la barra).
     if (left) return SDL_HITTEST_RESIZE_LEFT;
     if (right) return SDL_HITTEST_RESIZE_RIGHT;
     if (bottom) return SDL_HITTEST_RESIZE_BOTTOM;
-    // 3) Arrastre de la barra de título (fuera de botones).
+    if (top) return SDL_HITTEST_RESIZE_TOP;  // borde superior central (y < border)
+    // 3) Arrastre de la barra de título (fuera de botones y fuera del borde de resize).
     if (titleH > 0 && y < titleH) {
         return SDL_HITTEST_DRAGGABLE;
     }
@@ -281,6 +282,74 @@ SDL_HitTestResult SDLCALL guiTitleBarHitTest(SDL_Window*,
 }
 #endif
 }  // namespace
+
+// --- Cursor de redimensionado en hover (sin click) ---
+
+void GuiRunLoop::initResizeCursors() {
+    if (resizeCursorsInitialized_) return;
+    cursorSizeWE_ = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
+    cursorSizeNS_ = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
+    cursorSizeNWSE_ = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENWSE);
+    cursorSizeNESW_ = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENESW);
+    cursorArrow_ = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
+    // Fallback final si falla la creación del cursor arrow:
+    // SDL_GetDefaultCursor() devuelve un cursor válido gestionado por SDL
+    // (no se debe liberar con SDL_FreeCursor).
+    if (!cursorArrow_) {
+        cursorArrow_ = SDL_GetDefaultCursor();
+        cursorArrowOwned_ = false;  // no es nuestro, no liberar
+    } else {
+        cursorArrowOwned_ = true;   // creado por nosotros, sí liberar
+    }
+    // NO asignamos cursorArrow_ como fallback en los campos direccionales:
+    // eso causaría doble liberación en freeResizeCursors().
+    // El fallback se resuelve en cursorForType().
+    resizeCursorsInitialized_ = true;
+}
+
+void GuiRunLoop::freeResizeCursors() {
+    if (cursorSizeWE_) SDL_FreeCursor(static_cast<SDL_Cursor*>(cursorSizeWE_));
+    if (cursorSizeNS_) SDL_FreeCursor(static_cast<SDL_Cursor*>(cursorSizeNS_));
+    if (cursorSizeNWSE_) SDL_FreeCursor(static_cast<SDL_Cursor*>(cursorSizeNWSE_));
+    if (cursorSizeNESW_) SDL_FreeCursor(static_cast<SDL_Cursor*>(cursorSizeNESW_));
+    // Liberar cursorArrow_ solo si lo creamos nosotros (owned).
+    // Si vino de SDL_GetDefaultCursor(), no es nuestra responsabilidad liberarlo.
+    if (cursorArrowOwned_ && cursorArrow_) {
+        SDL_FreeCursor(static_cast<SDL_Cursor*>(cursorArrow_));
+    }
+    cursorSizeWE_ = cursorSizeNS_ = cursorSizeNWSE_ = cursorSizeNESW_ = cursorArrow_ = nullptr;
+    currentCursor_ = nullptr;
+    resizeCursorsInitialized_ = false;
+    cursorArrowOwned_ = false;
+}
+
+void GuiRunLoop::setCursorIfChanged(void* cursor) {
+    if (cursor != currentCursor_) {
+        SDL_SetCursor(static_cast<SDL_Cursor*>(cursor));
+        currentCursor_ = cursor;
+    }
+}
+
+void* GuiRunLoop::cursorForType(ResizeCursorType type) const {
+    void* cursor = nullptr;
+    switch (type) {
+        case ResizeCursorType::SizeWE:
+            cursor = cursorSizeWE_;
+            break;
+        case ResizeCursorType::SizeNS:
+            cursor = cursorSizeNS_;
+            break;
+        case ResizeCursorType::SizeNWSE:
+            cursor = cursorSizeNWSE_;
+            break;
+        case ResizeCursorType::SizeNESW:
+            cursor = cursorSizeNESW_;
+            break;
+        case ResizeCursorType::Arrow:
+            break;
+    }
+    return cursor ? cursor : cursorArrow_;
+}
 
 int GuiRunLoop::run() {
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
@@ -392,6 +461,9 @@ int GuiRunLoop::run() {
     // Stop en todos los caminos de salida.
     SdlTextInputGuard textInput;
 
+    // Inicializar cursors de redimensionado para hover (sin click)
+    initResizeCursors();
+
     auto currentSize = [&] {
         // ESPACIO DRAWABLE (no puntos de ventana): con ALLOW_HIGHDPI el
         // drawable puede ser N× la ventana, y la grilla cols/filas vive en
@@ -456,13 +528,13 @@ int GuiRunLoop::run() {
         // hit-test nativo (guiTitleBarHitTest). El layout ya está fresco
         // tras renderFrame() (lastLayout_ actualizado en GuiRenderer).
         if (gui_ && gui_->scrollbarEnabled()) {
-            // Margen de redimensionado en píxeles del drawable: kResizeBorderPx (puntos
+            // Margen de redimensionado en píxeles del drawable: kResizeBorderPts (puntos
             // de ventana) convertido a píxeles del drawable.
             int winW = 0, winH = 0, outW = 0, outH = 0;
             SDL_GetWindowSize(win, &winW, &winH);
             SDL_GetRendererOutputSize(ren, &outW, &outH);
             const GuiDrawableSize mfb = guiDrawableOrWindow(winW, winH, outW, outH);
-            const int resizeBorderPx = (kResizeBorderPx * mfb.w) / std::max(1, winW);
+            const int resizeBorderPx = (kResizeBorderPts * mfb.w) / std::max(1, winW);
             const GuiPixelRect track = gui_->scrollbarTrackRect(gui_->lastLayout(), resizeBorderPx);
             if (track.valid && track.w > 0 && track.h > 0) {
                 // Convertir drawable px -> puntos de ventana (misma fórmula que toDrawablePoint invertida).
@@ -513,17 +585,18 @@ int GuiRunLoop::run() {
     // ventana con el mismo grosor visual que usa el callback SDL. Se evalúa
     // ANTES que la barra de título para que el borde superior siga
     // redimensionando.
-    auto borderPoints = [&] {
-        return kResizeBorderPx;
-    };
+    // Una sola fuente para el ancho del borde (puntos de ventana).
+    const int borderPts = kResizeBorderPts;
     auto manualResizeEdgeAt = [&](int ptX, int ptY) {
         if (hitTestEnabled_) return GuiWindowEdge::None;
         int winW = 0, winH = 0;
         SDL_GetWindowSize(win, &winW, &winH);
-        GuiWindowEdge edge = guiWindowEdgeAt(ptX, ptY, winW, winH, borderPoints());
-        // No ofrecer redimensionado por el borde superior dentro de la barra:
-        // esa zona es para arrastrar o botones.
+        GuiWindowEdge edge = guiWindowEdgeAt(ptX, ptY, winW, winH, borderPts);
+        // No ofrecer redimensionado por el borde superior dentro de la barra de título
+        // EXCEPTO en la franja de resize (primeros kResizeBorderPts puntos).
+        // Esto coincide con el hit-test nativo: Top/TopLeft/TopRight solo en y < border.
         if (ptY < titleBarHeightPoints_ &&
+            ptY >= borderPts &&  // solo el resto de la barra, NO el borde de resize
             (edge == GuiWindowEdge::Top ||
              edge == GuiWindowEdge::TopLeft ||
              edge == GuiWindowEdge::TopRight)) {
@@ -716,6 +789,8 @@ int GuiRunLoop::run() {
                         if (titleBar_.setHover(GuiTitleBarButton::None)) {
                             requestRender();
                         }
+                        // Restaurar cursor arrow al salir de la ventana
+                        setCursorIfChanged(cursorArrow_);
                     } else if (ev.window.event ==
                                    SDL_WINDOWEVENT_MAXIMIZED ||
                                ev.window.event ==
@@ -968,6 +1043,45 @@ int GuiRunLoop::run() {
                     const GuiTitleBarButton hovered =
                         titleButtonAtPoint(ev.motion.x, ev.motion.y);
                     const bool hoverChanged = titleBar_.setHover(hovered);
+
+                    // --- Cursor de redimensionado en HOVER (sin click) ---
+                    // Prioridad explícita (idéntica al hit-test nativo guiTitleBarHitTest):
+                    // 1. Scrollbar track -> arrow
+                    // 2. Botones de la barra de título (hovered) -> arrow
+                    // 3. Operaciones de arrastre activo -> no tocar cursor (deja el del drag)
+                    // 4. Bordes de redimensionado -> resize cursor
+                    // 5. Resto (zona arrastrable) -> arrow
+
+                    bool inActiveDrag = scrollbarDragging_ ||
+                                        manualResizeEdge_ != GuiWindowEdge::None ||
+                                        manualTitleDrag_ ||
+                                        activeTitleButton_ != GuiTitleBarButton::None ||
+                                        guiLeftHeld(ev.motion.state);
+
+                    int ptX = ev.motion.x;
+                    int ptY = ev.motion.y;
+                    int winW = 0, winH = 0;
+                    SDL_GetWindowSize(win, &winW, &winH);
+
+                    // 1. Scrollbar track: cursor arrow (no redimensionable)
+                    if (pointInScrollbarTrack(hitState_.scrollbar.get(), ptX, ptY)) {
+                        setCursorIfChanged(cursorArrow_);
+                    }
+                    // 2. Botones de la barra de título: cursor arrow (clickable) - PRIORIDAD sobre bordes
+                    else if (hovered != GuiTitleBarButton::None) {
+                        setCursorIfChanged(cursorArrow_);
+                    }
+                    // 3. Si hay arrastre activo, no cambiar cursor (mantiene el del drag)
+                    else if (inActiveDrag) {
+                        // No hacer nada: el cursor actual es el correcto para el drag
+                    }
+                    // 4. Bordes de redimensionado (usar lógica pura de GuiWindowGeometry)
+                    else {
+                        ResizeCursorType type = hoverCursorType(
+                            ptX, ptY, winW, winH, kResizeBorderPts);
+                        setCursorIfChanged(cursorForType(type));
+                    }
+
                     if (manualResizeEdge_ != GuiWindowEdge::None) {
                         if (!guiLeftHeld(ev.motion.state)) {
                             manualResizeEdge_ = GuiWindowEdge::None;
@@ -1162,6 +1276,7 @@ int GuiRunLoop::run() {
 
     // Sin SDL_StopTextInput() manual: lo hace ~SdlTextInputGuard (RAII),
     // así cualquier retorno anticipado futuro también limpia el estado.
+    freeResizeCursors();
     if (gui_) gui_->setSdlRenderer(nullptr);
     sdlWin_ = nullptr;
     sdlRen_ = nullptr;

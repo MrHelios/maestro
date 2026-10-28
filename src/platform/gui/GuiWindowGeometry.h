@@ -9,11 +9,18 @@
 // dependen de SDL para poder testearse sin ventana.
 // ---------------------------------------------------------------------------
 
-// Grosor del borde de redimensionado en PUNTOS DE VENTANA.
-// Mismo valor que usa guiTitleBarHitTest() y guiWindowEdgeAt().
-// Debe coincidir con std::max(4, std::min(8, titleH / 4)) donde titleH >= 28.
-// Para titleH=28 -> 7; titleH=32 -> 8; titleH=40 -> 8.
-inline constexpr int kResizeBorderPx = 8;
+// Grosor del borde de redimensionado en PUNTOS DE VENTANA (window points).
+// Valor fijo de 8 puntos, usado por:
+// - guiTitleBarHitTest() (hit-test nativo SDL)
+// - guiWindowEdgeAt() (detección geométrica pura)
+// - hoverCursorType() (cursor en hover sin click)
+// - fallback manual de redimensionado (cuando hit-test nativo no disponible)
+//
+// NOTA: Un comentario anterior sugería calcularlo como
+// std::max(4, std::min(8, titleH / 4)) según la altura de la barra.
+// Esa fórmula dinámica NO se usa; el borde es fijo en 8 puntos para
+// simplicidad y consistencia visual en todas las configuraciones.
+inline constexpr int kResizeBorderPts = 8;
 
 enum class GuiWindowEdge {
     None,
@@ -98,4 +105,57 @@ inline GuiWindowRect guiResizeWindowRect(const GuiWindowRect& start,
         next.h = minH;
     }
     return next;
+}
+
+// ============================================================================
+// Lógica pura de cursor de redimensionado (sin SDL, testeable sin ventana).
+// Coincide exactamente con el hit-test nativo (guiTitleBarHitTest) y el
+// handler SDL_MOUSEMOTION de GuiRunLoop.
+// ============================================================================
+
+// Tipo de cursor de sistema para redimensionado (enum portátil, sin SDL).
+enum class ResizeCursorType {
+    Arrow,
+    SizeWE,      // Left, Right
+    SizeNS,      // Top, Bottom
+    SizeNWSE,    // TopLeft, BottomRight
+    SizeNESW     // TopRight, BottomLeft
+};
+
+// Convierte GuiWindowEdge a tipo de cursor (pura, sin estado).
+inline ResizeCursorType cursorTypeForEdge(GuiWindowEdge edge) {
+    switch (edge) {
+        case GuiWindowEdge::Left:
+        case GuiWindowEdge::Right:
+            return ResizeCursorType::SizeWE;
+        case GuiWindowEdge::Top:
+        case GuiWindowEdge::Bottom:
+            return ResizeCursorType::SizeNS;
+        case GuiWindowEdge::TopLeft:
+        case GuiWindowEdge::BottomRight:
+            return ResizeCursorType::SizeNWSE;
+        case GuiWindowEdge::TopRight:
+        case GuiWindowEdge::BottomLeft:
+            return ResizeCursorType::SizeNESW;
+        case GuiWindowEdge::None:
+        default:
+            return ResizeCursorType::Arrow;
+    }
+}
+
+// Calcula el tipo de cursor para hover (sin click) en una posición dada.
+// Parámetros en PUNTOS DE VENTANA (igual que eventos SDL y hit-test nativo).
+//
+// Prioridad (idéntica al hit-test nativo guiTitleBarHitTest):
+// 1. Scrollbar track -> Arrow (se maneja ANTES en el caller)
+// 2. Botones de la barra de título -> Arrow (se maneja ANTES en el caller)
+// 3. Bordes de redimensionado -> ResizeCursorType según edge
+// 4. Zona arrastrable (resto de barra de título) -> Arrow
+// 5. Contenido -> Arrow
+//
+// NOTA: Esta función NO maneja scrollbar track ni botones de título.
+// El caller debe comprobarlos ANTES y solo llamar a esta función para bordes/contenido.
+inline ResizeCursorType hoverCursorType(int ptX, int ptY, int winW, int winH,
+                                         int border) {
+    return cursorTypeForEdge(guiWindowEdgeAt(ptX, ptY, winW, winH, border));
 }

@@ -311,10 +311,10 @@ TEST(GuiScrollbar_BorderConsistency) {
     using namespace std::string_literals;
 
     // Simular el fallback: guiWindowEdgeAt con el nuevo borderPoints
-    // que ahora devuelve kResizeBorderPx (8).
+    // que ahora devuelve kResizeBorderPts (8).
     const int winW = 800;
     const int winH = 600;
-    const int border = kResizeBorderPx;  // 8
+    const int border = kResizeBorderPts;  // 8
 
     // Justo en el límite: x = winW - border = 792.
     // Con border=8, x=792 está en [792, 800) -> zona de redimensionado (Right).
