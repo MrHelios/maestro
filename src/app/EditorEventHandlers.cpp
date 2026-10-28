@@ -233,6 +233,14 @@ void Editor::openFileInBuffer(const std::string& path) {
 
 void Editor::handleFileBrowserEvent(const InputEvent& event) {
     switch (event.type) {
+        case InputEventType::PageUp:
+            fileBrowser.movePage(-1, active().viewport.height);
+            fileBrowser.clampScroll(active().viewport.height);
+            break;
+        case InputEventType::PageDown:
+            fileBrowser.movePage(+1, active().viewport.height);
+            fileBrowser.clampScroll(active().viewport.height);
+            break;
         case InputEventType::MoveUp:
             fileBrowser.moveUp();
             fileBrowser.clampScroll(active().viewport.height);
@@ -1230,6 +1238,14 @@ void Editor::commitSaveAsFileBrowser() {
 
 void Editor::handleSaveAsFileBrowserEvent(const InputEvent& event) {
     switch (event.type) {
+        case InputEventType::PageUp:
+            fileBrowser.movePage(-1, active().viewport.height);
+            fileBrowser.clampScroll(active().viewport.height);
+            break;
+        case InputEventType::PageDown:
+            fileBrowser.movePage(+1, active().viewport.height);
+            fileBrowser.clampScroll(active().viewport.height);
+            break;
         case InputEventType::MoveUp:
             fileBrowser.moveUp();
             fileBrowser.clampScroll(active().viewport.height);

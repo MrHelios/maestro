@@ -214,8 +214,8 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 | **Selección**         | `s` en Navegación             | Flechas/`j`/`k`/RePag/AvPag extienden selección (anchor fijo). `c`/`x`/`Esc` salen
 | **Prefijo**           | `Ctrl+K`                      | Siguiente tecla decide: `s` guardar, `Ctrl+S` guardar en otra ubicación, `q` salir verificando guardado, `Ctrl+Q` salir forzado, `n`/`t`/`w`/`o` buffers/archivos
 | **BufferSelector**    | `Ctrl+K t`                    | Lista modal de buffers (`↑`/`↓`, `Enter`, `Esc`)
-| **SaveAs**            | `Ctrl+K s` sin nombre / `Ctrl+K Ctrl+S` | Prompt `Guardar archivo:` (`Enter` guarda, `Esc` cancela; en `Ctrl+K Ctrl+S` la ruta inicial es editable)
-| **FileBrowser**       | `Ctrl+K o`                    | Explorador modal (`↑`/`↓`, `Enter` carpeta/archivo, `Esc`); arranca en el directorio del archivo activo o en el directorio de trabajo si el buffer no tiene ruta
+| **SaveAs**            | `Ctrl+K s` sin nombre / `Ctrl+K Ctrl+S` | Prompt `Guardar archivo:` (`↑`/`↓`/RePag/AvPag en la lista, `Enter` guarda, `Esc` cancela; en `Ctrl+K Ctrl+S` la ruta inicial es editable)
+| **FileBrowser**       | `Ctrl+K o`                    | Explorador modal (`↑`/`↓`/RePag/AvPag, `Enter` carpeta/archivo, `Esc`); arranca en el directorio del archivo activo o en el directorio de trabajo si el buffer no tiene ruta
 | **Búsqueda**          | `Ctrl+K f` / `/`              | Búsqueda incremental, `Enter`/`Esc`
 
 ## Atajos principales
@@ -225,7 +225,7 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 | `i`                       | Navegación → Interacción
 | `s`                       | Navegación → Selección
 | Flechas / Home / End      | Mover cursor
-| RePag / AvPag             | Página (cursor + viewport)
+| RePag / AvPag             | Página (cursor + viewport; también en exploradores de abrir/guardar)
 | `j` / `k`                 | Bloque previo/siguiente palabra
 | `a` (en Selección)        | Selección total
 | `c` / `x` (en Selección)  | Copiar / cortar

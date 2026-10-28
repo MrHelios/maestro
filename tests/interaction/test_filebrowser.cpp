@@ -301,19 +301,133 @@ TEST(browser_jk_are_noop) {
     CHECK(ed.state_ == State::FileBrowser);
 }
 
-TEST(browser_page_keys_are_noop) {
-    // (24) RePag/AvPag no se soportan: se ignoran de forma documentada.
+TEST(browser_page_navigation_moves_one_page) {
+    // RePag/AvPag mueven seleccion + scroll una pagina (viewport.height).
     TempDir t;
     CwdGuard g;
     g.enter(t.path);
-    for (int i = 0; i < 5; ++i) t.file("f" + std::to_string(i) + ".txt");
+    for (int i = 0; i < 20; ++i) t.file("f" + std::to_string(i) + ".txt");
     Editor ed;
-    openFileBrowser(ed);
-    press(ed, InputEventType::MoveDown);              // index 1
-    press(ed, InputEventType::PageUp);
+    ed.active().viewport.height = 5;
+    openFileBrowser(ed);  // entries: .. + 20 archivos = 21
+
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.scroll_, 0);
+
     press(ed, InputEventType::PageDown);
-    CHECK_EQ(ed.fileBrowser.index_, 1);           // sin cambio
+    CHECK_EQ(ed.fileBrowser.index_, 5);
+    CHECK_EQ(ed.fileBrowser.scroll_, 5);
+
+    press(ed, InputEventType::PageDown);
+    CHECK_EQ(ed.fileBrowser.index_, 10);
+    CHECK_EQ(ed.fileBrowser.scroll_, 10);
+
+    press(ed, InputEventType::PageUp);
+    CHECK_EQ(ed.fileBrowser.index_, 5);
+    CHECK_EQ(ed.fileBrowser.scroll_, 5);
     CHECK(ed.state_ == State::FileBrowser);
+}
+
+TEST(browser_page_navigation_preserves_relative_row) {
+    // Igual que el editor: la fila relativa dentro de la ventana se conserva.
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    for (int i = 0; i < 20; ++i) t.file("f" + std::to_string(i) + ".txt");
+    Editor ed;
+    ed.active().viewport.height = 5;
+    openFileBrowser(ed);
+
+    for (int i = 0; i < 3; ++i) press(ed, InputEventType::MoveDown);
+    CHECK_EQ(ed.fileBrowser.index_, 3);
+    CHECK_EQ(ed.fileBrowser.scroll_, 0);
+
+    press(ed, InputEventType::PageDown);
+    CHECK_EQ(ed.fileBrowser.index_, 8);   // 5 (scroll) + 3 (fila relativa)
+    CHECK_EQ(ed.fileBrowser.scroll_, 5);
+
+    press(ed, InputEventType::PageDown);
+    CHECK_EQ(ed.fileBrowser.index_, 13);
+    CHECK_EQ(ed.fileBrowser.scroll_, 10);
+
+    press(ed, InputEventType::PageUp);
+    CHECK_EQ(ed.fileBrowser.index_, 8);
+    CHECK_EQ(ed.fileBrowser.scroll_, 5);
+}
+
+TEST(browser_page_navigation_clamps_at_edges) {
+    // En el borde superior/inferior la seleccion se imanta al extremo, como
+    // applyPage() en el editor.
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    for (int i = 0; i < 20; ++i) t.file("f" + std::to_string(i) + ".txt");
+    Editor ed;
+    ed.active().viewport.height = 5;
+    openFileBrowser(ed);
+
+    press(ed, InputEventType::PageUp);  // ya arriba: no-op
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.scroll_, 0);
+
+    for (int i = 0; i < 5; ++i) press(ed, InputEventType::PageDown);
+    CHECK_EQ(ed.fileBrowser.index_, 20);  // ultima entrada
+    CHECK_EQ(ed.fileBrowser.scroll_, 16); // n(21) - page(5)
+
+    press(ed, InputEventType::PageDown);  // ya abajo: no-op
+    CHECK_EQ(ed.fileBrowser.index_, 20);
+    CHECK_EQ(ed.fileBrowser.scroll_, 16);
+
+    for (int i = 0; i < 10; ++i) press(ed, InputEventType::PageUp);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.scroll_, 0);
+}
+
+TEST(browser_page_navigation_list_shorter_than_page) {
+    // Si todo entra en una pagina, AvPag va al final y RePag al inicio.
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    for (int i = 0; i < 3; ++i) t.file("f" + std::to_string(i) + ".txt");
+    Editor ed;
+    ed.active().viewport.height = 5;
+    openFileBrowser(ed);  // entries: .. + 3 archivos = 4
+
+    press(ed, InputEventType::PageDown);
+    CHECK_EQ(ed.fileBrowser.index_, 3);
+    CHECK_EQ(ed.fileBrowser.scroll_, 0);
+
+    press(ed, InputEventType::PageDown);
+    CHECK_EQ(ed.fileBrowser.index_, 3);
+
+    press(ed, InputEventType::PageUp);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.scroll_, 0);
+}
+
+TEST(browser_page_navigation_does_not_open_or_change_state) {
+    // Paginar es solo navegacion: no abre archivos, no entra a carpetas y
+    // no cambia el estado modal.
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    for (int i = 0; i < 10; ++i) t.file("f" + std::to_string(i) + ".txt");
+    Editor ed;
+    ed.active().viewport.height = 3;
+    openFileBrowser(ed);
+
+    const int bufferCount = ed.buffers.count();
+    const size_t entryCount = ed.fileBrowser.entries_.size();
+    const std::string path = ed.fileBrowser.path_;
+
+    press(ed, InputEventType::PageDown);
+    press(ed, InputEventType::PageUp);
+
+    CHECK(ed.state_ == State::FileBrowser);
+    CHECK_EQ(ed.buffers.count(), bufferCount);
+    CHECK_EQ(ed.fileBrowser.entries_.size(), entryCount);
+    CHECK_EQ(ed.fileBrowser.path_, path);
+    CHECK(ed.active().filename.empty());
 }
 
 TEST(browser_unrecognized_keys_ignored) {

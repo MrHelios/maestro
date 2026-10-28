@@ -50,6 +50,13 @@ public:
     bool moveUp();
     bool moveDown();
 
+    // RePag/AvPag: desplaza la seleccion y el scroll una pagina (`page`
+    // filas, tipicamente viewport.height), conservando la fila relativa de
+    // index_ dentro de la ventana. En los bordes la seleccion se imanta al
+    // inicio/fin, igual que Editor::applyPage(). `dir` = -1 sube (RePag) y
+    // +1 baja (AvPag). Devuelve true si cambio index_ o scroll_.
+    bool movePage(int dir, int page);
+
     // Sube al directorio padre (equivalente a seleccionar ".." y enter).
     // Devuelve true si cambio de directorio.
     bool goUp();

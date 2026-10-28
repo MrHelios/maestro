@@ -118,6 +118,34 @@ bool FileBrowser::moveDown() {
     return false;
 }
 
+bool FileBrowser::movePage(int dir, int page) {
+    const int n = static_cast<int>(entries_.size());
+    if (n == 0 || page <= 0 || (dir != -1 && dir != 1)) return false;
+
+    const int oldIndex = index_;
+    const int oldScroll = scroll_;
+    const int maxScroll = std::max(0, n - page);
+
+    // Normaliza el estado por si el caller dejo index_/scroll_ fuera de
+    // rango antes de la pagina (los tests acceden a los campos directo).
+    index_ = std::clamp(index_, 0, n - 1);
+    scroll_ = std::clamp(scroll_, 0, maxScroll);
+    const int rel = std::clamp(index_ - scroll_, 0, page - 1);
+
+    if (dir < 0) {
+        const bool alreadyAtTop = (scroll_ == 0);
+        scroll_ = std::max(0, scroll_ - page);
+        index_ = alreadyAtTop ? 0 : scroll_ + rel;
+    } else {
+        const bool alreadyAtBottom = (scroll_ == maxScroll);
+        scroll_ = std::min(maxScroll, scroll_ + page);
+        index_ = alreadyAtBottom ? n - 1 : scroll_ + rel;
+    }
+
+    index_ = std::clamp(index_, 0, n - 1);
+    return index_ != oldIndex || scroll_ != oldScroll;
+}
+
 FileBrowser::EnterResult FileBrowser::enter() {
     if (entries_.empty()) return EnterResult::None;
     const FileBrowserEntry& e = entries_[static_cast<size_t>(index_)];

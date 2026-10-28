@@ -485,3 +485,62 @@ TEST(save_as_paste_descarta_controles) {
     press(ed, InputEventType::Paste);
     CHECK_EQ(ed.saveAsFileName_, std::string("backup.txt"));
 }
+
+TEST(browser_page_navigation_saveas_moves_selection_only) {
+    // RePag/AvPag en "Guardar como" paginan la lista pero no confirman ni
+    // tocan el nombre escrito.
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    for (int i = 0; i < 20; ++i) t.file("f" + std::to_string(i) + ".txt");
+    Editor ed;
+    ed.active().viewport.height = 5;
+    openSaveAs(ed);  // entries: .. + 20 archivos = 21
+
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
+    typePrompt(ed, "destino.txt");
+    const int bufferCount = ed.buffers.count();
+    const std::string name = ed.saveAsFileName_;
+    const std::string path = ed.fileBrowser.path_;
+
+    press(ed, InputEventType::PageDown);
+    CHECK_EQ(ed.fileBrowser.index_, 5);
+    CHECK_EQ(ed.fileBrowser.scroll_, 5);
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
+    CHECK_EQ(ed.saveAsFileName_, name);
+    CHECK_EQ(ed.buffers.count(), bufferCount);
+    CHECK_EQ(ed.fileBrowser.path_, path);
+    CHECK(ed.active().filename.empty());
+    CHECK(!std::filesystem::exists(t.path + "/destino.txt"));
+
+    press(ed, InputEventType::PageDown);
+    CHECK_EQ(ed.fileBrowser.index_, 10);
+    CHECK_EQ(ed.fileBrowser.scroll_, 10);
+
+    press(ed, InputEventType::PageUp);
+    CHECK_EQ(ed.fileBrowser.index_, 5);
+    CHECK_EQ(ed.fileBrowser.scroll_, 5);
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
+    CHECK_EQ(ed.saveAsFileName_, name);
+    CHECK(!std::filesystem::exists(t.path + "/destino.txt"));
+}
+
+TEST(browser_page_navigation_saveas_short_list_goes_to_ends) {
+    TempDir t;
+    CwdGuard g;
+    g.enter(t.path);
+    for (int i = 0; i < 3; ++i) t.file("f" + std::to_string(i) + ".txt");
+    Editor ed;
+    ed.active().viewport.height = 5;
+    openSaveAs(ed);  // entries: .. + 3 archivos = 4
+
+    press(ed, InputEventType::PageDown);
+    CHECK_EQ(ed.fileBrowser.index_, 3);
+    CHECK_EQ(ed.fileBrowser.scroll_, 0);
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
+
+    press(ed, InputEventType::PageUp);
+    CHECK_EQ(ed.fileBrowser.index_, 0);
+    CHECK_EQ(ed.fileBrowser.scroll_, 0);
+    CHECK(static_cast<int>(ed.state_) == static_cast<int>(State::SaveAsFileBrowser));
+}
