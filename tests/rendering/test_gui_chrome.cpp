@@ -3932,3 +3932,112 @@ TEST(gui_contraste_texto_fondo_headless) {
                     guichrome::currentLineBackground(dark)) >= kMin);
     }
 }
+
+// No hay residuos del framebuffer-chrome tras presentFramebuf durante un
+// resize: el chrome pintado en posicion logica dentro del framebuffer queda
+// cubierto por el overlay anclado o por el relleno del gap, nunca queda
+// "basura" de StatusBar/MessageBar en una posicion intermedia.
+// No hay residuos del framebuffer-chrome tras presentFramebuf durante un
+// resize: el chrome pintado en posicion logica dentro del framebuffer queda
+// cubierto por el overlay anclado o por el relleno del gap, nunca queda
+// "basura" de StatusBar/MessageBar en una posicion intermedia.
+// Esto reproduce el escenario del bug de redimensionado desde la parte
+// superior: outH cambia continuamente, el residuo cruza el umbral de anclado
+// y el chrome no debe saltar entre la posicion logica y la anclada.
+TEST(gui_sdl_chrome_no_residuos_framebuffer_resize) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl(800, 600);
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.hasFont()) SKIP("sin fuente");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola"});
+    const int cw = gui.cellW(), ch = gui.cellH();
+    Cursor cur;
+    Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
+    const int inset = gui.contentTopInset();
+
+    // Altura inicial: usableH no multiplo de ch -> modo anclado con gap.
+    // Se elige residuo >= 3 para que logicalStatusY + 1 caiga dentro del gap.
+    const int startUsable = 20 * ch + 3;  // residuo = 3
+    const int startH = startUsable + inset;
+    SDL_SetWindowSize(sdl.win, 800, startH);
+    SDL_PumpEvents();
+    int outW = 0, outH = 0;
+    SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
+    CHECK_EQ(outH, startH);
+    const int rows1 = (outH - inset) / ch;
+    Viewport vp1 = makeVp(rows1 - 2, outW / cw);
+    gui.renderScreenDiff(doc, cur, vp1, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    const Layout lo1 = gui.lastLayout();
+    const int usableH1 = outH - inset;
+    const guichrome::BottomChromeGeometry geom1 =
+        guichrome::bottomChromeGeometry(usableH1, ch,
+                                        lo1.content.height, lo1.chrome.height);
+    CHECK(geom1.anchored);
+    CHECK(geom1.gapPx >= 3);
+
+    // Posicion logica del StatusBar dentro del framebuffer.
+    const int logicalStatusY = inset + lo1.chrome.row * ch;
+    // Posicion anclada real (donde debería pintarse finalmente).
+    const int anchoredStatusY = inset + geom1.statusTop;
+
+    // La posicion logica esta dentro del gap (logicalStatusY = gapTop).
+    // El overlay rellena el gap con fondo del editor, no debe haber
+    // color de StatusBar en logicalStatusY + 1.
+    CHECK(logicalStatusY != anchoredStatusY);
+    CHECK(readPixel(sdl.ren, outW / 2, logicalStatusY + 1, probe));
+    CHECK(probe == guichrome::background(gui.isDarkTheme()));
+    // Y en la posicion anclada SIEMPRE debe haber StatusBar.
+    CHECK(readPixel(sdl.ren, outW / 2, anchoredStatusY + ch / 2, probe));
+    CHECK(probe == guichrome::statusBackground(gui.isDarkTheme()));
+
+    // ---- Resize hacia arriba (simular arrastre del borde superior) ----
+    // Aumentar outH un solo pixel: el numero de filas de contenido no
+    // cambia (mismo layout.chrome.row), pero la posicion anclada se
+    // desplaza 1 pixel hacia abajo. Esto es lo que ocurre al arrastrar el
+    // borde superior durante un frame.
+    const int endH = startH + 1;
+    SDL_SetWindowSize(sdl.win, 800, endH);
+    SDL_PumpEvents();
+    SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
+    CHECK_EQ(outH, endH);
+    const int rows2 = (outH - inset) / ch;
+    // rows2 == rows1 (cambio de 1 px no cruza limite de fila).
+    CHECK_EQ(rows2, rows1);
+    Viewport vp2 = makeVp(rows2 - 2, outW / cw);
+    gui.renderScreenDiff(doc, cur, vp2, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    const Layout lo2 = gui.lastLayout();
+    const int usableH2 = outH - inset;
+    const guichrome::BottomChromeGeometry geom2 =
+        guichrome::bottomChromeGeometry(usableH2, ch,
+                                        lo2.content.height, lo2.chrome.height);
+    CHECK(geom2.anchored);
+
+    // El layout de contenido no cambio, por lo que la posicion logica del
+    // StatusBar es la misma que antes.
+    CHECK_EQ(lo1.chrome.row, lo2.chrome.row);
+
+    // La posicion anclada se desplazo 1 px hacia abajo.
+    const int newAnchoredStatusY = inset + geom2.statusTop;
+    CHECK_EQ(newAnchoredStatusY, anchoredStatusY + 1);
+
+    // No debe haber residuos de StatusBar en la posicion logica anterior:
+    // esa posicion sigue dentro del gap y debe ser fondo del editor.
+    CHECK(readPixel(sdl.ren, outW / 2, logicalStatusY + 1, probe));
+    CHECK(probe == guichrome::background(gui.isDarkTheme()));
+    // Y en la nueva posicion anclada debe haber StatusBar.
+    CHECK(readPixel(sdl.ren, outW / 2, newAnchoredStatusY + ch / 2, probe));
+    CHECK(probe == guichrome::statusBackground(gui.isDarkTheme()));
+#endif
+}
