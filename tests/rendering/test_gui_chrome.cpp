@@ -2428,6 +2428,229 @@ TEST(gui_sdl_messagebar_sin_franja_no_desplaza) {
 #endif
 }
 
+// Chrome anclado: detecta independientemente (por color de píxel, desde el
+// borde inferior hacia arriba) dónde comienzan y terminan las bandas de
+// StatusBar y MessageBar, y solo entonces las compara contra la geometría
+// del helper. El gap se pinta con el fondo del editor.
+TEST(gui_sdl_chrome_limites_de_fila_y_borde_inferior) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;  // 800x600
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.hasFont()) SKIP("sin fuente");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola"});
+    const int cw = gui.cellW(), ch = gui.cellH();
+    const int rows = 600 / ch - 2;
+    Viewport vp = makeVp(rows, 800 / cw);
+    Cursor cur;
+    Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    const bool dark = gui.isDarkTheme();
+    const Layout lo = gui.lastLayout();
+    int outW = 0, outH = 0;
+    SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
+    const int inset = gui.contentTopInset();
+    const int usableH = outH - inset;
+    const guichrome::BottomChromeGeometry geom =
+        guichrome::bottomChromeGeometry(usableH, ch,
+                                        lo.content.height, lo.chrome.height);
+    CHECK(geom.anchored);
+    // Columna dentro del área del chrome, cerca de su borde derecho, para
+    // evitar el texto centrado del MessageBar y asegurar que cae dentro del
+    // rango de columnas que el chrome realmente pinta.
+    const int xRight = (lo.chrome.col + lo.chrome.width - 1) * cw - 1;
+
+    // --- Detección independiente de bandas desde el borde inferior ---
+    // Orden visual de abajo hacia arriba: MessageBar, StatusBar, gap (si
+    // hay residuo), contenido. Se detectan las transiciones de color por
+    // píxel sin usar el helper para ubicar las bandas.
+    const int yBottom = inset + usableH - 1;
+    CHECK(readPixel(sdl.ren, xRight, yBottom, probe));
+    CHECK(probe == guichrome::messageBackground(dark));
+
+    // Contar filas de messageBackground hacia arriba (debe ser exactamente ch).
+    int msgRows = 0;
+    int y = yBottom;
+    while (y >= inset && msgRows <= ch) {
+        if (!readPixel(sdl.ren, xRight, y, probe)) break;
+        if (probe != guichrome::messageBackground(dark)) break;
+        ++msgRows;
+        --y;
+    }
+    CHECK_EQ(msgRows, ch);
+    // msgTopObserved se deriva directamente de la transición observada:
+    // y apunta a la primera fila por encima del MessageBar.
+    const int msgTopObserved = y + 1 - inset;  // relativo al área útil
+
+    // La fila `y` es la primera por encima del MessageBar: debe ser
+    // statusBackground (última fila del StatusBar).
+    CHECK(readPixel(sdl.ren, xRight, y, probe));
+    CHECK(probe == guichrome::statusBackground(dark));
+
+    // Contar filas de statusBackground hacia arriba (debe ser exactamente ch).
+    int statusRows = 0;
+    while (y >= inset && statusRows <= ch) {
+        if (!readPixel(sdl.ren, xRight, y, probe)) break;
+        if (probe != guichrome::statusBackground(dark)) break;
+        ++statusRows;
+        --y;
+    }
+    CHECK_EQ(statusRows, ch);
+    const int statusTopObserved = y + 1 - inset;  // relativo al área útil
+
+    // Si hay residuo, la fila `y` (primera no-StatusBar) debe ser el gap
+    // pintado con el fondo del editor.
+    if (geom.gapPx > 0) {
+        CHECK(readPixel(sdl.ren, xRight, y, probe));
+        CHECK(probe == guichrome::background(dark));
+    }
+
+    // Comparar límites observados con la geometría del helper.
+    CHECK_EQ(msgTopObserved, geom.messageTop);
+    CHECK_EQ(statusTopObserved, geom.statusTop);
+    if (lo.chrome.height >= 2) {
+        CHECK_EQ(geom.messageTop, geom.statusTop + ch);
+    }
+
+    // Cada celda de chrome debe tener su color en los tres límites de fila,
+    // usando los límites observados (no el helper para ubicar).
+    for (int obsY : {statusTopObserved, statusTopObserved + ch / 2,
+                     statusTopObserved + ch - 1}) {
+        CHECK(readPixel(sdl.ren, xRight, inset + obsY, probe));
+        CHECK(probe == guichrome::statusBackground(dark));
+    }
+    if (lo.chrome.height >= 2) {
+        for (int obsY : {msgTopObserved, msgTopObserved + ch / 2,
+                         msgTopObserved + ch - 1}) {
+            CHECK(readPixel(sdl.ren, xRight, inset + obsY, probe));
+            CHECK(probe == guichrome::messageBackground(dark));
+        }
+    }
+
+    // El chrome ocupa exactamente hasta el borde inferior útil.
+    CHECK_EQ(geom.chromeTop + geom.chromeHeight, usableH);
+#endif
+}
+
+// Chrome anclado con barra de título propia (inset > 0): el inset se descuenta
+// una sola vez y el chrome sigue anclado al borde inferior del área útil.
+TEST(gui_sdl_chrome_con_titulo_inset) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;  // 800x600
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.hasFont()) SKIP("sin fuente");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    gui.setContentTopInset(28);  // barra de título propia
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola"});
+    const int cw = gui.cellW(), ch = gui.cellH();
+    const int rows = (600 - 28) / ch - 2;
+    Viewport vp = makeVp(rows, 800 / cw);
+    Cursor cur;
+    Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    const bool dark = gui.isDarkTheme();
+    const Layout lo = gui.lastLayout();
+    int outW = 0, outH = 0;
+    SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
+    const int inset = gui.contentTopInset();
+    const int usableH = outH - inset;
+    const guichrome::BottomChromeGeometry geom =
+        guichrome::bottomChromeGeometry(usableH, ch,
+                                        lo.content.height, lo.chrome.height);
+    CHECK(geom.anchored);
+    // Columna dentro del área del chrome, cerca de su borde derecho, para
+    // evitar el texto centrado del MessageBar y asegurar que cae dentro del
+    // rango de columnas que el chrome realmente pinta (la ventana no es
+    // múltiplo de cw en general).
+    const int xRight = (lo.chrome.col + lo.chrome.width) * cw - 1;
+
+    // Coordenadas absolutas: el inset se suma una sola vez.
+    CHECK(readPixel(sdl.ren, xRight, inset + geom.statusTop + ch / 2, probe));
+    CHECK(probe == guichrome::statusBackground(dark));
+    if (lo.chrome.height >= 2) {
+        CHECK(readPixel(sdl.ren, xRight,
+                        inset + geom.messageTop + ch / 2, probe));
+        CHECK(probe == guichrome::messageBackground(dark));
+    }
+    CHECK(readPixel(sdl.ren, xRight, inset + usableH - 1, probe));
+    CHECK(probe == guichrome::messageBackground(dark));
+    // El área útil comienza justo debajo de la barra de título: toda la
+    // franja y = 0 .. inset-1 debe conservar el fondo del editor (no hay
+    // título inyectado en el test, así que nada debe dibujarse por encima
+    // del inset).
+    for (int y = 0; y < inset; ++y) {
+        CHECK(readPixel(sdl.ren, xRight, y, probe));
+        CHECK(probe == guichrome::background(dark));
+    }
+#endif
+}
+
+// Modo legacy: cuando la ventana no ancla (residuo >= ch o negativo), el
+// MessageBar NO toca el borde inferior del área útil.
+TEST(gui_sdl_chrome_legacy_no_toca_borde_inferior) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl(800, 437);
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.hasFont()) SKIP("sin fuente");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola"});
+    const int cw = gui.cellW(), ch = gui.cellH();
+    // Viewport con menos filas de las que caben en la ventana: contentH fijo
+    // para que r = usableH - (contentH+chromeH)*ch >= ch (modo legacy).
+    Viewport vp = makeVp(20, 800 / cw);
+    Cursor cur;
+    Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
+    gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    const bool dark = gui.isDarkTheme();
+    const Layout lo = gui.lastLayout();
+    int outW = 0, outH = 0;
+    SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
+    const int inset = gui.contentTopInset();
+    const int usableH = outH - inset;
+    const guichrome::BottomChromeGeometry geom =
+        guichrome::bottomChromeGeometry(usableH, ch,
+                                        lo.content.height, lo.chrome.height);
+    CHECK(!geom.anchored);
+    // Columna dentro del área del chrome, cerca de su borde derecho, para
+    // evitar el texto centrado del MessageBar y asegurar que cae dentro del
+    // rango de columnas que el chrome realmente pinta (la ventana no es
+    // múltiplo de cw en general).
+    const int xRight = (lo.chrome.col + lo.chrome.width) * cw - 1;
+
+    // En legacy el último píxel del área útil es fondo del editor, no chrome.
+    CHECK(readPixel(sdl.ren, xRight, inset + usableH - 1, probe));
+    CHECK(probe == guichrome::background(dark));
+#endif
+}
+
+
 // El "~" real seleccionado se pinta con el fg de texto (ListSelected), no
 // con el verde tenue del relleno: con el sentinel por texto este test
 // fallaba (el archivo se pintaba como Marker).
