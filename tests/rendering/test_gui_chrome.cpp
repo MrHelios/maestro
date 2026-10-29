@@ -48,6 +48,7 @@
 #include "rendering/Style.h"
 #include "rendering/gui/GuiChrome.h"
 #include "rendering/gui/GuiRenderer.h"
+#include "rendering/gui/GuiChromePixels.h"
 #include "rendering/tty/TtyChrome.h"
 #include "rendering/tty/TtyEncoder.h"
 #include "rendering/tty/TtyTheme.h"
@@ -2107,13 +2108,11 @@ TEST(gui_sdl_mensaje_llena_y_vacia_messagebar) {
 #endif
 }
 
-// Franja de la ventana por debajo de la grilla (SdlDummy 800x600 con celda
-// ~19px: grilla 31 filas = 589px, franja restante [589,600) de ~11px). La
-// banda visible de la MessageBar es ahora [yBar, borde inferior] y la pinta
-// el overlay de la MessageBar sobre la ventana; el fondo debe llegar al
-// borde inferior sin arrastrar al StatusBar (de otro color). Sólo comprueba
-// el color de la banda: el centrado real del texto/cursor lo cubren los
-// tests gui_sdl_messagebar_*_centrado_en_banda_visible.
+// Chrome anclado: con una ventana que no es múltiplo de la altura de celda,
+// StatusBar y MessageBar quedan pegados al borde inferior con altura fija ch,
+// y el residuo entre el contenido y el chrome se pinta con el fondo del
+// editor. Se leen píxeles REALES del target de ventana (overlay), no del
+// framebuffer.
 TEST(gui_sdl_franja_bajo_grilla_fondo_messagebar) {
 #ifndef HAVE_SDL2
     SKIP("sin SDL2");
@@ -2136,33 +2135,144 @@ TEST(gui_sdl_franja_bajo_grilla_fondo_messagebar) {
                          std::nullopt, std::nullopt, std::nullopt);
     const bool dark = gui.isDarkTheme();
     const Layout lo = gui.lastLayout();
-    const int hGrid = (lo.chrome.row + lo.chrome.height) * ch;
     int outW = 0, outH = 0;
     SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
-    if (outH <= hGrid || outW <= 0) SKIP("ventana multiplo de la celda (sin franja)");
-    const int yMid = hGrid + (outH - hGrid) / 2;
+    const int inset = gui.contentTopInset();
+    const guichrome::BottomChromeGeometry geom =
+        guichrome::bottomChromeGeometry(outH - inset, ch,
+                                        lo.content.height, lo.chrome.height);
+    if (!geom.anchored) SKIP("ventana múltiplo de la celda (sin residuo)");
     const int xMid = outW / 2;
-    // La franja completa (con y sin mensaje: el color no depende del texto).
-    CHECK(readPixel(sdl.ren, xMid, yMid, probe));
+
+    // Coordenadas absolutas en pantalla = inset + geometría relativa.
+    const int statusY  = inset + geom.statusTop  + ch / 2;
+    const int messageY = inset + geom.messageTop + ch / 2;
+    const int gapY     = inset + geom.gapTop + geom.gapPx / 2;
+
+    // StatusBar anclado al bloque inferior (ya no en la fila de grilla).
+    CHECK(readPixel(sdl.ren, xMid, statusY, probe));
+    CHECK(probe == guichrome::statusBackground(dark));
+    // MessageBar con altura fija ch, tocando el borde inferior.
+    CHECK(readPixel(sdl.ren, xMid, messageY, probe));
     CHECK(probe == guichrome::messageBackground(dark));
+    CHECK_EQ(geom.messageTop + ch, outH - inset);  // relativo vs. área útil
+    // El residuo queda entre contenido y chrome, pintado con el fondo.
+    CHECK(geom.gapPx > 0);
+    CHECK(readPixel(sdl.ren, xMid, gapY, probe));
+    CHECK(probe == guichrome::background(dark));
+    // Sin mensaje la banda visible conserva el mismo color de fondo.
     Message emptyMsg{std::string(""), MessageKind::Info, std::nullopt};
     gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
                          makeChromeRequest(emptyMsg, State::Navegacion), sink,
                          std::nullopt, std::nullopt, std::nullopt);
-    CHECK(readPixel(sdl.ren, xMid, yMid, probe));
+    CHECK(readPixel(sdl.ren, xMid, messageY, probe));
     CHECK(probe == guichrome::messageBackground(dark));
-    // El StatusBar (fila superior del chrome, aquí encima de la franja)
-    // conserva su propio fondo: no se contagia de la franja.
-    CHECK(readPixel(sdl.ren, xMid, lo.chrome.row * ch + ch / 2, probe));
-    CHECK(probe == guichrome::statusBackground(dark));
 #endif
 }
 
-// Centrado REAL del texto de la MessageBar: con ventana 800x600 y celda
-// ~19px la banda visible es [yBar, 600) = celda (570..589) + franja residual
-// (589..600). El centro de la tinta de "Guardado" debe quedar junto al centro
-// de la banda visible (~585), no en el de la celda (~579.5) como antes de la
-// corrección. Este test mide la tinta, no el color de fondo.
+// Resize vertical consecutivo: el bloque de chrome se recalcula en cada
+// frame y sigue pegado al borde inferior (altura fija ch), sin acumular
+// desplazamiento. Se valida sobre el overlay real tras cada render.
+TEST(gui_sdl_chrome_anclado_resize_consecutivo) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl(800, 600);
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.hasFont()) SKIP("sin fuente");
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola"});
+    const int cw = gui.cellW(), ch = gui.cellH();
+    Cursor cur;
+    Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
+
+    // Barrido pixel a pixel de 2*ch + 2 alturas consecutivas: cualquier
+    // intervalo de esa longitud cruza al menos dos límites de fila.
+    const int startH = 600;
+    const int endH = startH + 2 * ch + 2;
+
+    int prevOutH = -1;
+    int prevChromeTop = 0;
+    int prevRows = -1;
+    int rowChanges = 0;
+    int zeroResidueAfterChange = 0;
+    bool havePrev = false;
+
+    for (int targetH = startH; targetH <= endH; ++targetH) {
+        SDL_SetWindowSize(sdl.win, 800, targetH);
+        SDL_PumpEvents();
+        int outW = 0, outH = 0;
+        SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
+        CHECK_EQ(outH, targetH);          // el barrido es realmente consecutivo
+        if (outH != targetH) { havePrev = false; continue; }
+
+        // Mismo cálculo de filas que producción.
+        const int inset = gui.contentTopInset();
+        const int usableH = outH - inset;
+        const int rows = usableH / ch;
+        const int residue = usableH % ch;
+        Viewport vp = makeVp(rows - 2, outW / cw);
+
+        gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                             makeChromeRequest(msg, State::Navegacion), sink,
+                             std::nullopt, std::nullopt, std::nullopt);
+        const Layout lo = gui.lastLayout();
+        const guichrome::BottomChromeGeometry geom =
+            guichrome::bottomChromeGeometry(usableH, ch,
+                                            lo.content.height,
+                                            lo.chrome.height);
+        CHECK(geom.anchored);
+        if (!geom.anchored) { havePrev = false; continue; }
+
+        // El chrome termina exactamente en el borde inferior útil (relativo).
+        CHECK_EQ(geom.chromeTop + geom.chromeHeight, usableH);
+
+        // Transición (relativa: el inset es constante entre iteraciones).
+        if (havePrev && prevOutH == outH - 1) {
+            CHECK_EQ(geom.chromeTop, prevChromeTop + 1);
+            if (rows != prevRows) {
+                ++rowChanges;
+                CHECK_EQ(rows, prevRows + 1);
+                CHECK_EQ(residue, 0);
+                if (residue == 0) ++zeroResidueAfterChange;
+            }
+        }
+
+        // Píxeles reales: coordenadas absolutas con inset.
+        const int xMid = outW / 2;
+        CHECK(readPixel(sdl.ren, xMid, inset + geom.statusTop + ch / 2, probe));
+        CHECK(probe == guichrome::statusBackground(gui.isDarkTheme()));
+        CHECK(readPixel(sdl.ren, xMid, inset + geom.messageTop + ch / 2, probe));
+        CHECK(probe == guichrome::messageBackground(gui.isDarkTheme()));
+        if (geom.gapPx > 0) {
+            CHECK(readPixel(sdl.ren, xMid,
+                            inset + geom.gapTop + geom.gapPx / 2, probe));
+            CHECK(probe == guichrome::background(gui.isDarkTheme()));
+        }
+
+        prevOutH = outH;
+        prevChromeTop = geom.chromeTop;
+        prevRows = rows;
+        havePrev = true;
+    }
+
+    // El barrido tiene que haber atravesado al menos dos cambios de fila.
+    CHECK(rowChanges >= 2);
+    CHECK_EQ(zeroResidueAfterChange, rowChanges);
+#endif
+}
+
+// Centrado REAL del texto de la MessageBar: con chrome anclado el MessageBar
+// está a altura fija ch desde el borde inferior. El texto se dibuja dentro de
+// su celda (no se estira con la franja residual). La tinta de la fuente suele
+// quedar en la parte superior de la celda por métricas de la fuente; lo que
+// importa es que NO se desplace al centro de la banda visible (comportamiento
+// legacy).
 TEST(gui_sdl_messagebar_texto_centrado_en_banda_visible) {
 #ifndef HAVE_SDL2
     SKIP("sin SDL2");
@@ -2186,30 +2296,34 @@ TEST(gui_sdl_messagebar_texto_centrado_en_banda_visible) {
                          std::nullopt, std::nullopt, std::nullopt);
     const bool dark = gui.isDarkTheme();
     const Layout lo = gui.lastLayout();
-    const int yBar = (lo.chrome.row + 1) * ch;
-    const int gridBottom = (lo.chrome.row + lo.chrome.height) * ch;
     int outW = 0, outH = 0;
     SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
-    if (outH - gridBottom <= 0 || outH - gridBottom >= ch)
-        SKIP("ventana sin franja residual");
+    const int inset = gui.contentTopInset();
+    const int H = outH - inset;
+    const guichrome::BottomChromeGeometry geom =
+        guichrome::bottomChromeGeometry(H, ch, lo.content.height, lo.chrome.height);
+    if (!geom.anchored) SKIP("modo legacy inesperado");
+
+    // Banda del MessageBar en coordenadas absolutas de pantalla.
+    const int msgTop = inset + geom.messageTop;
+    const int msgBot = msgTop + ch;
+
     const GuiColor mbg = guichrome::messageBackground(dark);
     int top = 0, bot = 0;
-    // "Guardado" arranca en padL=1; basta escanear sus ~8 columnas.
-    CHECK(inkExtent(sdl.ren, 1, 9, yBar, outH, cw, mbg, top, bot));
-    // Centros x2 para comparar con aritmética entera (sin <cmath>).
-    const int ink2 = top + bot;
-    const int vis2 = yBar + outH;
-    const int cell2 = 2 * yBar + ch;
-    // Centrado en la banda visible (tolerancia por asimetría de la tinta).
-    CHECK(std::abs(ink2 - vis2) <= 4);
-    // Y más cerca del centro visible que del de la celda: eso prueba que la
-    // franja residual desplaza el texto (antes caía en el centro de celda).
-    CHECK(std::abs(ink2 - vis2) <= std::abs(ink2 - cell2));
+    CHECK(inkExtent(sdl.ren, 1, 9, msgTop, msgBot, cw, mbg, top, bot));
+    // La tinta está DENTRO de la celda del MessageBar.
+    CHECK(top >= msgTop);
+    CHECK(bot <= msgBot);
+    // Y no en la posición legacy (centro de la banda visible), también
+    // expresada en coordenadas absolutas.
+    const int legacyBandCenter = inset + (lo.chrome.row + 1) * ch + H / 2;
+    const int inkCenter = (top + bot) / 2;
+    CHECK(inkCenter < legacyBandCenter);
 #endif
 }
 
-// Centrado REAL del cursor Bar de la MessageBar (prompt Busqueda): misma
-// referencia vertical que el texto, no el centro de la celda.
+// Centrado REAL del cursor Bar de la MessageBar (prompt Busqueda): con chrome
+// anclado, el cursor Bar llena la celda del MessageBar (altura fija ch).
 TEST(gui_sdl_messagebar_cursor_bar_centrado_en_banda_visible) {
 #ifndef HAVE_SDL2
     SKIP("sin SDL2");
@@ -2237,22 +2351,30 @@ TEST(gui_sdl_messagebar_cursor_bar_centrado_en_banda_visible) {
     CHECK(gui.lastCursor().cell.valid());
     const bool dark = gui.isDarkTheme();
     const Layout lo = gui.lastLayout();
-    const int yBar = (lo.chrome.row + 1) * ch;
-    const int gridBottom = (lo.chrome.row + lo.chrome.height) * ch;
     int outW = 0, outH = 0;
     SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
-    if (outH - gridBottom <= 0 || outH - gridBottom >= ch)
-        SKIP("ventana sin franja residual");
+    const int inset = gui.contentTopInset();
+    const int H = outH - inset;
+    const guichrome::BottomChromeGeometry geom =
+        guichrome::bottomChromeGeometry(H, ch, lo.content.height, lo.chrome.height);
+    if (!geom.anchored) SKIP("modo legacy inesperado");
+
+    // Banda del MessageBar en coordenadas absolutas de pantalla.
+    const int msgTop = inset + geom.messageTop;
+    const int msgBot = msgTop + ch;
+
     // Columna dentro del Bar de 2px: su primera columna (+1 si cabe).
     const int px = gui.lastCursor().cell.col * cw + (cw > 2 ? 1 : 0);
     int top = 0, bot = 0;
-    CHECK(colorExtent(sdl.ren, px, yBar, outH,
+    CHECK(colorExtent(sdl.ren, px, msgTop, msgBot,
                       guichrome::cursorColor(dark), top, bot));
-    const int bar2 = top + bot;
-    const int vis2 = yBar + outH;
-    const int cell2 = 2 * yBar + ch;
-    CHECK(std::abs(bar2 - vis2) <= 2);
-    CHECK(std::abs(bar2 - vis2) <= std::abs(bar2 - cell2));
+    // El cursor está DENTRO de la celda del MessageBar.
+    CHECK(top >= msgTop);
+    CHECK(bot <= msgBot);
+    // Su centro está cerca del centro de la celda (tolerancia 8px).
+    const int barCenter = (top + bot) / 2;
+    const int cellCenter = msgTop + ch / 2;
+    CHECK(std::abs(barCenter - cellCenter) <= 8);
 #endif
 }
 

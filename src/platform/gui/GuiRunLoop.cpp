@@ -11,6 +11,7 @@
 #include "platform/gui/GuiWindowGeometry.h"
 #include "rendering/Sink.h"
 #include "rendering/gui/GuiRenderer.h"
+#include "rendering/gui/GuiChromePixels.h"
 
 #ifdef HAVE_SDL2
 #include <SDL2/SDL.h>
@@ -650,7 +651,11 @@ int GuiRunLoop::run() {
     // el Editor la trata como fuera de contenido) en vez de clamparse a la
     // última columna; el pasado-EOL DENTRO de la grilla lo sigue resolviendo
     // screenToCursor a EOL. Sin offsets propios.
-    auto mouseCell = [&](int ptX, int ptY) {
+    // gapAsBottom: para el ARRASTRE, una posición en la franja residual se
+    // trata como "debajo del contenido" (fila content.height) para que el
+    // autoscroll baje. En press/release esa misma zona devuelve CellPos{}
+    // (click muerto): el residuo no es una celda de contenido.
+    auto mouseCell = [&](int ptX, int ptY, bool gapAsBottom = false) {
         int winW = 0, winH = 0, outW = 0, outH = 0;
         SDL_GetWindowSize(win, &winW, &winH);
         SDL_GetRendererOutputSize(ren, &outW, &outH);
@@ -674,11 +679,51 @@ int GuiRunLoop::run() {
         // La grilla y la celda viven debajo de la barra propia: se descuenta
         // su alto del drawable y del eje Y. Un click en la barra produce una
         // celda inválida (nunca {0,0}).
+        const int pyUtil = pxY - titleBarHeightPx_;
+        if (pyUtil < 0) return CellPos{}; // click en la barra de título
+        
         const int contentH = std::max(1, outH - titleBarHeightPx_);
         const platform::WindowSize g =
             guiGridSize(outW, contentH, cw, ch);
-        return guiCellFromPixelsBounded(pxX, pxY - titleBarHeightPx_, cw, ch,
-                                        g.cols, g.rows);
+        
+        // Obtener layout actual para calcular geometría del chrome anclado
+        const Layout layout = gui_ ? gui_->lastLayout() : Layout{};
+        const guichrome::BottomChromeGeometry chromeGeom =
+            guichrome::bottomChromeGeometry(contentH, ch,
+                                            layout.content.height,
+                                            layout.chrome.height);
+        
+        int row = -1;
+        if (chromeGeom.anchored) {
+            if (pyUtil < chromeGeom.contentBottom) {
+                // Contenido normal
+                row = pyUtil / ch;
+            } else if (pyUtil < chromeGeom.chromeTop) {
+                // Espacio residual entre contenido y chrome.
+                if (gapAsBottom) {
+                    const int col = std::clamp(pxX / cw, 0,
+                                               std::max(0, g.cols - 1));
+                    return CellPos{col, layout.content.height};
+                }
+                // Click muerto: sin celda válida (no es contenido).
+                return CellPos{};
+            } else {
+                // Chrome anclado (StatusBar o MessageBar)
+                const int chromeRow = (pyUtil - chromeGeom.chromeTop) / ch;
+                row = layout.chrome.row + chromeRow;
+            }
+        } else {
+            // Camino legacy: usar la conversión habitual
+            row = pyUtil / ch;
+        }
+        
+        const int col = pxX / cw;
+        
+        // Validar límites
+        if (row < 0 || row >= g.rows || col < 0 || col >= g.cols) {
+            return CellPos{};
+        }
+        return CellPos{col, row};
     };
 
     struct DrawablePoint {
@@ -1144,7 +1189,7 @@ int GuiRunLoop::run() {
                     // dentro, el release o el cierre por tick/foco.
                     if (!guiLeftHeld(ev.motion.state)) break;
                     InputEvent ie = makeMouseDragEvent(
-                        mouseCell(ev.motion.x, ev.motion.y));
+                        mouseCell(ev.motion.x, ev.motion.y, true));
                     editor_.handleEvent(ie);
                     const auto now = std::chrono::steady_clock::now();
                     editor_.clearExpiredMessages(now);

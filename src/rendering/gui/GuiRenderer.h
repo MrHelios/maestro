@@ -23,6 +23,7 @@
 #include "rendering/gui/GuiChrome.h"
 #include "platform/gui/GuiOptions.h"
 #include "rendering/gui/GuiFont.h"
+#include "rendering/gui/GuiChromePixels.h"
 #include "syntax/SyntaxCache.h"
 
 // ---------------------------------------------------------------------------
@@ -487,6 +488,7 @@ private:
     mutable int lastRepainted_ = 0;
     mutable int lastSkipped_ = 0;
     mutable bool lastChromeDirty_ = true;
+    mutable guichrome::BottomChromeGeometry lastChromeGeometry_;
     mutable long long totalFrames_ = 0;
     mutable long long totalFull_ = 0;
     mutable long long totalRepainted_ = 0;
@@ -538,6 +540,8 @@ private:
                           StyleRole accent, const Layout& layout,
                           const FrameCursor& next, int selectedRow,
                           int selSnapshot, int scrollSnapshot);
+    // Calcula y almacena la geometría del chrome inferior anclado.
+    void updateChromeGeometry(const Layout& layout, int outH);
 
     // --- Framebuffers persistentes para el repintado parcial (P1) ---
     // El camino parcial NO puede apoyarse en que el backbuffer conserve sus
