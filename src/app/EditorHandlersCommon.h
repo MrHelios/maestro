@@ -87,6 +87,13 @@ inline int visualColumnOf(const softwrap::Index& idx, const Document& doc, const
 }
 
 // screenToCursor con wrap: mapea celda visual -> posicion logica
+//
+// Igual que screenToCursor() pero con el dominio visual (filas de wrap):
+// los clicks dentro de layout.content mapean a una Position del documento;
+// los clicks fuera del area de contenido (filas `~` y chrome anclado:
+// StatusBar / MessageBar) devuelven nullopt. El chrome se maneja por
+// separado en Editor::handleMousePress() (es un no-op: no mueve el cursor,
+// no toca la seleccion, no arma el gesto de mouse).
 inline std::optional<Position> screenToCursorWrap(const softwrap::Index& idx,
                                                    CellPos cell,
                                                    const Layout& layout,
@@ -95,10 +102,15 @@ inline std::optional<Position> screenToCursorWrap(const softwrap::Index& idx,
                                                    int gutterW) {
     const int relRow = cell.row - layout.content.row;
     const int relCol = cell.col - layout.content.col;
+
+    // Clicks fuera del area de contenido (filas `~` y chrome inferior) no
+    // resuelven a una posicion de documento valida: se devuelve nullopt. El
+    // chrome anclado se maneja por separado en Editor::handleMousePress().
     if (relRow < 0 || relRow >= layout.content.height) return std::nullopt;
     if (relCol < 0) return std::nullopt;
 
     int visualRow = viewport.top + relRow;
+    if (visualRow < 0) return std::nullopt;
     if (visualRow >= idx.totalRows()) return std::nullopt;
 
     if (relCol < gutterW) {

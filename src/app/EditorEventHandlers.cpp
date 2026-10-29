@@ -310,6 +310,20 @@ void Editor::handleMousePress(const InputEvent& event) {
     const Layout layout =
         computeLayout(b.viewport.height + kChromeRows, b.viewport.width);
 
+    // El chrome ocupa el rectangulo layout.chrome (filas contiguas justo
+    // despues del contenido, exactamente kChromeRows filas segun
+    // Layout::computeLayout). Identificarlo por su rectangulo real, no
+    // deducido de content.height, para no romper si el layout cambia.
+    const bool chromeClick = (event.cell.row >= layout.chrome.row &&
+                              event.cell.row < layout.chrome.row + layout.chrome.height);
+
+    if (chromeClick) {
+        // El chrome (StatusBar / MessageBar) es puramente informativo: los
+        // clicks no producen ninguna accion. No se mueve el cursor, no se
+        // toca la seleccion, no se arma el gesto de mouse.
+        return;
+    }
+
     std::optional<Position> pos;
     if (isWrapEnabledFor(b)) {
         const softwrap::Index& idx = wrapFor(this, b);

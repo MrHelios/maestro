@@ -255,7 +255,7 @@ TEST(mouse_map_first_last_visible_row) {
     CHECK_EQ(last->line, 3);
 }
 
-TEST(mouse_map_below_doc_and_chrome_ignored) {
+TEST(mouse_map_outside_content_returns_nullopt) {
     Document d;
     d.restore({"a", "b"});
     Viewport vp = testViewport(10, 20);
@@ -263,9 +263,61 @@ TEST(mouse_map_below_doc_and_chrome_ignored) {
     // fila visible 2 = docLine 2 >= lineCount => nullopt (fila `~`)
     auto below = screenToCursor(CellPos{9, 2}, lo, vp, d);
     CHECK(!below.has_value());
-    // status bar: primera fila fuera de content (relRow=10 => celda row=10)
+    // status bar (primera fila fuera de content): nullopt. El chrome se
+    // maneja por separado en handleMousePress(), no aqui.
     auto bar = screenToCursor(CellPos{9, 10}, lo, vp, d);
     CHECK(!bar.has_value());
+    // mensaje del chrome: nullopt tambien.
+    auto msg = screenToCursor(CellPos{9, 11}, lo, vp, d);
+    CHECK(!msg.has_value());
+    // Fuera de todo el chrome (relRow >= content.height + chrome.height) sigue
+    // siendo nullopt (fila residual/abajo del frame).
+    auto out = screenToCursor(CellPos{9, 12}, lo, vp, d);
+    CHECK(!out.has_value());
+}
+
+TEST(mouse_map_chrome_with_content_row_nonzero) {
+    // Verifica que screenToCursor rechace cualquier fila fuera de
+    // layout.content cuando content.row != 0, incluyendo el chrome.
+    // computeLayout() siempre pone content.row = 0, así que construimos el
+    // Layout manualmente para exponer el mezclado de coordenadas.
+    Document d;
+    d.restore({"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9"});
+    Viewport vp = testViewport(10, 20);
+    Layout lo = testLayout(vp);          // content = Rect{0,0,20,10}, chrome = Rect{10,0,20,2}
+    lo.content.row = 5;                  // contenido empieza en la fila 5
+    lo.chrome.row = 15;                  // chrome empieza en la fila 15 (5 + 10)
+    lo.chrome.height = 2;
+
+    // Fila anterior al contenido (cell.row = 4 < content.row = 5): nullopt.
+    auto before = screenToCursor(CellPos{5, 4}, lo, vp, d);
+    CHECK(!before.has_value());
+
+    // Primera fila de contenido (cell.row = 5 == content.row): válido.
+    auto first = screenToCursor(CellPos{5, 5}, lo, vp, d);
+    CHECK(first.has_value());
+    if (first) {
+        CHECK_EQ(first->line, 0);
+    }
+
+    // StatusBar (cell.row = 15 == chrome.row): nullopt (fuera de content).
+    auto status = screenToCursor(CellPos{5, 15}, lo, vp, d);
+    CHECK(!status.has_value());
+
+    // MessageBar (cell.row = 16 == chrome.row + 1): nullopt (fuera de content).
+    auto message = screenToCursor(CellPos{5, 16}, lo, vp, d);
+    CHECK(!message.has_value());
+
+    // Última fila de contenido (cell.row = 14 == content.row + height - 1): válido.
+    auto last = screenToCursor(CellPos{5, 14}, lo, vp, d);
+    CHECK(last.has_value());
+    if (last) {
+        CHECK_EQ(last->line, 9);
+    }
+
+    // Fila posterior al chrome (cell.row = 17 >= chrome.row + chrome.height): nullopt.
+    auto after = screenToCursor(CellPos{5, 17}, lo, vp, d);
+    CHECK(!after.has_value());
 }
 
 // --- Editor ---
@@ -756,8 +808,9 @@ TEST(mouse_click_after_mouse_drag_on_tilde_clears) {
     CHECK(!ed.hasSelection());
 }
 
-TEST(mouse_click_after_mouse_drag_on_chrome_clears) {
-    // Click en el chrome tambien debe limpiar la seleccion vigente.
+TEST(mouse_click_after_mouse_drag_on_chrome_does_not_change_state) {
+    // Click en el chrome es un no-op: no mueve el cursor, no toca la
+    // seleccion, no cambia el estado ni arma el gesto de mouse.
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
     b.document.restore({"hello", "world"});
@@ -774,12 +827,42 @@ TEST(mouse_click_after_mouse_drag_on_chrome_clears) {
              static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());
     // Contenido = filas 1..10 (1-based); 11 es la primera de statusbar.
-    ed.processEventForTesting(mousePress(14, 11));
+    ed.processEventForTesting(mousePress(14, 11)); // StatusBar: no-op
     ed.processEventForTesting(mouseRelease(14, 11));
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Navegacion));
-    CHECK(!b.selection.has_value());
-    CHECK(!ed.hasSelection());
+             static_cast<int>(State::Seleccion)); // sin cambios
+    CHECK(b.selection.has_value());              // seleccion mantiene
+    CHECK(ed.hasSelection());
+    CHECK_EQ(b.cursor.line, 1);                  // cursor sin mover
+    CHECK_EQ(b.cursor.col, 2);
+}
+
+// Verifica que un click en el MessageBar tampoco modifica el estado.
+TEST(mouse_click_on_messagebar_does_not_change_state) {
+    Editor ed;
+    Buffer& b = ed.getActiveBufferForTesting();
+    b.document.restore({"hello", "world"});
+    b.viewport.height = 10;
+    b.viewport.width = 20;
+    b.viewport.top = 0;
+    b.viewport.left = 0;
+    b.cursor.line = 0;
+    b.cursor.col = 0;
+    ed.processEventForTesting(mousePress(8, 1)); // (0,0)
+    ed.processEventForTesting(mouseDrag(10, 2));  // (1,2)
+    ed.processEventForTesting(mouseRelease(10, 2));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Seleccion));
+    CHECK(ed.hasSelection());
+    // 12 es la segunda fila del chrome (MessageBar).
+    ed.processEventForTesting(mousePress(14, 12)); // MessageBar: no-op
+    ed.processEventForTesting(mouseRelease(14, 12));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Seleccion)); // sin cambios
+    CHECK(b.selection.has_value());              // seleccion mantiene
+    CHECK(ed.hasSelection());
+    CHECK_EQ(b.cursor.line, 1);                  // cursor sin mover
+    CHECK_EQ(b.cursor.col, 2);
 }
 
 TEST(mouse_press_after_mouse_drag_clears_highlight_immediately) {

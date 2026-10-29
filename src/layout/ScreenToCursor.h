@@ -19,7 +19,11 @@
 // No depende de Editor/Renderer: testeable sin construir el engine.
 //
 // Reglas:
-//   - Fuera de layout.content (chrome: StatusBar/MessageBar, etc.) => nullopt.
+//   - Click dentro de layout.content => mapea a Position del documento.
+//   - Click fuera de layout.content (filas `~` y chrome anclado:
+//     StatusBar / MessageBar) => nullopt. El chrome se maneja por separado
+//     en Editor::handleMousePress() para armar el gesto sin mover el
+//     cursor: el cursor nunca debe activarse por un click en el chrome.
 //   - Fila `~` (docLine >= lineCount) => nullopt.
 //   - Click en gutter (relCol < gutterW) => inicio de la fila (col 0).
 //   - Click en texto o mas alla de EOL => utf8::byteForColumn + alignStart
@@ -33,6 +37,11 @@ inline std::optional<Position> screenToCursor(CellPos cell,
                                               const Document& doc) {
     const int relRow = cell.row - layout.content.row;
     const int relCol = cell.col - layout.content.col;
+
+    // Clicks fuera del area de contenido (filas `~` y chrome inferior) no
+    // resuelven a una posicion de documento valida: se devuelve nullopt. El
+    // chrome anclado (StatusBar / MessageBar) se maneja por separado en
+    // Editor::handleMousePress() para armar el gesto sin mover el cursor.
     if (relRow < 0 || relRow >= layout.content.height) return std::nullopt;
     if (relCol < 0) return std::nullopt;
 

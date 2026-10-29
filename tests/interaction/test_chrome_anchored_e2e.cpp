@@ -34,25 +34,38 @@ InputEvent mouse(InputEventType type, CellPos cell) {
 
 } // namespace
 
-// Press en StatusBar (fila lógica = content.height) arma el gesto
-TEST(chrome_anchored_e2e_press_statusbar_arms_gesture) {
+// Press en StatusBar (fila lógica = content.height): es un no-op, no modifica
+// ningún estado del editor.
+TEST(chrome_anchored_e2e_press_statusbar_is_noop) {
     Editor ed;
     setupEditor(ed, 25, 0, 10);
+
+    const int cursorLineBefore = ed.active().cursor.line;
+    const int cursorColBefore = ed.active().cursor.col;
 
     ed.handleEvent(mouse(InputEventType::MousePress, CellPos{10, 20}));
 
-    CHECK(ed.mouseGestureActive_);
+    CHECK(!ed.mouseGestureActive_);
     CHECK(!ed.mouseDragStarted_);
+    CHECK_EQ(ed.active().cursor.line, cursorLineBefore);
+    CHECK_EQ(ed.active().cursor.col, cursorColBefore);
 }
 
-// Press en MessageBar (fila lógica = content.height + 1) arma el gesto
-TEST(chrome_anchored_e2e_press_messagebar_arms_gesture) {
+// Press en MessageBar (fila lógica = content.height + 1): es un no-op, no
+// modifica ningún estado del editor.
+TEST(chrome_anchored_e2e_press_messagebar_is_noop) {
     Editor ed;
     setupEditor(ed, 25, 0, 10);
 
+    const int cursorLineBefore = ed.active().cursor.line;
+    const int cursorColBefore = ed.active().cursor.col;
+
     ed.handleEvent(mouse(InputEventType::MousePress, CellPos{15, 21}));
 
-    CHECK(ed.mouseGestureActive_);
+    CHECK(!ed.mouseGestureActive_);
+    CHECK(!ed.mouseDragStarted_);
+    CHECK_EQ(ed.active().cursor.line, cursorLineBefore);
+    CHECK_EQ(ed.active().cursor.col, cursorColBefore);
 }
 
 // Arrastre hacia el espacio residual (gapAsBottom -> fila content.height)
