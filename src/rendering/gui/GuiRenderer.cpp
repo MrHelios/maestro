@@ -877,20 +877,29 @@ void paintSnapshotListRow(SDL_Renderer* r, GuiFont& font, bool dark,
     }
 }
 
-// Solo el chrome (StatusBar + MessageBar), sin cursor ni Present. Extraído
-// del cuerpo de paintChromeAndCursor para el camino parcial: si el chrome
-// está limpio se salta entero; si cambió se repintan sus 2 filas (barato).
-void paintChromeOnly(SDL_Renderer* r, GuiFont& font, bool dark,
-                     const Layout& layout, const ChromeData& chromeData,
-                     StyleRole accent) {
+// Unico pintor del frame del chrome inferior (StatusBar + MessageBar).
+// Pinta las dos filas en las posiciones de píxel recibidas (`statusTop`,
+// `messageTop`), ya sean la posición lógica de grilla o la posición
+// anclada al borde inferior (resuelta por el caller vía
+// lastChromeGeometry_). `topInset` se suma para desplazar debajo de la
+// barra de título propia cuando existe. Es la UNICA funcion responsable de
+// dibujar las dos filas del chrome sobre el destino activo (framebuffer o
+// ventana).
+void paintChromeFrame(SDL_Renderer* r, GuiFont& font, bool dark,
+                      const Layout& layout, const ChromeData& chromeData,
+                      StyleRole accent, int statusTop, int messageTop,
+                      int topInset) {
     const int cw = font.cellW();
     const int ch = font.cellH();
-    if (cw <= 0 || ch <= 0) return;
+    if (cw <= 0 || ch <= 0 || layout.chrome.width <= 0) return;
+
     const int totalWpx = layout.chrome.width * cw;
-    if (layout.chrome.height >= 1 && layout.chrome.width > 0) {
+    const int baseX = layout.chrome.col * cw;
+
+    // ---- StatusBar: fila superior del chrome ----
+    if (layout.chrome.height >= 1) {
         const GuiColor sbg = guichrome::statusBackground(dark);
-        SDL_Rect srect{layout.chrome.col * cw, layout.chrome.row * ch, totalWpx,
-                       ch};
+        SDL_Rect srect{baseX, topInset + statusTop, totalWpx, ch};
         SDL_SetRenderDrawColor(r, sbg.r, sbg.g, sbg.b, sbg.a);
         SDL_RenderFillRect(r, &srect);
         if (font.ok()) {
@@ -898,8 +907,7 @@ void paintChromeOnly(SDL_Renderer* r, GuiFont& font, bool dark,
                 guichrome::statusSegments(chromeData.statusBar, accent,
                                           layout.chrome.width);
             int consumed = 0;
-            const int baseX = layout.chrome.col * cw;
-            const int y = layout.chrome.row * ch;
+            const int y = topInset + statusTop;
             for (const auto& sg : segs) {
                 if (sg.text.empty()) continue;
                 const int cols = chrome::colCount(sg.text);
@@ -922,10 +930,11 @@ void paintChromeOnly(SDL_Renderer* r, GuiFont& font, bool dark,
             }
         }
     }
-    if (layout.chrome.height >= 2 && layout.chrome.width > 0) {
+
+    // ---- MessageBar: fila inferior del chrome ----
+    if (layout.chrome.height >= 2) {
         const GuiColor mbg = guichrome::messageBackground(dark);
-        SDL_Rect mrect{layout.chrome.col * cw, (layout.chrome.row + 1) * ch,
-                       totalWpx, ch};
+        SDL_Rect mrect{baseX, topInset + messageTop, totalWpx, ch};
         SDL_SetRenderDrawColor(r, mbg.r, mbg.g, mbg.b, mbg.a);
         SDL_RenderFillRect(r, &mrect);
         if (font.ok()) {
@@ -933,8 +942,7 @@ void paintChromeOnly(SDL_Renderer* r, GuiFont& font, bool dark,
                 guichrome::messageSegments(chromeData.message,
                                            layout.chrome.width);
             int consumed = 0;
-            const int baseX = layout.chrome.col * cw;
-            const int y = (layout.chrome.row + 1) * ch;
+            const int y = topInset + messageTop;
             for (const auto& sg : segs) {
                 if (sg.text.empty()) continue;
                 const int cols = chrome::colCount(sg.text);
@@ -957,6 +965,19 @@ void paintChromeOnly(SDL_Renderer* r, GuiFont& font, bool dark,
             }
         }
     }
+}
+
+// Solo el chrome (StatusBar + MessageBar), sin cursor ni Present. Extraído
+// del cuerpo de paintChromeAndCursor para el camino parcial: si el chrome
+// está limpio se salta entero; si cambió se repintan sus 2 filas (barato).
+// Delegacion unica en paintChromeFrame con la posicion logica de grilla.
+void paintChromeOnly(SDL_Renderer* r, GuiFont& font, bool dark,
+                     const Layout& layout, const ChromeData& chromeData,
+                     StyleRole accent) {
+    if (font.cellW() <= 0 || font.cellH() <= 0) return;
+    paintChromeFrame(r, font, dark, layout, chromeData, accent,
+                     layout.chrome.row * font.cellH(),
+                     (layout.chrome.row + 1) * font.cellH(), 0);
 }
 
 // Solo el cursor (bloque con glifo invertido / barra 2px), sin Present.
@@ -1348,81 +1369,10 @@ void paintChromeAndCursor(SDL_Renderer* r, GuiFont& font, bool dark,
     // composite del framebuffer, o en el fallback directo).
     if (cw <= 0 || ch <= 0) return;
 
-    const int totalWpx = layout.chrome.width * cw;
-    // StatusBar: fila superior del chrome.
-    if (layout.chrome.height >= 1 && layout.chrome.width > 0) {
-        const GuiColor sbg = guichrome::statusBackground(dark);
-        SDL_Rect srect{layout.chrome.col * cw, layout.chrome.row * ch, totalWpx,
-                       ch};
-        SDL_SetRenderDrawColor(r, sbg.r, sbg.g, sbg.b, sbg.a);
-        SDL_RenderFillRect(r, &srect);
-        if (font.ok()) {
-            const std::vector<guichrome::GuiChromeSeg> segs =
-                guichrome::statusSegments(chromeData.statusBar, accent,
-                                          layout.chrome.width);
-            int consumed = 0;
-            const int baseX = layout.chrome.col * cw;
-            const int y = layout.chrome.row * ch;
-            for (const auto& sg : segs) {
-                if (sg.text.empty()) continue;
-                const int cols = chrome::colCount(sg.text);
-                const bool onlySpaces =
-                    sg.text.find_first_not_of(' ') == std::string::npos;
-                if (!onlySpaces) {
-                    const GuiColor fg =
-                        guichrome::colorFor(sg.role, dark);
-                    void* tex =
-                        font.textTexture(r, sg.text, fg.r, fg.g, fg.b);
-                    if (tex) {
-                        SDL_Texture* t = static_cast<SDL_Texture*>(tex);
-                        int tw = 0, th = 0;
-                        SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-                        SDL_Rect dst{baseX + consumed * cw, y, tw, th};
-                        SDL_RenderCopy(r, t, nullptr, &dst);
-                    }
-                }
-                consumed += cols;
-            }
-        }
-    }
-    // MessageBar: fila inferior del chrome. El texto expira por timeout en
-    // el Editor (tick/clearExpiredMessages): cuando vence, el chrome llega
-    // vacío y la fila queda en fondo limpio (mensaje cumplido).
-    if (layout.chrome.height >= 2 && layout.chrome.width > 0) {
-        const GuiColor mbg = guichrome::messageBackground(dark);
-        SDL_Rect mrect{layout.chrome.col * cw, (layout.chrome.row + 1) * ch,
-                       totalWpx, ch};
-        SDL_SetRenderDrawColor(r, mbg.r, mbg.g, mbg.b, mbg.a);
-        SDL_RenderFillRect(r, &mrect);
-        if (font.ok()) {
-            const std::vector<guichrome::GuiChromeSeg> segs =
-                guichrome::messageSegments(chromeData.message,
-                                           layout.chrome.width);
-            int consumed = 0;
-            const int baseX = layout.chrome.col * cw;
-            const int y = (layout.chrome.row + 1) * ch;
-            for (const auto& sg : segs) {
-                if (sg.text.empty()) continue;
-                const int cols = chrome::colCount(sg.text);
-                const bool onlySpaces =
-                    sg.text.find_first_not_of(' ') == std::string::npos;
-                if (!onlySpaces) {
-                    const GuiColor fg =
-                        guichrome::colorFor(sg.role, dark);
-                    void* tex =
-                        font.textTexture(r, sg.text, fg.r, fg.g, fg.b);
-                    if (tex) {
-                        SDL_Texture* t = static_cast<SDL_Texture*>(tex);
-                        int tw = 0, th = 0;
-                        SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-                        SDL_Rect dst{baseX + consumed * cw, y, tw, th};
-                        SDL_RenderCopy(r, t, nullptr, &dst);
-                    }
-                }
-                consumed += cols;
-            }
-        }
-    }
+    // Frame del chrome (StatusBar + MessageBar) en posición lógica de grilla.
+    // Delegacion unica en paintChromeFrame.
+    paintChromeFrame(r, font, dark, layout, chromeData, accent,
+                     layout.chrome.row * ch, (layout.chrome.row + 1) * ch, 0);
 
     // Cursor: el Frame ya trae la posicion resuelta (contenido o MessageBar
     // en prompts). Bar = barra fina de 2px (ok sobre el texto).
