@@ -877,14 +877,22 @@ void paintSnapshotListRow(SDL_Renderer* r, GuiFont& font, bool dark,
     }
 }
 
-// Unico pintor del frame del chrome inferior (StatusBar + MessageBar).
+// Pintor del frame del chrome inferior (StatusBar + MessageBar).
 // Pinta las dos filas en las posiciones de píxel recibidas (`statusTop`,
 // `messageTop`), ya sean la posición lógica de grilla o la posición
 // anclada al borde inferior (resuelta por el caller vía
 // lastChromeGeometry_). `topInset` se suma para desplazar debajo de la
-// barra de título propia cuando existe. Es la UNICA funcion responsable de
-// dibujar las dos filas del chrome sobre el destino activo (framebuffer o
-// ventana).
+// barra de título propia cuando existe.
+//
+// NOTA: esta función centraliza CÓMO se pinta el frame del chrome, pero no
+// es el único responsable de dibujarlo sobre el destino activo:
+//   - paintChromeAndCursor / paintChromeOnly la invocan con coordenadas
+//     lógicas (fila de grilla) dentro del framebuffer.
+//   - paintWindowChromeOverlays la invocará con coordenadas ancladas al
+//     borde inferior directamente sobre la ventana.
+// Esa doble representación (framebuffer + ventana directa) es la que debe
+// unificarse para resolver el salto visual al redimensionar desde arriba.
+// Este refactor solo aísla la implementación común en una sola función.
 void paintChromeFrame(SDL_Renderer* r, GuiFont& font, bool dark,
                       const Layout& layout, const ChromeData& chromeData,
                       StyleRole accent, int statusTop, int messageTop,
