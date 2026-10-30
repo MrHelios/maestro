@@ -4125,3 +4125,444 @@ TEST(gui_sdl_chrome_no_residuos_framebuffer_resize) {
     }
 #endif
 }
+
+// ===========================================================================
+// Tests de regresión del chrome: invariante "pintar una sola vez por frame"
+// y cursor Bar del prompt.
+// ===========================================================================
+namespace {
+
+struct ChromeFixture {
+    SdlDummy sdl;
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    Cursor cur;
+    Viewport vp;
+    Message msg{"Guardado", MessageKind::Info, std::nullopt};
+
+    explicit ChromeFixture(int w = 800, int h = 600) : sdl(w, h) {
+        if (!sdl.ok) return;
+        gui.initForRenderer(sdl.ren);
+        doc.restore({"hola", "mundo", "linea 3"});
+        vp = makeVp(h / gui.cellH() - 2, w / gui.cellW());
+    }
+
+    bool ok() const { return sdl.ok; }
+
+    void render(State st = State::Navegacion) {
+        gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                             makeChromeRequest(msg, st), sink,
+                             std::nullopt, std::nullopt, std::nullopt);
+    }
+};
+
+struct Shot {
+    std::vector<GuiColor> px;
+    int w = 0, h = 0, inset = 0, ch = 0, cw = 0;
+    bool dark = false;
+    Layout lo;
+    guichrome::ChromePaintGeometry g;
+
+    GuiColor at(int x, int y) const {
+        return px[static_cast<size_t>(y) * w + x];
+    }
+};
+
+// Redimensiona para que H (alto util, sin inset) sea exactamente `H`.
+void setUsableHeight(ChromeFixture& f, int H) {
+    SDL_SetWindowSize(f.sdl.win, 800, f.gui.contentTopInset() + H);
+    SDL_PumpEvents();
+    f.gui.invalidateCache();
+}
+
+// Lee pixeles y calcula la geometria con los mismos datos que el renderer.
+bool grabShot(ChromeFixture& f, Shot& s) {
+    if (!f.gui.readWindowPixels(s.px, s.w, s.h)) return false;
+    s.inset = f.gui.contentTopInset();
+    s.ch = f.gui.cellH();
+    s.cw = f.gui.cellW();
+    s.dark = f.gui.isDarkTheme();
+    s.lo = f.gui.lastLayout();
+    s.g = guichrome::chromePaintGeometry(s.lo, s.w, s.h - s.inset, s.ch, s.cw);
+    return true;
+}
+
+// Cuenta pixeles distintos de `expected` en [x0,x1) x [y0,y1). `total`
+// recibe la cantidad examinada para poder exigir que no sea cero.
+int countMismatch(const Shot& s, int x0, int x1, int y0, int y1,
+                  GuiColor expected, int& total) {
+    int bad = 0;
+    total = 0;
+    for (int y = y0; y < y1 && y < s.h; ++y)
+        for (int x = x0; x < x1 && x < s.w; ++x) {
+            ++total;
+            if (s.at(x, y) != expected) ++bad;
+        }
+    return bad;
+}
+
+} // namespace
+
+TEST(gui_sdl_chrome_paint_once_full_fresh) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    ChromeFixture f;
+    if (!f.ok()) SKIP("sin video dummy");
+
+    f.gui.resetChromePaintCountersForTests();
+    f.render();
+
+    CHECK_EQ(f.gui.chromePaintCalls(), 1);
+    CHECK_EQ(f.gui.messageBarCursorPaints(), 0);
+#endif
+}
+
+TEST(gui_sdl_chrome_paint_once_parcial_contenido) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    ChromeFixture f;
+    if (!f.ok()) SKIP("sin video dummy");
+
+    // Frame base para llenar la caché de contenido.
+    f.render();
+    CHECK(f.gui.lastWasFull());
+
+    // Camino parcial: estado estable sin cambios de contenido.
+    f.gui.resetChromePaintCountersForTests();
+    f.render();
+
+    // Debe ser parcial (no full) y el chrome debe pintarse una sola vez.
+    CHECK(!f.gui.lastWasFull());
+    CHECK_EQ(f.gui.chromePaintCalls(), 1);
+#endif
+}
+
+TEST(gui_sdl_chrome_paint_once_parcial_chrome_dirty) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    ChromeFixture f;
+    if (!f.ok()) SKIP("sin video dummy");
+
+    f.render();
+    CHECK(f.gui.lastWasFull());
+
+    // Contenido intacto, chrome distinto: escenario del doble pintado original.
+    f.msg = Message{"Guardado correctamente", MessageKind::Info, std::nullopt};
+    f.gui.resetChromePaintCountersForTests();
+    f.render();
+
+    CHECK(!f.gui.lastWasFull());
+    CHECK(f.gui.lastChromeDirty());
+    CHECK_EQ(f.gui.chromePaintCalls(), 1);
+#endif
+}
+
+TEST(gui_sdl_chrome_paint_once_cursor_rapido) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    ChromeFixture f;
+    if (!f.ok()) SKIP("sin video dummy");
+
+    // Frame base para llenar la caché.
+    f.render();
+    CHECK(f.gui.lastWasFull());
+
+    // Camino rápido: mover el cursor sin cambiar el contenido.
+    f.gui.resetChromePaintCountersForTests();
+    f.cur.line = 2;
+    f.render();
+
+    CHECK(!f.gui.lastWasFull());
+    CHECK_EQ(f.gui.chromePaintCalls(), 1);
+#endif
+}
+
+TEST(gui_sdl_chrome_paint_once_scroll_normal) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    ChromeFixture f;
+    if (!f.ok()) SKIP("sin video dummy");
+
+    // Frame base para llenar la caché.
+    f.render();
+    CHECK(f.gui.lastWasFull());
+
+    // Camino rápido: scroll +1 sin cambiar el contenido.
+    f.gui.resetChromePaintCountersForTests();
+    f.vp.top = 1;
+    f.render();
+
+    CHECK(!f.gui.lastWasFull());
+    CHECK_EQ(f.gui.chromePaintCalls(), 1);
+#endif
+}
+
+TEST(gui_sdl_chrome_paint_once_fallback_sin_framebuffer) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    ChromeFixture f;
+    if (!f.ok()) SKIP("sin video dummy");
+
+    f.gui.setFramebufAcquireFailAfterForTests(0);
+    f.gui.resetChromePaintCountersForTests();
+    f.render();
+    f.gui.setFramebufAcquireFailAfterForTests(-1);
+
+    CHECK_EQ(f.gui.chromePaintCalls(), 1);
+#endif
+}
+
+TEST(gui_sdl_chrome_messagebar_cursor_bar_blink) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    ChromeFixture f;
+    if (!f.ok()) SKIP("sin video dummy");
+
+    Message prompt{"Find: ho", MessageKind::Prompt, std::nullopt, 7, 6};
+
+    auto t0 = std::chrono::steady_clock::now();
+
+    // Fase ON: blinkNow == anchor, elapsed = 0, phase = 0 < 530 => ON.
+    // El primer render con prompt ancla el blink en t0.
+    f.gui.setBlinkNow(t0);
+    f.gui.resetChromePaintCountersForTests();
+    f.gui.renderScreenDiff(f.doc, f.cur, f.vp, "t.txt", false,
+                           makeChromeRequest(prompt, State::Busqueda),
+                           f.sink, std::nullopt, std::nullopt, std::nullopt);
+
+    CHECK_EQ(f.gui.chromePaintCalls(), 1);
+    CHECK_EQ(f.gui.messageBarCursorPaints(), 1);
+    CHECK(f.gui.lastCursor().visible);
+    CHECK(f.gui.lastCursor().shape == FrameCursorShape::Bar);
+
+    // Fase OFF: elapsed = 530ms, phase = 530, no es < 530 => OFF.
+    // El cursor no cambia, por lo que el ancla no se mueve.
+    f.gui.setBlinkNow(t0 + std::chrono::milliseconds(530));
+    f.gui.resetChromePaintCountersForTests();
+    f.gui.renderScreenDiff(f.doc, f.cur, f.vp, "t.txt", false,
+                           makeChromeRequest(prompt, State::Busqueda),
+                           f.sink, std::nullopt, std::nullopt, std::nullopt);
+
+    CHECK_EQ(f.gui.chromePaintCalls(), 1);
+    CHECK_EQ(f.gui.messageBarCursorPaints(), 0);
+    CHECK(f.gui.lastCursor().visible);
+    CHECK(f.gui.lastCursor().shape == FrameCursorShape::Bar);
+
+    // Fase ON de nuevo: elapsed = 1060ms, phase = 0 < 530 => ON.
+    f.gui.setBlinkNow(t0 + std::chrono::milliseconds(1060));
+    f.gui.resetChromePaintCountersForTests();
+    f.gui.renderScreenDiff(f.doc, f.cur, f.vp, "t.txt", false,
+                           makeChromeRequest(prompt, State::Busqueda),
+                           f.sink, std::nullopt, std::nullopt, std::nullopt);
+
+    CHECK_EQ(f.gui.chromePaintCalls(), 1);
+    CHECK_EQ(f.gui.messageBarCursorPaints(), 1);
+    CHECK(f.gui.lastCursor().visible);
+    CHECK(f.gui.lastCursor().shape == FrameCursorShape::Bar);
+#endif
+}
+
+TEST(gui_sdl_chrome_statusbar_legacy_una_fila) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    ChromeFixture f(800, 600);
+    if (!f.ok()) SKIP("sin video dummy");
+    const int cw = f.gui.cellW(), ch = f.gui.cellH();
+    f.vp = makeVp(20, 800 / cw);
+    f.msg = Message{"", MessageKind::Info, std::nullopt}; // solo StatusBar
+
+    // r = ch => legacy.
+    setUsableHeight(f, (20 + 2) * ch + ch);
+    f.gui.setCaptureEnabled(true);
+    f.render();
+    Shot s;
+    CHECK(grabShot(f, s));
+    f.gui.setCaptureEnabled(false);
+
+    // Precondicion: modo legacy.
+    CHECK(!s.g.anchored);
+
+    // 1. El StatusBar debe tener su fondo en su posicion legacy.
+    const GuiColor statusBg = guichrome::statusBackground(s.dark);
+    const int baseX = s.lo.chrome.col * cw;
+    const int statusY = s.inset + s.g.statusTop + ch / 2;
+    CHECK(s.at(baseX, statusY) == statusBg);
+
+    // 2. Si hay una sola fila de chrome, verificar la cola residual
+    // (statusTail), incluyendo el extremo derecho del drawable.
+    if (s.lo.chrome.height == 1) {
+        CHECK(s.g.statusTailHeight > 0);
+        CHECK(s.g.statusTailWidth > 0);
+        const int tailY = s.inset + s.g.statusTailTop + s.g.statusTailHeight / 2;
+        CHECK(s.at(baseX, tailY) == statusBg);
+        CHECK(s.at(s.w - 1, tailY) == statusBg);
+    }
+#endif
+}
+
+TEST(gui_sdl_chrome_transicion_anchored_a_legacy_sin_residuos) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    ChromeFixture f(800, 600);
+    if (!f.ok()) SKIP("sin video dummy");
+    const int cw = f.gui.cellW(), ch = f.gui.cellH();
+    CHECK(ch >= 2);
+    f.vp = makeVp(20, 800 / cw);
+    const int grid = (20 + 2) * ch;
+
+    f.gui.setCaptureEnabled(true);
+
+    // Frame 1: anclado con gap real de ch/2.
+    setUsableHeight(f, grid + ch / 2);
+    f.render();
+    Shot a;
+    CHECK(grabShot(f, a));
+    CHECK_EQ(a.lo.content.height, 20);
+    CHECK_EQ(a.lo.chrome.height, 2);
+    CHECK_EQ(a.h - a.inset, grid + ch / 2);
+    CHECK(a.g.anchored);
+    CHECK_EQ(a.g.gapHeight, ch / 2);
+
+    // Frame 2: legacy (r == ch).
+    setUsableHeight(f, grid + ch);
+    f.render();
+    Shot leg;
+    CHECK(grabShot(f, leg));
+    f.gui.setCaptureEnabled(false);
+    CHECK_EQ(leg.lo.chrome.height, 2);
+    CHECK_EQ(leg.h - leg.inset, grid + ch);
+    CHECK(!leg.g.anchored);
+
+    const int baseX = leg.lo.chrome.col * cw;
+    const int endX = (leg.lo.chrome.col + leg.lo.chrome.width) * cw;
+    const GuiColor editorBg = guichrome::background(leg.dark);
+
+    // Franja inferior bajo el chrome legacy: no debe quedar chrome viejo.
+    int total = 0;
+    const int bad = countMismatch(leg, baseX, endX, leg.inset + grid,
+                                  leg.inset + grid + ch, editorBg, total);
+    CHECK(total > 0);
+    CHECK_EQ(bad, 0);
+#endif
+}
+
+TEST(gui_sdl_chrome_transicion_legacy_a_anchored_sin_franjas) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    ChromeFixture f(800, 600);
+    if (!f.ok()) SKIP("sin video dummy");
+    const int cw = f.gui.cellW(), ch = f.gui.cellH();
+    CHECK(ch >= 2);
+    f.vp = makeVp(20, 800 / cw);
+    const int grid = (20 + 2) * ch;
+
+    f.gui.setCaptureEnabled(true);
+
+    // Frame 1: legacy.
+    setUsableHeight(f, grid + ch);
+    f.render();
+    Shot l;
+    CHECK(grabShot(f, l));
+    CHECK_EQ(l.lo.content.height, 20);
+    CHECK_EQ(l.lo.chrome.height, 2);
+    CHECK_EQ(l.h - l.inset, grid + ch);
+    CHECK(!l.g.anchored);
+
+    // Frame 2: anclado con gap de ch/2.
+    setUsableHeight(f, grid + ch / 2);
+    f.render();
+    Shot s;
+    CHECK(grabShot(f, s));
+    f.gui.setCaptureEnabled(false);
+    CHECK_EQ(s.h - s.inset, grid + ch / 2);
+    CHECK(s.g.anchored);
+    CHECK(s.g.gapHeight > 0);
+    CHECK_EQ(s.g.gapHeight, ch / 2);
+
+    const int baseX = s.lo.chrome.col * cw;
+    const int endX = (s.lo.chrome.col + s.lo.chrome.width) * cw;
+    const GuiColor editorBg = guichrome::background(s.dark);
+
+    // Gap completo: todo fondo del editor (incluye donde antes estaba el
+    // chrome legacy).
+    int total = 0;
+    const int bad = countMismatch(s, baseX, endX, s.inset + s.g.gapTop,
+                                  s.inset + s.g.gapTop + s.g.gapHeight,
+                                  editorBg, total);
+    CHECK(total > 0);
+    CHECK_EQ(bad, 0);
+#endif
+}
+
+TEST(gui_sdl_chrome_paint_once_lista_full) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    NullTestSink sink;
+    std::vector<std::string> names = {"a.txt", "b.txt", "c.txt"};
+
+    gui.resetChromePaintCountersForTests();
+    gui.renderBufferList(names, 0, 40, 10, sink);
+
+    CHECK(gui.lastWasFull());
+    CHECK_EQ(gui.chromePaintCalls(), 1);
+#endif
+}
+
+TEST(gui_sdl_chrome_paint_once_lista_parcial) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    NullTestSink sink;
+    std::vector<std::string> names = {"a.txt", "b.txt", "c.txt"};
+
+    gui.renderBufferList(names, 0, 40, 10, sink);
+    CHECK(gui.lastWasFull());
+
+    gui.resetChromePaintCountersForTests();
+    gui.renderBufferList(names, 1, 40, 10, sink); // cambia la seleccion
+
+    CHECK(!gui.lastWasFull());
+    CHECK_EQ(gui.chromePaintCalls(), 1);
+#endif
+}
+
+TEST(gui_sdl_chrome_paint_once_lista_fallback_sin_framebuffer) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl;
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    NullTestSink sink;
+    std::vector<std::string> names = {"a.txt", "b.txt", "c.txt"};
+
+    gui.setFramebufAcquireFailAfterForTests(0); // acquireFb falla -> presentWindow
+    gui.resetChromePaintCountersForTests();
+    gui.renderBufferList(names, 0, 40, 10, sink);
+    gui.setFramebufAcquireFailAfterForTests(-1);
+
+    CHECK_EQ(gui.chromePaintCalls(), 1);
+#endif
+}
+

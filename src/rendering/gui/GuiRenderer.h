@@ -148,6 +148,19 @@ public:
     // render targets o sin ningún render previo) o si ReadPixels falla.
     bool readLastSurfacePixels(std::vector<GuiColor>& out, int& wPx,
                                int& hPx);
+    // Activa/desactiva la captura del frame de ventana. Pensado para tests:
+    // en producción queda en false y no hay lectura de píxeles por frame.
+    void setCaptureEnabled(bool on) { captureEnabled_ = on; if (!on) lastCaptureValid_ = false; }
+
+    // Devuelve el snapshot del último frame, capturado tras pintar el overlay
+    // y ANTES de SDL_RenderPresent(). Requiere setCaptureEnabled(true) y
+    // haber renderizado al menos un frame. Devuelve false si no hay snapshot.
+    bool readWindowPixels(std::vector<GuiColor>& out, int& wPx,
+                          int& hPx);
+    bool readWindowPixels(std::vector<GuiColor>& out) {
+        int w = 0, h = 0;
+        return readWindowPixels(out, w, h);
+    }
     void setExternalSyntaxCache(SyntaxCache* c) override {
         frameBuilder_.setExternalSyntaxCache(c);
     }
@@ -166,6 +179,18 @@ public:
     // (como si el renderer/tamaño las hubiera invalidado) para forzar su
     // recreación en el próximo render.
     void dropContentFramebuffersForTests();
+
+    // Solo tests/observabilidad: cuántas veces se invocó el pintor único de
+    // chrome (paintWindowChromeOverlays) y cuántas veces se pintó el cursor
+    // Bar de la MessageBar desde el overlay. La invariante de composición es
+    // exactamente 1 por frame compuesto; un píxel correcto no la demuestra
+    // (el segundo pase puede tapar al primero).
+    int chromePaintCalls() const { return chromePaintCalls_; }
+    int messageBarCursorPaints() const { return messageBarCursorPaints_; }
+    void resetChromePaintCountersForTests() const {
+        chromePaintCalls_ = 0;
+        messageBarCursorPaints_ = 0;
+    }
 
     // Tema claro/oscuro: conmuta `dark_` y libera el caché de texturas
     // (ahorro de memoria, no corrección: el color ya va en la clave de
@@ -488,7 +513,15 @@ private:
     mutable int lastRepainted_ = 0;
     mutable int lastSkipped_ = 0;
     mutable bool lastChromeDirty_ = true;
-    mutable guichrome::BottomChromeGeometry lastChromeGeometry_;
+    mutable guichrome::ChromePaintGeometry lastChromeGeometry_;
+    mutable int chromePaintCalls_ = 0;
+    mutable int messageBarCursorPaints_ = 0;
+    // Captura del último frame de ventana (solo tests, desactivada por defecto).
+    bool captureEnabled_ = false;
+    bool lastCaptureValid_ = false;
+    std::vector<GuiColor> lastCapture_;
+    int lastCaptureW_ = 0;
+    int lastCaptureH_ = 0;
     mutable long long totalFrames_ = 0;
     mutable long long totalFull_ = 0;
     mutable long long totalRepainted_ = 0;
@@ -540,8 +573,9 @@ private:
                           StyleRole accent, const Layout& layout,
                           const FrameCursor& next, int selectedRow,
                           int selSnapshot, int scrollSnapshot);
-    // Calcula y almacena la geometría del chrome inferior anclado.
-    void updateChromeGeometry(const Layout& layout, int outH);
+    // Calcula y almacena la geometría de pintado del chrome inferior para
+    // ambos modos (anclado y legacy). Única fuente de verdad para el overlay.
+    void updateChromeGeometry(const Layout& layout, int outW, int outH);
 
     // --- Framebuffers persistentes para el repintado parcial (P1) ---
     // El camino parcial NO puede apoyarse en que el backbuffer conserve sus
@@ -590,10 +624,25 @@ private:
     const softwrap::Index* wrapIndex_ = nullptr;
 
     #ifdef HAVE_SDL2
+    // Captura el destino de ventana tras el último draw del overlay y antes
+    // del Present. Solo se usa cuando captureEnabled_ está activo (tests).
+    void captureBackbuffer_(SDL_Renderer* r);
     void presentFramebuf(SDL_Renderer* r, SDL_Texture* fb,
                          const GuiColor& bg, const Layout& layout, int ch,
                          const ChromeData& chromeData,
                          const FrameCursor& cursor, bool cursorShown);
+    // Composición final del fallback sin render targets: clear + contenido +
+    // cursor + (scrollbar) + chrome + Present. Es el único otro punto de
+    // composición además de presentFramebuf, y también pinta el chrome una
+    // sola vez. `withScrollbar` preserva la diferencia histórica entre
+    // contenido (con scrollbar) y listas (sin scrollbar).
+    void presentWindow(SDL_Renderer* r, const GuiColor& bg,
+                       const Layout& layout, int ch,
+                       const ChromeData& chromeData, StyleRole accent,
+                       const FrameCursor& cursor, bool cursorShown,
+                       const Frame* contentFrame,
+                       const std::vector<ListLine>* listLines,
+                       int listSelectedRow, bool withScrollbar);
 
     void paintVerticalScrollbar(SDL_Renderer* r, const Layout& layout);
 #endif

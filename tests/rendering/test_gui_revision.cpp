@@ -556,8 +556,8 @@ TEST(gui_revision_stress_sdl_framebuffer_resize_y_recursos) {
 // ---------------------------------------------------------------------------
 
 // Headless: el DTO y los colores que el pintor resuelve para cada elemento
-// usan el tema nuevo. Se resuelve POR EL MISMO CAMINO que paintChromeOnly
-// (segmento del chrome -> colorFor(rol, dark); fondos -> tablas por tema),
+// usan el tema nuevo. Se resuelve POR EL MISMO CAMINO que el pintor de
+// chrome (segmento del chrome -> colorFor(rol, dark); fondos -> tablas por tema),
 // no solo que las tablas difieren. No se afirma nada sobre el caché de
 // texturas: el color va en la clave (GuiFont.h), así que vaciarlo en el
 // toggle es ahorro de memoria, no corrección.
@@ -616,8 +616,8 @@ TEST(gui_revision_tema_con_prompt_representa_todo_headless) {
     CHECK_EQ(static_cast<int>(gui.lastAccent()),
              static_cast<int>(StyleRole::AccentGuardar));
     // Colores resueltos por el camino del pintor con el tema nuevo: cada
-    // segmento del chrome que paintChromeOnly pintaría lleva el RGB nuevo,
-    // distinto del viejo. El cursor Bar cae dentro de las filas del chrome.
+    // segmento del chrome lleva el RGB nuevo, distinto del viejo. El cursor
+    // Bar cae dentro de las filas del chrome.
     {
         const bool nowDark = gui.isDarkTheme();
         const int chw = gui.lastLayout().chrome.width;
@@ -702,6 +702,7 @@ TEST(gui_revision_tema_con_prompt_paridad_pixeles_sdl) {
         gui.renderScreenDiff(doc, cur, vp, "t.txt", false, cr, sink,
                              std::nullopt, std::nullopt, std::nullopt);
     };
+    gui.setCaptureEnabled(true);
     render();
     CHECK(gui.lastWasFull());
     const Layout lo = gui.lastLayout();
@@ -763,19 +764,20 @@ TEST(gui_revision_tema_con_prompt_paridad_pixeles_sdl) {
                        oldAcc));
     };
 
-    // 1. Tema dark: cada elemento con su color (precondición simétrica).
+    // 1. Tema dark: cada elemento con su color en píxeles de ventana (el
+    // chrome se pinta por overlay en ventana, no en el framebuffer).
     std::vector<GuiColor> darkPx;
     int darkW = 0, darkH = 0;
-    if (!readSurfaceRev(gui, darkPx, darkW, darkH))
+    if (!gui.readWindowPixels(darkPx, darkW, darkH))
         SKIP("ReadPixels no disponible");
     CHECK(gui.isDarkTheme());
     checkPromptPixels(darkPx, darkW, darkH, true);
 
-    // 2. Steady en dark: misma imagen.
+    // 2. Steady en dark: misma imagen de ventana.
     render();
     CHECK(!gui.lastWasFull());
     std::vector<GuiColor> darkSteady;
-    CHECK(readSurfaceRev(gui, darkSteady));
+    CHECK(gui.readWindowPixels(darkSteady));
     CHECK(darkSteady == darkPx);
 
     // 3. Toggle con el prompt activo: frame completo y cada elemento con el
@@ -788,7 +790,7 @@ TEST(gui_revision_tema_con_prompt_paridad_pixeles_sdl) {
     CHECK(gui.lastCursor().shape == FrameCursorShape::Bar);
     std::vector<GuiColor> lightPx;
     int lightW = 0, lightH = 0;
-    CHECK(readSurfaceRev(gui, lightPx, lightW, lightH));
+    CHECK(gui.readWindowPixels(lightPx, lightW, lightH));
     CHECK_EQ(lightW, darkW);
     CHECK_EQ(lightH, darkH);
     CHECK(lightPx != darkPx);
@@ -799,13 +801,13 @@ TEST(gui_revision_tema_con_prompt_paridad_pixeles_sdl) {
     render();
     CHECK(!gui.lastWasFull());
     std::vector<GuiColor> lightSteady;
-    CHECK(readSurfaceRev(gui, lightSteady));
+    CHECK(gui.readWindowPixels(lightSteady));
     CHECK(lightSteady == lightPx);
     gui.invalidateCache();
     render();
     CHECK(gui.lastWasFull());
     std::vector<GuiColor> lightFull;
-    CHECK(readSurfaceRev(gui, lightFull));
+    CHECK(gui.readWindowPixels(lightFull));
     CHECK(lightFull == lightPx);
 #endif
 }
