@@ -132,20 +132,6 @@ public:
 
     Layout calculateLayout(int contentRows, int width) const;
 
-    // Layout desde dimensiones logicas completas (fuente unica: Editor).
-    // Antes: se reconstruia desde viewport.height + kChromeRows inferido, lo
-    // que pierde informacion cuando el contenido colapsa (filas totales <= 3).
-    // Ahora: recibe las filas/columnas logicas originales y construye el layout
-    // exacto con computeLayout(rows, cols).
-    Layout layoutFromLogical(int rows, int cols) const;
-
-    // EditorGeometry desde dimensiones logicas completas (mismo criterio que
-    // layoutFromLogical). `viewport` se conserva como fallback para los callers
-    // que solo conocen el contenido (TTY).
-    EditorGeometry editorGeometry(const Document& doc, const Viewport& viewport,
-                                   int totalRows, int totalCols,
-                                   const softwrap::Index* wrapIndex = nullptr) const;
-
     // Sincroniza el lenguaje de sintaxis con el filename. Devuelve true si
     // cambió (el backend debe tratarlo como rebuild total, como hacía el
     // viejo Renderer::updateSyntaxLanguage al limpiar hasCache_).

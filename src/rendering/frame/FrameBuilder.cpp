@@ -152,26 +152,6 @@ Layout FrameBuilder::calculateLayout(int contentRows, int width) const {
     return computeLayout(contentRows + kChromeRows, width);
 }
 
-Layout FrameBuilder::layoutFromLogical(int rows, int cols) const {
-    // Dimensiones logicas completas: fuente unica del layout (Editor).
-    // computeLayout(rows, cols) ya aplica la politica de contenido minimo
-    // (content = rows - kChromeRows si rows > kChromeRows, sino 1), por lo que
-    // el chrome resultante es consistente con el total original.
-    return computeLayout(rows, cols);
-}
-
-FrameBuilder::EditorGeometry FrameBuilder::editorGeometry(const Document& doc, const Viewport& viewport,
-                                            int totalRows, int totalCols,
-                                            const softwrap::Index* wrapIndex) const {
-    EditorGeometry g;
-    g.layout = computeLayout(totalRows, totalCols);
-    g.gutterW = gutterWidth(doc.lineCount(), totalCols);
-    g.wrapIndex = wrapIndex;
-    g.wrapEnabled = wrapIndex && wrapIndex->enabled();
-    (void)viewport;
-    return g;
-}
-
 FrameBuilder::EditorGeometry FrameBuilder::editorGeometry(
     const Document& doc, const Viewport& viewport,
     const softwrap::Index* wrapIndex) const {
@@ -626,11 +606,7 @@ Frame FrameBuilder::buildFrame(const Document& doc,
     const softwrap::Index* wrapIndex,
     const Layout& layout) const {
     // Layout desde dimensiones logicas completas (fuente unica: Editor).
-    EditorGeometry g;
-    g.layout = layout;
-    g.gutterW = gutterWidth(doc.lineCount(), layout.content.width);
-    g.wrapIndex = wrapIndex;
-    g.wrapEnabled = wrapIndex && wrapIndex->enabled();
+    const EditorGeometry g = editorGeometry(doc, layout, wrapIndex);
 
     if (instrument::isEnabled()) {
         instrument::resetFrame();

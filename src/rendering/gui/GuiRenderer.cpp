@@ -1778,9 +1778,8 @@ void GuiRenderer::renderScreenDiff(
     // existentes): comportamiento historico (content + kChromeRows).
     return renderScreenDiff(doc, cursor, viewport, filename, modified, chrome,
                             sink, selection, searchHighlight, bracketPair,
-                            frameBuilder_.layoutFromLogical(viewport.height +
-                                                                 kChromeRows,
-                                                             viewport.width));
+                            computeLayout(viewport.height + kChromeRows,
+                                          viewport.width));
 }
 
 void GuiRenderer::renderScreenDiff(
