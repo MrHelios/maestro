@@ -97,6 +97,13 @@ StyleRole roleAtTextCol(const GuiContentRow& row, int col) {
 struct SdlDummyRev {
     SDL_Window* win = nullptr;
     SDL_Renderer* ren = nullptr;
+    int w = 800;
+    int h = 600;
+    // Fase 2/P2: tamaño REAL del drawable (output size del renderer), al que
+    // se alimenta setDrawableMetrics. No se confía en las dimensiones
+    // solicitadas al crear la ventana (pueden diferir del drawable con HiDPI).
+    int drawableW = 0;
+    int drawableH = 0;
     bool ok = false;
     bool didInit_ = false;
     bool videoAlreadyInit_ = false;
@@ -104,7 +111,7 @@ struct SdlDummyRev {
     std::string prevAudio;
     bool hadVideo = false;
     bool hadAudio = false;
-    SdlDummyRev(int w = 800, int h = 600) {
+    SdlDummyRev(int w = 800, int h = 600) : w(w), h(h) {
         if (const char* p = std::getenv("SDL_VIDEODRIVER")) {
             prevVideo = p;
             hadVideo = true;
@@ -127,6 +134,12 @@ struct SdlDummyRev {
         ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
         if (!ren) ren = SDL_CreateRenderer(win, -1, 0);
         ok = (ren != nullptr);
+        // Fase 2/P2: medir el tamaño REAL del drawable tras crear el renderer.
+        if (ren) SDL_GetRendererOutputSize(ren, &drawableW, &drawableH);
+        if (drawableW <= 0 || drawableH <= 0) {
+            drawableW = w;
+            drawableH = h;
+        }
     }
     ~SdlDummyRev() {
         if (ren) SDL_DestroyRenderer(ren);
@@ -411,6 +424,7 @@ TEST(gui_revision_stress_sdl_framebuffer_resize_y_recursos) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     Document doc;
     std::vector<std::string> lines;
@@ -535,6 +549,7 @@ TEST(gui_revision_stress_sdl_framebuffer_resize_y_recursos) {
     if (!sdl.ren) sdl.ren = SDL_CreateRenderer(sdl.win, -1, 0);
     CHECK(sdl.ren != nullptr);
     gui.setSdlRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     render(vp, cur);
     std::vector<GuiColor> revived;
     int revW = 0, revH = 0;
@@ -681,6 +696,7 @@ TEST(gui_revision_tema_con_prompt_paridad_pixeles_sdl) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     const bool haveFont = gui.hasFont();
     NullTestSink sink;
     Document doc;

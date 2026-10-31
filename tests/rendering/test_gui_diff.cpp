@@ -86,12 +86,19 @@ void captureContent(GuiRenderer& gui, std::vector<std::string>& plain,
 struct SdlDummyLocal {
     SDL_Window* win = nullptr;
     SDL_Renderer* ren = nullptr;
+    int w = 400;
+    int h = 300;
+    // Fase 2/P2: tamaño REAL del drawable (output size del renderer), al que
+    // se alimenta setDrawableMetrics. No se confía en las dimensiones
+    // solicitadas al crear la ventana (pueden diferir del drawable con HiDPI).
+    int drawableW = 0;
+    int drawableH = 0;
     bool ok = false;
     std::string prevVideo;
     std::string prevAudio;
     bool hadVideo = false;
     bool hadAudio = false;
-    SdlDummyLocal(int w = 400, int h = 300) {
+    SdlDummyLocal(int w = 400, int h = 300) : w(w), h(h) {
         if (const char* p = std::getenv("SDL_VIDEODRIVER")) {
             prevVideo = p;
             hadVideo = true;
@@ -108,6 +115,14 @@ struct SdlDummyLocal {
         ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
         if (!ren) ren = SDL_CreateRenderer(win, -1, 0);
         ok = (ren != nullptr);
+        // Fase 2/P2: el renderer consume el tamaño REAL del drawable (no el
+        // solicitado): se consulta el output size y se almacena como la única
+        // fuente para setDrawableMetrics.
+        if (ren) SDL_GetRendererOutputSize(ren, &drawableW, &drawableH);
+        if (drawableW <= 0 || drawableH <= 0) {
+            drawableW = w;
+            drawableH = h;
+        }
     }
     ~SdlDummyLocal() {
         if (ren) SDL_DestroyRenderer(ren);
@@ -325,6 +340,7 @@ TEST(gui_sdl_parcial_iguala_full_en_pixeles) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);  // fuente real si hay (más tinta que verificar)
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     Document doc;
     doc.restore({"hola mundo", "segunda fila", "tercera"});
@@ -371,6 +387,7 @@ TEST(gui_sdl_volver_de_modal_muestra_editor) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);  // fuente real si hay (más tinta que verificar)
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     Document doc;
     doc.restore({"hola mundo", "segunda fila", "tercera"});
@@ -417,6 +434,7 @@ TEST(gui_sdl_barra_en_chrome_no_queda_residual) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);  // fuente real si hay (más tinta que verificar)
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     Document doc;
     doc.restore({"hola mundo", "segunda"});
@@ -473,6 +491,7 @@ TEST(gui_sdl_cambio_metricas_misma_grilla_fuerza_full) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);  // abre la fuente real y mide la celda
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");
     NullTestSink sink;
     Document doc;
@@ -516,6 +535,7 @@ TEST(gui_sdl_texto_largo_a_corto_sin_restos) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);  // fuente real: sin ella el texto nunca se
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");  // rasteriza y el test es ciego
     NullTestSink sink;
     Document doc;
@@ -555,6 +575,7 @@ TEST(gui_sdl_toggle_theme_paridad_en_tema_nuevo) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);  // fuente real si hay (más tinta que verificar)
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     Document doc;
     doc.restore({"hola mundo", "segunda fila"});
@@ -694,6 +715,7 @@ TEST(gui_sdl_cursor_move_paridad_pixeles_con_full) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     Document doc;
     doc.restore({"hola mundo", "segunda fila", "tercera línea",
@@ -929,6 +951,7 @@ TEST(gui_sdl_scroll_paridad_pixeles_con_full) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     Document doc;
     std::vector<std::string> lines;
@@ -968,6 +991,7 @@ TEST(gui_sdl_scroll_bordes_cursor_block_paridad_pixeles) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     Document doc;
     std::vector<std::string> lines;
@@ -1024,6 +1048,7 @@ TEST(gui_sdl_scroll_dst_fb_falla_repinta_frame_actual) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     gui.setFramebufAcquireFailAfterForTests(-1);
     NullTestSink sink;
     Document doc;
@@ -1066,6 +1091,7 @@ TEST(gui_sdl_fb_falla_reconstruye_siguiente_frame) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     gui.setFramebufAcquireFailAfterForTests(-1);
     NullTestSink sink;
     Document doc;
@@ -1111,6 +1137,7 @@ TEST(gui_sdl_scroll_src_fb_falla_invalida_y_reconstruye) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     gui.setFramebufAcquireFailAfterForTests(-1);
     NullTestSink sink;
     Document doc;
@@ -1157,6 +1184,7 @@ TEST(gui_sdl_framebuffer_recreado_repinta_imagen_completa) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     Document doc;
     doc.restore({"linea 0", "linea 1", "linea 2", "linea 3", "linea 4",
@@ -1325,6 +1353,7 @@ TEST(gui_sdl_softwrap_fast_paths_paridad_pixeles_con_full) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     Document doc;
     doc.restore(softWrapLines());
@@ -1485,6 +1514,7 @@ TEST(guirenderer_ciclo_vida_hidpi_tallas_esperadas) {
     const int initPx = guiScaledFontPixels(base, winH, fb.h);
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren, initPx);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente del sistema");
     CHECK_EQ(gui.fontPixels(), initPx);
     const int cw1 = gui.cellW(), ch1 = gui.cellH();

@@ -716,12 +716,19 @@ namespace {
 struct SdlDummy {
     SDL_Window* win = nullptr;
     SDL_Renderer* ren = nullptr;
+    int w = 800;
+    int h = 600;
+    // Fase 2/P2: tamaño REAL del drawable (output size del renderer), al que
+    // se alimenta setDrawableMetrics. No se confía en las dimensiones
+    // solicitadas al crear la ventana (pueden diferir del drawable con HiDPI).
+    int drawableW = 0;
+    int drawableH = 0;
     bool ok = false;
     std::string prevVideo;
     std::string prevAudio;
     bool hadVideo = false;
     bool hadAudio = false;
-    SdlDummy(int w = 800, int h = 600) {
+    SdlDummy(int w = 800, int h = 600) : w(w), h(h) {
         // Hermético como DummyVideo (test_guifont.cpp): SDL_VIDEODRIVER /
         // SDL_AUDIODRIVER se restauran al salir. Sin esto, el "dummy"
         // quedaba fijo en el environ del proceso y cambiaba el driver de
@@ -743,6 +750,14 @@ struct SdlDummy {
         ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
         if (!ren) ren = SDL_CreateRenderer(win, -1, 0);  // cualquiera
         ok = (ren != nullptr);
+        // Fase 2/P2: el renderer consume el tamaño REAL del drawable (no el
+        // solicitado): se consulta el output size y se almacena como la única
+        // fuente para setDrawableMetrics.
+        if (ren) SDL_GetRendererOutputSize(ren, &drawableW, &drawableH);
+        if (drawableW <= 0 || drawableH <= 0) {
+            drawableW = w;
+            drawableH = h;
+        }
     }
     ~SdlDummy() {
         if (ren) SDL_DestroyRenderer(ren);
@@ -884,6 +899,7 @@ TEST(gui_sdl_fondo_contenido_y_linea_actual) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
@@ -919,6 +935,7 @@ TEST(gui_sdl_status_modified_light_pinta_tinta_roja) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -986,6 +1003,7 @@ TEST(gui_sdl_fondos_igualan_stylefor) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;  // sin fuente a propósito: fills exactos, sin tinta.
     gui.setSdlRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     CHECK(!gui.hasFont());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -1051,6 +1069,7 @@ TEST(gui_sdl_seleccion_pinta_fondo_sin_cajas_negras) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
@@ -1090,6 +1109,7 @@ TEST(gui_sdl_cursor_block_en_borde_seleccion) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
@@ -1263,6 +1283,7 @@ TEST(gui_sdl_cursor_glifo_usa_fondo_real_pintado) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -1425,6 +1446,7 @@ TEST(gui_sdl_cursor_block_cubre_celda) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
@@ -1476,6 +1498,7 @@ TEST(gui_sdl_cursor_block_en_vacio_es_fill_solido) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
@@ -1565,6 +1588,7 @@ TEST(gui_sdl_cursor_block_en_tab_sin_desplazar) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
@@ -1660,6 +1684,7 @@ TEST(gui_sdl_cursor_block_en_bracket_usa_fallback_legible) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.isDarkTheme()) SKIP("caso dark: bracket vs cursor claro");
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
@@ -1762,6 +1787,7 @@ TEST(gui_sdl_cursor_block_en_ancho_doble_legible) {
         GuiRenderer gui;  // a propósito sin initForRenderer: sin fuente.
         if (gui.isDarkTheme() != true) SKIP("caso dark");
         gui.setSdlRenderer(sdl.ren);
+        gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
         CHECK(!gui.hasFont());
         const int cw = gui.cellW(), ch = gui.cellH();
         auto solidAt = [&](int c, int r, const GuiColor& want) {
@@ -1803,6 +1829,7 @@ TEST(gui_sdl_cursor_block_en_ancho_doble_legible) {
     {
         GuiRenderer gui;
         gui.initForRenderer(sdl.ren);
+        gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
         if (!gui.isDarkTheme()) SKIP("caso dark: bracket vs cursor claro");
         if (!gui.hasFont()) SKIP("sin fuente");
         const char* kWideCandidates[] = {
@@ -1920,6 +1947,7 @@ TEST(gui_sdl_cursor_block_gutter_no_desplaza_glifo) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -2023,6 +2051,7 @@ TEST(gui_sdl_lista_cursor_en_espacio_es_fill_solido) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
@@ -2057,6 +2086,7 @@ TEST(gui_sdl_lista_modal_destaca_seleccionada) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
@@ -2082,6 +2112,7 @@ TEST(gui_sdl_saveas_cursor_bar_en_messagebar) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
@@ -2111,6 +2142,7 @@ TEST(gui_sdl_mensaje_llena_y_vacia_messagebar) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
@@ -2164,6 +2196,7 @@ TEST(gui_sdl_franja_bajo_grilla_fondo_messagebar) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
@@ -2224,6 +2257,7 @@ TEST(gui_sdl_chrome_anclado_resize_consecutivo) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -2252,6 +2286,11 @@ TEST(gui_sdl_chrome_anclado_resize_consecutivo) {
         int outW = 0, outH = 0;
         SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
         CHECK_EQ(outH, targetH);          // el barrido es realmente consecutivo
+        sdl.drawableW = outW;
+        sdl.drawableH = outH;
+        // Fase 2: el renderer consume métricas almacenadas del drawable; el
+        // test debe re-medir (como haría el loop) tras cada resize.
+        gui.setDrawableMetrics(outW, outH, gui.contentTopInset());
         if (outH != targetH) { havePrev = false; continue; }
 
         // Mismo cálculo de filas que producción.
@@ -2324,6 +2363,7 @@ TEST(gui_sdl_messagebar_texto_centrado_en_banda_visible) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -2375,6 +2415,7 @@ TEST(gui_sdl_messagebar_cursor_bar_centrado_en_banda_visible) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -2441,6 +2482,7 @@ TEST(gui_sdl_messagebar_sin_franja_no_desplaza) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -2483,6 +2525,7 @@ TEST(gui_sdl_chrome_limites_de_fila_y_borde_inferior) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -2594,10 +2637,10 @@ TEST(gui_sdl_chrome_con_titulo_inset) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, 28);  // barra de título propia
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
-    gui.setContentTopInset(28);  // barra de título propia
     NullTestSink sink;
     Document doc;
     doc.restore({"hola"});
@@ -2656,6 +2699,7 @@ TEST(gui_sdl_chrome_legacy_no_toca_borde_inferior) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -2705,6 +2749,7 @@ TEST(gui_sdl_tilde_real_se_pinta_como_texto) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -2834,6 +2879,7 @@ TEST(gui_sdl_linea_actual_vacia_cubre_fila) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
@@ -3489,6 +3535,7 @@ TEST(gui_toggle_pantalla_quieta_repinta_todo) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;  // sin fuente: fills exactos.
     gui.setSdlRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     CHECK(!gui.hasFont());
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -3995,6 +4042,7 @@ TEST(gui_sdl_chrome_no_residuos_framebuffer_resize) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     if (!gui.hasFont()) SKIP("sin fuente");
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
@@ -4021,6 +4069,12 @@ TEST(gui_sdl_chrome_no_residuos_framebuffer_resize) {
         int outW = 0, outH = 0;
         SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
         CHECK_EQ(outH, targetH);
+        sdl.drawableW = outW;
+        sdl.drawableH = outH;
+
+        // Fase 2: el renderer consume métricas almacenadas del drawable; el
+        // test debe re-medir (como haría el loop) tras cada resize.
+        gui.setDrawableMetrics(outW, outH, gui.contentTopInset());
 
         const int rows = (outH - inset) / ch;
         Viewport vp = makeVp(rows - 2, outW / cw);
@@ -4144,6 +4198,7 @@ struct ChromeFixture {
     explicit ChromeFixture(int w = 800, int h = 600) : sdl(w, h) {
         if (!sdl.ok) return;
         gui.initForRenderer(sdl.ren);
+        gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
         doc.restore({"hola", "mundo", "linea 3"});
         vp = makeVp(h / gui.cellH() - 2, w / gui.cellW());
     }
@@ -4173,6 +4228,14 @@ struct Shot {
 void setUsableHeight(ChromeFixture& f, int H) {
     SDL_SetWindowSize(f.sdl.win, 800, f.gui.contentTopInset() + H);
     SDL_PumpEvents();
+    // Fase 2: el renderer consume las métricas del drawable almacenadas
+    // (setDrawableMetrics desde el loop); sin este refresco usaría el tamaño
+    // inicial y pintaría sobre geometría vieja tras el resize.
+    int w = 0, h = 0;
+    SDL_GetRendererOutputSize(f.sdl.ren, &w, &h);
+    f.sdl.drawableW = w;
+    f.sdl.drawableH = h;
+    f.gui.setDrawableMetrics(w, h, f.gui.contentTopInset());
     f.gui.invalidateCache();
 }
 
@@ -4513,6 +4576,7 @@ TEST(gui_sdl_chrome_paint_once_lista_full) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     std::vector<std::string> names = {"a.txt", "b.txt", "c.txt"};
 
@@ -4532,6 +4596,7 @@ TEST(gui_sdl_chrome_paint_once_lista_parcial) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     std::vector<std::string> names = {"a.txt", "b.txt", "c.txt"};
 
@@ -4554,6 +4619,7 @@ TEST(gui_sdl_chrome_paint_once_lista_fallback_sin_framebuffer) {
     if (!sdl.ok) SKIP("sin video dummy");
     GuiRenderer gui;
     gui.initForRenderer(sdl.ren);
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
     NullTestSink sink;
     std::vector<std::string> names = {"a.txt", "b.txt", "c.txt"};
 

@@ -111,6 +111,19 @@ void GuiRenderer::setSdlRenderer(void* r) {
     sdlRenderer_ = r;
 }
 
+void GuiRenderer::setDrawableMetrics(int pixelW, int pixelH,
+                                    int contentTopInsetPx) {
+    // Fase 2: recibe las métricas COMPLETAS ya medidas por el dueño del ciclo
+    // (GuiRunLoop::applyWindowSize con la WindowSize): píxeles totales del
+    // drawable + el inset de contenido (px, p.ej. barra de título). Se aplican
+    // juntas como la única fuente de geometría (viewport + chrome) del camino
+    // de pintado: los render* ya no consultan SDL_GetRendererOutputSize.
+    drawablePixelW_ = pixelW;
+    drawablePixelH_ = pixelH;
+    contentTopInset_ = contentTopInsetPx > 0 ? contentTopInsetPx : 0;
+    drawableMetricsInitialized_ = true;
+}
+
 bool GuiRenderer::initForRenderer(void* r, int fontPixels) {
     setSdlRenderer(r);
     if (!r) return true;
@@ -1105,12 +1118,11 @@ void paintMessageBarOverlay(SDL_Renderer* r, GuiFont& font, bool dark,
 // empieza debajo de ella. El RenderClear sigue limpiando toda la ventana
 // (no respeta viewport), y el cierre restaura el viewport completo antes de
 // los overlays.
-void beginContentViewport(SDL_Renderer* r, int topInset) {
+void beginContentViewport(SDL_Renderer* r, int topInset, int drawableW,
+                          int drawableH) {
     if (topInset <= 0) return;
-    int outW = 0, outH = 0;
-    if (SDL_GetRendererOutputSize(r, &outW, &outH) != 0) return;
-    if (outH <= topInset) return;
-    SDL_Rect vp{0, topInset, outW, outH - topInset};
+    if (drawableH <= topInset) return;
+    SDL_Rect vp{0, topInset, drawableW, drawableH - topInset};
     SDL_RenderSetViewport(r, &vp);
 }
 
@@ -1127,12 +1139,17 @@ void paintWindowChromeOverlays(SDL_Renderer* r, GuiFont& font, bool dark,
                                int ch, int topInset,
                                const GuiTitleBar* titleBar,
                                const guichrome::ChromePaintGeometry& geometry,
-                               int& chromePaintCalls, int& cursorPaints) {
+                               int& chromePaintCalls, int& cursorPaints,
+                               int drawableW, int drawableH) {
     ++chromePaintCalls;
     SDL_RenderSetViewport(r, nullptr);
 
-    int outW = 0, outH = 0;
-    if (SDL_GetRendererOutputSize(r, &outW, &outH) != 0) return;
+    // Fase 2: métricas del drawable ya medidas por el dueño del ciclo
+    // (GuiRunLoop::applyWindowSize -> setDrawableMetrics): el chrome se
+    // pinta con la geometría resuelta sobre las mismas métricas que el
+    // loop usó para la grilla (drawable completo, sin re-medir).
+    const int outW = drawableW;
+    const int outH = drawableH;
     const int H = outH - topInset;
     if (H <= 0) return;
 
@@ -1157,9 +1174,7 @@ void paintWindowChromeOverlays(SDL_Renderer* r, GuiFont& font, bool dark,
 
     // 4. Barra de título propia (si existe).
     if (titleBar && topInset > 0) {
-        if (SDL_GetRendererOutputSize(r, &outW, &outH) == 0) {
-            titleBar->paint(r, font, outW, topInset, dark);
-        }
+        titleBar->paint(r, font, outW, topInset, dark);
     }
 }
 
@@ -2329,13 +2344,13 @@ void GuiRenderer::presentFramebuf(SDL_Renderer* r, SDL_Texture* fb,
         }
     }
 
-    // Obtener el alto real del drawable para calcular la geometría del chrome
-    // anclado. IMPORTANTE: SDL_GetRendererOutputSize devuelve el tamaño del
-    // TARGET activo, así que primero se vuelve a la ventana; si no, en el
-    // camino con framebuffer mide la textura de contenido (sin chrome).
+    // Obtener la geometría del chrome anclado a partir de las métricas del
+    // drawable ya medidas (Fase 2: setDrawableMetrics desde el loop; el
+    // drawable completo, sin re-medir).
+    assert(drawableMetricsInitialized_);
     SDL_SetRenderTarget(r, nullptr);
-    int outW = 0, outH = 0;
-    SDL_GetRendererOutputSize(r, &outW, &outH);
+    const int outW = drawablePixelW_;
+    const int outH = drawablePixelH_;
     updateChromeGeometry(layout, outW, outH);
     
     SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
@@ -2351,7 +2366,8 @@ void GuiRenderer::presentFramebuf(SDL_Renderer* r, SDL_Texture* fb,
                               /*accent=*/lastAccent_, cursor, cursorShown,
                               ch, contentTopInset_, titleBar_,
                               lastChromeGeometry_,
-                              chromePaintCalls_, messageBarCursorPaints_);
+                              chromePaintCalls_, messageBarCursorPaints_,
+                              drawablePixelW_, drawablePixelH_);
     if (captureEnabled_) captureBackbuffer_(r);
     SDL_RenderPresent(r);
 }
@@ -2370,7 +2386,8 @@ void GuiRenderer::presentWindow(SDL_Renderer* r, const GuiColor& bg,
     SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
     SDL_RenderClear(r);
 
-    beginContentViewport(r, contentTopInset_);
+    assert(drawableMetricsInitialized_);
+    beginContentViewport(r, contentTopInset_, drawablePixelW_, drawablePixelH_);
 
     // Pintar contenido (luego de clear y viewport). El cursor de contenido
     // se pinta tras el contenido pero antes del chrome overlay.
@@ -2387,16 +2404,19 @@ void GuiRenderer::presentWindow(SDL_Renderer* r, const GuiColor& bg,
     SDL_RenderSetViewport(r, nullptr);
     if (withScrollbar) paintVerticalScrollbar(r, layout);
 
-    // Geometría de pintado del chrome para este drawable. Sintaxis idéntica a
-    // presentFramebuf: mide con el target de ventana activo.
-    int outW = 0, outH = 0;
-    SDL_GetRendererOutputSize(r, &outW, &outH);
+    // Geometría de pintado del chrome para este drawable. Con las métricas ya
+    // medidas por el dueño del ciclo (setDrawableMetrics / WindowSize):
+    // única fuente, sin SDL_GetRendererOutputSize en el camino de pintado.
+    assert(drawableMetricsInitialized_);
+    const int outW = drawablePixelW_;
+    const int outH = drawablePixelH_;
     updateChromeGeometry(layout, outW, outH);
     paintWindowChromeOverlays(r, font_, dark_, layout, chromeData,
                               accent, cursor, cursorShown, ch,
                               contentTopInset_, titleBar_,
                               lastChromeGeometry_,
-                              chromePaintCalls_, messageBarCursorPaints_);
+                              chromePaintCalls_, messageBarCursorPaints_,
+                              drawablePixelW_, drawablePixelH_);
     if (captureEnabled_) captureBackbuffer_(r);
     SDL_RenderPresent(r);
 }

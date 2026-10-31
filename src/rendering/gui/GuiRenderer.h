@@ -235,10 +235,13 @@ public:
     // la barra en la franja superior antes de Present. Sin titleBar o con
     // inset 0 el comportamiento es idéntico al de las decoraciones nativas.
     void setTitleBar(GuiTitleBar* titleBar) { titleBar_ = titleBar; }
-    void setContentTopInset(int px) {
-        contentTopInset_ = px > 0 ? px : 0;
-    }
     int contentTopInset() const { return contentTopInset_; }
+    // Fase 2: aplicación COMPLETA de la geometría del drawable: píxeles totales
+    // del drawable (completo, ya sin dividir por el inset) + el inset de
+    // contenido (px, p.ej. barra de título) ya medido. Una sola llamada aplica
+    // las tres métricas: viewport + chrome se resuelven sobre ellas y el camino
+    // de pintado no vuelve a consultar SDL_GetRendererOutputSize.
+    void setDrawableMetrics(int pixelW, int pixelH, int contentTopInsetPx);
     // Variante completa: inyecta renderer + abre la fuente y mide la celda.
     // Debe llamarse tras crear el SDL_Renderer y antes del primer resize.
     // `fontPixels` son PÍXELES DEL DRAWABLE (el loop ya escaló la base en
@@ -404,9 +407,19 @@ private:
     void* sdlRenderer_ = nullptr;
     GuiFont font_;
     // Barra de título propia (no-owned) y alto reservado en píxeles del
-    // drawable. Ver setTitleBar/setContentTopInset.
+    // drawable. Ver setTitleBar/setDrawableMetrics.
     GuiTitleBar* titleBar_ = nullptr;
     int contentTopInset_ = 0;
+    // Fase 2: métricas del drawable (píxeles, completo) medidas por el loop y
+    // aplicadas vía setDrawableMetrics. Única fuente del tamaño del drawable
+    // en el camino de pintado (chrome geometry + viewport del contenido).
+    int drawablePixelW_ = 0;
+    int drawablePixelH_ = 0;
+    // Fase 2/P3: ¿ya se aplicaron las métricas del drawable vía
+    // setDrawableMetrics? Sin este flag el camino de pintado no tiene base
+    // para el viewport ni la geometría del chrome (evita viewport vacío /
+    // geometría inválida si se pinta antes de inicializar).
+    bool drawableMetricsInitialized_ = false;
 
     // Ultimo chrome/cursor calculados (para inspeccion en tests sin SDL y
     // para no recalcular en el pintado cuando hay SDL).

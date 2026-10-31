@@ -352,6 +352,17 @@ void* GuiRunLoop::cursorForType(ResizeCursorType type) const {
     return cursor ? cursor : cursorArrow_;
 }
 
+void GuiRunLoop::applyWindowSize(const platform::WindowSize& size,
+                                int contentTopInsetPx) {
+    // Fase 2: actualización completa de la geometría del ciclo. Aplica en un
+    // solo punto la medición fresca (grilla/editor + métricas de drawable +
+    // inset de contenido) a los consumidores: Editor (grilla/viewport) y
+    // GuiRenderer (viewport + chrome). No depende de efectos secundarios
+    // previos: quien llame le pasa TODAS las métricas ya medidas.
+    editor_.resize(size);
+    if (gui_) gui_->setDrawableMetrics(size.pixelW, size.pixelH, contentTopInsetPx);
+}
+
 int GuiRunLoop::run() {
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         std::fprintf(stderr, "maestro: SDL_Init falló: %s\n", SDL_GetError());
@@ -511,13 +522,20 @@ int GuiRunLoop::run() {
         }
         titleBarHeightPx_ = titleHPx;
         titleBarHeightPoints_ = titleHPoints;
-        if (gui_) gui_->setContentTopInset(titleBarHeightPx_);
         hitState_.winW = winW;
         hitState_.winH = winH;
         hitState_.titleH = titleBarHeightPoints_;
         hitState_.titleBar = &titleBar_;
         const int contentH = std::max(1, outH - titleBarHeightPx_);
-        return guiGridSize(outW, contentH, cw, ch);
+        // Normalización fase 2: rows/cols salen del área de contenido (post
+        // barra de título); pixelW/pixelH se normalizan al DRAWABLE COMPLETO
+        // (outW/outH, incl. la franja de la barra). Así WindowSize pasa a
+        // representar el drawable completo y el render no debe restar el inset
+        // a una altura "de contenido" que ya lo esté haciendo la grilla.
+        platform::WindowSize size = guiGridSize(outW, contentH, cw, ch);
+        size.pixelW = outW;
+        size.pixelH = outH;
+        return size;
     };
     auto renderWithBlink = [&] {
         syncScrollbarInfo();
@@ -742,7 +760,7 @@ int GuiRunLoop::run() {
         return p;
     };
 
-    editor_.resize(currentSize());
+    applyWindowSize(currentSize(), titleBarHeightPx_);
     // Hit-test nativo: la franja de la barra (salvo botones) arrastra la
     // ventana y los bordes/corners redimensionan; los botones quedan NORMAL
     // para recibir clicks. El estado se pasa como userdata al callback
@@ -808,7 +826,7 @@ int GuiRunLoop::run() {
                         // ventana lógica no se mueve pero el drawable y la
                         // escala sí). currentSize() re-consulta el drawable,
                         // re-escala la fuente y recalcula la grilla.
-                        editor_.resize(currentSize());
+                        applyWindowSize(currentSize(), titleBarHeightPx_);
                         requestRender();
                     } else if (guiFocusLossEndsGesture(ev.window.event)) {
                         // Pérdida de foco con gesto en curso: la captura cae

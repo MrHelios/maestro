@@ -7,6 +7,7 @@
 #include "platform/gui/GuiOptions.h"
 #include "platform/gui/GuiWindowGeometry.h"
 #include "platform/gui/IGuiKeymap.h"
+#include "platform/WindowSize.h"
 #include "rendering/gui/GuiTitleBar.h"
 
 class Editor;
@@ -221,6 +222,13 @@ public:
     bool idleOnTimeout(std::chrono::steady_clock::time_point now);
 
 private:
+    // Fase 2: actualización COMPLETA de la geometría del ciclo. Aplica en un
+    // solo punto la medición fresca (grilla/editor + métricas de drawable +
+    // inset de contenido) a los consumidores: Editor (grilla/viewport) y
+    // GuiRenderer (viewport + chrome). No depende de efectos secundarios
+    // previos: quien llame le pasa TODAS las métricas ya medidas.
+    void applyWindowSize(const platform::WindowSize& size, int contentTopInsetPx);
+
     // Override de tests para kMaxBatchMs (0 = default). Ver
     // setMaxBatchMsForTests. Estático: el loop es único por proceso.
     static int maxBatchMsOverride_;

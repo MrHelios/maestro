@@ -61,12 +61,19 @@ std::vector<std::string> makeCppLines(int n) {
 struct SdlBench {
     SDL_Window* win = nullptr;
     SDL_Renderer* ren = nullptr;
+    int w = 800;
+    int h = 600;
+    // Fase 2/P2: tamaño REAL del drawable (output size del renderer), al que
+    // se alimenta setDrawableMetrics. No se confía en las dimensiones
+    // solicitadas al crear la ventana (pueden diferir del drawable con HiDPI).
+    int drawableW = 0;
+    int drawableH = 0;
     bool ok = false;
     std::string prevVideo;
     std::string prevAudio;
     bool hadVideo = false;
     bool hadAudio = false;
-    SdlBench(int w = 800, int h = 600) {
+    SdlBench(int w = 800, int h = 600) : w(w), h(h) {
         if (const char* p = std::getenv("SDL_VIDEODRIVER")) {
             prevVideo = p;
             hadVideo = true;
@@ -83,6 +90,12 @@ struct SdlBench {
         ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
         if (!ren) ren = SDL_CreateRenderer(win, -1, 0);
         ok = (ren != nullptr);
+        // Fase 2/P2: medir el tamaño REAL del drawable tras crear el renderer.
+        if (ren) SDL_GetRendererOutputSize(ren, &drawableW, &drawableH);
+        if (drawableW <= 0 || drawableH <= 0) {
+            drawableW = w;
+            drawableH = h;
+        }
     }
     ~SdlBench() {
         if (ren) SDL_DestroyRenderer(ren);
@@ -145,6 +158,7 @@ TEST(bench_perf_gui_sdl_full_vs_steady_checked) {
     if (!sdl.ok) SKIP("sin video dummy");
     SdlPerfFixture fx;
     fx.gui.initForRenderer(sdl.ren);
+    fx.gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, fx.gui.contentTopInset());
     perf_arch::reportVerbose("\n== perf_gui_sdl: full vs steady (camino real) ==\n");
     perf_arch::reportVerbose("font: %s\n",
                              fx.gui.hasFont() ? fx.gui.fontPath().c_str()
@@ -182,6 +196,7 @@ TEST(bench_perf_gui_sdl_cursor_move_checked) {
     if (!sdl.ok) SKIP("sin video dummy");
     SdlPerfFixture fx;
     fx.gui.initForRenderer(sdl.ren);
+    fx.gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, fx.gui.contentTopInset());
     perf_arch::reportVerbose("\n== perf_gui_sdl: cursor move 1 linea/frame ==\n");
     fx.frame();
     fx.frame();
@@ -213,6 +228,7 @@ TEST(bench_perf_gui_sdl_scroll_checked) {
     if (!sdl.ok) SKIP("sin video dummy");
     SdlPerfFixture fx;
     fx.gui.initForRenderer(sdl.ren);
+    fx.gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, fx.gui.contentTopInset());
     perf_arch::reportVerbose("\n== perf_gui_sdl: scroll +-1 con cursor ==\n");
     perf_arch::reportVerbose("font: %s\n",
                              fx.gui.hasFont() ? fx.gui.fontPath().c_str()
@@ -297,6 +313,7 @@ TEST(bench_perf_gui_sdl_prompt_chrome_checked) {
     if (!sdl.ok) SKIP("sin video dummy");
     SdlPerfFixture fx;
     fx.gui.initForRenderer(sdl.ren);
+    fx.gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, fx.gui.contentTopInset());
     perf_arch::reportVerbose("\n== perf_gui_sdl: prompt con Bar (chrome/frame) ==\n");
     Message prompt{std::string("Find: var15"), MessageKind::Prompt, std::nullopt,
                    11, 6};
