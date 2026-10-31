@@ -236,12 +236,15 @@ public:
     // inset 0 el comportamiento es idéntico al de las decoraciones nativas.
     void setTitleBar(GuiTitleBar* titleBar) { titleBar_ = titleBar; }
     int contentTopInset() const { return contentTopInset_; }
+    // Fase 2/P3: observabilidad para tests. Indica si setDrawableMetrics fue
+    // llamado con éxito al menos una vez (métricas válidas aplicadas).
+    bool drawableMetricsInitialized() const { return drawableMetricsInitialized_; }
     // Fase 2: aplicación COMPLETA de la geometría del drawable: píxeles totales
     // del drawable (completo, ya sin dividir por el inset) + el inset de
     // contenido (px, p.ej. barra de título) ya medido. Una sola llamada aplica
     // las tres métricas: viewport + chrome se resuelven sobre ellas y el camino
     // de pintado no vuelve a consultar SDL_GetRendererOutputSize.
-    void setDrawableMetrics(int pixelW, int pixelH, int contentTopInsetPx);
+    bool setDrawableMetrics(int pixelW, int pixelH, int contentTopInsetPx);
     // Variante completa: inyecta renderer + abre la fuente y mide la celda.
     // Debe llamarse tras crear el SDL_Renderer y antes del primer resize.
     // `fontPixels` son PÍXELES DEL DRAWABLE (el loop ya escaló la base en

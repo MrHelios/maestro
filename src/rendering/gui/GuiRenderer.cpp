@@ -111,17 +111,28 @@ void GuiRenderer::setSdlRenderer(void* r) {
     sdlRenderer_ = r;
 }
 
-void GuiRenderer::setDrawableMetrics(int pixelW, int pixelH,
+bool GuiRenderer::setDrawableMetrics(int pixelW, int pixelH,
                                     int contentTopInsetPx) {
     // Fase 2: recibe las métricas COMPLETAS ya medidas por el dueño del ciclo
     // (GuiRunLoop::applyWindowSize con la WindowSize): píxeles totales del
     // drawable + el inset de contenido (px, p.ej. barra de título). Se aplican
     // juntas como la única fuente de geometría (viewport + chrome) del camino
     // de pintado: los render* ya no consultan SDL_GetRendererOutputSize.
+    // Rechaza estados geométricos inválidos (tamaño no positivo o inset que
+    // sobrepasa el alto del drawable) para no dejar al renderer en un estado
+    // de pintado inconsistente.
+    if (pixelW <= 0 || pixelH <= 0) {
+        return false;
+    }
+    const int inset = contentTopInsetPx > 0 ? contentTopInsetPx : 0;
+    if (inset > pixelH) {
+        return false;
+    }
     drawablePixelW_ = pixelW;
     drawablePixelH_ = pixelH;
-    contentTopInset_ = contentTopInsetPx > 0 ? contentTopInsetPx : 0;
+    contentTopInset_ = inset;
     drawableMetricsInitialized_ = true;
+    return true;
 }
 
 bool GuiRenderer::initForRenderer(void* r, int fontPixels) {

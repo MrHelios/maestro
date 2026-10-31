@@ -359,8 +359,17 @@ void GuiRunLoop::applyWindowSize(const platform::WindowSize& size,
     // inset de contenido) a los consumidores: Editor (grilla/viewport) y
     // GuiRenderer (viewport + chrome). No depende de efectos secundarios
     // previos: quien llame le pasa TODAS las métricas ya medidas.
+    //
+    // El renderer se actualiza PRIMERO. Si setDrawableMetrics() rechaza las
+    // métricas (p. ej. drawable con dimensión 0), no se propaga el resize al
+    // Editor, evitando que ambos consumidores trabajen con geometrías
+    // distintas.
+    if (gui_ &&
+        !gui_->setDrawableMetrics(size.pixelW, size.pixelH,
+                                  contentTopInsetPx)) {
+        return;
+    }
     editor_.resize(size);
-    if (gui_) gui_->setDrawableMetrics(size.pixelW, size.pixelH, contentTopInsetPx);
 }
 
 int GuiRunLoop::run() {
@@ -759,8 +768,9 @@ int GuiRunLoop::run() {
         p.y = guiScaleCoord(ptY, winH, mfb.h);
         return p;
     };
-
-    applyWindowSize(currentSize(), titleBarHeightPx_);
+    
+    const platform::WindowSize size = currentSize();
+    applyWindowSize(size, titleBarHeightPx_);
     // Hit-test nativo: la franja de la barra (salvo botones) arrastra la
     // ventana y los bordes/corners redimensionan; los botones quedan NORMAL
     // para recibir clicks. El estado se pasa como userdata al callback
@@ -826,7 +836,8 @@ int GuiRunLoop::run() {
                         // ventana lógica no se mueve pero el drawable y la
                         // escala sí). currentSize() re-consulta el drawable,
                         // re-escala la fuente y recalcula la grilla.
-                        applyWindowSize(currentSize(), titleBarHeightPx_);
+                        const platform::WindowSize size = currentSize();
+                        applyWindowSize(size, titleBarHeightPx_);
                         requestRender();
                     } else if (guiFocusLossEndsGesture(ev.window.event)) {
                         // Pérdida de foco con gesto en curso: la captura cae

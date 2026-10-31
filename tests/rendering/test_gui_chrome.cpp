@@ -2203,7 +2203,7 @@ TEST(gui_sdl_franja_bajo_grilla_fondo_messagebar) {
     Document doc;
     doc.restore({"hola"});
     const int cw = gui.cellW(), ch = gui.cellH();
-    Viewport vp = makeVp(600 / ch - 2, 800 / cw);
+    Viewport vp = makeVp(sdl.drawableH / ch - 2, sdl.drawableW / cw);
     Cursor cur;
     Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
     gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
@@ -2371,7 +2371,7 @@ TEST(gui_sdl_messagebar_texto_centrado_en_banda_visible) {
     Document doc;
     doc.restore({"hola"});
     const int cw = gui.cellW(), ch = gui.cellH();
-    Viewport vp = makeVp(600 / ch - 2, 800 / cw);
+    Viewport vp = makeVp(sdl.drawableH / ch - 2, sdl.drawableW / cw);
     Cursor cur;
     Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
     gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
@@ -2423,7 +2423,7 @@ TEST(gui_sdl_messagebar_cursor_bar_centrado_en_banda_visible) {
     Document doc;
     doc.restore({"hola mundo"});
     const int cw = gui.cellW(), ch = gui.cellH();
-    Viewport vp = makeVp(600 / ch - 2, 800 / cw);
+    Viewport vp = makeVp(sdl.drawableH / ch - 2, sdl.drawableW / cw);
     Cursor cur;
     Message prompt{std::string("Find: ho (1/2)"), MessageKind::Prompt,
                    std::nullopt, 7, 6};
@@ -2490,7 +2490,7 @@ TEST(gui_sdl_messagebar_sin_franja_no_desplaza) {
     Document doc;
     doc.restore({"hola"});
     const int cw = gui.cellW();
-    Viewport vp = makeVp(24 - 2, 800 / cw);
+    Viewport vp = makeVp(24 - 2, sdl.drawableW / cw);
     Cursor cur;
     Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
     gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
@@ -2533,8 +2533,8 @@ TEST(gui_sdl_chrome_limites_de_fila_y_borde_inferior) {
     Document doc;
     doc.restore({"hola"});
     const int cw = gui.cellW(), ch = gui.cellH();
-    const int rows = 600 / ch - 2;
-    Viewport vp = makeVp(rows, 800 / cw);
+    const int rows = sdl.drawableH / ch - 2;
+    Viewport vp = makeVp(rows, sdl.drawableW / cw);
     Cursor cur;
     Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
     gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
@@ -2645,8 +2645,8 @@ TEST(gui_sdl_chrome_con_titulo_inset) {
     Document doc;
     doc.restore({"hola"});
     const int cw = gui.cellW(), ch = gui.cellH();
-    const int rows = (600 - 28) / ch - 2;
-    Viewport vp = makeVp(rows, 800 / cw);
+    const int rows = (sdl.drawableH - 28) / ch - 2;
+    Viewport vp = makeVp(rows, sdl.drawableW / cw);
     Cursor cur;
     Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
     gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
@@ -2709,7 +2709,7 @@ TEST(gui_sdl_chrome_legacy_no_toca_borde_inferior) {
     const int cw = gui.cellW(), ch = gui.cellH();
     // Viewport con menos filas de las que caben en la ventana: contentH fijo
     // para que r = usableH - (contentH+chromeH)*ch >= ch (modo legacy).
-    Viewport vp = makeVp(20, 800 / cw);
+    Viewport vp = makeVp(20, sdl.drawableW / cw);
     Cursor cur;
     Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
     gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
@@ -4198,9 +4198,13 @@ struct ChromeFixture {
     explicit ChromeFixture(int w = 800, int h = 600) : sdl(w, h) {
         if (!sdl.ok) return;
         gui.initForRenderer(sdl.ren);
-        gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH, gui.contentTopInset());
+        // Fase 2/P3: setDrawableMetrics puede rechazar métricas inválidas; en
+        // un fixture de prueba las dimensiones deben ser válidas, así que se
+        // exige explícitamente que la aplicación tuvo éxito.
+        CHECK(gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH,
+                                     gui.contentTopInset()));
         doc.restore({"hola", "mundo", "linea 3"});
-        vp = makeVp(h / gui.cellH() - 2, w / gui.cellW());
+        vp = makeVp(sdl.drawableH / gui.cellH() - 2, sdl.drawableW / gui.cellW());
     }
 
     bool ok() const { return sdl.ok; }
@@ -4440,7 +4444,7 @@ TEST(gui_sdl_chrome_statusbar_legacy_una_fila) {
     ChromeFixture f(800, 600);
     if (!f.ok()) SKIP("sin video dummy");
     const int cw = f.gui.cellW(), ch = f.gui.cellH();
-    f.vp = makeVp(20, 800 / cw);
+    f.vp = makeVp(20, f.sdl.drawableW / cw);
     f.msg = Message{"", MessageKind::Info, std::nullopt}; // solo StatusBar
 
     // r = ch => legacy.
@@ -4480,7 +4484,7 @@ TEST(gui_sdl_chrome_transicion_anchored_a_legacy_sin_residuos) {
     if (!f.ok()) SKIP("sin video dummy");
     const int cw = f.gui.cellW(), ch = f.gui.cellH();
     CHECK(ch >= 2);
-    f.vp = makeVp(20, 800 / cw);
+    f.vp = makeVp(20, f.sdl.drawableW / cw);
     const int grid = (20 + 2) * ch;
 
     f.gui.setCaptureEnabled(true);
@@ -4527,7 +4531,7 @@ TEST(gui_sdl_chrome_transicion_legacy_a_anchored_sin_franjas) {
     if (!f.ok()) SKIP("sin video dummy");
     const int cw = f.gui.cellW(), ch = f.gui.cellH();
     CHECK(ch >= 2);
-    f.vp = makeVp(20, 800 / cw);
+    f.vp = makeVp(20, f.sdl.drawableW / cw);
     const int grid = (20 + 2) * ch;
 
     f.gui.setCaptureEnabled(true);
@@ -4630,5 +4634,48 @@ TEST(gui_sdl_chrome_paint_once_lista_fallback_sin_framebuffer) {
 
     CHECK_EQ(gui.chromePaintCalls(), 1);
 #endif
+}
+
+// Fase 2/P3: validación de setDrawableMetrics.
+// No requiere SDL ni ventana: solo verifica que el setter rechace estados
+// geométricos inválidos y conserve las métricas previas tras un rechazo.
+TEST(gui_renderer_set_drawable_metrics_rechaza_dimensiones_invalidas) {
+    GuiRenderer gui;
+
+    // pixelW <= 0: rechazo.
+    CHECK(!gui.setDrawableMetrics(0, 600, 0));
+    CHECK(!gui.setDrawableMetrics(-1, 600, 0));
+    // pixelH <= 0: rechazo.
+    CHECK(!gui.setDrawableMetrics(800, 0, 0));
+    CHECK(!gui.setDrawableMetrics(800, -1, 0));
+    // contentTopInsetPx > pixelH: rechazo.
+    CHECK(!gui.setDrawableMetrics(800, 600, 601));
+    CHECK(!gui.setDrawableMetrics(800, 600, 800));
+    // Aún no se aplicó ninguna métrica válida.
+    CHECK(!gui.drawableMetricsInitialized());
+}
+
+TEST(gui_renderer_set_drawable_metrics_acepta_valido_y_mantiene_previas) {
+    GuiRenderer gui;
+
+    // Primera aplicación válida.
+    CHECK(gui.setDrawableMetrics(800, 600, 28));
+    CHECK(gui.drawableMetricsInitialized());
+
+    // Segundo intento válido sobrescribe.
+    CHECK(gui.setDrawableMetrics(1024, 768, 0));
+    CHECK(gui.drawableMetricsInitialized());
+
+    // Intento inválido: dimensiones cero.
+    CHECK(!gui.setDrawableMetrics(0, 768, 0));
+    CHECK(!gui.setDrawableMetrics(1024, 0, 0));
+    // Intento inválido: inset mayor al alto.
+    CHECK(!gui.setDrawableMetrics(1024, 768, 769));
+
+    // Las métricas previas (1024x768, inset 0) siguen intactas: una nueva
+    // aplicación válida las sobrescribe correctamente, lo que implica que el
+    // rechazo no las corrompió.
+    CHECK(gui.setDrawableMetrics(1024, 768, 0));
+    CHECK(gui.drawableMetricsInitialized());
 }
 
