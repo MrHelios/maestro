@@ -50,3 +50,18 @@ inline Layout computeLayout(int rows, int cols) {
     
     return layout;
 }
+
+// Compara dos layouts (contenido + chrome) para decidir si la geometría
+// lógica es idéntica. Se usa para invalidar cachés cuando el chrome cambia
+// sin cambiar el contenido (p.ej. resize de 3 filas a 2 filas: content=1 en
+// ambos, chrome 2->1).
+inline bool sameLayout(const Layout& a, const Layout& b) {
+    return a.content.row == b.content.row &&
+           a.content.col == b.content.col &&
+           a.content.width == b.content.width &&
+           a.content.height == b.content.height &&
+           a.chrome.row == b.chrome.row &&
+           a.chrome.col == b.chrome.col &&
+           a.chrome.width == b.chrome.width &&
+           a.chrome.height == b.chrome.height;
+}

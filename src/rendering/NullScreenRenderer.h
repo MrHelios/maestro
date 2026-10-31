@@ -45,7 +45,10 @@ public:
                           const std::string&, bool, const ChromeRequest&,
                           Sink&, const std::optional<Selection>&,
                           const std::optional<Selection>&,
-                          const std::optional<BracketPair>&) override {}
+                          const std::optional<BracketPair>&,
+                          const Layout& layout = Layout{}) override {
+        (void)layout;
+    }
 
     void renderBufferList(const std::vector<std::string>&, int, int, int,
                           Sink&) override {}

@@ -20,6 +20,7 @@
 #include "document/Document.h"
 #include "document/Selection.h"
 #include "layout/BracketMatcher.h"
+#include "layout/Layout.h"
 #include "layout/Viewport.h"
 #include "rendering/tty/TtyRenderer.h"
 #include "rendering/RenderUtil.h"
@@ -217,4 +218,260 @@ TEST(frame_encode_parity_con_buildscreen) {
             CHECK(legacy == diff);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Regresiones del layout completo (anclado/legacy): FrameBuilder::buildFrame
+// con const Layout& debe producir un Frame cuyo content+chrome llenen
+// EXACTAMENTE las filas totales, sin alternancia.
+// Invariante central: content.height + chrome.height == rows,
+// por tanto 0 <= rows % ch < ch y anchored == true en todo resize normal.
+// ---------------------------------------------------------------------------
+
+TEST(frame_buildFrame_layout_completo_minimo) {
+    // rows=1: content=1, chrome=0 (anchored=false legítimo, mínimo)
+    Document doc;
+    doc.restore({"hola"});
+    Viewport vp{0, 0, 1, 80};
+    Cursor cur;
+    FrameBuilder b;
+    const Layout layout = computeLayout(1, 80);
+    Frame f = b.buildFrame(doc, cur, vp, "t.txt", false,
+                           makeChromeRequest(Message("", MessageKind::Info, std::nullopt),
+                                             State::Navegacion),
+                           std::nullopt, std::nullopt, std::nullopt, nullptr, layout);
+    CHECK_EQ(f.layout.content.height + f.layout.chrome.height, 1);
+    CHECK_EQ(f.layout.content.height, 1);
+    CHECK_EQ(f.layout.chrome.height, 0);
+}
+
+TEST(frame_buildFrame_layout_completo_regresion_principal) {
+    // rows=2: content=1, chrome=1 (anchored=true: el caso problemático)
+    Document doc;
+    doc.restore({"hola"});
+    Viewport vp{0, 0, 1, 80};
+    Cursor cur;
+    FrameBuilder b;
+    const Layout layout = computeLayout(2, 80);
+    Frame f = b.buildFrame(doc, cur, vp, "t.txt", false,
+                           makeChromeRequest(Message("", MessageKind::Info, std::nullopt),
+                                             State::Navegacion),
+                           std::nullopt, std::nullopt, std::nullopt, nullptr, layout);
+    CHECK_EQ(f.layout.content.height + f.layout.chrome.height, 2);
+    CHECK_EQ(f.layout.content.height, 1);
+    CHECK_EQ(f.layout.chrome.height, 1);
+}
+
+TEST(frame_buildFrame_layout_completo_limite_normal) {
+    // rows=3: content=1, chrome=2 (anchored=true: límite normal)
+    Document doc;
+    doc.restore({"hola"});
+    Viewport vp{0, 0, 1, 80};
+    Cursor cur;
+    FrameBuilder b;
+    const Layout layout = computeLayout(3, 80);
+    Frame f = b.buildFrame(doc, cur, vp, "t.txt", false,
+                           makeChromeRequest(Message("", MessageKind::Info, std::nullopt),
+                                             State::Navegacion),
+                           std::nullopt, std::nullopt, std::nullopt, nullptr, layout);
+    CHECK_EQ(f.layout.content.height + f.layout.chrome.height, 3);
+    CHECK_EQ(f.layout.content.height, 1);
+    CHECK_EQ(f.layout.chrome.height, 2);
+}
+
+TEST(frame_buildFrame_layout_completo_habitual) {
+    // rows=4: content=2, chrome=2 (anchored=true: comportamiento habitual)
+    Document doc;
+    doc.restore({"hola", "mundo"});
+    Viewport vp{0, 0, 2, 80};
+    Cursor cur;
+    FrameBuilder b;
+    const Layout layout = computeLayout(4, 80);
+    Frame f = b.buildFrame(doc, cur, vp, "t.txt", false,
+                           makeChromeRequest(Message("", MessageKind::Info, std::nullopt),
+                                             State::Navegacion),
+                           std::nullopt, std::nullopt, std::nullopt, nullptr, layout);
+    CHECK_EQ(f.layout.content.height + f.layout.chrome.height, 4);
+    CHECK_EQ(f.layout.content.height, 2);
+    CHECK_EQ(f.layout.chrome.height, 2);
+}
+
+TEST(frame_buildFrame_transicion_resize) {
+    // Transición 3 -> 2 -> 3 filas: no debe quedar filas residuales.
+    // El layout completo (content+chrome) debe llenar exactamente las filas.
+    Document doc;
+    doc.restore({"l0", "l1", "l2"});
+    Viewport vp{0, 0, 1, 80};
+    Cursor cur;
+    FrameBuilder b;
+
+    const Layout l3 = computeLayout(3, 80);
+    Frame f3 = b.buildFrame(doc, cur, vp, "t.txt", false,
+                            makeChromeRequest(Message("", MessageKind::Info, std::nullopt),
+                                              State::Navegacion),
+                            std::nullopt, std::nullopt, std::nullopt, nullptr, l3);
+    CHECK_EQ(f3.layout.content.height + f3.layout.chrome.height, 3);
+    CHECK_EQ(f3.layout.content.height, 1);
+    CHECK_EQ(f3.layout.chrome.height, 2);
+
+    const Layout l2 = computeLayout(2, 80);
+    Frame f2 = b.buildFrame(doc, cur, vp, "t.txt", false,
+                            makeChromeRequest(Message("", MessageKind::Info, std::nullopt),
+                                              State::Navegacion),
+                            std::nullopt, std::nullopt, std::nullopt, nullptr, l2);
+    CHECK_EQ(f2.layout.content.height + f2.layout.chrome.height, 2);
+    CHECK_EQ(f2.layout.content.height, 1);
+    CHECK_EQ(f2.layout.chrome.height, 1);
+
+    const Layout l3b = computeLayout(3, 80);
+    Frame f3b = b.buildFrame(doc, cur, vp, "t.txt", false,
+                             makeChromeRequest(Message("", MessageKind::Info, std::nullopt),
+                                               State::Navegacion),
+                             std::nullopt, std::nullopt, std::nullopt, nullptr, l3b);
+    CHECK_EQ(f3b.layout.content.height + f3b.layout.chrome.height, 3);
+    CHECK_EQ(f3b.layout.content.height, 1);
+    CHECK_EQ(f3b.layout.chrome.height, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Regresión para TTY: buildDiffFrame con const Layout& debe preservar la
+// geometría completa (content + chrome) sin traducir a viewport.height +
+// kChromeRows, que era la causa del problema P1.
+// Usa una misma instancia de TtyDiff (con caché) para verificar transiciones
+// reales y fast paths (cursor move / scroll de una fila).
+// ---------------------------------------------------------------------------
+
+TEST(tty_buildDiffFrame_transicion_tres_dos_tres_filas) {
+    // 3 filas: content=1, chrome=2
+    // 2 filas: content=1, chrome=1
+    // 3 filas: content=1, chrome=2
+    Document doc;
+    doc.restore({"l0", "l1", "l2"});
+    Viewport vp{0, 0, 1, 80};
+    Cursor cur;
+    FrameBuilder builder;
+    TtyEncoder encoder;
+    TtyDiff diff(builder, encoder);
+    auto chrome = makeChromeRequest(Message("", MessageKind::Info, std::nullopt),
+                                    State::Navegacion);
+
+    auto countLines = [](const std::string& out) {
+        int n = 0;
+        for (char c : out)
+            if (c == '\n') ++n;
+        return n;
+    };
+
+    // --- Transición 1: 3 filas totales (content=1, chrome=2) ---
+    const Layout l3 = computeLayout(3, 80);
+    vp.height = l3.content.height; // 1 fila de contenido
+    vp.top = 0;
+    cur.line = 0;
+    const std::string out3a = diff.buildDiffFrame(
+        doc, cur, vp, "t.txt", false, chrome,
+        std::nullopt, std::nullopt, std::nullopt, nullptr, l3);
+    CHECK_EQ(countLines(out3a), 2); // 1 contenido + 1 statusBar
+
+    // --- Transición 2: 2 filas totales (content=1, chrome=1) ---
+    const Layout l2 = computeLayout(2, 80);
+    vp.height = l2.content.height; // 1 fila de contenido
+    vp.top = 0;
+    cur.line = 0;
+    const std::string out2 = diff.buildDiffFrame(
+        doc, cur, vp, "t.txt", false, chrome,
+        std::nullopt, std::nullopt, std::nullopt, nullptr, l2);
+    CHECK_EQ(countLines(out2), 1); // 1 contenido
+
+    // --- Transición 3: 3 filas totales de nuevo (content=1, chrome=2) ---
+    vp.height = l3.content.height; // 1 fila de contenido
+    vp.top = 0;
+    cur.line = 0;
+    const std::string out3b = diff.buildDiffFrame(
+        doc, cur, vp, "t.txt", false, chrome,
+        std::nullopt, std::nullopt, std::nullopt, nullptr, l3);
+    CHECK_EQ(countLines(out3b), 2); // 1 contenido + 1 statusBar
+}
+
+TEST(tty_buildDiffFrame_cursor_move_con_layout_dos_filas) {
+    // Movimiento de cursor con layout de 2 filas (content=1, chrome=1).
+    // Ejercita el fast path buildCursorMoveFrame con layout reducido.
+    Document doc;
+    doc.restore({"l0", "l1"});
+    Viewport vp{0, 0, 1, 80};
+    Cursor cur;
+    cur.line = 0;
+    cur.col = 0;
+    FrameBuilder builder;
+    TtyEncoder encoder;
+    TtyDiff diff(builder, encoder);
+    auto chrome = makeChromeRequest(Message("", MessageKind::Info, std::nullopt),
+                                    State::Navegacion);
+
+    const Layout l2 = computeLayout(2, 80);
+    vp.height = l2.content.height; // 1 fila de contenido
+    vp.top = 0;
+
+    // Primer render (full)
+    const std::string out1 = diff.buildDiffFrame(
+        doc, cur, vp, "t.txt", false, chrome,
+        std::nullopt, std::nullopt, std::nullopt, nullptr, l2);
+    CHECK(!out1.empty());
+
+    // Movimiento de cursor a la columna 1 (mismo renglón visible, dentro del contenido)
+    cur.col = 1;
+    const std::string out2 = diff.buildDiffFrame(
+        doc, cur, vp, "t.txt", false, chrome,
+        std::nullopt, std::nullopt, std::nullopt, nullptr, l2);
+    CHECK(!out2.empty());
+    // El camino incremental (buildCursorMoveFrame) no emite clear screen (\x1b[2J),
+    // solo reposiciona el cursor. Si cae al fallback completo, out2 contendría
+    // \x1b[2J (línea 139 de TtyEncoder.cpp::beginFrame).
+    CHECK(out2.find("\x1b[2J") == std::string::npos);
+    // El camino incremental reutiliza el cache de filas de contenido, por lo que
+    // out2 debe ser significativamente más corto que out1 (que reconstruyó todo).
+    CHECK(out2.size() < out1.size());
+}
+
+TEST(tty_buildDiffFrame_scroll_con_layout_cuatro_filas) {
+    // Scroll incremental con layout de 4 filas (content=2, chrome=2).
+    // Ejercita el fast path buildScrollFrame: con 2 filas de contenido,
+    // un scroll de +1 deja 1 fila compartida, así que useRegion es verdadero.
+    Document doc;
+    doc.restore({"l0", "l1", "l2", "l3"});
+    Viewport vp{0, 0, 2, 80};
+    Cursor cur;
+    cur.line = 0;
+    cur.col = 0;
+    FrameBuilder builder;
+    TtyEncoder encoder;
+    TtyDiff diff(builder, encoder);
+    auto chrome = makeChromeRequest(Message("", MessageKind::Info, std::nullopt),
+                                    State::Navegacion);
+
+    const Layout l4 = computeLayout(4, 80);
+    vp.height = l4.content.height; // 2 filas de contenido
+    vp.top = 0;
+
+    // Primer render en top=0 (full frame)
+    const std::string out0 = diff.buildDiffFrame(
+        doc, cur, vp, "t.txt", false, chrome,
+        std::nullopt, std::nullopt, std::nullopt, nullptr, l4);
+    CHECK(!out0.empty());
+
+    // Scroll +1 (top=1): debería usar fast path de scroll regional
+    vp.top = 1;
+    cur.line = 1;
+    const std::string out1 = diff.buildDiffFrame(
+        doc, cur, vp, "t.txt", false, chrome,
+        std::nullopt, std::nullopt, std::nullopt, nullptr, l4);
+    CHECK(!out1.empty());
+    // El camino incremental (buildScrollFrame) no emite clear screen (\x1b[2J).
+    CHECK(out1.find("\x1b[2J") == std::string::npos);
+    // Verifica secuencias concretas del fast path de scroll regional:
+    //   \x1b[1;2r  -> establecer región de scroll (2 filas de contenido)
+    //   \x1b[1S    -> scroll 1 línea hacia abajo
+    //   \x1b[r     -> reset de región de scroll
+    CHECK(out1.find("\x1b[1;2r") != std::string::npos);
+    CHECK(out1.find("\x1b[1S") != std::string::npos);
+    CHECK(out1.find("\x1b[r") != std::string::npos);
 }

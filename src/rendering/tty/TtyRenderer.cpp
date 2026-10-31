@@ -104,6 +104,24 @@ void TtyRenderer::renderScreenDiff(
     if (!sink.writeStdout(out)) diff_.invalidateCache();
 }
 
+void TtyRenderer::renderScreenDiff(
+    const Document& doc, const Cursor& cursor, const Viewport& viewport,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    Sink& sink, const std::optional<Selection>& selection,
+    const std::optional<Selection>& searchHighlight,
+    const std::optional<BracketPair>& bracketPair, const Layout& layout) {
+    // Layout ya resuelto (fuente unica: Editor -> computeLayout): se propaga
+    // hasta FrameBuilder sin reconstruirlo desde viewport.height +
+    // kChromeRows, preservando la geometria de chrome.
+    Viewport v = viewport;
+    v.height = layout.content.height;
+    v.width = layout.content.width;
+    const std::string out =
+        buildDiffFrame(doc, cursor, v, filename, modified, chrome,
+                        selection, searchHighlight, bracketPair, layout);
+    if (!sink.writeStdout(out)) diff_.invalidateCache();
+}
+
 std::string TtyRenderer::buildDiffFrame(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
     const std::string& filename, bool modified, const ChromeRequest& chrome,
@@ -112,6 +130,18 @@ std::string TtyRenderer::buildDiffFrame(
     const std::optional<BracketPair>& bracketPair) {
     return diff_.buildDiffFrame(doc, cursor, viewport, filename, modified, chrome,
                                  selection, searchHighlight, bracketPair, wrapIndex_);
+}
+
+std::string TtyRenderer::buildDiffFrame(
+    const Document& doc, const Cursor& cursor, const Viewport& viewport,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    const std::optional<Selection>& selection,
+    const std::optional<Selection>& searchHighlight,
+    const std::optional<BracketPair>& bracketPair,
+    const Layout& layout) {
+    return diff_.buildDiffFrame(doc, cursor, viewport, filename, modified, chrome,
+                                 selection, searchHighlight, bracketPair, wrapIndex_,
+                                 layout);
 }
 
 void TtyRenderer::renderEditorContent(

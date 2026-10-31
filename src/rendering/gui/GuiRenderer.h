@@ -216,6 +216,16 @@ public:
                      const std::optional<BracketPair>& bracketPair = std::nullopt,
                      const softwrap::Index* wrapIndex = nullptr);
 
+    // Variante con layout ya resuelto (fuente unica: Editor -> computeLayout).
+    Frame buildFrame(const Document& doc, const Cursor& cursor,
+                     const Viewport& viewport, const std::string& filename,
+                     bool modified, const ChromeRequest& chrome,
+                     const std::optional<Selection>& selection,
+                     const std::optional<Selection>& searchHighlight,
+                     const std::optional<BracketPair>& bracketPair,
+                     const softwrap::Index* wrapIndex,
+                     const Layout& layout);
+
     // ChromeData de las pantallas de listas (misma composicion que
     // TtyRenderer: nombre/estado/right + MessageBar). Publico para tests.
     ChromeData bufferListChrome(const std::vector<std::string>& names,
@@ -362,7 +372,19 @@ public:
                           Sink& sink,
                           const std::optional<Selection>& selection,
                           const std::optional<Selection>& searchHighlight,
-                          const std::optional<BracketPair>& bracketPair) override;
+                          const std::optional<BracketPair>& bracketPair,
+                          const Layout& layout) override;
+
+    void renderScreenDiff(const Document& doc,
+                          const Cursor& cursor,
+                          const Viewport& viewport,
+                          const std::string& filename,
+                          bool modified,
+                          const ChromeRequest& chrome,
+                          Sink& sink,
+                          const std::optional<Selection>& selection,
+                          const std::optional<Selection>& searchHighlight,
+                          const std::optional<BracketPair>& bracketPair);
 
     void renderBufferList(const std::vector<std::string>& names,
                           int selected,
@@ -553,33 +575,27 @@ private:
     // camino rápido; esto solo evita que queden valores obsoletos).
     void resetIncrementalState() const;
     // Camino rápido: movimiento de cursor sin scroll ni cambios (etapa ↑/↓).
-    // Evita buildFrame() completo (todas las filas + snapshot total):
-    // reconstruye solo las filas afectadas por CurrentLine y resuelve el
-    // cursor/chrome como buildFrame. Devuelve true si resolvió el frame
-    // (actualizó cachés, stats, snapshots y pintó); false para caer al camino
-    // completo existente. Nunca altera el backend TTY (método solo GUI).
+    // `layout` es la geometría completa resuelta por el Editor; el camino
+    // rápido solo es válido si coincide con el cacheado (incluye chrome).
     bool tryFastCursorMove(const Document& doc, const Cursor& cursor,
                            const Viewport& viewport,
                            const std::string& filename, bool modified,
                            const ChromeRequest& chrome,
                            const std::optional<Selection>& selection,
                            const std::optional<Selection>& searchHighlight,
-                           const std::optional<BracketPair>& bracketPair);
+                           const std::optional<BracketPair>& bracketPair,
+                           const Layout& layout);
     // Camino rápido: scroll vertical de una línea (etapa scroll ±1).
-    // Rota los snapshots cacheados (la fila de docLine L sigue representando
-    // a L: solo cambia su índice) y construye únicamente la fila entrante +
-    // las extras por CurrentLine; no reconstruye las filas que siguen
-    // visibles. El repintado usa scroll-blit GPU (ping-pong, ver contentFb_)
-    // cuando hay render targets; sin ellos cae al repintado desde caché.
-    // Mismas garantías de equivalencia visual que el camino completo;
-    // false = fallback.
+    // `layout` es la geometría completa resuelta por el Editor; el camino
+    // rápido solo es válido si coincide con el cacheado (incluye chrome).
     bool tryFastScrollLine(const Document& doc, const Cursor& cursor,
                            const Viewport& viewport,
                            const std::string& filename, bool modified,
                            const ChromeRequest& chrome,
                            const std::optional<Selection>& selection,
                            const std::optional<Selection>& searchHighlight,
-                           const std::optional<BracketPair>& bracketPair);
+                           const std::optional<BracketPair>& bracketPair,
+                           const Layout& layout);
     // Camino común de los 3 modales: snapshots + diff por línea + pintado
     // full/parcial. `lines` ya viene compuesto (ListLines.h), `next` es el
     // cursor resuelto por el caller, `selectedRow` la fila destacada

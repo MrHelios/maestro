@@ -451,9 +451,26 @@ Frame GuiRenderer::buildFrame(
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair,
     const softwrap::Index* wrapIndex) {
+    // Layout derivado (caller con content dims, p.ej. tests): comportamiento
+    // historico (content + kChromeRows).
+    return frameBuilder_.buildFrame(doc, cursor, viewport, filename, modified,
+                                   chrome, selection, searchHighlight,
+                                   bracketPair, wrapIndex);
+}
+
+Frame GuiRenderer::buildFrame(
+    const Document& doc, const Cursor& cursor, const Viewport& viewport,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    const std::optional<Selection>& selection,
+    const std::optional<Selection>& searchHighlight,
+    const std::optional<BracketPair>& bracketPair,
+    const softwrap::Index* wrapIndex,
+    const Layout& layout) {
+    // Layout ya resuelto por el Editor (computeLayout(currentRows_,
+    // currentCols_)): fuente unica, sin reconstruccion desde viewport.height.
     return frameBuilder_.buildFrame(doc, cursor, viewport, filename, modified,
                                     chrome, selection, searchHighlight,
-                                    bracketPair, wrapIndex);
+                                    bracketPair, wrapIndex, layout);
 }
 
 ChromeData GuiRenderer::bufferListChrome(
@@ -1244,7 +1261,8 @@ bool GuiRenderer::tryFastCursorMove(
     const std::string& filename, bool modified, const ChromeRequest& chrome,
     const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
-    const std::optional<BracketPair>& bracketPair) {
+    const std::optional<BracketPair>& bracketPair,
+    const Layout& layout) {
     // Precondiciones probadas (etapa ↑/↓ sin scroll). Si alguna no se cumple,
     // false SIN mutar nada: el caller cae al camino completo existente.
     // No basta con pintar menos filas después de buildFrame(): este camino
@@ -1255,6 +1273,11 @@ bool GuiRenderer::tryFastCursorMove(
     // CurrentLine. Se desactiva hasta implementar rangos por índice visual.
     if (frameBuilder_.isWrapEnabled(wrapIndex_)) return false;
     if (!contentHasCache_) return false;
+    // El layout completo (incluye chrome) debe coincidir con el cacheado.
+    // Un resize que cambie solo las filas de chrome (p.ej. 3 filas totales ->
+    // 2 filas totales: content=1 en ambos, chrome 2->1) no se detectaría
+    // solo por viewport.height.
+    if (!sameLayout(layout, contentLayout_)) return false;
     if (selection.has_value() || searchHighlight.has_value() ||
         contentSelection_.has_value() || contentSearch_.has_value()) {
         return false;  // el highlight de selección/búsqueda cubre N filas
@@ -1280,8 +1303,7 @@ bool GuiRenderer::tryFastCursorMove(
         return false;
     }
     const FrameBuilder::EditorGeometry g =
-        frameBuilder_.editorGeometry(doc, viewport);
-    if (!sameLayout(g.layout, contentLayout_)) return false;
+        frameBuilder_.editorGeometry(doc, layout);
     const int cw = font_.cellW();
     const int ch = font_.cellH();
     if (cw != contentCellW_ || ch != contentCellH_ ||
@@ -1472,7 +1494,8 @@ bool GuiRenderer::tryFastScrollLine(
     const std::string& filename, bool modified, const ChromeRequest& chrome,
     const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
-    const std::optional<BracketPair>& bracketPair) {
+    const std::optional<BracketPair>& bracketPair,
+    const Layout& layout) {
     // Precondiciones (etapa scroll ±1). Si alguna falla, false SIN mutar:
     // el caller cae al camino completo. Deltas != ±1 (saltos, páginas),
     // edición, cambios visuales o geometría incompatible van por full.
@@ -1482,6 +1505,11 @@ bool GuiRenderer::tryFastScrollLine(
     // rangos por índice visual.
     if (frameBuilder_.isWrapEnabled(wrapIndex_)) return false;
     if (!contentHasCache_) return false;
+    // El layout completo (incluye chrome) debe coincidir con el cacheado.
+    // Un resize que cambie solo las filas de chrome (p.ej. 3 filas totales ->
+    // 2 filas totales: content=1 en ambos, chrome 2->1) no se detectaría
+    // solo por viewport.height.
+    if (!sameLayout(layout, contentLayout_)) return false;
     const int delta = viewport.top - contentTop_;
     if (delta != 1 && delta != -1) return false;
     // Selección/búsqueda/bracket: se admiten si son IGUALES a las cacheadas
@@ -1507,8 +1535,7 @@ bool GuiRenderer::tryFastScrollLine(
         return false;
     }
     const FrameBuilder::EditorGeometry g =
-        frameBuilder_.editorGeometry(doc, viewport);
-    if (!sameLayout(g.layout, contentLayout_)) return false;
+        frameBuilder_.editorGeometry(doc, layout);
     const int cw = font_.cellW();
     const int ch = font_.cellH();
     if (cw != contentCellW_ || ch != contentCellH_ ||
@@ -1747,6 +1774,21 @@ void GuiRenderer::renderScreenDiff(
     Sink& sink, const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair) {
+    // Layout derivado (callers que solo conocen el content, p.ej. TTY y tests
+    // existentes): comportamiento historico (content + kChromeRows).
+    return renderScreenDiff(doc, cursor, viewport, filename, modified, chrome,
+                            sink, selection, searchHighlight, bracketPair,
+                            frameBuilder_.layoutFromLogical(viewport.height +
+                                                                 kChromeRows,
+                                                             viewport.width));
+}
+
+void GuiRenderer::renderScreenDiff(
+    const Document& doc, const Cursor& cursor, const Viewport& viewport,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    Sink& sink, const std::optional<Selection>& selection,
+    const std::optional<Selection>& searchHighlight,
+    const std::optional<BracketPair>& bracketPair, const Layout& layout) {
     (void)sink;  // la GUI pinta en el SDL_Renderer, no en el Sink de bytes.
 
     // Camino rápido (etapa ↑/↓ sin scroll): evita buildFrame() completo si
@@ -1755,18 +1797,18 @@ void GuiRenderer::renderScreenDiff(
     // camino completo de abajo sin haber mutado nada. Los fast paths se
     // autodescartan con Soft Wrap activo (ver sus precondiciones).
     if (tryFastCursorMove(doc, cursor, viewport, filename, modified, chrome,
-                          selection, searchHighlight, bracketPair)) {
+                          selection, searchHighlight, bracketPair, layout)) {
         return;
     }
     // Camino rápido (etapa scroll ±1): rota snapshots y construye O(1) filas.
     // Mismas garantías de equivalencia; el repintado sigue saliendo del caché
     // hasta la etapa scroll-blit.
     if (tryFastScrollLine(doc, cursor, viewport, filename, modified, chrome,
-                          selection, searchHighlight, bracketPair)) {
+                          selection, searchHighlight, bracketPair, layout)) {
         return;
     }
     Frame f = buildFrame(doc, cursor, viewport, filename, modified, chrome,
-                         selection, searchHighlight, bracketPair, wrapIndex_);
+                         selection, searchHighlight, bracketPair, wrapIndex_, layout);
     const bool havePrevContent = contentHasCache_;
     const FrameCursor prevContent = contentCursor_;
     lastChrome_ = f.chrome;

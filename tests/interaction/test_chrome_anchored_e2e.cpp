@@ -23,6 +23,7 @@ void setupEditor(Editor& ed, int nLines, int top, int cursorLine) {
     ed.active().viewport.top = top;
     ed.active().cursor.line = cursorLine;
     ed.active().cursor.col = 5;
+    ed.resize(22, 80);
 }
 
 InputEvent mouse(InputEventType type, CellPos cell) {

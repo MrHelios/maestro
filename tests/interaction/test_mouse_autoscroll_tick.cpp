@@ -54,6 +54,7 @@ TEST(mouse_tick_scrolls_down_periodically) {
     ed.active().viewport.left = 0;
     ed.active().cursor.line = 11;
     ed.active().cursor.col = 0;
+    ed.resize(6, 20);
 
     ed.handleEvent(mousePressAt(4, 2)); // linea 11, arma gesto
     CHECK_EQ(ed.active().cursor.line, 11);
@@ -93,6 +94,7 @@ TEST(mouse_tick_scrolls_up_periodically) {
     ed.active().viewport.left = 0;
     ed.active().cursor.line = 12;
     ed.active().cursor.col = 0;
+    ed.resize(6, 20);
 
     ed.handleEvent(mousePressAt(4, 3)); // linea 12, arma gesto
     ed.handleEvent(mouseDragAt(4, 0));  // fuera por arriba
@@ -122,6 +124,7 @@ TEST(mouse_tick_stops_when_back_inside) {
     ed.active().viewport.left = 0;
     ed.active().cursor.line = 11;
     ed.active().cursor.col = 0;
+    ed.resize(6, 20);
 
     ed.handleEvent(mousePressAt(4, 2));
     ed.handleEvent(mouseDragAt(4, 5)); // fuera: arma Down
@@ -146,6 +149,7 @@ TEST(mouse_tick_stops_on_release) {
     ed.active().viewport.left = 0;
     ed.active().cursor.line = 11;
     ed.active().cursor.col = 0;
+    ed.resize(6, 20);
 
     ed.handleEvent(mousePressAt(4, 2));
     ed.handleEvent(mouseDragAt(4, 5)); // fuera: arma Down
@@ -171,6 +175,7 @@ TEST(mouse_tick_holds_edge_at_limit) {
     ed.active().viewport.left = 0;
     ed.active().cursor.line = 5;
     ed.active().cursor.col = 0;
+    ed.resize(6, 20);
 
     ed.handleEvent(mousePressAt(4, 2)); // linea 5
     ed.handleEvent(mouseDragAt(4, 5));  // chrome: clamp a linea 7
@@ -198,6 +203,7 @@ TEST(mouse_tick_small_file_clamps_by_side) {
     ed.active().viewport.left = 0;
     ed.active().cursor.line = 1;
     ed.active().cursor.col = 0;
+    ed.resize(12, 20);
 
     ed.handleEvent(mousePressAt(4, 2)); // linea 1
     ed.handleEvent(mouseDragAt(4, 0));  // fuera por arriba
@@ -223,6 +229,7 @@ TEST(mouse_tick_without_gesture_does_nothing) {
     ed.active().document.restore({"a", "b"});
     ed.active().viewport.height = 10;
     ed.active().viewport.width = 20;
+    ed.resize(12, 20);
     const auto t0 = now();
     CHECK(!ed.mouseAutoscrollActive());
     CHECK(!ed.tickMouseAutoscroll(t0 + kStep * 10));
@@ -245,6 +252,7 @@ TEST(mouse_tick_scrolls_up_from_top_edge_row) {
     ed.active().viewport.left = 0;
     ed.active().cursor.line = 12;
     ed.active().cursor.col = 0;
+    ed.resize(6, 20);
 
     ed.handleEvent(mousePressAt(4, 3)); // linea 12, arma gesto
     ed.handleEvent(mouseDragAt(4, 1));  // primera fila visible (tope real)
@@ -276,6 +284,7 @@ TEST(mouse_tick_last_row_does_not_arm) {
     ed.active().viewport.left = 0;
     ed.active().cursor.line = 10;
     ed.active().cursor.col = 0;
+    ed.resize(6, 20);
 
     ed.handleEvent(mousePressAt(4, 1)); // linea 10, arma gesto
     ed.handleEvent(mouseDragAt(4, 4));  // ultima fila visible: exacta

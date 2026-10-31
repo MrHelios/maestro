@@ -52,6 +52,19 @@ public:
                      const std::optional<BracketPair>& bracketPair = std::nullopt,
                      const softwrap::Index* wrapIndex = nullptr) const;
 
+    // Variante con layout ya resuelto (fuente unica: Editor -> computeLayout).
+    Frame buildFrame(const Document& doc,
+                     const Cursor& cursor,
+                     const Viewport& viewport,
+                     const std::string& filename,
+                     bool modified,
+                     const ChromeRequest& chrome,
+                     const std::optional<Selection>& selection,
+                     const std::optional<Selection>& searchHighlight,
+                     const std::optional<BracketPair>& bracketPair,
+                     const softwrap::Index* wrapIndex,
+                     const Layout& layout) const;
+
     // Una sola fila de contenido (para patches incrementales del backend).
     // Las selecciones ya vienen normalizadas (ver normalizeBracketPair).
     StyledRow buildContentRow(const Document& doc,
@@ -83,6 +96,13 @@ public:
     EditorGeometry editorGeometry(const Document& doc,
                                    const Viewport& viewport,
                                    const softwrap::Index* wrapIndex = nullptr) const;
+
+    // Variante con layout ya resuelto: usa el layout pasado directamente
+    // (no lo recalcula desde viewport). Para fast paths de GuiRenderer que
+    // ya recibieron el layout completo del Editor.
+    EditorGeometry editorGeometry(const Document& doc,
+                                   const Layout& layout,
+                                   const softwrap::Index* wrapIndex = nullptr) const;
     // Resuelve el cursor lógico a CellPos 0-based (col=X, row=Y).
     // Contrato explícito (sin clamp silencioso):
     //   return true  -> `out` es la posición visual real (válida).
@@ -111,6 +131,20 @@ public:
     const softwrap::Index& wrapIndex(const softwrap::Index* external) const { return *external; }
 
     Layout calculateLayout(int contentRows, int width) const;
+
+    // Layout desde dimensiones logicas completas (fuente unica: Editor).
+    // Antes: se reconstruia desde viewport.height + kChromeRows inferido, lo
+    // que pierde informacion cuando el contenido colapsa (filas totales <= 3).
+    // Ahora: recibe las filas/columnas logicas originales y construye el layout
+    // exacto con computeLayout(rows, cols).
+    Layout layoutFromLogical(int rows, int cols) const;
+
+    // EditorGeometry desde dimensiones logicas completas (mismo criterio que
+    // layoutFromLogical). `viewport` se conserva como fallback para los callers
+    // que solo conocen el contenido (TTY).
+    EditorGeometry editorGeometry(const Document& doc, const Viewport& viewport,
+                                   int totalRows, int totalCols,
+                                   const softwrap::Index* wrapIndex = nullptr) const;
 
     // Sincroniza el lenguaje de sintaxis con el filename. Devuelve true si
     // cambió (el backend debe tratarlo como rebuild total, como hacía el

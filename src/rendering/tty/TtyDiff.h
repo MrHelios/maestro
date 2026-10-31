@@ -78,6 +78,21 @@ public:
                                const std::optional<BracketPair>& bracketPair = std::nullopt,
                                const softwrap::Index* wrapIndex = nullptr);
 
+    // Variante con layout ya resuelto (fuente unica: Editor -> computeLayout).
+    // Propaga el layout completo a FrameBuilder sin reconstruirlo desde
+    // viewport.height + kChromeRows, preservando la geometria de chrome.
+    std::string buildDiffFrame(const Document& doc,
+                               const Cursor& cursor,
+                               const Viewport& viewport,
+                               const std::string& filename,
+                               bool modified,
+                               const ChromeRequest& chrome,
+                               const std::optional<Selection>& selection,
+                               const std::optional<Selection>& searchHighlight,
+                               const std::optional<BracketPair>& bracketPair,
+                               const softwrap::Index* wrapIndex,
+                               const Layout& layout);
+
     // Requiere rowCache_[i] <=> línea viewport.top+i y size==contentH.
     std::string buildScrollFrame(const Document& doc,
                                  const Cursor& cursor,
@@ -88,7 +103,8 @@ public:
                                  const std::optional<Selection>& selection,
                                  const std::optional<Selection>& searchHighlight,
                                  const std::optional<BracketPair>& bracketPair,
-                                 int deltaTop);
+                                 int deltaTop,
+                                 const Layout& layout);
 
     static void splitRows(const std::string& body,
                           std::vector<std::string_view>* rows);
@@ -101,6 +117,7 @@ private:
     std::string chromeCache_;          // chrome codificado (StatusBar + MessageBar), filas con "\r\n"
     bool hasCache_ = false;
     int cachedContentH_ = -1;
+    Layout cachedLayout_;       // Layout completo usado para construir el caché
     int lastViewportW_ = -1;
     int lastViewportH_ = -1;
     int lastViewportTop_ = 0;
@@ -125,15 +142,19 @@ private:
                                      const Viewport& viewport,
                                      const std::string& filename,
                                      bool modified,
-                                     const ChromeRequest& chrome);
+                                     const ChromeRequest& chrome,
+                                     const Layout& layout);
 
+    // Variante con layout ya resuelto: usa totalRows = content.height +
+    // chrome.height para editorGeometry, preservando la geometria de chrome.
     void rebuildCache(const Document& doc, const Cursor& cursor,
                       const Viewport& viewport, const std::string& filename,
                       bool modified, const ChromeRequest& chrome,
                       const std::optional<Selection>& selection,
                       const std::optional<Selection>& searchHighlight,
                       const std::optional<BracketPair>& bracketPair,
-                      const softwrap::Index* wrapIndex);
+                      const softwrap::Index* wrapIndex,
+                      const Layout& layout);
 
     bool patchContentRow(std::string& out, const Document& doc,
                          const Cursor& cursor, const Viewport& viewport,

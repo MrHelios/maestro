@@ -59,7 +59,8 @@ struct CountingGuiRenderer : public GuiRenderer {
                           bool modified, const ChromeRequest& chrome, Sink& sink,
                           const std::optional<Selection>& selection,
                           const std::optional<Selection>& searchHighlight,
-                          const std::optional<BracketPair>& bracketPair) override {
+                          const std::optional<BracketPair>& bracketPair,
+                          const Layout& layout) override {
         ++renderCount;
         lastDocLineCount.store(doc.lineCount());
         {
@@ -68,7 +69,7 @@ struct CountingGuiRenderer : public GuiRenderer {
         }
         GuiRenderer::renderScreenDiff(doc, cursor, viewport, filename, modified,
                                       chrome, sink, selection, searchHighlight,
-                                      bracketPair);
+                                      bracketPair, layout);
     }
     std::vector<std::pair<int, int>> cursorSamples() {
         std::lock_guard<std::mutex> lk(samplesMutex);
@@ -380,6 +381,7 @@ TEST(idle_wait_autoscroll_armado) {
     h.ed->getActiveBufferForTesting().viewport.left = 0;
     h.ed->getActiveBufferForTesting().cursor.line = 11;
     h.ed->getActiveBufferForTesting().cursor.col = 0;
+    h.ed->resize(6, 20);
     h.ed->handleEvent(mousePressAt(4, 2));
     h.ed->handleEvent(mouseDragAt(4, 5));  // fuera por abajo: arma + paso
     const auto t0 = clk::now();

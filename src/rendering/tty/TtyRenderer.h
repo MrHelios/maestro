@@ -82,7 +82,20 @@ public:
                           Sink& sink,
                           const std::optional<Selection>& selection,
                           const std::optional<Selection>& searchHighlight,
-                          const std::optional<BracketPair>& bracketPair) override;
+                          const std::optional<BracketPair>& bracketPair);
+
+    // Layout ya resuelto (fuente unica: Editor -> computeLayout).
+    void renderScreenDiff(const Document& doc,
+                          const Cursor& cursor,
+                          const Viewport& viewport,
+                          const std::string& filename,
+                          bool modified,
+                          const ChromeRequest& chrome,
+                          Sink& sink,
+                          const std::optional<Selection>& selection,
+                          const std::optional<Selection>& searchHighlight,
+                          const std::optional<BracketPair>& bracketPair,
+                          const Layout& layout) override;
 
     std::string buildDiffFrame(const Document& doc,
                                const Cursor& cursor,
@@ -93,6 +106,18 @@ public:
                                const std::optional<Selection>& selection = std::nullopt,
                                const std::optional<Selection>& searchHighlight = std::nullopt,
                                const std::optional<BracketPair>& bracketPair = std::nullopt);
+
+    // Variante con layout ya resuelto (fuente unica: Editor -> computeLayout).
+    std::string buildDiffFrame(const Document& doc,
+                               const Cursor& cursor,
+                               const Viewport& viewport,
+                               const std::string& filename,
+                               bool modified,
+                               const ChromeRequest& chrome,
+                               const std::optional<Selection>& selection,
+                               const std::optional<Selection>& searchHighlight,
+                               const std::optional<BracketPair>& bracketPair,
+                               const Layout& layout);
 
     std::string buildBufferListScreen(const std::vector<std::string>& names,
                                       int selected,

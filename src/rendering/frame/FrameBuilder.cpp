@@ -152,12 +152,46 @@ Layout FrameBuilder::calculateLayout(int contentRows, int width) const {
     return computeLayout(contentRows + kChromeRows, width);
 }
 
+Layout FrameBuilder::layoutFromLogical(int rows, int cols) const {
+    // Dimensiones logicas completas: fuente unica del layout (Editor).
+    // computeLayout(rows, cols) ya aplica la politica de contenido minimo
+    // (content = rows - kChromeRows si rows > kChromeRows, sino 1), por lo que
+    // el chrome resultante es consistente con el total original.
+    return computeLayout(rows, cols);
+}
+
+FrameBuilder::EditorGeometry FrameBuilder::editorGeometry(const Document& doc, const Viewport& viewport,
+                                            int totalRows, int totalCols,
+                                            const softwrap::Index* wrapIndex) const {
+    EditorGeometry g;
+    g.layout = computeLayout(totalRows, totalCols);
+    g.gutterW = gutterWidth(doc.lineCount(), totalCols);
+    g.wrapIndex = wrapIndex;
+    g.wrapEnabled = wrapIndex && wrapIndex->enabled();
+    (void)viewport;
+    return g;
+}
+
 FrameBuilder::EditorGeometry FrameBuilder::editorGeometry(
     const Document& doc, const Viewport& viewport,
     const softwrap::Index* wrapIndex) const {
     EditorGeometry g;
     g.layout = calculateLayout(viewport.height, viewport.width);
     g.gutterW = gutterWidth(doc.lineCount(), viewport.width);
+    g.wrapIndex = wrapIndex;
+    g.wrapEnabled = wrapIndex && wrapIndex->enabled();
+    return g;
+}
+
+FrameBuilder::EditorGeometry FrameBuilder::editorGeometry(
+    const Document& doc, const Layout& layout,
+    const softwrap::Index* wrapIndex) const {
+    // Usa el layout completo pasado directamente (no lo recalcula desde
+    // viewport.height + kChromeRows). Para fast paths de GuiRenderer que
+    // ya recibieron el layout completo del Editor.
+    EditorGeometry g;
+    g.layout = layout;
+    g.gutterW = gutterWidth(doc.lineCount(), layout.content.width);
     g.wrapIndex = wrapIndex;
     g.wrapEnabled = wrapIndex && wrapIndex->enabled();
     return g;
@@ -572,6 +606,32 @@ Frame FrameBuilder::buildFrame(const Document& doc,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair,
     const softwrap::Index* wrapIndex) const {
+    // Adaptador: deriva el layout desde viewport.height/width (comportamiento
+    // historico: content + kChromeRows) y delega al cuerpo unico con layout.
+    const Layout layout = calculateLayout(viewport.height, viewport.width);
+    return buildFrame(doc, cursor, viewport, filename, modified, chrome,
+                      selection, searchHighlight, bracketPair, wrapIndex,
+                      layout);
+}
+
+Frame FrameBuilder::buildFrame(const Document& doc,
+    const Cursor& cursor,
+    const Viewport& viewport,
+    const std::string& filename,
+    bool modified,
+    const ChromeRequest& chrome,
+    const std::optional<Selection>& selection,
+    const std::optional<Selection>& searchHighlight,
+    const std::optional<BracketPair>& bracketPair,
+    const softwrap::Index* wrapIndex,
+    const Layout& layout) const {
+    // Layout desde dimensiones logicas completas (fuente unica: Editor).
+    EditorGeometry g;
+    g.layout = layout;
+    g.gutterW = gutterWidth(doc.lineCount(), layout.content.width);
+    g.wrapIndex = wrapIndex;
+    g.wrapEnabled = wrapIndex && wrapIndex->enabled();
+
     if (instrument::isEnabled()) {
         instrument::resetFrame();
         instrument::onBuildScreen();
@@ -589,7 +649,6 @@ Frame FrameBuilder::buildFrame(const Document& doc,
     std::optional<Normalized> bracketOpen, bracketClose;
     normalizeBracketPair(bracketPair, bracketOpen, bracketClose);
 
-    const EditorGeometry g = editorGeometry(doc, viewport, wrapIndex);
     const int contentH = g.layout.content.height;
     const int gutterW = g.gutterW;
     const int textWidth = std::max(0, g.layout.content.width - gutterW);

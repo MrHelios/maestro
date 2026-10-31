@@ -90,7 +90,40 @@ struct SpyScreenRenderer : public ScreenRenderer {
                           Sink&,
                           const std::optional<Selection>& selection = std::nullopt,
                           const std::optional<Selection>& searchHighlight = std::nullopt,
-                          const std::optional<BracketPair>& bracketPair = std::nullopt) override {
+                          const std::optional<BracketPair>& bracketPair = std::nullopt) {
+        ++renderScreenDiffCount;
+        pendingInvalidation = false; // el render consume
+        lastChrome = chrome;
+        lastFilename = filename;
+        lastModified = modified;
+        // Asignación incondicional: un frame sin selección debe LIMPIAR el
+        // snapshot, no conservar el valor del frame anterior.
+        lastSelection = selection;
+        lastSearchHighlight = searchHighlight;
+        lastBracketPair = bracketPair;
+        // Snapshot del ÚLTIMO frame: las otras clases de render quedan vacías.
+        lastBufferListSelected = -1;
+        lastBufferNames.clear();
+        lastFileListSelected = -1;
+        lastFileListScroll = -1;
+        lastFileItems.clear();
+        lastFilePath.clear();
+    }
+
+    // Overload con layout ya resuelto (fuente unica: Editor): el spy no usa
+    // el layout, ignora el parametro y registra el render igual.
+    void renderScreenDiff(const Document&,
+                          const Cursor&,
+                          const Viewport&,
+                          const std::string& filename,
+                          bool modified,
+                          const ChromeRequest& chrome,
+                          Sink&,
+                          const std::optional<Selection>& selection = std::nullopt,
+                          const std::optional<Selection>& searchHighlight = std::nullopt,
+                          const std::optional<BracketPair>& bracketPair = std::nullopt,
+                          const Layout& layout = Layout{}) override {
+        (void)layout;
         ++renderScreenDiffCount;
         pendingInvalidation = false; // el render consume
         lastChrome = chrome;

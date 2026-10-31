@@ -308,7 +308,7 @@ void Editor::handleMousePress(const InputEvent& event) {
     }
     Buffer& b = active();
     const Layout layout =
-        computeLayout(b.viewport.height + kChromeRows, b.viewport.width);
+        computeLayout(currentRows_, currentCols_);
 
     // El chrome ocupa el rectangulo layout.chrome (filas contiguas justo
     // despues del contenido, exactamente kChromeRows filas segun

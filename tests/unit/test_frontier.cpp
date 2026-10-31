@@ -442,6 +442,7 @@ TEST(fase_c_event_path_does_not_autoscroll) {
     ed.getActiveBufferForTesting().viewport.left = 0;
     ed.getActiveBufferForTesting().cursor.line = 11;
     ed.getActiveBufferForTesting().cursor.col = 0;
+    ed.resize(6, 20);
 
     InputEvent press;
     press.type = InputEventType::MousePress;

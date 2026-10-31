@@ -588,6 +588,7 @@ TEST(mouse_drag_last_visible_row_is_exact_no_scroll) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
+    ed.resize(6, 20);
     ed.processEventForTesting(mousePress(8, 1)); // fila 0
     CHECK_EQ(b.viewport.top, 0);
     ed.processEventForTesting(mouseDrag(8, 4)); // ultima fila visible
@@ -611,6 +612,7 @@ TEST(mouse_drag_autoscroll_up) {
     b.viewport.left = 0;
     b.cursor.line = 7;
     b.cursor.col = 0;
+    ed.resize(6, 20);
     ed.processEventForTesting(mousePress(8, 4)); // fila doc 7
     CHECK_EQ(b.viewport.top, 4);
     ed.processEventForTesting(mouseDrag(8, 1)); // primera fila visible
@@ -630,6 +632,7 @@ TEST(mouse_drag_autoscroll_horizontal) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
+    ed.resize(12, 16);
     ed.processEventForTesting(mousePress(8, 1)); // visual 0
     const int lastCol = 16; // ultima celda visible (1-based)
     ed.processEventForTesting(mouseDrag(lastCol, 1));
@@ -659,6 +662,7 @@ TEST(mouse_drag_chrome_scrolls_when_content_below) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
+    ed.resize(6, 20);
     ed.processEventForTesting(mousePress(8, 1)); // fila doc 0
     ed.processEventForTesting(mouseDrag(8, 5));  // statusbar (relRow=4)
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
@@ -684,6 +688,7 @@ TEST(mouse_drag_chrome_at_maxTop_clamps_to_edge) {
     b.viewport.left = 0;
     b.cursor.line = 7;
     b.cursor.col = 0;
+    ed.resize(6, 20);
     ed.processEventForTesting(mousePress(8, 4)); // fila doc 7, arma
     ed.processEventForTesting(mouseDrag(8, 3));  // fila doc 6, inicia rango
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
@@ -715,6 +720,7 @@ TEST(mouse_drag_multiple_anchor_fixed_position_follows) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
+    ed.resize(12, 40);
     // gutter=7: celda col = 7 + visual (0-based).
     ed.processEventForTesting(mousePress(8, 1)); // anchor (0,0)
     ed.processEventForTesting(mouseDrag(10, 2));  // (1,2)
@@ -820,6 +826,7 @@ TEST(mouse_click_after_mouse_drag_on_chrome_does_not_change_state) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
+    ed.resize(12, 20);
     ed.processEventForTesting(mousePress(8, 1)); // (0,0)
     ed.processEventForTesting(mouseDrag(10, 2));  // (1,2)
     ed.processEventForTesting(mouseRelease(10, 2));
@@ -848,6 +855,7 @@ TEST(mouse_click_on_messagebar_does_not_change_state) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
+    ed.resize(12, 20);
     ed.processEventForTesting(mousePress(8, 1)); // (0,0)
     ed.processEventForTesting(mouseDrag(10, 2));  // (1,2)
     ed.processEventForTesting(mouseRelease(10, 2));
@@ -879,6 +887,7 @@ TEST(mouse_press_after_mouse_drag_clears_highlight_immediately) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
+    ed.resize(12, 40);
     ed.processEventForTesting(mousePress(8, 1)); // anchor (0,0)
     ed.processEventForTesting(mouseDrag(12, 2));  // (1,4)
     ed.processEventForTesting(mouseRelease(12, 2));

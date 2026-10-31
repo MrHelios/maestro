@@ -152,10 +152,10 @@ void TtyDiff::rebuildCache(
     const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair,
-    const softwrap::Index* wrapIndex) {
+    const softwrap::Index* wrapIndex, const Layout& layout) {
     builder_.updateSyntaxLanguage(filename);
     const FrameBuilder::EditorGeometry g =
-        builder_.editorGeometry(doc, viewport, wrapIndex);
+        builder_.editorGeometry(doc, layout, wrapIndex);
     const int contentH = g.layout.content.height;
     const int gutterW = g.gutterW;
     const int textWidth = std::max(0, g.layout.content.width - gutterW);
@@ -171,8 +171,6 @@ void TtyDiff::rebuildCache(
     bool wrap = idx && idx->enabled();
 
     if (wrap) {
-        // Con wrap: validar sintaxis para las líneas lógicas cubiertas por el
-        // rango visual. Todos los recorridos usan el mismo visualTop corregido.
         const int totalVisualRows = idx->totalRows();
         int visualTop = viewport.top;
         const int maxVisualTop = std::max(0, totalVisualRows - contentH);
@@ -190,7 +188,8 @@ void TtyDiff::rebuildCache(
         {
             SyntaxCache& cache = builder_.activeCache();
             int need = maxDocLineNeeded + 1;
-            if (need > 0) cache.ensureValid(doc, need);
+            if (need > 0 && !cache.isValidThrough(need))
+                cache.ensureValid(doc, need);
         }
 
         rowCache_.clear();
@@ -202,12 +201,12 @@ void TtyDiff::rebuildCache(
                 vr, gutterW, textWidth)));
         }
     } else {
-        // Sin wrap: comportamiento original
         {
             SyntaxCache& cache = builder_.activeCache();
             int need = viewport.top + contentH;
             if (need > doc.lineCount()) need = doc.lineCount();
-            if (need > 0) cache.ensureValid(doc, need);
+            if (need > 0 && !cache.isValidThrough(need))
+                cache.ensureValid(doc, need);
         }
 
         rowCache_.clear();
@@ -228,6 +227,7 @@ void TtyDiff::rebuildCache(
 
     hasCache_ = true;
     cachedContentH_ = contentH;
+    cachedLayout_ = layout;
     lastVersion_ = doc.version();
     lastLineCount_ = doc.lineCount();
     lastGutterW_ = gutterW;
@@ -237,11 +237,13 @@ void TtyDiff::rebuildCache(
 
 std::string TtyDiff::buildCursorMoveFrame(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
-    const std::string& filename, bool modified, const ChromeRequest& chrome) {
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    const Layout& layout) {
     builder_.updateSyntaxLanguage(filename);
+    // Usa el layout completo recibido directamente, no reconstruye desde
+    // viewport.height + kChromeRows, preservando la geometria de chrome.
     const FrameBuilder::EditorGeometry g =
-        builder_.editorGeometry(doc, viewport);
-    const Layout& layout = g.layout;
+        builder_.editorGeometry(doc, layout);
     const int contentH = layout.content.height;
     if (contentH <= 0 || static_cast<int>(rowCache_.size()) != contentH)
         return "";
@@ -306,11 +308,14 @@ std::string TtyDiff::buildScrollFrame(
     const std::string& filename, bool modified, const ChromeRequest& chrome,
     const std::optional<Selection>& selection,
     const std::optional<Selection>& searchHighlight,
-    const std::optional<BracketPair>& bracketPair, int deltaTop) {
+    const std::optional<BracketPair>& bracketPair, int deltaTop,
+    const Layout& layout) {
     builder_.updateSyntaxLanguage(filename);
+    // Usa el layout completo recibido directamente, no reconstruye desde
+    // viewport.height + kChromeRows, preservando la geometria de chrome.
     const FrameBuilder::EditorGeometry g =
-        builder_.editorGeometry(doc, viewport);
-    const int contentH = g.layout.content.height;
+        builder_.editorGeometry(doc, layout);
+    const int contentH = layout.content.height;
     const TtyScrollOp scrollOp = scrollOpFor(contentH, deltaTop);
     const int absDelta = scrollOp.absDelta;
     if (!scrollOp.useRegion) return "";
@@ -318,7 +323,7 @@ std::string TtyDiff::buildScrollFrame(
     if (static_cast<int>(rowCache_.size()) != contentH) return "";
 
     const int gutterW = g.gutterW;
-    const int textWidth = std::max(0, g.layout.content.width - gutterW);
+    const int textWidth = std::max(0, layout.content.width - gutterW);
     // El ancho del gutter cambio: las filas ya cacheadas conservan el ancho
     // viejo y la region de scroll las desplazaria sin repintarlas. Declinar
     // para que buildDiffFrame haga el rebuild total (gate de lastGutterW_).
@@ -393,10 +398,26 @@ std::string TtyDiff::buildDiffFrame(
     const std::optional<Selection>& searchHighlight,
     const std::optional<BracketPair>& bracketPair,
     const softwrap::Index* wrapIndex) {
+    // Adaptador: deriva el layout historico y delega a la implementacion
+    // unica con Layout. Usa content.height + kChromeRows para
+    // reconstruir la geometria que el codigo anterior esperaba.
+    const Layout layout =
+        computeLayout(viewport.height + kChromeRows, viewport.width);
+    return buildDiffFrame(doc, cursor, viewport, filename, modified, chrome,
+                          selection, searchHighlight, bracketPair, wrapIndex,
+                          layout);
+}
+
+std::string TtyDiff::buildDiffFrame(
+    const Document& doc, const Cursor& cursor, const Viewport& viewport,
+    const std::string& filename, bool modified, const ChromeRequest& chrome,
+    const std::optional<Selection>& selection,
+    const std::optional<Selection>& searchHighlight,
+    const std::optional<BracketPair>& bracketPair,
+    const softwrap::Index* wrapIndex, const Layout& layout) {
     const bool langChanged = builder_.updateSyntaxLanguage(filename);
     const FrameBuilder::EditorGeometry geom =
-        builder_.editorGeometry(doc, viewport, wrapIndex);
-    const Layout layout = geom.layout;
+        builder_.editorGeometry(doc, layout, wrapIndex);
     const int contentH = layout.content.height;
 
     const bool wrapEnabled = wrapIndex && wrapIndex->enabled();
@@ -406,10 +427,11 @@ std::string TtyDiff::buildDiffFrame(
     else if (lastBracketPair_ != bracketPair) bracketChanged = true;
     if (!hasCache_ || langChanged || viewport.width != lastViewportW_ ||
         viewport.height != lastViewportH_ || cachedContentH_ != contentH ||
+        !sameLayout(cachedLayout_, layout) ||
         geom.gutterW != lastGutterW_ || bracketChanged ||
         wrapEnabled != lastWrapEnabled_) {
         rebuildCache(doc, cursor, viewport, filename, modified, chrome,
-                     selection, searchHighlight, bracketPair, wrapIndex);
+                     selection, searchHighlight, bracketPair, wrapIndex, layout);
         lastViewportW_ = viewport.width;
         lastViewportH_ = viewport.height;
         lastGutterW_ = geom.gutterW;
@@ -424,10 +446,8 @@ std::string TtyDiff::buildDiffFrame(
         out += chromeCache_;
         if (!chrome.cursorVisibleByMode) return out;
         {
-            // Si esta fuera del viewport se deja oculto (sin show): respeta
-            // el contrato visible==false sin clampar al borde.
             const FrameBuilder::EditorGeometry g =
-                builder_.editorGeometry(doc, viewport, wrapIndex);
+                builder_.editorGeometry(doc, layout, wrapIndex);
             emitCurrentCursor(out, doc, cursor, viewport, g, chrome,
                               /*endFrame=*/true);
         }
@@ -436,19 +456,14 @@ std::string TtyDiff::buildDiffFrame(
 
     const int deltaTop = viewport.top - lastViewportTop_;
     const int deltaLeft = viewport.left - lastViewportLeft_;
-    // Bracket highlighting disables the scroll fast path because the overlay
-    // may require repainting either endpoint.
     const bool noHighlight = !selection.has_value() &&
                              !searchHighlight.has_value() &&
                              !bracketPair.has_value();
 
-    // Fast scroll path: only one-row vertical scroll, no
-    // selection/search highlight, viewport width unchanged. Multi-row
-    // scrolls deliberately use the diff path.
     if (!wrapEnabled && (deltaTop == 1 || deltaTop == -1) && deltaLeft == 0 && noHighlight) {
         const std::string scrollFrame = buildScrollFrame(
             doc, cursor, viewport, filename, modified, chrome,
-            selection, searchHighlight, bracketPair, deltaTop);
+            selection, searchHighlight, bracketPair, deltaTop, layout);
         if (!scrollFrame.empty()) return scrollFrame;
     }
 
@@ -461,19 +476,17 @@ std::string TtyDiff::buildDiffFrame(
             (cursor.line != lastCursorLine_ || cursor.col != lastCursorCol_);
         if (sameLineEdit || pureCursorMove) {
             const std::string moveFrame = buildCursorMoveFrame(
-                doc, cursor, viewport, filename, modified, chrome);
+                doc, cursor, viewport, filename, modified, chrome, layout);
             if (!moveFrame.empty()) return moveFrame;
         }
     }
 
-    // Camino lento: selección/búsqueda/bracket activa, o los caminos rápidos
-    // declinaron. Codifica el Frame fresco y emite solo las filas que
-    // difieren contra los caches (el doble "\x1b[K" intencional del camino
-    // original se preserva: las filas nuevas ya traen el suyo y el rewrite
-    // puntual agrega otro clear).
+    // Camino lento: usa el layout completo del Editor para construir el
+    // Frame, preservando la geometria de chrome.
     Frame fresh = builder_.buildFrame(doc, cursor, viewport, filename, modified,
                                       chrome, selection,
-                                      searchHighlight, bracketPair, wrapIndex);
+                                      searchHighlight, bracketPair, wrapIndex,
+                                      layout);
     std::vector<std::string> newRows;
     newRows.reserve(fresh.contentRows.size() + 2);
     for (const auto& r : fresh.contentRows)
@@ -522,9 +535,8 @@ std::string TtyDiff::buildDiffFrame(
         return out;
     }
     {
-        // Misma proyección visual que usó buildFrame para el contenido.
         const FrameBuilder::EditorGeometry g =
-            builder_.editorGeometry(doc, viewport, wrapIndex);
+            builder_.editorGeometry(doc, layout, wrapIndex);
         emitCurrentCursor(out, doc, cursor, viewport, g, chrome,
                           /*endFrame=*/false);
     }

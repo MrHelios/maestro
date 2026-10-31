@@ -42,6 +42,7 @@ TEST(mouse_tick_stops_when_released_outside_down) {
     ed.active().viewport.left = 0;
     ed.active().cursor.line = 11;
     ed.active().cursor.col = 0;
+    ed.resize(6, 20);
 
     ed.handleEvent(pressAt(4, 2)); // linea 11, arma gesto
     ed.handleEvent(dragAt(4, 5));  // chrome: arma Down, top 10->11
@@ -67,6 +68,7 @@ TEST(mouse_tick_stops_when_released_outside_up) {
     ed.active().viewport.left = 0;
     ed.active().cursor.line = 12;
     ed.active().cursor.col = 0;
+    ed.resize(6, 20);
 
     ed.handleEvent(pressAt(4, 3)); // linea 12, arma gesto
     ed.handleEvent(dragAt(4, 1));  // primera fila: arma Up, top 10->9
@@ -94,6 +96,7 @@ TEST(mouse_tick_keeps_scrolling_while_held) {
     ed.active().viewport.left = 0;
     ed.active().cursor.line = 11;
     ed.active().cursor.col = 0;
+    ed.resize(6, 20);
 
     ed.handleEvent(pressAt(4, 2)); // linea 11, arma gesto
     ed.handleEvent(dragAt(4, 5));  // chrome: arma Down, top 10->11

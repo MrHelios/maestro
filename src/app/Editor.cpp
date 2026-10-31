@@ -1070,6 +1070,11 @@ void Editor::renderFrame() {
             renderer_->setWrapIndex(nullptr);
         }
 
+        // Layout completo desde las dimensiones logicas del Editor (fuente
+        // unica): computeLayout(currentRows_, currentCols_). Antes el renderer
+        // reconstruia desde viewport.height + kChromeRows (perdia informacion
+        // cuando el contenido colapsa: filas totales <= 3).
+        const Layout layout = computeLayout(currentRows_, currentCols_);
         renderer_->renderScreenDiff(
             b.document,
             b.cursor,
@@ -1080,7 +1085,8 @@ void Editor::renderFrame() {
             sink(),
             b.selection,
             searchHighlight_,
-            toRender
+            toRender,
+            layout
         );
 
         renderer_->setExternalSyntaxCache(nullptr);
@@ -1089,8 +1095,7 @@ void Editor::renderFrame() {
 
 std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
     Buffer& b = active();
-    const Layout layout =
-        computeLayout(b.viewport.height + kChromeRows, b.viewport.width);
+    const Layout layout = computeLayout(currentRows_, currentCols_);
     const int h = layout.content.height;
     const int totalW = layout.content.width;
     if (h <= 0 || totalW <= 0) return std::nullopt;

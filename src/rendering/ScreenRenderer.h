@@ -8,6 +8,7 @@
 #include "document/Document.h"
 #include "document/Selection.h"
 #include "layout/BracketMatcher.h"
+#include "layout/Layout.h"
 #include "layout/SoftWrap.h"
 #include "layout/Viewport.h"
 #include "rendering/ChromeRequest.h"
@@ -76,9 +77,10 @@ public:
                                   bool modified,
                                   const ChromeRequest& chrome,
                                   Sink& sink,
-                                  const std::optional<Selection>& selection = std::nullopt,
-                                  const std::optional<Selection>& searchHighlight = std::nullopt,
-                                  const std::optional<BracketPair>& bracketPair = std::nullopt) = 0;
+                                  const std::optional<Selection>& selection,
+                                  const std::optional<Selection>& searchHighlight,
+                                  const std::optional<BracketPair>& bracketPair,
+                                  const Layout& layout) = 0;
 
     virtual void renderBufferList(const std::vector<std::string>& names,
                                   int selected,
