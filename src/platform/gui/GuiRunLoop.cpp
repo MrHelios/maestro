@@ -685,8 +685,9 @@ int GuiRunLoop::run() {
     // MISMO espacio (drawable). Los eventos llegan en puntos de ventana: con
     // ALLOW_HIGHDPI a escala N hay que subir N× ANTES de dividir por la
     // celda (guiScaleCoord por eje); dividir puntos por celda TTF da la
-    // celda N× chica. Medidas frescas por evento (barato): la escala puede
-    // cambiar al mover la ventana entre monitores sin resize. La celda se
+    // celda N× chica. Reusa la última medición de currentSize (no consulta
+    // SDL por evento): los cambios de escala sin resize llegan como
+    // DISPLAY_CHANGED y re-miden antes del render siguiente. La celda se
     // ACOTA a la grilla del drawable (guiCellFromPixelsBounded con los
     // cols/rows de guiGridSize): el borde exterior queda FUERA (inválida,
     // el Editor la trata como fuera de contenido) en vez de clamparse a la
@@ -697,16 +698,13 @@ int GuiRunLoop::run() {
     // autoscroll baje. En press/release esa misma zona devuelve CellPos{}
     // (click muerto): el residuo no es una celda de contenido.
     auto mouseCell = [&](int ptX, int ptY, bool gapAsBottom = false) {
-        int winW = 0, winH = 0, outW = 0, outH = 0;
-        SDL_GetWindowSize(win, &winW, &winH);
-        SDL_GetRendererOutputSize(ren, &outW, &outH);
-        // Mismo fallback que currentSize (guiDrawableOrWindow, por eje): sin
-        // drawable se usa la ventana (o 960×600 si tampoco hay ventana),
-        // para que grilla y mouse sigan en el mismo espacio también en el
-        // camino degenerado.
-        const GuiDrawableSize mfb = guiDrawableOrWindow(winW, winH, outW, outH);
-        outW = mfb.w;
-        outH = mfb.h;
+        // Misma medición que la grilla (currentSize); lastDrawable* ya trae
+        // el fallback por eje de guiDrawableOrWindow, así que grilla y mouse
+        // siguen en el mismo espacio también en el camino degenerado.
+        const int winW = lastWinW_;
+        const int winH = lastWinH_;
+        const int outW = lastDrawableW_;
+        const int outH = lastDrawableH_;
         int cw = 0, ch = 0;
         if (gui_ && gui_->hasFont()) {
             cw = gui_->cellW();
