@@ -253,12 +253,19 @@ private:
     // Sin SDL: solo Editor + reloj.
     void serviceWatcherIfDue(std::chrono::steady_clock::time_point now);
     // Handles SDL vivos durante run() (opacos para no meter SDL en el
-    // header): los necesita updateImeRect para devolver el rect a puntos de
-    // ventana (SDL_SetTextInputRect habla en puntos, no en píxeles del
-    // drawable). Se fijan tras crear ventana/renderer y se limpian en el
-    // teardown; fuera de run() son nullptr y updateImeRect es no-op.
+    // header). Se fijan tras crear ventana/renderer y se limpian en el
+    // teardown; fuera de run() son nullptr. El loop NO los consulta para
+    // medir: currentSize() es la única medición por frame.
     void* sdlWin_ = nullptr;
     void* sdlRen_ = nullptr;
+    // Última medición hecha por currentSize(): la reusa updateImeRect para
+    // pasar el rect IME del drawable a puntos de ventana sin volver a
+    // preguntarle a SDL (una sola consulta al drawable por frame). 0 = aún
+    // sin medir; guiImeRectToWindow trata medidas inválidas como identidad.
+    int lastWinW_ = 0;
+    int lastWinH_ = 0;
+    int lastDrawableW_ = 0;
+    int lastDrawableH_ = 0;
     // Phase 2: barra de título propia (ventana SDL_WINDOW_BORDERLESS). El
     // alto se reserva en la grilla; los clicks de sus botones no llegan al
     // Editor. `titleBarHeightPoints_` es la misma medida en puntos de
@@ -310,7 +317,8 @@ private:
     // (no-op sin SDL2). Si no hay cursor válido conserva el último rect de
     // SDL a propósito (ver política en el comentario de clase): la
     // candidata queda anclada a la última celda válida. Se llama después
-    // de cada render.
+    // de cada render y NO consulta SDL: convierte con la última medición
+    // guardada por currentSize() (una sola lectura del drawable por frame).
     void updateImeRect() const;
 
     // Scrollbar state

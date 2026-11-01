@@ -139,19 +139,19 @@ void GuiRunLoop::updateImeRect() const {
     // celda), pero SDL_SetTextInputRect habla en puntos de ventana (supuesto
     // documentado en guiImeRectToWindow: SDL3 lo explicita, SDL2 se infiere
     // del uso junto a eventos en puntos). Con ALLOW_HIGHDPI a escala N hay
-    // que bajar N× por eje; a escala 1 es identidad. Sin handles o con
-    // medidas inválidas se pasa tal cual (comportamiento pre-HiDPI).
+    // que bajar N× por eje; a escala 1 es identidad. Sin medición (valores en
+    // 0) se pasa tal cual (comportamiento pre-HiDPI).
     // La geometría del cursor vive en la grilla de contenido, debajo de la
     // barra propia: se desplaza al espacio del drawable completo antes de
     // convertir a puntos de ventana.
     GuiImeRectPx pr{r.x, r.y + titleBarHeightPx_, r.w, r.h};
     int x = pr.x, y = pr.y, w = pr.w, h = pr.h;
-    if (sdlWin_ && sdlRen_) {
-        int winW = 0, winH = 0, outW = 0, outH = 0;
-        SDL_GetWindowSize(static_cast<SDL_Window*>(sdlWin_), &winW, &winH);
-        SDL_GetRendererOutputSize(static_cast<SDL_Renderer*>(sdlRen_), &outW,
-                                  &outH);
-        const GuiImeRectPx o = guiImeRectToWindow(pr, winW, winH, outW, outH);
+    if (sdlWin_) {
+        // Sin consultas SDL acá: se reusa la medición guardada por
+        // currentSize() (única lectura del drawable por frame). Si todavía
+        // no hay medición, win/out quedan en 0 y la conversión es identidad.
+        const GuiImeRectPx o = guiImeRectToWindow(
+            pr, lastWinW_, lastWinH_, lastDrawableW_, lastDrawableH_);
         x = o.x;
         y = o.y;
         w = o.w;
@@ -439,7 +439,8 @@ int GuiRunLoop::run() {
     // usa (NullSink de descarte, vive todo el run).
     NullSink discard;
     editor_.setSink(discard);
-    // Handles para updateImeRect (rect IME a puntos de ventana, ver arriba).
+    // Handles SDL vivos durante run(). updateImeRect solo usa sdlWin_ para
+    // decidir si convierte; las medidas vienen de currentSize().
     sdlWin_ = static_cast<void*>(win);
     sdlRen_ = static_cast<void*>(ren);
     if (gui_) gui_->setTitleBar(&titleBar_);
@@ -544,6 +545,12 @@ int GuiRunLoop::run() {
         platform::WindowSize size = guiGridSize(outW, contentH, cw, ch);
         size.pixelW = outW;
         size.pixelH = outH;
+        // Misma medición para updateImeRect: el rect IME se convierte a
+        // puntos con estos valores en vez de volver a consultar SDL.
+        lastWinW_ = winW;
+        lastWinH_ = winH;
+        lastDrawableW_ = outW;
+        lastDrawableH_ = outH;
         return size;
     };
     auto renderWithBlink = [&] {
@@ -880,9 +887,10 @@ int GuiRunLoop::run() {
                         // quedado obsoleto (cursor, buffer, tamaño o escala
                         // cambiados en el medio), así que se repinta y se
                         // recalcula desde la geometría actual del cursor
-                        // (renderWithBlink termina en updateImeRect con
-                        // medidas frescas). Sin cursor válido aún, rige el
-                        // fallback de conservar el último conocido.
+                        // (renderWithBlink termina en updateImeRect, que usa
+                        // la última medición de currentSize()). Sin cursor
+                        // válido aún, rige el fallback de conservar el último
+                        // conocido.
                         requestRender();
                     } else if (guiExposeNeedsRepaint(ev.window.event)) {
                         // Región descubierta (p. ej. al cerrarse el overlay de
