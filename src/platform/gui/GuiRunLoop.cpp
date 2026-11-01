@@ -630,8 +630,9 @@ int GuiRunLoop::run() {
     const int borderPts = kResizeBorderPts;
     auto manualResizeEdgeAt = [&](int ptX, int ptY) {
         if (hitTestEnabled_) return GuiWindowEdge::None;
-        int winW = 0, winH = 0;
-        SDL_GetWindowSize(win, &winW, &winH);
+        // Reusar la medición de currentSize; no se consulta SDL por evento.
+        const int winW = lastWinW_;
+        const int winH = lastWinH_;
         GuiWindowEdge edge = guiWindowEdgeAt(ptX, ptY, winW, winH, borderPts);
         // No ofrecer redimensionado por el borde superior dentro de la barra de título
         // EXCEPTO en la franja de resize (primeros kResizeBorderPts puntos).
