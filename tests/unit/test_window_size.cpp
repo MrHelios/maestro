@@ -29,7 +29,7 @@ TEST(window_size_aggregate_construction) {
     CHECK_EQ(s.pixelH, 480);
 }
 
-TEST(editor_resize_preserves_window_metrics) {
+TEST(editor_resize_applies_rows_cols_and_viewport) {
     Editor ed;
     platform::WindowSize s{30, 100, 9, 18, 900, 540};
     ed.resize(s);
@@ -40,7 +40,7 @@ TEST(editor_resize_preserves_window_metrics) {
     CHECK_EQ(ed.getActiveBufferForTesting().viewport.height, 28);
 }
 
-TEST(editor_resize_int_clears_metrics) {
+TEST(editor_resize_int_applies_rows_cols) {
     Editor ed;
     ed.resize(platform::WindowSize{30, 100, 9, 18, 900, 540});
     ed.resize(24, 80);
@@ -48,7 +48,7 @@ TEST(editor_resize_int_clears_metrics) {
     CHECK_EQ(ed.currentCols_, 80);
 }
 
-TEST(editor_resize_invalid_keeps_metrics) {
+TEST(editor_resize_invalid_rows_cols_preserves_current_grid) {
     Editor ed;
     ed.resize(platform::WindowSize{30, 100, 9, 18, 900, 540});
     ed.resize(platform::WindowSize{0, -5, 1, 2, 3, 4});
@@ -72,7 +72,7 @@ TEST(terminal_get_window_size_pixels_does_not_break) {
     CHECK_EQ(c2, cols);
 }
 
-TEST(editor_resize_negative_metrics_become_unknown) {
+TEST(editor_resize_applies_valid_rows_cols_with_negative_metrics) {
     // Solo filas/cols validas aplican (guard); el resto ya no se conserva.
     Editor ed;
     ed.resize(platform::WindowSize{30, 100, -9, -18, -900, -540});

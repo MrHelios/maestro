@@ -1652,7 +1652,7 @@ TEST(gui_sdl_mousemotion_durante_arrastre_cambia_viewport) {
 
     // Obtener tamaños de ventana y drawable para convertir coordenadas
     SDL_Window* win = static_cast<SDL_Window*>(h.loop->sdlWinForTesting());
-    SDL_Renderer* ren = static_cast<SDL_Renderer*>(h.loop->sdlRenForTesting());
+    SDL_Renderer* ren = static_cast<SDL_Renderer*>(SDL_GetRenderer(win));
     int winW = 0, winH = 0, outW = 0, outH = 0;
     SDL_GetWindowSize(win, &winW, &winH);
     SDL_GetRendererOutputSize(ren, &outW, &outH);
@@ -1808,7 +1808,7 @@ TEST(gui_sdl_scrollbar_drag_cambia_viewport) {
 
     // Geometría en píxeles del drawable -> puntos de ventana (eventos SDL).
     SDL_Window* win = static_cast<SDL_Window*>(h.loop->sdlWinForTesting());
-    SDL_Renderer* ren = static_cast<SDL_Renderer*>(h.loop->sdlRenForTesting());
+    SDL_Renderer* ren = static_cast<SDL_Renderer*>(SDL_GetRenderer(win));
     int winW = 0, winH = 0, outW = 0, outH = 0;
     SDL_GetWindowSize(win, &winW, &winH);
     SDL_GetRendererOutputSize(ren, &outW, &outH);
@@ -1880,6 +1880,94 @@ TEST(gui_sdl_scrollbar_drag_cambia_viewport) {
     if (!samples.empty()) {
         CHECK_EQ(samples.back().second, top);
     }
+}
+
+// P2 (comportamiento): SDL_WINDOWEVENT_MOVED actualiza lastWinX_/lastWinY_
+// (origen de gestos manuales) y un nuevo gesto arranca desde esa posición
+// sin salto; varios SDL_MOUSEMOTION acumulan sus respectivos xrel/yrel.
+TEST(guiloop_moved_updates_gesture_origin_and_accumulates_motion) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummyDrivers env;
+    auto watcher = std::make_unique<BlockingWatcher>();
+    BlockingWatcher* raw = watcher.get();
+    Harness h = makeHarness(std::move(watcher));
+
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+
+    // Esperar reposo: render estable + watcher servido al menos una vez.
+    int lastRender = -1;
+    int stable = 0;
+    bool idle = false;
+    for (int i = 0; i < 500 && !idle; ++i) {
+        const int rcNow = h.gui->renderCount.load();
+        if (raw->pollCount.load() >= 1 && rcNow == lastRender) {
+            if (++stable >= 10) idle = true;
+        } else {
+            stable = 0;
+        }
+        lastRender = rcNow;
+        if (!idle) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(idle);
+
+    raw->arm();
+    CHECK(raw->waitBlocked());
+
+    // 1) La ventana se mueve sin cambiar de tamaño: MOVED trae la nueva
+    //    posición en data1/data2; el loop la guarda como origen de gestos.
+    {
+        SDL_Event ev{};
+        ev.type = SDL_WINDOWEVENT;
+        ev.window.event = SDL_WINDOWEVENT_MOVED;
+        ev.window.data1 = 150;
+        ev.window.data2 = 250;
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    raw->release();
+    // El loop procesa MOVED y queda en SDL_WaitEventTimeout.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    CHECK_EQ(h.loop->lastWinXForTesting(), 150);
+    CHECK_EQ(h.loop->lastWinYForTesting(), 250);
+
+    // 2) Armar un gesto de resize manual desde el borde derecho: el origen
+    //    debe ser la posición nueva (150, 250), sin salto.
+    h.loop->startManualResizeForTesting(GuiWindowEdge::Right);
+    CHECK_EQ(h.loop->manualResizeWinXForTesting(), 150);
+    CHECK_EQ(h.loop->manualResizeWinYForTesting(), 250);
+
+    // 3) Varios SDL_MOUSEMOTION acumulan sus respectivos xrel/yrel (uno por
+    //    evento, sin acumulación global pendiente de SDL_GetRelativeMouseState).
+    const int dxs[] = {10, 20, 5};
+    const int dys[] = {5, 10, -3};
+    for (size_t i = 0; i < 3; ++i) {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEMOTION;
+        ev.motion.state = SDL_BUTTON_LMASK;
+        ev.motion.xrel = dxs[i];
+        ev.motion.yrel = dys[i];
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    // SDL_WaitEventTimeout despierta con los eventos de moción.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Acumulado: 10+20+5 = 35 ; 5+10+(-3) = 12
+    CHECK_EQ(h.loop->manualResizeDragDXForTesting(), 35);
+    CHECK_EQ(h.loop->manualResizeDragDYForTesting(), 12);
+
+    // 4) Cerrar el loop.
+    {
+        SDL_Event quit{};
+        quit.type = SDL_QUIT;
+        CHECK(SDL_PushEvent(&quit) == 1);
+    }
+    raw->release();
+    runner.join();
+    CHECK_EQ(rc, 0);
+#endif
 }
 
 #endif

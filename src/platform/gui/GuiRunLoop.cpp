@@ -227,14 +227,16 @@ inline void sdlCaptureMouseBestEffort(SDL_bool enabled) {
     if (SDL_CaptureMouse(enabled) != 0) SDL_ClearError();
 }
 
-// Estado GLOBAL del mouse (posicion + botones izquierdo) consultado al OS.
-// Fuente unica de verdad del estado del puntero para los gestos que
-// arrastran ventana (resize manual / barra de titulo) y para el oraculo de
-// autoscroll del tick. Al arranque de un gesto se consulta UNA vez (posicion
-// inicial); durante el arrastre activo se usan deltas relativos
-// (SDL_GetRelativeMouseState), nunca una query absoluta por motion.
-inline void sdlGlobalMouseState(int& x, int& y, Uint32& buttons) {
-    buttons = SDL_GetGlobalMouseState(&x, &y);
+// SDL_GetGlobalMouseState consulta el estado del sistema operativo (estado
+// real del puntero), mientras que SDL_GetMouseState solo repite el estado que
+// SDL conoce tras el último procesamiento de eventos: si un release nunca
+// llegó a la cola, SDL_GetMouseState seguiría reportando el botón presionado
+// y el oráculo del autoscroll no se desarmaría. Por eso se usa la consulta
+// global al OS (SDL2 acepta punteros nulos para las coordenadas, que aquí no
+// se necesitan). Único uso restante del estado global del mouse: el oráculo
+// de setMouseButtonPressedQuery (autoscroll del tick).
+inline Uint32 sdlGlobalMouseButtons() {
+    return SDL_GetGlobalMouseState(nullptr, nullptr);
 }
 
 
@@ -407,10 +409,7 @@ int GuiRunLoop::run() {
     //      OS, el autoscroll por timer puede frenar antes (los pasos por
     //      evento de drag no se afectan); en el target X11 funciona.
     editor_.setMouseButtonPressedQuery([] {
-        int x = 0, y = 0;
-        Uint32 st = 0;
-        sdlGlobalMouseState(x, y, st);
-        return (st & SDL_BUTTON_LMASK) != 0;
+        return (sdlGlobalMouseButtons() & SDL_BUTTON_LMASK) != 0;
     });
 
     // Único lugar que decide los flags de creación de ventana (helper puro
@@ -453,7 +452,6 @@ int GuiRunLoop::run() {
     // Handles SDL vivos durante run(). updateImeRect solo usa sdlWin_ para
     // decidir si convierte; las medidas vienen de currentSize().
     sdlWin_ = static_cast<void*>(win);
-    sdlRen_ = static_cast<void*>(ren);
     if (gui_) gui_->setTitleBar(&titleBar_);
     // Pista nativa de tema ANTES del primer map (SDL_ShowWindow). La barra
     // visible es la propia (GuiTitleBar); esto solo mantiene la propiedad
@@ -470,7 +468,6 @@ int GuiRunLoop::run() {
         std::fputs(fontOpenDiagnostic(options_).c_str(), stderr);
         if (gui_) gui_->setSdlRenderer(nullptr);
         sdlWin_ = nullptr;
-        sdlRen_ = nullptr;
         SDL_DestroyRenderer(ren);
         SDL_DestroyWindow(win);
         SDL_Quit();
@@ -664,11 +661,9 @@ int GuiRunLoop::run() {
         manualResizeWinH_ = lastWinH_;
         manualResizeDragDX_ = 0;
         manualResizeDragDY_ = 0;
-        int gx = 0, gy = 0;
-        Uint32 gst = 0;
-        sdlGlobalMouseState(gx, gy, gst);
-        manualResizeMouseX_ = gx;
-        manualResizeMouseY_ = gy;
+        // Sin query de posicion inicial: el gesto arranca desde el origen
+        // guardado (lastWinX_/lastWinY_, refresheados en SDL_WINDOWEVENT_MOVED
+        // y en currentSize) y los deltas relativos vienen en ev.motion.*.
     };
     auto activateTitleButton = [&](GuiTitleBarButton button) {
         switch (button) {
@@ -865,6 +860,12 @@ int GuiRunLoop::run() {
                         const platform::WindowSize size = currentSize();
                         applyWindowSize(size, titleBarHeightPx_);
                         requestRender();
+                    } else if (guiWindowMovedSyncsDragOrigin(ev.window.event)) {
+                        // SDL_WINDOWEVENT_MOVED ya trae la nueva posición en
+                        // data1/data2 (doc de SDL2). Se usa directamente para
+                        // evitar una consulta adicional a SDL_GetWindowPosition.
+                        lastWinX_ = ev.window.data1;
+                        lastWinY_ = ev.window.data2;
                     } else if (guiFocusLossEndsGesture(ev.window.event)) {
                         // Pérdida de foco con gesto en curso: la captura cae
                         // sola y el BUTTONUP puede ir a otra ventana, así que
@@ -1041,11 +1042,6 @@ int GuiRunLoop::run() {
                         // Reusa la medicion guardada por currentSize().
                         manualDragWinX_ = lastWinX_;
                         manualDragWinY_ = lastWinY_;
-                        int gx = 0, gy = 0;
-                        Uint32 gst = 0;
-                        sdlGlobalMouseState(gx, gy, gst);
-                        manualDragMouseX_ = gx;
-                        manualDragMouseY_ = gy;
                         break;
                     }
                     // Click izquierdo -> MousePress en la celda (0-based).
@@ -1198,10 +1194,12 @@ int GuiRunLoop::run() {
                             // arrastre, ver startManualResize): se suman los
                             // deltas relativos del mouse y se aplica sobre el
                             // rect inicial del gesto.
-                            int dx = 0, dy = 0;
-                            SDL_GetRelativeMouseState(&dx, &dy);
-                            manualResizeDragDX_ += dx;
-                            manualResizeDragDY_ += dy;
+                            // Se usa ev.motion.xrel / ev.motion.yrel del
+                            // SDL_MOUSEMOTION en curso: SDL2 ya los calcula por
+                            // evento, sin acumulacion global pendiente (que es
+                            // lo que devuelve SDL_GetRelativeMouseState).
+                            manualResizeDragDX_ += ev.motion.xrel;
+                            manualResizeDragDY_ += ev.motion.yrel;
                             const GuiWindowRect start{
                                 manualResizeWinX_, manualResizeWinY_,
                                 manualResizeWinW_, manualResizeWinH_};
@@ -1223,12 +1221,13 @@ int GuiRunLoop::run() {
                             manualTitleDrag_ = false;
                         } else {
                             // Delta acumulado del gesto: se suma el delta relativo
-                            // del mouse (SDL_GetRelativeMouseState) a la posicion
-                            // inicial del arrastre.
-                            int dx = 0, dy = 0;
-                            SDL_GetRelativeMouseState(&dx, &dy);
-                            manualDragWinX_ += dx;
-                            manualDragWinY_ += dy;
+                            // del mouse (ev.motion.xrel / ev.motion.yrel del
+                            // SDL_MOUSEMOTION en curso) a la posicion inicial del
+                            // arrastre. ev.motion ya representa el movimiento
+                            // relativo exacto de este evento, sin acumulacion
+                            // pendiente de SDL_GetRelativeMouseState.
+                            manualDragWinX_ += ev.motion.xrel;
+                            manualDragWinY_ += ev.motion.yrel;
                             SDL_SetWindowPosition(
                                 win, manualDragWinX_, manualDragWinY_);
                         }
@@ -1394,7 +1393,6 @@ int GuiRunLoop::run() {
     freeResizeCursors();
     if (gui_) gui_->setSdlRenderer(nullptr);
     sdlWin_ = nullptr;
-    sdlRen_ = nullptr;
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();

@@ -151,7 +151,32 @@ public:
     void setGuiRenderer(GuiRenderer* r) { gui_ = r; }
     // Getters para tests: acceso a handles SDL vivos durante run().
     void* sdlWinForTesting() const { return sdlWin_; }
-    void* sdlRenForTesting() const { return sdlRen_; }
+    // Última posición de ventana (puntos de pantalla) medida por
+    // currentSize() / actualizada por SDL_WINDOWEVENT_MOVED. Origen de los
+    // gestos manuales (resize de borde / arrastre de barra).
+    int lastWinXForTesting() const { return lastWinX_; }
+    int lastWinYForTesting() const { return lastWinY_; }
+    // Rectángulo base del gesto de resize manual en curso (origen + tamaño).
+    int manualResizeWinXForTesting() const { return manualResizeWinX_; }
+    int manualResizeWinYForTesting() const { return manualResizeWinY_; }
+    // Acumulado de deltas del gesto de resize manual en curso.
+    int manualResizeDragDXForTesting() const { return manualResizeDragDX_; }
+    int manualResizeDragDYForTesting() const { return manualResizeDragDY_; }
+    // Solo tests: armar un gesto de resize manual desde el borde dado, usando
+    // lastWinX_/lastWinY_ como origen (refresheados por
+    // SDL_WINDOWEVENT_MOVED). Permite verificar que el gesto arranca desde la
+    // posición actual sin salto y que los deltas relativos se acumulan por
+    // evento (ev.motion.xrel / ev.motion.yrel).
+    void startManualResizeForTesting(GuiWindowEdge edge) {
+        manualResizeEdge_ = edge;
+        manualTitleDrag_ = false;
+        manualResizeWinX_ = lastWinX_;
+        manualResizeWinY_ = lastWinY_;
+        manualResizeWinW_ = lastWinW_;
+        manualResizeWinH_ = lastWinH_;
+        manualResizeDragDX_ = 0;
+        manualResizeDragDY_ = 0;
+    }
     // Tabla tecla -> Evento que el SDL_KEYDOWN consulta (remapeable en
     // tiempo de ejecución). Única vía pública: la interfaz GUI; el tipo
     // concreto GuiKeymap es detalle privado, nunca se expone.
@@ -253,11 +278,12 @@ private:
     // Sin SDL: solo Editor + reloj.
     void serviceWatcherIfDue(std::chrono::steady_clock::time_point now);
     // Handles SDL vivos durante run() (opacos para no meter SDL en el
-    // header). Se fijan tras crear ventana/renderer y se limpian en el
-    // teardown; fuera de run() son nullptr. El loop NO los consulta para
-    // medir: currentSize() es la única medición por frame.
+    // header). Se fijan tras crear ventana y se limpian en el teardown;
+    // fuera de run() son nullptr. El loop NO los consulta para medir:
+    // currentSize() es la única medición por frame. sdlWin_ es el indicador
+    // del contexto SDL activo (lo consulta updateImeRect); el renderer se
+    // maneja via GuiRenderer::setSdlRenderer.
     void* sdlWin_ = nullptr;
-    void* sdlRen_ = nullptr;
     // Última medición hecha por currentSize(): la reusan updateImeRect (rect
     // IME del drawable a puntos de ventana), el hit-test del scrollbar en
     // renderWithBlink y los hit-tests de la barra de título (botones y
@@ -287,20 +313,18 @@ private:
     // hit-test nativo el WM se encarga y estos quedan en None/false.
     bool hitTestEnabled_ = false;
     bool manualTitleDrag_ = false;
-    int manualDragMouseX_ = 0;
-    int manualDragMouseY_ = 0;
     int manualDragWinX_ = 0;
     int manualDragWinY_ = 0;
     GuiWindowEdge manualResizeEdge_ = GuiWindowEdge::None;
-    int manualResizeMouseX_ = 0;
-    int manualResizeMouseY_ = 0;
     int manualResizeWinX_ = 0;
     int manualResizeWinY_ = 0;
     int manualResizeWinW_ = 0;
     int manualResizeWinH_ = 0;
     // Acumulado de deltas del puntero desde el inicio del gesto de resize
     // manual; se aplica sobre el rect inicial del gesto (startManualResize)
-    // y se actualiza con SDL_GetRelativeMouseState en cada motion.
+    // y se actualiza con ev.motion.xrel / ev.motion.yrel del SDL_MOUSEMOTION
+    // en curso (que ya son el delta exacto de ese evento, sin acumulacion
+    // global pendiente de SDL_GetRelativeMouseState).
     int manualResizeDragDX_ = 0;
     int manualResizeDragDY_ = 0;
 

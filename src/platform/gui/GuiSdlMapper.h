@@ -445,4 +445,19 @@ inline bool guiResizeNeedsRemeasure(Uint8 windowEventId) {
            windowEventId == SDL_WINDOWEVENT_DISPLAY_CHANGED;
 }
 
+// SDL_WINDOWEVENT.window.event -> ¿hay que refrescar el origen (posicion)
+// guardado de los gestos manuales (resize de borde / arrastre de barra)?
+// Solo MOVED: la ventana puede desplazarse SIN cambio de tamaño (gesto de
+// bordes con su propio arrastre, movimiento externo del WM/compositor, etc.).
+// lastWinX_/lastWinY_ solo se refrescan dentro de currentSize() ante
+// RESIZED/SIZE_CHANGED/DISPLAY_CHANGED: sin este caso, un click posterior a
+// un movimiento previo arrancaría el gesto desde una posición obsoleta y el
+// primer movimiento produciría un salto. El loop sincroniza lastWinX_/
+// lastWinY_ con ev.window.data1/data2 del evento MOVED, antes de que un
+// gesto nuevo pueda arrancar. Testeable sin ventana: solo nombra la constante
+// del evento.
+inline bool guiWindowMovedSyncsDragOrigin(Uint8 windowEventId) {
+    return windowEventId == SDL_WINDOWEVENT_MOVED;
+}
+
 #endif  // HAVE_SDL2

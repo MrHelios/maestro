@@ -671,6 +671,34 @@ TEST(guimouse_sdl_resize_needs_remeasure) {
 #endif
 }
 
+TEST(guimouse_sdl_moved_syncs_drag_origin) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    // P2 (origen de gestos): MOVED refresca lastWinX_/lastWinY_ (vía
+    // SDL_GetWindowPosition en el loop) para que un gesto manual nuevo
+    // (resize de borde / arrastre de barra) arranque desde la posición real
+    // de la ventana, no desde una medición vieja. Sin este evento no se
+    // re-mide ni se refresca el origen: un click post-movimiento provocaría
+    // un salto en el primer delta del gesto.
+    CHECK(guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_MOVED));
+    // El resto no refresca el origen (los de resize ya van por su propio
+    // clasificador; los de foco/exposición IME tienen caminos propios).
+    CHECK(!guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_FOCUS_LOST));
+    CHECK(!guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_FOCUS_GAINED));
+    CHECK(!guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_RESIZED));
+    CHECK(!guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_SIZE_CHANGED));
+    CHECK(!guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_DISPLAY_CHANGED));
+    CHECK(!guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_ENTER));
+    CHECK(!guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_LEAVE));
+    CHECK(!guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_SHOWN));
+    CHECK(!guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_HIDDEN));
+    CHECK(!guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_MINIMIZED));
+    CHECK(!guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_MAXIMIZED));
+    CHECK(!guiWindowMovedSyncsDragOrigin(SDL_WINDOWEVENT_CLOSE));
+#endif
+}
+
 TEST(guigrid_size_scale_1x) {
     // Sin SDL (pura): drawable 960x600, celda real 9x18 -> 106x33.
     // Es el camino del loop tras SDL_GetRendererOutputSize.
