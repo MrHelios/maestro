@@ -186,8 +186,8 @@ bool GuiRenderer::readLastSurfacePixels(std::vector<GuiColor>& out, int& wPx,
 #ifdef HAVE_SDL2
 void GuiRenderer::captureBackbuffer_(SDL_Renderer* r) {
     lastCaptureValid_ = false;
-    int outW = 0, outH = 0;
-    if (SDL_GetRendererOutputSize(r, &outW, &outH) != 0) return;
+    const int outW = drawablePixelW_;
+    const int outH = drawablePixelH_;
     if (outW <= 0 || outH <= 0) return;
 
     std::vector<Uint32> raw(static_cast<size_t>(outW) *
