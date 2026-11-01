@@ -447,25 +447,15 @@ int GuiRunLoop::run() {
     // Pista nativa de tema ANTES del primer map (SDL_ShowWindow). La barra
     // visible es la propia (GuiTitleBar); esto solo mantiene la propiedad
     // coherente para el entorno/WM desde el arranque.
-    // Abre la fuente y mide la celda real ANTES del primer resize: de acá
-    // salen cols/filas = píxeles/celda (ya no estimados).
-    // La base del CLI son píxeles lógicos (ver contrato de arriba): se escala
-    // a píxeles del drawable con las medidas REALES de ventana/salida antes
-    // de abrir, así la celda ya nace correcta en HiDPI y el primer resize no
-    // paga una recarga. La misma fórmula corre en cada currentSize (cambio
-    // de monitor sin resize en puntos).
+    // Abre la fuente con la base lógica del CLI (ver contrato de arriba).
+    // El primer currentSize() mide el drawable y llama ensureFontPixels para
+    // escalarla antes del primer render: no se consulta SDL acá, así el
+    // arranque no duplica la medición de ventana/salida. A escala 1 no hay
+    // recarga (la talla ya coincide); en HiDPI currentSize la reabre una vez
+    // con el tamaño correcto.
     const int baseFontPx = options_.fontSize.value_or(16);
-    // Solo el eje VERTICAL: la talla tipográfica es altura y el ancho no se
-    // mezcla en la escala de la fuente (la grilla la calcula el primer
-    // currentSize con ambos ejes). Medidas degeneradas (minimizado) dan la
-    // base sin escalar vía la identidad de guiScaledFontPixels.
-    int initWinH = 0, initOutH = 0;
-    SDL_GetWindowSize(win, nullptr, &initWinH);
-    SDL_GetRendererOutputSize(ren, nullptr, &initOutH);
-    const int initFontPixels =
-        guiScaledFontPixels(baseFontPx, initWinH, initOutH);
     if (gui_ &&
-        !gui_->initForRenderer(static_cast<void*>(ren), initFontPixels)) {
+        !gui_->initForRenderer(static_cast<void*>(ren), baseFontPx)) {
         std::fputs(fontOpenDiagnostic(options_).c_str(), stderr);
         if (gui_) gui_->setSdlRenderer(nullptr);
         sdlWin_ = nullptr;
