@@ -259,10 +259,11 @@ private:
     void* sdlWin_ = nullptr;
     void* sdlRen_ = nullptr;
     // Última medición hecha por currentSize(): la reusan updateImeRect (rect
-    // IME del drawable a puntos de ventana) y el hit-test del scrollbar en
-    // renderWithBlink (track del drawable a puntos de ventana) sin volver a
-    // preguntarle a SDL (una sola consulta al drawable por frame). 0 = aún
-    // sin medir; guiImeRectToWindow trata medidas inválidas como identidad.
+    // IME del drawable a puntos de ventana), el hit-test del scrollbar en
+    // renderWithBlink y los hit-tests de la barra de título (botones y
+    // bordes) sin volver a preguntarle a SDL (una sola consulta al drawable
+    // por frame). 0 = aún sin medir; guiImeRectToWindow trata medidas
+    // inválidas como identidad.
     int lastWinW_ = 0;
     int lastWinH_ = 0;
     int lastDrawableW_ = 0;

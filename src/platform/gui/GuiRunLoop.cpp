@@ -604,16 +604,19 @@ int GuiRunLoop::run() {
     // cada botón. Los botones NO se envían al Editor (no son celdas).
     auto titleButtonAtPoint = [&](int ptX, int ptY) {
         if (titleBarHeightPx_ <= 0) return GuiTitleBarButton::None;
-        int winW = 0, winH = 0, outW = 0, outH = 0;
-        SDL_GetWindowSize(win, &winW, &winH);
-        SDL_GetRendererOutputSize(ren, &outW, &outH);
-        const GuiDrawableSize fb = guiDrawableOrWindow(winW, winH, outW, outH);
-        const int pxX = guiScaleCoord(ptX, winW, fb.w);
-        const int pxY = guiScaleCoord(ptY, winH, fb.h);
+        // Reusar la medición de currentSize: lastDrawable* ya incluye el
+        // fallback por eje de guiDrawableOrWindow, sin consultar SDL por
+        // evento de mouse.
+        const int winW = lastWinW_;
+        const int winH = lastWinH_;
+        const int outW = lastDrawableW_;
+        const int outH = lastDrawableH_;
+        const int pxX = guiScaleCoord(ptX, winW, outW);
+        const int pxY = guiScaleCoord(ptY, winH, outH);
         if (pxY < 0 || pxY >= titleBarHeightPx_) {
             return GuiTitleBarButton::None;
         }
-        return titleBar_.buttonAt(pxX, pxY, fb.w, titleBarHeightPx_);
+        return titleBar_.buttonAt(pxX, pxY, outW, titleBarHeightPx_);
     };
     auto pointInTitleBar = [&](int ptY) {
         return titleBarHeightPoints_ > 0 && ptY >= 0 &&
