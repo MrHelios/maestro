@@ -227,6 +227,16 @@ inline void sdlCaptureMouseBestEffort(SDL_bool enabled) {
     if (SDL_CaptureMouse(enabled) != 0) SDL_ClearError();
 }
 
+// Estado GLOBAL del mouse (posicion + botones izquierdo) consultado al OS.
+// Fuente unica de verdad del estado del puntero para los gestos que
+// arrastran ventana (resize manual / barra de titulo) y para el oraculo de
+// autoscroll del tick. Al arranque de un gesto se consulta UNA vez (posicion
+// inicial); durante el arrastre activo se usan deltas relativos
+// (SDL_GetRelativeMouseState), nunca una query absoluta por motion.
+inline void sdlGlobalMouseState(int& x, int& y, Uint32& buttons) {
+    buttons = SDL_GetGlobalMouseState(&x, &y);
+}
+
 
 
 
@@ -398,7 +408,8 @@ int GuiRunLoop::run() {
     //      evento de drag no se afectan); en el target X11 funciona.
     editor_.setMouseButtonPressedQuery([] {
         int x = 0, y = 0;
-        const Uint32 st = SDL_GetGlobalMouseState(&x, &y);
+        Uint32 st = 0;
+        sdlGlobalMouseState(x, y, st);
         return (st & SDL_BUTTON_LMASK) != 0;
     });
 
@@ -487,6 +498,8 @@ int GuiRunLoop::run() {
         // se mantiene (~106×33 en vez de duplicarse a 213×66 con texto
         // diminuto). Sin fuente, el fallback 9×18 se escala por eje igual.
         int winW = 0, winH = 0, outW = 0, outH = 0;
+        int winX = 0, winY = 0;
+        SDL_GetWindowPosition(win, &winX, &winY);
         SDL_GetWindowSize(win, &winW, &winH);
         SDL_GetRendererOutputSize(ren, &outW, &outH);
         // Drawable efectivo por eje (minimizado / driver degenerado): un eje
@@ -539,6 +552,8 @@ int GuiRunLoop::run() {
         // puntos con estos valores en vez de volver a consultar SDL.
         lastWinW_ = winW;
         lastWinH_ = winH;
+        lastWinX_ = winX;
+        lastWinY_ = winY;
         lastDrawableW_ = outW;
         lastDrawableH_ = outH;
         return size;
@@ -640,9 +655,20 @@ int GuiRunLoop::run() {
         manualResizeEdge_ = edge;
         manualTitleDrag_ = false;
         sdlCaptureMouseBestEffort(SDL_TRUE);
-        SDL_GetWindowPosition(win, &manualResizeWinX_, &manualResizeWinY_);
-        SDL_GetWindowSize(win, &manualResizeWinW_, &manualResizeWinH_);
-        SDL_GetGlobalMouseState(&manualResizeMouseX_, &manualResizeMouseY_);
+        // Reusa la medicion guardada por currentSize() (la unica lectura del
+        // drawable por frame) en vez de consultar SDL_GetWindowPosition /
+        // SDL_GetWindowSize al iniciar el gesto.
+        manualResizeWinX_ = lastWinX_;
+        manualResizeWinY_ = lastWinY_;
+        manualResizeWinW_ = lastWinW_;
+        manualResizeWinH_ = lastWinH_;
+        manualResizeDragDX_ = 0;
+        manualResizeDragDY_ = 0;
+        int gx = 0, gy = 0;
+        Uint32 gst = 0;
+        sdlGlobalMouseState(gx, gy, gst);
+        manualResizeMouseX_ = gx;
+        manualResizeMouseY_ = gy;
     };
     auto activateTitleButton = [&](GuiTitleBarButton button) {
         switch (button) {
@@ -1012,10 +1038,14 @@ int GuiRunLoop::run() {
                         pointInTitleBar(ev.button.y)) {
                         manualTitleDrag_ = true;
                         sdlCaptureMouseBestEffort(SDL_TRUE);
-                        SDL_GetWindowPosition(win, &manualDragWinX_,
-                                              &manualDragWinY_);
-                        SDL_GetGlobalMouseState(&manualDragMouseX_,
-                                                &manualDragMouseY_);
+                        // Reusa la medicion guardada por currentSize().
+                        manualDragWinX_ = lastWinX_;
+                        manualDragWinY_ = lastWinY_;
+                        int gx = 0, gy = 0;
+                        Uint32 gst = 0;
+                        sdlGlobalMouseState(gx, gy, gst);
+                        manualDragMouseX_ = gx;
+                        manualDragMouseY_ = gy;
                         break;
                     }
                     // Click izquierdo -> MousePress en la celda (0-based).
@@ -1164,15 +1194,20 @@ int GuiRunLoop::run() {
                             manualResizeEdge_ = GuiWindowEdge::None;
                             sdlCaptureMouseBestEffort(SDL_FALSE);
                         } else {
-                            int gx = 0, gy = 0;
-                            SDL_GetGlobalMouseState(&gx, &gy);
+                            // Delta acumulado del gesto (desde el inicio del
+                            // arrastre, ver startManualResize): se suman los
+                            // deltas relativos del mouse y se aplica sobre el
+                            // rect inicial del gesto.
+                            int dx = 0, dy = 0;
+                            SDL_GetRelativeMouseState(&dx, &dy);
+                            manualResizeDragDX_ += dx;
+                            manualResizeDragDY_ += dy;
                             const GuiWindowRect start{
                                 manualResizeWinX_, manualResizeWinY_,
                                 manualResizeWinW_, manualResizeWinH_};
                             const GuiWindowRect next = guiResizeWindowRect(
                                 start, manualResizeEdge_,
-                                gx - manualResizeMouseX_,
-                                gy - manualResizeMouseY_, 160, 120);
+                                manualResizeDragDX_, manualResizeDragDY_, 160, 120);
                             if (next.x != start.x || next.y != start.y) {
                                 SDL_SetWindowPosition(win, next.x, next.y);
                             }
@@ -1187,12 +1222,15 @@ int GuiRunLoop::run() {
                         if (!guiLeftHeld(ev.motion.state)) {
                             manualTitleDrag_ = false;
                         } else {
-                            int gx = 0, gy = 0;
-                            SDL_GetGlobalMouseState(&gx, &gy);
+                            // Delta acumulado del gesto: se suma el delta relativo
+                            // del mouse (SDL_GetRelativeMouseState) a la posicion
+                            // inicial del arrastre.
+                            int dx = 0, dy = 0;
+                            SDL_GetRelativeMouseState(&dx, &dy);
+                            manualDragWinX_ += dx;
+                            manualDragWinY_ += dy;
                             SDL_SetWindowPosition(
-                                win,
-                                manualDragWinX_ + (gx - manualDragMouseX_),
-                                manualDragWinY_ + (gy - manualDragMouseY_));
+                                win, manualDragWinX_, manualDragWinY_);
                         }
                         if (hoverChanged) requestRender();
                         break;

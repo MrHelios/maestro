@@ -268,6 +268,12 @@ private:
     int lastWinH_ = 0;
     int lastDrawableW_ = 0;
     int lastDrawableH_ = 0;
+    // Posicion de la ventana (puntos de pantalla) en la ultima medicion de
+    // currentSize(); junto a lastWinW_/lastWinH_ completa el rectangulo base
+    // (x,y,w,h) de los gestos manuales (arrastre de barra / resize) sin
+    // consultar SDL fuera de currentSize().
+    int lastWinX_ = 0;
+    int lastWinY_ = 0;
     // Phase 2: barra de título propia (ventana SDL_WINDOW_BORDERLESS). El
     // alto se reserva en la grilla; los clicks de sus botones no llegan al
     // Editor. `titleBarHeightPoints_` es la misma medida en puntos de
@@ -292,6 +298,11 @@ private:
     int manualResizeWinY_ = 0;
     int manualResizeWinW_ = 0;
     int manualResizeWinH_ = 0;
+    // Acumulado de deltas del puntero desde el inicio del gesto de resize
+    // manual; se aplica sobre el rect inicial del gesto (startManualResize)
+    // y se actualiza con SDL_GetRelativeMouseState en cada motion.
+    int manualResizeDragDX_ = 0;
+    int manualResizeDragDY_ = 0;
 
     TitleBarHitState hitState_;
 

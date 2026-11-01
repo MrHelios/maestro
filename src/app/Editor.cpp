@@ -724,10 +724,6 @@ void Editor::resize(const platform::WindowSize& size) {
     if (size.rows <= 0 || size.cols <= 0) return;
     currentRows_ = size.rows;
     currentCols_ = size.cols;
-    // Métrica GUI (HiDPI): solo valores conocidos (>=0). Un negativo es
-    // "desconocido" igual que 0 (nunca se guarda tal cual: contaminaría el
-    // escalado puntos<->drawable que asume dimensiones válidas o 0).
-    currentCellH_ = size.cellH < 0 ? 0 : size.cellH;
     for (int i = 0; i < buffers.count(); ++i) {
         syncViewportSize(buffers.at(i));
         buffers.at(i).cursor.clampToLine(buffers.at(i).document);
