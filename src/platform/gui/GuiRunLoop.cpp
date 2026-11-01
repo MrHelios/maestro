@@ -563,12 +563,15 @@ int GuiRunLoop::run() {
         // hit-test nativo (guiTitleBarHitTest). El layout ya está fresco
         // tras renderFrame() (lastLayout_ actualizado en GuiRenderer).
         if (gui_ && gui_->scrollbarEnabled()) {
+            // Reusar la medición de currentSize (única lectura del drawable
+            // por frame). lastDrawable* ya incluye el fallback por eje de
+            // guiDrawableOrWindow, así que no hace falta volver a consultar
+            // SDL acá.
+            const int winW = lastWinW_;
+            const int winH = lastWinH_;
+            const GuiDrawableSize mfb{lastDrawableW_, lastDrawableH_};
             // Margen de redimensionado en píxeles del drawable: kResizeBorderPts (puntos
             // de ventana) convertido a píxeles del drawable.
-            int winW = 0, winH = 0, outW = 0, outH = 0;
-            SDL_GetWindowSize(win, &winW, &winH);
-            SDL_GetRendererOutputSize(ren, &outW, &outH);
-            const GuiDrawableSize mfb = guiDrawableOrWindow(winW, winH, outW, outH);
             const int resizeBorderPx = (kResizeBorderPts * mfb.w) / std::max(1, winW);
             const GuiPixelRect track = gui_->scrollbarTrackRect(gui_->lastLayout(), resizeBorderPx);
             if (track.valid && track.w > 0 && track.h > 0) {
