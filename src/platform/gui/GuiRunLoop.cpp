@@ -1143,10 +1143,12 @@ int GuiRunLoop::run() {
                                         activeTitleButton_ != GuiTitleBarButton::None ||
                                         guiLeftHeld(ev.motion.state);
 
-                    int ptX = ev.motion.x;
-                    int ptY = ev.motion.y;
-                    int winW = 0, winH = 0;
-                    SDL_GetWindowSize(win, &winW, &winH);
+                    const int ptX = ev.motion.x;
+                    const int ptY = ev.motion.y;
+                    // Reusar la medición de currentSize; no se consulta SDL
+                    // por evento de motion.
+                    const int winW = lastWinW_;
+                    const int winH = lastWinH_;
 
                     // 1. Scrollbar track: cursor arrow (no redimensionable)
                     if (pointInScrollbarTrack(hitState_.scrollbar.get(), ptX, ptY)) {
