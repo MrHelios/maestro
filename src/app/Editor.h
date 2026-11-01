@@ -380,13 +380,11 @@ private:
     // root / loop de plataforma) antes del primer render en producción.
     int currentRows_ = 24;
     int currentCols_ = 80;
-    // Métricas de ventana para la futura GUI (ver platform::WindowSize).
-    // TTY las deja en 0 (desconocido); resize(const WindowSize&) las
-    // conserva aunque hoy ningún lector las consuma.
-    int currentCellW_ = 0;
+    // Alto de celda en píxeles para la futura GUI (ver platform::WindowSize).
+    // TTY lo deja en 0 (desconocido); resize(const WindowSize&) lo conserva
+    // aunque hoy ningún lector lo consuma. El resto de las métricas de
+    // ventana (cellW/pixelW/pixelH) las consume el renderer directamente.
     int currentCellH_ = 0;
-    int currentPixelW_ = 0;
-    int currentPixelH_ = 0;
     // Despacho de comandos por nombre. El Editor registra los handlers en
     // el constructor (registerCommands) y los modos resuelven la tecla ->
     // nombre -> handler aqui, en vez de tener cada accion dispersa en
