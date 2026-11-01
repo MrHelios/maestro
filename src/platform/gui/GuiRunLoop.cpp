@@ -772,12 +772,10 @@ int GuiRunLoop::run() {
 
     auto toDrawablePoint = [&](int ptX, int ptY) {
         DrawablePoint p;
-        int winW = 0, winH = 0, outW = 0, outH = 0;
-        SDL_GetWindowSize(win, &winW, &winH);
-        SDL_GetRendererOutputSize(ren, &outW, &outH);
-        const GuiDrawableSize mfb = guiDrawableOrWindow(winW, winH, outW, outH);
-        p.x = guiScaleCoord(ptX, winW, mfb.w);
-        p.y = guiScaleCoord(ptY, winH, mfb.h);
+        // Reusar la medición de currentSize (lastDrawable* ya incluye el
+        // fallback por eje): sin consultas SDL por evento.
+        p.x = guiScaleCoord(ptX, lastWinW_, lastDrawableW_);
+        p.y = guiScaleCoord(ptY, lastWinH_, lastDrawableH_);
         return p;
     };
     
