@@ -1929,6 +1929,15 @@ void GuiRenderer::renderScreenDiff(
     const std::optional<BracketPair>& bracketPair, const Layout& layout) {
     (void)sink;  // la GUI pinta en el SDL_Renderer, no en el Sink de bytes.
 
+    // Mantener la geometría física del frame sincronizada con el drawable
+    // actual, incluso cuando se tome un camino rápido que no pasa por
+    // presentFramebuf/presentWindow. Sin esto, lastFrameGeometry_ queda
+    // obsoleto tras un resize que no altera el viewport/layout (p. ej. un
+    // resize de 1 px que no cambia filas ni columnas).
+    if (drawableMetricsInitialized_) {
+        updateChromeGeometry(layout, drawablePixelW_, drawablePixelH_);
+    }
+
     // Camino rápido (etapa ↑/↓ sin scroll): evita buildFrame() completo si
     // solo se movió el cursor sobre el mismo viewport sin cambios. Si lo
     // resuelve, ya actualizó cachés/stats/snapshots y pintó; si no, se cae al
