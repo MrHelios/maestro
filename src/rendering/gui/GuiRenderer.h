@@ -255,6 +255,11 @@ public:
     // inset 0 el comportamiento es idéntico al de las decoraciones nativas.
     void setTitleBar(GuiTitleBar* titleBar) { titleBar_ = titleBar; }
     int contentTopInset() const { return contentTopInset_; }
+    // Métricas de celda para interpretar lecturas de píxeles del framebuffer
+    // en pruebas de gaps al redimensionar (Paso F). Útiles solo tras
+    // initForRenderer + setDrawableMetrics.
+    int cellWForTests() const { return font_.cellW(); }
+    int cellHForTests() const { return font_.cellH(); }
     // Fase 2/P3: observabilidad para tests. Indica si setDrawableMetrics fue
     // llamado con éxito al menos una vez (métricas válidas aplicadas).
     bool drawableMetricsInitialized() const { return drawableMetricsInitialized_; }
