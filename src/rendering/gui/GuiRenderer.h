@@ -652,6 +652,13 @@ private:
         int h = 0;
         int activeW = 0;
         int activeH = 0;
+        // Validez del extremo horizontal POR TEXTURA. -1 = el contenido no es
+        // confiable para ningún activeRightPx (textura fresh, destruida o
+        // invalidada). Valor >= 0 = activeRightPx para el cual TODAS las filas
+        // de la textura están pintadas válidamente. Cada contentFb_[0]/[1] y
+        // listFb_ lleva la suya; nunca se asume que actualizar una sincroniza
+        // a las demás (Paso A.1).
+        int validActiveRightPx_ = -1;
     };
     // Contenido con ping-pong para el scroll-blit (etapa scroll-blit):
     // contentFb_[contentFbActive_] guarda la imagen vigente; el blit copia la

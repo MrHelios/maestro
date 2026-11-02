@@ -11,6 +11,21 @@
 
 #ifdef HAVE_SDL2
 #include <SDL2/SDL.h>
+
+namespace {
+// Establece explícitamente el estado gráfico que necesita cualquier camino
+// que pinte (o lea) sobre un framebuffer: target, viewport y clip rect por
+// defecto, sin depender de operaciones gráficas previas (Paso B.1).
+// Devuelve false si alguna operación falla; el llamador abandona el camino
+// rápido y recurre a un fallback seguro (render completo).
+bool prepareFramebufferTarget(SDL_Renderer* r, SDL_Texture* fb) {
+    if (!r || !fb) return false;
+    if (SDL_SetRenderTarget(r, fb) != 0) return false;
+    if (SDL_RenderSetViewport(r, nullptr) != 0) return false;
+    if (SDL_RenderSetClipRect(r, nullptr) != 0) return false;
+    return true;
+}
+}  // namespace
 #endif
 
 GuiRenderer::GuiRenderer(const GuiOptions& opts) : options_(opts) {
@@ -31,6 +46,7 @@ void GuiRenderer::destroyFb(FrameSurface& s) {
     s.h = 0;
     s.activeW = 0;
     s.activeH = 0;
+    s.validActiveRightPx_ = -1;
 }
 
 void GuiRenderer::destroyFramebuf() {
@@ -116,6 +132,7 @@ void* GuiRenderer::acquireFb(FrameSurface& s, void* sdlRenderer, int activeW,
         s.tex = static_cast<void*>(t);
         s.w = capW;
         s.h = capH;
+        s.validActiveRightPx_ = -1;  // contenido indefinido hasta pintarlo entero
         ++framebufCreations_;
         fresh = true;
     }
@@ -205,7 +222,10 @@ bool GuiRenderer::readLastSurfacePixels(std::vector<GuiColor>& out, int& wPx,
     if (activeW <= 0 || activeH <= 0) return false;
     // Guarda/restaura el destino activo: la lectura no perturba al loop.
     SDL_Texture* prev = SDL_GetRenderTarget(r);
-    if (SDL_SetRenderTarget(r, fb) != 0) return false;
+    if (!prepareFramebufferTarget(r, fb)) {
+        SDL_SetRenderTarget(r, prev);
+        return false;
+    }
     std::vector<Uint32> raw(static_cast<size_t>(s.w) *
                             static_cast<size_t>(s.h));
     const bool ok =
@@ -315,6 +335,11 @@ void GuiRenderer::toggleTheme() {
 void GuiRenderer::invalidateCache() {
     contentHasCache_ = false;
     listHasCache_ = false;
+    // Las texturas de contenido dejan de ser válidas para la geometría activa
+    // hasta que un render completo las repinte (Paso A.3).
+    contentFb_[0].validActiveRightPx_ = -1;
+    contentFb_[1].validActiveRightPx_ = -1;
+    listFb_.validActiveRightPx_ = -1;
     resetIncrementalState();
 }
 
@@ -1520,11 +1545,22 @@ bool GuiRenderer::tryFastCursorMove(
             invalidateCache();
             return true;
         }
-        SDL_SetRenderTarget(r, fb);
         const auto fg = guichrome::framePixelGeometry(
             g.layout, drawablePixelW_, drawablePixelH_ - contentTopInset_,
             font_.cellW(), font_.cellH());
         const int activeRightPx = fg.logicalWidth + fg.rightSpacerPx;
+        // Paso A.2/E: la textura debe estar válida para el activeRightPx
+        // actual antes de usarla como origen/destino del camino rápido.
+        if (contentFb_[contentFbActive_].validActiveRightPx_ != activeRightPx) {
+            invalidateCache();
+            return true;
+        }
+        if (!prepareFramebufferTarget(r, fb)) {
+            // No se puede establecer el target del framebuffer: el camino
+            // rápido no es seguro (B.1).
+            invalidateCache();
+            return true;
+        }
         for (int k = 0; k < nRels; ++k) {
             if (!dirty[static_cast<size_t>(rb[k].rel)]) continue;
             paintSnapshotRow(r, font_, dark_, g.layout, rb[k].rel,
@@ -1796,9 +1832,18 @@ bool GuiRenderer::tryFastScrollLine(
             g.layout, drawablePixelW_, drawablePixelH_ - contentTopInset_,
             font_.cellW(), font_.cellH());
         const int activeRightPx = fg.logicalWidth + fg.rightSpacerPx;
+        // Paso A.2/E: el origen del scroll-blit debe estar válido para el
+        // activeRightPx actual; de lo contrario sus píxeles son de una
+        // geometría anterior y no se pueden copiar de forma segura.
+        if (contentFb_[srcIdx].validActiveRightPx_ != activeRightPx) {
+            invalidateCache();
+            return true;
+        }
         if (!dstFb) {
-            SDL_SetRenderTarget(r, srcFb);
-            SDL_RenderSetViewport(r, nullptr);
+            if (!prepareFramebufferTarget(r, srcFb)) {
+                invalidateCache();
+                return true;
+            }
             for (int i = 0; i < H; ++i) {
                 paintSnapshotRow(r, font_, dark_, g.layout, i,
                                  contentRows_[static_cast<size_t>(i)],
@@ -1806,6 +1851,9 @@ bool GuiRenderer::tryFastScrollLine(
             }
             paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
                                            contentRows_, next, shown);
+            // Todas las filas repintadas hasta activeRightPx: srcFb queda
+            // válida para este extremo activo.
+            contentFb_[srcIdx].validActiveRightPx_ = activeRightPx;
             presentFramebuf(r, srcFb, bg, g.layout, cch, payload.data, next, shown);
             return true;
         }
@@ -1813,8 +1861,11 @@ bool GuiRenderer::tryFastScrollLine(
         // destino. El chrome NO se desplaza (posición fija): se repinta
         // siempre sobre el destino (2 filas baratas; su región en el destino
         // puede estar obsoleta y el blit no la cubre).
-        SDL_SetRenderTarget(r, dstFb);
-        SDL_RenderSetViewport(r, nullptr);
+        if (!prepareFramebufferTarget(r, dstFb)) {
+            // No hay destino válido para el blit: no es seguro continuar.
+            invalidateCache();
+            return true;
+        }
         const int x0 = g.layout.content.col * ccw;
         const int y0 = g.layout.content.row * cch;
         if (H > 1) {
@@ -1845,6 +1896,9 @@ bool GuiRenderer::tryFastScrollLine(
         paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
                                        contentRows_, next, shown);
         presentFramebuf(r, dstFb, bg, g.layout, cch, payload.data, next, shown);
+        // Blit de H-1 filas + repintado de fila expuesta y dirty cubren todas
+        // las filas hasta activeRightPx: dstFb queda válida para este extremo.
+        contentFb_[dstIdx].validActiveRightPx_ = activeRightPx;
         contentFbActive_ = dstIdx;
     }
 #else
@@ -2008,36 +2062,49 @@ void GuiRenderer::renderScreenDiff(
                           f.cursor, shown, &f, nullptr, -1,
                           /*withScrollbar=*/true);
         } else {
-            SDL_SetRenderTarget(r, fb);
-            SDL_RenderSetViewport(r, nullptr);
-            if (full || fbFresh) {
-                SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
-                SDL_RenderClear(r);
-                const auto fg = guichrome::framePixelGeometry(
-                    f.layout, drawablePixelW_, drawablePixelH_ - contentTopInset_,
-                    font_.cellW(), font_.cellH());
-                const int activeRightPx = fg.logicalWidth + fg.rightSpacerPx;
-                paintFrameContent(r, font_, dark_, f.layout, f,
-                                  activeRightPx);
-                paintContentCursor(r, font_, dark_, f.layout, f.cursor, shown,
-                                   &f, nullptr, -1);
+            if (!prepareFramebufferTarget(r, fb)) {
+                // Fallback seguro: composición completa directa en ventana
+                // cuando no se puede preparar el target del framebuffer (B.1).
+                presentWindow(r, bg, f.layout, ch, f.chrome, f.statusAccent,
+                              f.cursor, shown, &f, nullptr, -1,
+                              /*withScrollbar=*/true);
             } else {
-                // Parcial sobre la textura: sin RenderClear; solo filas dirty
-                // + cursor. El chrome lo pinta el overlay una sola vez. Lee
-                // `fresh` (aún no movido).
                 const auto fg = guichrome::framePixelGeometry(
                     f.layout, drawablePixelW_, drawablePixelH_ - contentTopInset_,
                     font_.cellW(), font_.cellH());
                 const int activeRightPx = fg.logicalWidth + fg.rightSpacerPx;
-                for (int i = 0; i < contentH; ++i)
-                    if (dirty[static_cast<size_t>(i)])
-                        paintSnapshotRow(r, font_, dark_, f.layout, i,
-                                         fresh[static_cast<size_t>(i)],
-                                         activeRightPx);
-                paintContentCursor(r, font_, dark_, f.layout, f.cursor, shown,
-                                   &f, nullptr, -1);
+                // Paso A.2/E: si la textura persistente no está válida para el
+                // activeRightPx actual (p. ej. tras un resize que cambió
+                // rightSpacerPx), el camino partial no es seguro: las filas
+                // limpias conservan píxeles del ancho anterior. Forzar render
+                // completo.
+                const bool paintAll =
+                    full || fbFresh ||
+                    contentFb_[contentFbActive_].validActiveRightPx_ != activeRightPx;
+                if (paintAll) {
+                    SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
+                    SDL_RenderClear(r);
+                    paintFrameContent(r, font_, dark_, f.layout, f,
+                                      activeRightPx);
+                    paintContentCursor(r, font_, dark_, f.layout, f.cursor, shown,
+                                       &f, nullptr, -1);
+                    contentFb_[contentFbActive_].validActiveRightPx_ =
+                        activeRightPx;
+                } else {
+                    // Parcial sobre la textura: sin RenderClear; solo filas
+                    // dirty + cursor. El chrome lo pinta el overlay una sola
+                    // vez. Lee `fresh` (aún no movido).
+                    for (int i = 0; i < contentH; ++i)
+                        if (dirty[static_cast<size_t>(i)])
+                            paintSnapshotRow(r, font_, dark_, f.layout, i,
+                                             fresh[static_cast<size_t>(i)],
+                                             activeRightPx);
+                    paintContentCursor(r, font_, dark_, f.layout, f.cursor,
+                                       shown, &f, nullptr, -1);
+                }
+                presentFramebuf(r, fb, bg, f.layout, ch, f.chrome, f.cursor,
+                                shown);
             }
-            presentFramebuf(r, fb, bg, f.layout, ch, f.chrome, f.cursor, shown);
         }
     }
 #else
@@ -2145,34 +2212,43 @@ void GuiRenderer::renderListCommon(std::vector<ListLine> lines,
                           lastCursor_, shown, nullptr, &lines, selectedRow,
                           /*withScrollbar=*/false);
         } else {
-            SDL_SetRenderTarget(r, fb);
-            SDL_RenderSetViewport(r, nullptr);
-            if (full || fbFresh) {
-                SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
-                SDL_RenderClear(r);
-                const auto fg = guichrome::framePixelGeometry(
-                    layout, drawablePixelW_, drawablePixelH_ - contentTopInset_,
-                    font_.cellW(), font_.cellH());
-                const int activeRightPx = fg.logicalWidth + fg.rightSpacerPx;
-                paintListContent(r, font_, dark_, layout, lines, selectedRow,
-                                 activeRightPx);
-                paintContentCursor(r, font_, dark_, layout, lastCursor_, shown,
-                                   nullptr, &lines, selectedRow);
+            if (!prepareFramebufferTarget(r, fb)) {
+                // Fallback seguro: composición completa directa en ventana
+                // cuando no se puede preparar el target del framebuffer (B.1).
+                presentWindow(r, bg, layout, lch, lastChrome_, lastAccent_,
+                              lastCursor_, shown, nullptr, &lines, selectedRow,
+                              /*withScrollbar=*/false);
             } else {
                 const auto fg = guichrome::framePixelGeometry(
                     layout, drawablePixelW_, drawablePixelH_ - contentTopInset_,
                     font_.cellW(), font_.cellH());
                 const int activeRightPx = fg.logicalWidth + fg.rightSpacerPx;
-                for (int i = 0; i < listH; ++i)
-                    if (dirty[static_cast<size_t>(i)])
-                        paintSnapshotListRow(r, font_, dark_, layout, i,
-                                             lines[static_cast<size_t>(i)],
-                                             i == selectedRow,
-                                             activeRightPx);
-                paintContentCursor(r, font_, dark_, layout, lastCursor_, shown,
-                                   nullptr, &lines, selectedRow);
+                // Paso A.2/E: si listFb_ no está válida para el activeRightPx
+                // actual, forzar render completo para no dejar filas con gap
+                // obsoleto.
+                const bool paintAll =
+                    full || fbFresh || listFb_.validActiveRightPx_ != activeRightPx;
+                if (paintAll) {
+                    SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
+                    SDL_RenderClear(r);
+                    paintListContent(r, font_, dark_, layout, lines, selectedRow,
+                                     activeRightPx);
+                    paintContentCursor(r, font_, dark_, layout, lastCursor_,
+                                       shown, nullptr, &lines, selectedRow);
+                    listFb_.validActiveRightPx_ = activeRightPx;
+                } else {
+                    for (int i = 0; i < listH; ++i)
+                        if (dirty[static_cast<size_t>(i)])
+                            paintSnapshotListRow(r, font_, dark_, layout, i,
+                                                 lines[static_cast<size_t>(i)],
+                                                 i == selectedRow,
+                                                 activeRightPx);
+                    paintContentCursor(r, font_, dark_, layout, lastCursor_,
+                                       shown, nullptr, &lines, selectedRow);
+                }
+                presentFramebuf(r, fb, bg, layout, lch, lastChrome_,
+                                lastCursor_, shown);
             }
-            presentFramebuf(r, fb, bg, layout, lch, lastChrome_, lastCursor_, shown);
         }
     }
 #else
@@ -2316,7 +2392,19 @@ GuiPixelRect GuiRenderer::scrollbarTrackRect(const Layout& layout, int resizeBor
     }
 
     const int w = scrollbarWidthPx(cw);
-    const int x = (layout.content.col + layout.content.width) * cw - w - resizeBorderPx;
+    const int logicalWidth = (layout.content.col + layout.content.width) * cw;
+    const int rightSpacerPx = drawablePixelW_ - logicalWidth;
+    // activeRightPx = borde derecho REAL del área activa (incluye el gap
+    // horizontal rightSpacerPx cuando el modo es "exact"; en modo legacy
+    // coincide con logicalWidth). El track se ancla a este extremo activo
+    // en lugar del borde lógico, de modo que el gap quede a la izquierda del
+    // track (dentro del área activa) y sea rellenado por los pintores de filas
+    // (Paso D).
+    const int activeRightPx =
+        (rightSpacerPx >= 0 && rightSpacerPx < cw)
+            ? logicalWidth + rightSpacerPx
+            : logicalWidth;
+    const int x = activeRightPx - w - resizeBorderPx;
     const int y = contentTopInset_ + layout.content.row * ch;
     const int h = layout.content.height * ch;
 
