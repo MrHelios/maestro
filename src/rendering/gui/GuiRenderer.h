@@ -187,9 +187,18 @@ public:
     // (el segundo pase puede tapar al primero).
     int chromePaintCalls() const { return chromePaintCalls_; }
     int messageBarCursorPaints() const { return messageBarCursorPaints_; }
+    // Observabilidad del ciclo de vida de las texturas de framebuffer:
+    // cuántas veces se creó una (no se incrementa al reutilizar capacidad).
+    // Permite comprobar que un resize de pocos píxeles no recrea la textura.
+    long long framebufCreations() const { return framebufCreations_; }
     void resetChromePaintCountersForTests() const {
         chromePaintCalls_ = 0;
         messageBarCursorPaints_ = 0;
+    }
+    // Última geometría física del frame resuelta para pintar (gaps incluidos).
+    // Solo lectura; se actualiza al presentar.
+    const guichrome::FramePixelGeometry& lastFrameGeometry() const {
+        return lastFrameGeometry_;
     }
 
     // Tema claro/oscuro: conmuta `dark_` y libera el caché de texturas
@@ -552,8 +561,13 @@ private:
     mutable int lastSkipped_ = 0;
     mutable bool lastChromeDirty_ = true;
     mutable guichrome::ChromePaintGeometry lastChromeGeometry_;
+    // Snapshot físico del frame (dimensiones activas + sobrantes) de la
+    // última presentación. Se calcula junto con lastChromeGeometry_ a partir
+    // de las métricas ya medidas del drawable y de la celda actual.
+    mutable guichrome::FramePixelGeometry lastFrameGeometry_;
     mutable int chromePaintCalls_ = 0;
     mutable int messageBarCursorPaints_ = 0;
+    mutable long long framebufCreations_ = 0;
     // Captura del último frame de ventana (solo tests, desactivada por defecto).
     bool captureEnabled_ = false;
     bool lastCaptureValid_ = false;
@@ -631,8 +645,13 @@ private:
     // (fresh=true: contenido indefinido, el caller pinta todo).
     struct FrameSurface {
         void* tex = nullptr;  // SDL_Texture* opaco (solo .cpp + HAVE_SDL2)
+        // Capacidad real de la textura (reservada). Puede ser mayor que el
+        // área activa para absorber los cambios de píxel de un resize sin
+        // recrear la textura: la copia a ventana usa sólo activeW/activeH.
         int w = 0;
         int h = 0;
+        int activeW = 0;
+        int activeH = 0;
     };
     // Contenido con ping-pong para el scroll-blit (etapa scroll-blit):
     // contentFb_[contentFbActive_] guarda la imagen vigente; el blit copia la
@@ -651,8 +670,14 @@ private:
     int framebufFailAfter_ = -1;
     void destroyFb(FrameSurface& s);
     void destroyFramebuf();
-    void* acquireFb(FrameSurface& s, void* sdlRenderer, int wPx, int hPx,
-                     bool& fresh);
+    // Resuelve el área ACTIVA del frame y la capacidad a reservar en la
+    // textura. Usa las métricas del drawable ya medidas (setDrawableMetrics)
+    // y la celda actual; nunca consulta SDL. `false` si no hay geometría
+    // válida (sin celda o layout degenerado).
+    bool resolveFramePixels(const Layout& layout, int& activeW, int& activeH,
+                            int& capW, int& capH) const;
+    void* acquireFb(FrameSurface& s, void* sdlRenderer, int activeW,
+                     int activeH, int capW, int capH, bool& fresh);
     const softwrap::Index* wrapIndex_ = nullptr;
 
     #ifdef HAVE_SDL2

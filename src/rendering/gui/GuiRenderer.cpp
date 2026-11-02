@@ -29,6 +29,8 @@ void GuiRenderer::destroyFb(FrameSurface& s) {
 #endif
     s.w = 0;
     s.h = 0;
+    s.activeW = 0;
+    s.activeH = 0;
 }
 
 void GuiRenderer::destroyFramebuf() {
@@ -37,7 +39,8 @@ void GuiRenderer::destroyFramebuf() {
     destroyFb(listFb_);
 }
 
-// Calcula y almacena la geometría de pintado del chrome inferior.
+// Calcula y almacena la geometría de pintado del chrome inferior y la del
+// frame físico (dimensiones activas + pseudo fila/columna).
 // Debe llamarse cuando se conoce el tamaño real del drawable (outH).
 // Produce posiciones válidas en modo anclado y legacy: el overlay no
 // interpreta modos, solo pinta la geometría recibida.
@@ -47,18 +50,44 @@ void GuiRenderer::updateChromeGeometry(const Layout& layout, int outW,
     const int cw = font_.cellW();
     if (ch <= 0 || cw <= 0) {
         lastChromeGeometry_ = guichrome::ChromePaintGeometry{};
+        lastFrameGeometry_ = guichrome::FramePixelGeometry{};
         return;
     }
     const int H = outH - contentTopInset_;
+    lastFrameGeometry_ =
+        guichrome::framePixelGeometry(layout, outW, H, cw, ch);
     lastChromeGeometry_ = guichrome::chromePaintGeometry(layout, outW, H, ch,
                                                          cw);
 }
 
-void* GuiRenderer::acquireFb(FrameSurface& s, void* sdlRenderer, int wPx,
-                             int hPx, bool& fresh) {
+bool GuiRenderer::resolveFramePixels(const Layout& layout, int& activeW,
+                                     int& activeH, int& capW,
+                                     int& capH) const {
+    const int cw = font_.cellW();
+    const int ch = font_.cellH();
+    const int usableH = drawablePixelH_ - contentTopInset_;
+    const guichrome::FramePixelGeometry f =
+        guichrome::framePixelGeometry(layout, drawablePixelW_, usableH, cw, ch);
+    if (!f.valid) return false;
+    activeW = f.width;
+    activeH = f.height;
+    if (f.exact) {
+        // Reserva el máximo del layout actual: cualquier residuo de píxel
+        // (0 <= r < celda) cabe sin recrear la textura durante el resize.
+        capW = f.logicalWidth + cw - 1;
+        capH = f.logicalHeight + ch - 1;
+    } else {
+        capW = activeW;
+        capH = activeH;
+    }
+    return activeW > 0 && activeH > 0;
+}
+
+void* GuiRenderer::acquireFb(FrameSurface& s, void* sdlRenderer, int activeW,
+                             int activeH, int capW, int capH, bool& fresh) {
     fresh = false;
 #ifdef HAVE_SDL2
-    if (!sdlRenderer || wPx <= 0 || hPx <= 0) return nullptr;
+    if (!sdlRenderer || activeW <= 0 || activeH <= 0) return nullptr;
     // Hook de tests (ver setFramebufAcquireFailAfterForTests): simula OOM de
     // SDL_CreateTexture sin tocar el estado de la superficie.
     if (framebufFailAfter_ >= 0) {
@@ -72,23 +101,34 @@ void* GuiRenderer::acquireFb(FrameSurface& s, void* sdlRenderer, int wPx,
     if (framebufTarget_ == 0)
         framebufTarget_ = SDL_RenderTargetSupported(r) ? 1 : -1;
     if (framebufTarget_ < 0) return nullptr;
-    if (s.tex && (s.w != wPx || s.h != hPx)) destroyFb(s);
+    if (capW < activeW) capW = activeW;
+    if (capH < activeH) capH = activeH;
+    // La capacidad existente alcanza: se reutiliza aunque el área activa
+    // (drawable + gaps) haya cambiado. Solo se recrea si el nuevo frame no
+    // cabe en la textura reservada.
+    if (s.tex && (s.w < capW || s.h < capH)) destroyFb(s);
     if (!s.tex) {
         SDL_Texture* t = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888,
-                                           SDL_TEXTUREACCESS_TARGET, wPx, hPx);
+                                           SDL_TEXTUREACCESS_TARGET, capW,
+                                           capH);
         if (!t) return nullptr;
         SDL_SetTextureBlendMode(t, SDL_BLENDMODE_NONE);
         s.tex = static_cast<void*>(t);
-        s.w = wPx;
-        s.h = hPx;
+        s.w = capW;
+        s.h = capH;
+        ++framebufCreations_;
         fresh = true;
     }
+    s.activeW = activeW;
+    s.activeH = activeH;
     return s.tex;
 #else
     (void)s;
     (void)sdlRenderer;
-    (void)wPx;
-    (void)hPx;
+    (void)activeW;
+    (void)activeH;
+    (void)capW;
+    (void)capH;
     return nullptr;
 #endif
 }
@@ -160,6 +200,9 @@ bool GuiRenderer::readLastSurfacePixels(std::vector<GuiColor>& out, int& wPx,
         lastIsList_ ? listFb_ : contentFb_[contentFbActive_];
     SDL_Texture* fb = static_cast<SDL_Texture*>(s.tex);
     if (!fb || s.w <= 0 || s.h <= 0) return false;
+    const int activeW = s.activeW > 0 ? std::min(s.activeW, s.w) : s.w;
+    const int activeH = s.activeH > 0 ? std::min(s.activeH, s.h) : s.h;
+    if (activeW <= 0 || activeH <= 0) return false;
     // Guarda/restaura el destino activo: la lectura no perturba al loop.
     SDL_Texture* prev = SDL_GetRenderTarget(r);
     if (SDL_SetRenderTarget(r, fb) != 0) return false;
@@ -170,13 +213,20 @@ bool GuiRenderer::readLastSurfacePixels(std::vector<GuiColor>& out, int& wPx,
                              s.w * static_cast<int>(sizeof(Uint32))) == 0;
     SDL_SetRenderTarget(r, prev);
     if (!ok) return false;
-    out.reserve(raw.size());
-    for (Uint32 v : raw)
-        out.push_back(GuiColor{static_cast<uint8_t>((v >> 16) & 0xFF),
-                               static_cast<uint8_t>((v >> 8) & 0xFF),
-                               static_cast<uint8_t>(v & 0xFF), 0xFF});
-    wPx = s.w;
-    hPx = s.h;
+    // La textura puede tener capacidad mayor que el frame activo. Se publica
+    // solo el rectángulo activo, que es lo que representa el frame actual.
+    out.reserve(static_cast<size_t>(activeW) * static_cast<size_t>(activeH));
+    for (int y = 0; y < activeH; ++y) {
+        const size_t row = static_cast<size_t>(y) * static_cast<size_t>(s.w);
+        for (int x = 0; x < activeW; ++x) {
+            const Uint32 v = raw[row + static_cast<size_t>(x)];
+            out.push_back(GuiColor{static_cast<uint8_t>((v >> 16) & 0xFF),
+                                   static_cast<uint8_t>((v >> 8) & 0xFF),
+                                   static_cast<uint8_t>(v & 0xFF), 0xFF});
+        }
+    }
+    wPx = activeW;
+    hPx = activeH;
     return true;
 #else
     return false;
@@ -1013,26 +1063,14 @@ void paintContentCursor(SDL_Renderer* r, GuiFont& font, bool dark,
     }
 }
 
-// Tamaño en píxeles del frame completo (contenido + chrome) para dimensionar
-// el framebuffer persistente. false si no hay celda válida o geometría
-// degenerada (el caller usa el fallback directo).
-bool framePxSize(const Layout& layout, int cw, int ch, int& wPx, int& hPx) {
-    if (cw <= 0 || ch <= 0) return false;
-    const int rows = layout.content.height + layout.chrome.height;
-    if (layout.chrome.width <= 0 || rows <= 0) return false;
-    wPx = layout.chrome.width * cw;
-    hPx = rows * ch;
-    return true;
-}
-
 // Pinta el StatusBar en una posición y dada (coordenadas útiles + topInset).
 // Única implementación de los segmentos/estilos del StatusBar.
 void paintStatusBarAt(SDL_Renderer* r, GuiFont& font, bool dark,
                       const ChromeData& chromeData, StyleRole accent,
                       const Layout& layout, int cw, int ch,
-                      int statusTop, int topInset) {
+                      int statusTop, int topInset, int chromeWidthPx) {
     if (layout.chrome.height < 1 || layout.chrome.width <= 0) return;
-    const int totalWpx = layout.chrome.width * cw;
+    const int totalWpx = chromeWidthPx;
     const int baseX = layout.chrome.col * cw;
     const GuiColor sbg = guichrome::statusBackground(dark);
     SDL_Rect srect{baseX, topInset + statusTop, totalWpx, ch};
@@ -1437,13 +1475,14 @@ bool GuiRenderer::tryFastCursorMove(
     if (sdlRenderer_) {
         SDL_Renderer* r = static_cast<SDL_Renderer*>(sdlRenderer_);
         const GuiColor bg = guichrome::background(dark_);
-        int wPx = 0, hPx = 0;
+        int wPx = 0, hPx = 0, capW = 0, capH = 0;
         bool fbFresh = false;
         SDL_Texture* fb = nullptr;
-        if (framePxSize(g.layout, font_.cellW(), font_.cellH(), wPx, hPx)) {
+        if (resolveFramePixels(g.layout, wPx, hPx, capW, capH)) {
             bool fr = false;
             fb = static_cast<SDL_Texture*>(acquireFb(
-                contentFb_[contentFbActive_], sdlRenderer_, wPx, hPx, fr));
+                contentFb_[contentFbActive_], sdlRenderer_, wPx, hPx, capW,
+                capH, fr));
             fbFresh = (fb != nullptr) && fr;
         }
         // Pre-chequeado arriba: fb existe y no es fresco (misma geometría).
@@ -1457,10 +1496,15 @@ bool GuiRenderer::tryFastCursorMove(
             return true;
         }
         SDL_SetRenderTarget(r, fb);
+        const auto fg = guichrome::framePixelGeometry(
+            g.layout, drawablePixelW_, drawablePixelH_ - contentTopInset_,
+            font_.cellW(), font_.cellH());
+        const int activeRightPx = fg.logicalWidth + fg.rightSpacerPx;
         for (int k = 0; k < nRels; ++k) {
             if (!dirty[static_cast<size_t>(rb[k].rel)]) continue;
             paintSnapshotRow(r, font_, dark_, g.layout, rb[k].rel,
-                             contentRows_[static_cast<size_t>(rb[k].rel)]);
+                             contentRows_[static_cast<size_t>(rb[k].rel)],
+                             activeRightPx);
         }
         // Filas dirty SOLO por cursor (sin rebuild): se repintan desde el
         // snapshot cacheado (idéntico al que pintaría el camino completo).
@@ -1475,7 +1519,8 @@ bool GuiRenderer::tryFastCursorMove(
             }
             if (!rebuilt) {
                 paintSnapshotRow(r, font_, dark_, g.layout, i,
-                                 contentRows_[static_cast<size_t>(i)]);
+                                 contentRows_[static_cast<size_t>(i)],
+                                 activeRightPx);
             }
         }
         // Cursor desde el snapshot (sin Frame en el camino rápido).
@@ -1689,8 +1734,8 @@ bool GuiRenderer::tryFastScrollLine(
         const GuiColor bg = guichrome::background(dark_);
         const int ccw = font_.cellW();
         const int cch = font_.cellH();
-        int wPx = 0, hPx = 0;
-        if (!framePxSize(g.layout, ccw, cch, wPx, hPx) || ccw <= 0 ||
+        int wPx = 0, hPx = 0, capW = 0, capH = 0;
+        if (!resolveFramePixels(g.layout, wPx, hPx, capW, capH) || ccw <= 0 ||
             cch <= 0) {
             invalidateCache();
             return true;
@@ -1702,9 +1747,11 @@ bool GuiRenderer::tryFastScrollLine(
         const int dstIdx = 1 - contentFbActive_;
         bool srcFresh = false, dstFresh = false;
         SDL_Texture* srcFb = static_cast<SDL_Texture*>(
-            acquireFb(contentFb_[srcIdx], sdlRenderer_, wPx, hPx, srcFresh));
+            acquireFb(contentFb_[srcIdx], sdlRenderer_, wPx, hPx, capW, capH,
+                      srcFresh));
         SDL_Texture* dstFb = static_cast<SDL_Texture*>(
-            acquireFb(contentFb_[dstIdx], sdlRenderer_, wPx, hPx, dstFresh));
+            acquireFb(contentFb_[dstIdx], sdlRenderer_, wPx, hPx, capW, capH,
+                      dstFresh));
         // Tres casos distintos de recuperación:
         //  - origen inválido o recién creado: no contiene la imagen vigente,
         //    así que no hay nada seguro de donde blitear ni repintar. Se
@@ -1720,11 +1767,17 @@ bool GuiRenderer::tryFastScrollLine(
             invalidateCache();
             return true;
         }
+        const auto fg = guichrome::framePixelGeometry(
+            g.layout, drawablePixelW_, drawablePixelH_ - contentTopInset_,
+            font_.cellW(), font_.cellH());
+        const int activeRightPx = fg.logicalWidth + fg.rightSpacerPx;
         if (!dstFb) {
             SDL_SetRenderTarget(r, srcFb);
+            SDL_RenderSetViewport(r, nullptr);
             for (int i = 0; i < H; ++i) {
                 paintSnapshotRow(r, font_, dark_, g.layout, i,
-                                 contentRows_[static_cast<size_t>(i)]);
+                                 contentRows_[static_cast<size_t>(i)],
+                                 activeRightPx);
             }
             paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
                                            contentRows_, next, shown);

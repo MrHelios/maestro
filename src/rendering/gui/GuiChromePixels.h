@@ -9,6 +9,71 @@
 
 namespace guichrome {
 
+// Geometría FÍSICA del frame en píxeles. Separa las dimensiones lógicas de
+// las del framebuffer activo:
+//
+//   logicalWidth  = layout.chrome.width * cw
+//   logicalHeight = (content.height + chrome.height) * ch
+//   rightSpacerPx = drawableW - logicalWidth      (0 <= r < cw en grilla)
+//   preChromeSpacerPx = usableH - logicalHeight   (0 <= r < ch en grilla)
+//
+// `exact` indica que ambos sobrantes son los residuos de la división entera
+// de guiGridSize (menores que una celda), de modo que el frame activo puede
+// cubrir EXACTAMENTE el área disponible del drawable sin estirar celdas:
+//
+//   width  == drawableW
+//   height == usableH   (drawable sin la barra de título)
+//
+// La pseudo columna (rightSpacerPx) queda a la derecha de las columnas
+// lógicas y la pseudo fila (preChromeSpacerPx) entre el contenido y el
+// chrome. El chrome se desplaza para quedar anclado al borde inferior, pero
+// sus filas/columnas LÓGICAS no cambian: los sobrantes son regiones físicas
+// vacías, no celdas del editor.
+//
+// Si el layout no cubre la grilla (p. ej. un viewport menor que el drawable),
+// o si el sobrante alcanza una celda completa, `exact=false` y se conserva la
+// geometría lógica histórica (el caller usa el modo legacy).
+struct FramePixelGeometry {
+    bool valid = false;
+    bool exact = false;
+    int logicalWidth = 0;
+    int logicalHeight = 0;
+    int width = 0;   // ancho ACTIVO del frame (== drawableW si exact)
+    int height = 0;  // alto ACTIVO del frame (== usableH si exact)
+    int rightSpacerPx = 0;
+    int preChromeSpacerPx = 0;
+};
+
+inline FramePixelGeometry framePixelGeometry(const Layout& layout,
+                                             int drawableW, int usableH,
+                                             int cw, int ch) {
+    FramePixelGeometry f;
+    if (cw <= 0 || ch <= 0 || drawableW <= 0 || usableH <= 0 ||
+        layout.chrome.width <= 0 || layout.content.height < 0 ||
+        layout.chrome.height < 0) {
+        return f;
+    }
+    f.valid = true;
+    f.logicalWidth = layout.chrome.width * cw;
+    f.logicalHeight =
+        (layout.content.height + layout.chrome.height) * ch;
+    const int right = drawableW - f.logicalWidth;
+    const int pre = usableH - f.logicalHeight;
+    // Solo son sobrantes de división entera si no alcanzan otra celda. Un
+    // residuo negativo significa que la grilla no entra en el drawable.
+    f.exact = right >= 0 && right < cw && pre >= 0 && pre < ch;
+    if (f.exact) {
+        f.width = drawableW;
+        f.height = usableH;
+        f.rightSpacerPx = right;
+        f.preChromeSpacerPx = pre;
+    } else {
+        f.width = f.logicalWidth;
+        f.height = f.logicalHeight;
+    }
+    return f;
+}
+
 struct BottomChromeGeometry {
     bool anchored = false;      // true solo cuando el layout cubre la ventana
     int contentBottom = 0;      // fin de la última fila de contenido (y útil)

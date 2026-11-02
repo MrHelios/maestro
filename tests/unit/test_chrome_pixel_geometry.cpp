@@ -171,3 +171,106 @@ TEST(chrome_pixels_gap_is_background_between_content_and_chrome) {
     CHECK_EQ(g.chromeTop, g.gapTop + g.gapPx);
     CHECK_EQ(g.chromeTop + g.chromeHeight, H); // chrome llega al borde inferior
 }
+
+// ---------------------------------------------------------------------------
+// Geometría física del frame: los dos sobrantes de guiGridSize se incorporan
+// como pseudo fila/columna para que el frame activo cubra el drawable sin
+// estirar celdas. No modifican las dimensiones lógicas.
+// ---------------------------------------------------------------------------
+
+TEST(chrome_pixels_frame_exact_incluye_gaps) {
+    Layout lo;
+    lo.content = {0, 0, 80, 20};
+    lo.chrome = {20, 0, 80, 2};
+    const int cw = 10, chh = 19;
+    const int logicalW = 80 * cw;            // 800
+    const int logicalH = (20 + 2) * chh;     // 418
+    const int drawableW = logicalW + 7;      // sobrante < cw
+    const int usableH = logicalH + 10;       // sobrante < ch
+    const auto f = guichrome::framePixelGeometry(lo, drawableW, usableH, cw,
+                                                 chh);
+    CHECK(f.valid);
+    CHECK(f.exact);
+    CHECK_EQ(f.logicalWidth, logicalW);
+    CHECK_EQ(f.logicalHeight, logicalH);
+    CHECK_EQ(f.width, drawableW);
+    CHECK_EQ(f.height, usableH);
+    CHECK_EQ(f.rightSpacerPx, 7);
+    CHECK_EQ(f.preChromeSpacerPx, 10);
+}
+
+TEST(chrome_pixels_frame_sin_sobrantes_sigue_exacto) {
+    Layout lo;
+    lo.content = {0, 0, 80, 20};
+    lo.chrome = {20, 0, 80, 2};
+    const auto f = guichrome::framePixelGeometry(lo, 800, 418, 10, 19);
+    CHECK(f.valid);
+    CHECK(f.exact);
+    CHECK_EQ(f.width, 800);
+    CHECK_EQ(f.height, 418);
+    CHECK_EQ(f.rightSpacerPx, 0);
+    CHECK_EQ(f.preChromeSpacerPx, 0);
+}
+
+TEST(chrome_pixels_frame_sobrante_de_una_celda_no_es_exacto) {
+    Layout lo;
+    lo.content = {0, 0, 80, 20};
+    lo.chrome = {20, 0, 80, 2};
+    // Un sobrante >= celda significa que falta una columna/fila lógica: no es
+    // el residuo de guiGridSize y se conserva la geometría legacy.
+    auto right = guichrome::framePixelGeometry(lo, 810, 418, 10, 19);
+    CHECK(right.valid);
+    CHECK(!right.exact);
+    CHECK_EQ(right.width, 800);
+    CHECK_EQ(right.height, 418);
+    CHECK_EQ(right.rightSpacerPx, 0);
+
+    auto bottom = guichrome::framePixelGeometry(lo, 800, 437, 10, 19);
+    CHECK(bottom.valid);
+    CHECK(!bottom.exact);
+    CHECK_EQ(bottom.width, 800);
+    CHECK_EQ(bottom.height, 418);
+    CHECK_EQ(bottom.preChromeSpacerPx, 0);
+}
+
+TEST(chrome_pixels_frame_no_entra_en_el_drawable_es_legacy) {
+    Layout lo;
+    lo.content = {0, 0, 80, 20};
+    lo.chrome = {20, 0, 80, 2};
+    // Sobrantes negativos (grilla más grande que el área): legacy con
+    // clipping posterior, nunca exact.
+    auto narrow = guichrome::framePixelGeometry(lo, 799, 418, 10, 19);
+    CHECK(narrow.valid);
+    CHECK(!narrow.exact);
+    CHECK_EQ(narrow.width, 800);
+    CHECK_EQ(narrow.height, 418);
+
+    auto shortH = guichrome::framePixelGeometry(lo, 800, 417, 10, 19);
+    CHECK(shortH.valid);
+    CHECK(!shortH.exact);
+    CHECK_EQ(shortH.width, 800);
+    CHECK_EQ(shortH.height, 418);
+}
+
+TEST(chrome_pixels_frame_sin_chrome_tambien_cubre_sobrantes) {
+    Layout lo;
+    lo.content = {0, 0, 80, 40};
+    lo.chrome = {40, 0, 80, 0};
+    const auto f = guichrome::framePixelGeometry(lo, 805, 763, 10, 19);
+    CHECK(f.valid);
+    CHECK(f.exact);
+    CHECK_EQ(f.logicalWidth, 800);
+    CHECK_EQ(f.logicalHeight, 760);
+    CHECK_EQ(f.rightSpacerPx, 5);
+    CHECK_EQ(f.preChromeSpacerPx, 3);
+}
+
+TEST(chrome_pixels_frame_geometria_invalida) {
+    Layout lo;
+    lo.content = {0, 0, 80, 20};
+    lo.chrome = {20, 0, 80, 2};
+    CHECK(!guichrome::framePixelGeometry(lo, 800, 418, 0, 19).valid);
+    CHECK(!guichrome::framePixelGeometry(lo, 800, 418, 10, 0).valid);
+    CHECK(!guichrome::framePixelGeometry(lo, 0, 418, 10, 19).valid);
+    CHECK(!guichrome::framePixelGeometry(lo, 800, 0, 10, 19).valid);
+}
