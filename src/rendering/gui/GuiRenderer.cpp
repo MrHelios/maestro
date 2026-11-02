@@ -900,8 +900,11 @@ void paintSegmentRow(SDL_Renderer* r, GuiFont& font, bool dark,
 // Contenido del editor: filas del Frame con gutter + sintaxis + Selection
 // (selección y highlight de búsqueda comparten rol) + BracketMatch +
 // fondo de línea actual. Sin SDL es no-op (el snapshot ya se guardó).
+// El fondo de cada fila se extiende hasta rightSpacerPx para cubrir el ancho
+// completo del frame activo (pseudo columna).
 void paintFrameContent(SDL_Renderer* r, GuiFont& font, bool dark,
-                       const Layout& layout, const Frame& f) {
+                       const Layout& layout, const Frame& f,
+                       int activeRightPx) {
     const int cw = font.cellW();
     const int ch = font.cellH();
     if (cw <= 0 || ch <= 0) return;
@@ -909,6 +912,16 @@ void paintFrameContent(SDL_Renderer* r, GuiFont& font, bool dark,
         const StyledRow& fr = f.contentRows[row];
         const int py = (layout.content.row + static_cast<int>(row)) * ch;
         const int basePx = layout.content.col * cw;
+        // Fondo de la fila desde basePx hasta el borde derecho activo del
+        // frame, sin asumir que el contenido empieza en X=0.
+        const int rowWpx = activeRightPx - basePx;
+        {
+            const GuiColor fillBg =
+                guichrome::styleFor(StyleRole::Default, fr.isCurrentLine, dark).bg;
+            SDL_Rect fill{basePx, py, rowWpx, ch};
+            SDL_SetRenderDrawColor(r, fillBg.r, fillBg.g, fillBg.b, fillBg.a);
+            SDL_RenderFillRect(r, &fill);
+        }
         int colCells = 0;
         for (const auto& seg : fr.segs) {
             paintSegmentRow(r, font, dark, basePx, py, cw, ch,
@@ -926,7 +939,8 @@ void paintFrameContent(SDL_Renderer* r, GuiFont& font, bool dark,
 // real "~" tiene el mismo texto "  ~" pero filler=false).
 void paintListContent(SDL_Renderer* r, GuiFont& font, bool dark,
                       const Layout& layout,
-                      const std::vector<ListLine>& lines, int selectedRow) {
+                      const std::vector<ListLine>& lines, int selectedRow,
+                      int activeRightPx) {
     const int cw = font.cellW();
     const int ch = font.cellH();
     if (cw <= 0 || ch <= 0) return;
@@ -939,7 +953,9 @@ void paintListContent(SDL_Renderer* r, GuiFont& font, bool dark,
         const int px = layout.content.col * cw;
         const std::string& text = lines[row].text;
         const int cols = chrome::colCount(text);
-        SDL_Rect bg{px, py, layout.content.width * cw, ch};
+        // Fondo de la fila: se extiende hasta el borde derecho activo.
+        const int rowWpx = activeRightPx - px;
+        SDL_Rect bg{px, py, rowWpx, ch};
         SDL_SetRenderDrawColor(r, st.bg.r, st.bg.g, st.bg.b, st.bg.a);
         SDL_RenderFillRect(r, &bg);
         if (!lines[row].filler) {
@@ -960,20 +976,21 @@ void paintListContent(SDL_Renderer* r, GuiFont& font, bool dark,
 // las filas limpias del backbuffer se conservan intactas entre Presents.
 void paintSnapshotRow(SDL_Renderer* r, GuiFont& font, bool dark,
                       const Layout& layout, int relRow,
-                      const GuiContentRow& row) {
+                      const GuiContentRow& row, int activeRightPx) {
     const int cw = font.cellW();
     const int ch = font.cellH();
     if (cw <= 0 || ch <= 0) return;
     const int py = (layout.content.row + relRow) * ch;
     const int basePx = layout.content.col * cw;
-    // Fondo de la fila ANTES de los segmentos: sin el RenderClear del full,
-    // una fila que se acorta (texto largo -> corto) dejaría píxeles
-    // obsoletos a la derecha. Las filas CurrentLine ya traen su pad como
-    // segmento; el resto muestra el fondo base (igual que el clear).
+    // Fondo de la fila desde basePx hasta el borde derecho activo del frame.
+    // Si la fila es la línea actual, usa el estilo CurrentLine para el fondo
+    // del gap, no el fondo general, así la selección visual no se corta.
+    const int rowWpx = activeRightPx - basePx;
     {
-        const GuiColor bg = guichrome::background(dark);
-        SDL_Rect fill{basePx, py, layout.content.width * cw, ch};
-        SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
+        const GuiColor fillBg =
+            guichrome::styleFor(StyleRole::Default, row.isCurrentLine, dark).bg;
+        SDL_Rect fill{basePx, py, rowWpx, ch};
+        SDL_SetRenderDrawColor(r, fillBg.r, fillBg.g, fillBg.b, fillBg.a);
         SDL_RenderFillRect(r, &fill);
     }
     int colCells = 0;
@@ -988,7 +1005,7 @@ void paintSnapshotRow(SDL_Renderer* r, GuiFont& font, bool dark,
 // Misma composición que paintListContent pero para una sola fila.
 void paintSnapshotListRow(SDL_Renderer* r, GuiFont& font, bool dark,
                           const Layout& layout, int relRow, const ListLine& line,
-                          bool selected) {
+                          bool selected, int activeRightPx) {
     const int cw = font.cellW();
     const int ch = font.cellH();
     if (cw <= 0 || ch <= 0) return;
@@ -999,7 +1016,9 @@ void paintSnapshotListRow(SDL_Renderer* r, GuiFont& font, bool dark,
     const int px = layout.content.col * cw;
     const std::string& text = line.text;
     const int cols = chrome::colCount(text);
-    SDL_Rect bg{px, py, layout.content.width * cw, ch};
+    // Fondo de la fila: se extiende hasta el borde derecho activo.
+    const int rowWpx = activeRightPx - px;
+    SDL_Rect bg{px, py, rowWpx, ch};
     SDL_SetRenderDrawColor(r, st.bg.r, st.bg.g, st.bg.b, st.bg.a);
     SDL_RenderFillRect(r, &bg);
     if (!line.filler) {
@@ -1206,7 +1225,9 @@ void paintWindowChromeOverlays(SDL_Renderer* r, GuiFont& font, bool dark,
                                const GuiTitleBar* titleBar,
                                const guichrome::ChromePaintGeometry& geometry,
                                int& chromePaintCalls, int& cursorPaints,
-                               int drawableW, int drawableH) {
+                               int drawableW, int drawableH,
+                               int chromeLeftPx, int chromeRightPx,
+                               int /*chromeTopPx*/, int /*chromeBottomPx*/) {
     ++chromePaintCalls;
     SDL_RenderSetViewport(r, nullptr);
 
@@ -1220,9 +1241,11 @@ void paintWindowChromeOverlays(SDL_Renderer* r, GuiFont& font, bool dark,
     if (H <= 0) return;
 
     // 1. Residuo entre contenido y chrome (solo anclado): background.
+    //    El gap se rellena hasta chromeRightPx (incluye rightSpacerPx en
+    //    modo exacto para no dejar franjas sin pintar).
     if (geometry.gapHeight > 0) {
-        const int baseX = layout.chrome.col * font.cellW();
-        const int bandW = layout.chrome.width * font.cellW();
+        const int baseX = chromeLeftPx;
+        const int bandW = chromeRightPx - chromeLeftPx;
         const GuiColor bg = guichrome::background(dark);
         SDL_Rect gap{baseX, topInset + geometry.gapTop, bandW,
                      geometry.gapHeight};
@@ -1231,8 +1254,10 @@ void paintWindowChromeOverlays(SDL_Renderer* r, GuiFont& font, bool dark,
     }
 
     // 2. StatusBar (en ambos modos: la geometría trae su fila).
+    //    El fondo del StatusBar se extiende hasta chromeRightPx.
     paintStatusBarAt(r, font, dark, chromeData, accent, layout,
-                     font.cellW(), ch, geometry.statusTop, topInset);
+                     font.cellW(), ch, geometry.statusTop, topInset,
+                     chromeRightPx - chromeLeftPx);
 
     // 3. MessageBar: fondo, texto y cursor Bar.
     paintMessageBarOverlay(r, font, dark, layout, chromeData, cursor,
@@ -1789,10 +1814,11 @@ bool GuiRenderer::tryFastScrollLine(
         // siempre sobre el destino (2 filas baratas; su región en el destino
         // puede estar obsoleta y el blit no la cubre).
         SDL_SetRenderTarget(r, dstFb);
+        SDL_RenderSetViewport(r, nullptr);
+        const int x0 = g.layout.content.col * ccw;
+        const int y0 = g.layout.content.row * cch;
         if (H > 1) {
-            const int x0 = g.layout.content.col * ccw;
-            const int y0 = g.layout.content.row * cch;
-            const int wRow = g.layout.content.width * ccw;
+            const int wRow = activeRightPx - x0;
             SDL_Rect src{0, 0, 0, 0}, dst{0, 0, 0, 0};
             if (delta == 1) {
                 // El contenido sube: destino[i] <- origen[i+1].
@@ -1805,10 +1831,16 @@ bool GuiRenderer::tryFastScrollLine(
             }
             SDL_RenderCopy(r, srcFb, &src, &dst);
         }
+        // La fila expuesta por el scroll (la que no proviene del blit)
+        // debe repintarse siempre, aunque no esté sucia, para actualizar
+        // su fondo (incluyendo el gap horizontal) y su contenido.
+        const int exposedRow = (delta == 1) ? H - 1 : 0;
         for (int i = 0; i < H; ++i) {
-            if (!dirty[static_cast<size_t>(i)]) continue;
+            if (!dirty[static_cast<size_t>(i)] && i != exposedRow)
+                continue;
             paintSnapshotRow(r, font_, dark_, g.layout, i,
-                             contentRows_[static_cast<size_t>(i)]);
+                             contentRows_[static_cast<size_t>(i)],
+                             activeRightPx);
         }
         paintContentCursorFromSnapshot(r, font_, dark_, g.layout,
                                        contentRows_, next, shown);
@@ -1959,13 +1991,14 @@ void GuiRenderer::renderScreenDiff(
         // P1: el parcial pinta sobre el framebuffer persistente (las filas
         // limpias conservan sus píxeles AHÍ, no en el backbuffer). Después se
         // compone a ventana con clear+copia+Present: el backbuffer nunca se lee.
-        int wPx = 0, hPx = 0;
+        int wPx = 0, hPx = 0, capW = 0, capH = 0;
         bool fbFresh = false;
         SDL_Texture* fb = nullptr;
-        if (framePxSize(f.layout, font_.cellW(), font_.cellH(), wPx, hPx)) {
+        if (resolveFramePixels(f.layout, wPx, hPx, capW, capH)) {
             bool fr = false;
             fb = static_cast<SDL_Texture*>(acquireFb(
-                contentFb_[contentFbActive_], sdlRenderer_, wPx, hPx, fr));
+                contentFb_[contentFbActive_], sdlRenderer_, wPx, hPx, capW,
+                capH, fr));
             fbFresh = (fb != nullptr) && fr;
         }
         if (!fb) {
@@ -1976,20 +2009,31 @@ void GuiRenderer::renderScreenDiff(
                           /*withScrollbar=*/true);
         } else {
             SDL_SetRenderTarget(r, fb);
+            SDL_RenderSetViewport(r, nullptr);
             if (full || fbFresh) {
                 SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
                 SDL_RenderClear(r);
-                paintFrameContent(r, font_, dark_, f.layout, f);
+                const auto fg = guichrome::framePixelGeometry(
+                    f.layout, drawablePixelW_, drawablePixelH_ - contentTopInset_,
+                    font_.cellW(), font_.cellH());
+                const int activeRightPx = fg.logicalWidth + fg.rightSpacerPx;
+                paintFrameContent(r, font_, dark_, f.layout, f,
+                                  activeRightPx);
                 paintContentCursor(r, font_, dark_, f.layout, f.cursor, shown,
                                    &f, nullptr, -1);
             } else {
                 // Parcial sobre la textura: sin RenderClear; solo filas dirty
                 // + cursor. El chrome lo pinta el overlay una sola vez. Lee
                 // `fresh` (aún no movido).
+                const auto fg = guichrome::framePixelGeometry(
+                    f.layout, drawablePixelW_, drawablePixelH_ - contentTopInset_,
+                    font_.cellW(), font_.cellH());
+                const int activeRightPx = fg.logicalWidth + fg.rightSpacerPx;
                 for (int i = 0; i < contentH; ++i)
                     if (dirty[static_cast<size_t>(i)])
                         paintSnapshotRow(r, font_, dark_, f.layout, i,
-                                         fresh[static_cast<size_t>(i)]);
+                                         fresh[static_cast<size_t>(i)],
+                                         activeRightPx);
                 paintContentCursor(r, font_, dark_, f.layout, f.cursor, shown,
                                    &f, nullptr, -1);
             }
@@ -2085,13 +2129,13 @@ void GuiRenderer::renderListCommon(std::vector<ListLine> lines,
         // P1: igual que el contenido (ver renderScreenDiff): el parcial pinta
         // sobre el framebuffer persistente y compone con clear+copia+Present.
         // Lee `lines` (aún no movido).
-        int wPx = 0, hPx = 0;
+        int wPx = 0, hPx = 0, capW = 0, capH = 0;
         bool fbFresh = false;
         SDL_Texture* fb = nullptr;
-        if (framePxSize(layout, font_.cellW(), font_.cellH(), wPx, hPx)) {
+        if (resolveFramePixels(layout, wPx, hPx, capW, capH)) {
             bool fr = false;
             fb = static_cast<SDL_Texture*>(
-                acquireFb(listFb_, sdlRenderer_, wPx, hPx, fr));
+                acquireFb(listFb_, sdlRenderer_, wPx, hPx, capW, capH, fr));
             fbFresh = (fb != nullptr) && fr;
         }
         if (!fb) {
@@ -2102,18 +2146,29 @@ void GuiRenderer::renderListCommon(std::vector<ListLine> lines,
                           /*withScrollbar=*/false);
         } else {
             SDL_SetRenderTarget(r, fb);
+            SDL_RenderSetViewport(r, nullptr);
             if (full || fbFresh) {
                 SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
                 SDL_RenderClear(r);
-                paintListContent(r, font_, dark_, layout, lines, selectedRow);
+                const auto fg = guichrome::framePixelGeometry(
+                    layout, drawablePixelW_, drawablePixelH_ - contentTopInset_,
+                    font_.cellW(), font_.cellH());
+                const int activeRightPx = fg.logicalWidth + fg.rightSpacerPx;
+                paintListContent(r, font_, dark_, layout, lines, selectedRow,
+                                 activeRightPx);
                 paintContentCursor(r, font_, dark_, layout, lastCursor_, shown,
                                    nullptr, &lines, selectedRow);
             } else {
+                const auto fg = guichrome::framePixelGeometry(
+                    layout, drawablePixelW_, drawablePixelH_ - contentTopInset_,
+                    font_.cellW(), font_.cellH());
+                const int activeRightPx = fg.logicalWidth + fg.rightSpacerPx;
                 for (int i = 0; i < listH; ++i)
                     if (dirty[static_cast<size_t>(i)])
                         paintSnapshotListRow(r, font_, dark_, layout, i,
                                              lines[static_cast<size_t>(i)],
-                                             i == selectedRow);
+                                             i == selectedRow,
+                                             activeRightPx);
                 paintContentCursor(r, font_, dark_, layout, lastCursor_, shown,
                                    nullptr, &lines, selectedRow);
             }
@@ -2421,49 +2476,103 @@ void GuiRenderer::presentFramebuf(SDL_Renderer* r, SDL_Texture* fb,
                                   const GuiColor& bg, const Layout& layout, int ch,
                                   const ChromeData& chromeData,
                                   const FrameCursor& cursor, bool cursorShown) {
-    // Rellenar las filas de chrome del framebuffer con background para que la
-    // lectura de superficie (tests) sea consistente entre caminos full y
-    // parcial. El chrome real se pinta por el overlay tras la copia a ventana.
-    // En el camino full el fb se limpia entero (bg en todo); en el parcial solo
-    // se tocan filas dirty, así que las filas de chrome quedarían con píxeles
-    // obsoletos si no se normalizan aquí.
     // Precondición explícita: el target activo debe ser fb (los callers hacen
     // SDL_SetRenderTarget(r, fb) justo antes de invocar esta función).
-    // Un target incorrecto no cancela toda la presentación: solo se omite la
-    // normalización del framebuffer y se continúa con la copia a ventana y el
-    // overlay de chrome.
-    if (layout.chrome.height > 0 && ch > 0) {
-        SDL_Texture* currentTarget = SDL_GetRenderTarget(r);
-        assert(currentTarget == fb);
-        if (currentTarget == fb) {
-            int w = 0, h = 0;
-            SDL_QueryTexture(fb, nullptr, nullptr, &w, &h);
+    // La geometría física se resuelve UNA vez con las métricas ya medidas del
+    // drawable; la misma instantánea decide el relleno del framebuffer, el
+    // rectángulo de copia y el overlay del chrome (sin consultas SDL nuevas).
+    assert(drawableMetricsInitialized_);
+    updateChromeGeometry(layout, drawablePixelW_, drawablePixelH_);
+    const guichrome::FramePixelGeometry frame = lastFrameGeometry_;
+
+    int texW = 0, texH = 0;
+    SDL_QueryTexture(fb, nullptr, nullptr, &texW, &texH);
+    const int copyW = std::min(frame.width > 0 ? frame.width : texW, texW);
+    const int copyH = std::min(frame.height > 0 ? frame.height : texH, texH);
+
+    // Normalizar en el framebuffer las regiones que NO son contenido:
+    //  - camino exacto: pseudo columna (derecha) + pseudo fila y chrome
+    //    (debajo del contenido), de modo que el framebuffer represente
+    //    exactamente el frame activo también en repintados parciales;
+    //  - camino legacy: las filas lógicas del chrome (comportamiento previo).
+    // El chrome real se pinta por el overlay tras la copia a ventana.
+    SDL_Texture* currentTarget = SDL_GetRenderTarget(r);
+    assert(currentTarget == fb);
+    if (currentTarget == fb && ch > 0) {
+        SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
+        if (frame.valid && frame.exact) {
+            const int contentBottom = layout.content.height * ch;
+            // Pseudo fila: espacio físico entre contenido y chrome, rellenado
+            // con fondo. preChromeSpacerPx es la fuente única de este valor
+            // (no se recalcula: no desplaza el anclaje inferior del chrome).
+            const int gapH = std::min(frame.preChromeSpacerPx,
+                                      copyH - contentBottom);
+            if (gapH > 0) {
+                SDL_Rect gapRect{0, contentBottom, copyW, gapH};
+                SDL_RenderFillRect(r, &gapRect);
+            }
+            // Filas de chrome: se normalizan con fondo (el overlay las pinta
+            // después). El inicio físico del chrome es contentBottom + gapH,
+            // manteniendo el anclaje inferior intacto.
+            const int chromeTopPx = contentBottom + gapH;
+            if (chromeTopPx < copyH) {
+                SDL_Rect chromeRect{0, chromeTopPx, copyW,
+                                    copyH - chromeTopPx};
+                SDL_RenderFillRect(r, &chromeRect);
+            }
+            // Pseudo columna: no se rellena acá. Los pintores de filas
+            // (paintFrameContent, paintSnapshotRow, paintListContent,
+            // paintSnapshotListRow) ya extienden sus fondos hasta
+            // activeRightPx (logicalWidth + rightSpacerPx) con el estilo
+            // correspondiente, incluido CurrentLine. Rellenar acá con el
+            // fondo general destruiría el fondo de la línea actual.
+        } else if (layout.chrome.height > 0) {
             const int chromeStartY = layout.chrome.row * ch;
             const int chromeHeightPx = layout.chrome.height * ch;
-            if (chromeStartY < h && chromeHeightPx > 0) {
-                const int fillH = std::min(chromeHeightPx, h - chromeStartY);
-                SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
-                SDL_Rect crect{0, chromeStartY, w, fillH};
+            if (chromeStartY < copyH && chromeHeightPx > 0) {
+                const int fillH = std::min(chromeHeightPx, copyH - chromeStartY);
+                SDL_Rect crect{0, chromeStartY, copyW, fillH};
                 SDL_RenderFillRect(r, &crect);
             }
         }
     }
 
-    // Obtener la geometría del chrome anclado a partir de las métricas del
-    // drawable ya medidas (Fase 2: setDrawableMetrics desde el loop; el
-    // drawable completo, sin re-medir).
-    assert(drawableMetricsInitialized_);
+    // Límites físicos del chrome para el overlay.
+    //  - En modo exacto: ancho incluye rightSpacerPx, alto comienza tras la
+    //    pseudo fila y termina en el borde inferior del frame activo.
+    //  - En modo legacy: ancho lógico sin rightSpacer, alto comienza en la
+    //    fila lógica del chrome.
+    // El texto y las celdas del chrome siguen limitados al ancho lógico;
+    // solo el fondo del chrome se extiende hasta chromeRightPx.
+    int chromeLeftPx = 0;
+    int chromeRightPx = 0;
+    int chromeTopPx = 0;
+    int chromeBottomPx = 0;
+    if (frame.valid && frame.exact) {
+        const int contentBottom = layout.content.height * ch;
+        const int gapH = std::min(frame.preChromeSpacerPx,
+                                  copyH - contentBottom);
+        chromeLeftPx = 0;
+        chromeRightPx = frame.logicalWidth + frame.rightSpacerPx;
+        chromeTopPx = contentBottom + gapH;
+        chromeBottomPx = copyH;
+    } else if (layout.chrome.height > 0) {
+        const int cw = font_.cellW();
+        chromeLeftPx = layout.chrome.col * cw;
+        chromeRightPx = layout.chrome.width * cw;
+        chromeTopPx = layout.chrome.row * ch;
+        chromeBottomPx = copyH;
+    }
+
+    // Copiar SOLO el rectángulo activo, 1:1 (nunca escalar celdas). La
+    // capacidad reservada puede ser mayor; el viewport/clip del target de
+    // ventana y los rects fuente/destino evitan mostrar píxeles sobrantes.
     SDL_SetRenderTarget(r, nullptr);
-    const int outW = drawablePixelW_;
-    const int outH = drawablePixelH_;
-    updateChromeGeometry(layout, outW, outH);
-    
     SDL_SetRenderDrawColor(r, bg.r, bg.g, bg.b, bg.a);
     SDL_RenderClear(r);
-    int w = 0, h = 0;
-    SDL_QueryTexture(fb, nullptr, nullptr, &w, &h);
-    SDL_Rect dst{0, contentTopInset_, w, h};
-    SDL_RenderCopy(r, fb, nullptr, &dst);
+    SDL_Rect src{0, 0, copyW, copyH};
+    SDL_Rect dst{0, contentTopInset_, copyW, copyH};
+    SDL_RenderCopy(r, fb, &src, &dst);
 
     SDL_RenderSetViewport(r, nullptr);
     paintVerticalScrollbar(r, layout);
@@ -2472,7 +2581,9 @@ void GuiRenderer::presentFramebuf(SDL_Renderer* r, SDL_Texture* fb,
                               ch, contentTopInset_, titleBar_,
                               lastChromeGeometry_,
                               chromePaintCalls_, messageBarCursorPaints_,
-                              drawablePixelW_, drawablePixelH_);
+                              drawablePixelW_, drawablePixelH_,
+                              chromeLeftPx, chromeRightPx,
+                              chromeTopPx, chromeBottomPx);
     if (captureEnabled_) captureBackbuffer_(r);
     SDL_RenderPresent(r);
 }
@@ -2497,11 +2608,17 @@ void GuiRenderer::presentWindow(SDL_Renderer* r, const GuiColor& bg,
     // Pintar contenido (luego de clear y viewport). El cursor de contenido
     // se pinta tras el contenido pero antes del chrome overlay.
     if (contentFrame) {
-        paintFrameContent(r, font_, dark_, layout, *contentFrame);
+        const int activeRightPx =
+            lastFrameGeometry_.logicalWidth + lastFrameGeometry_.rightSpacerPx;
+        paintFrameContent(r, font_, dark_, layout, *contentFrame,
+                          activeRightPx);
         paintContentCursor(r, font_, dark_, layout, cursor, cursorShown,
                            contentFrame, nullptr, -1);
     } else if (listLines) {
-        paintListContent(r, font_, dark_, layout, *listLines, listSelectedRow);
+        const int activeRightPx =
+            lastFrameGeometry_.logicalWidth + lastFrameGeometry_.rightSpacerPx;
+        paintListContent(r, font_, dark_, layout, *listLines, listSelectedRow,
+                         activeRightPx);
         paintContentCursor(r, font_, dark_, layout, cursor, cursorShown,
                            nullptr, listLines, listSelectedRow);
     }
@@ -2516,12 +2633,37 @@ void GuiRenderer::presentWindow(SDL_Renderer* r, const GuiColor& bg,
     const int outW = drawablePixelW_;
     const int outH = drawablePixelH_;
     updateChromeGeometry(layout, outW, outH);
+
+    // Límites físicos del chrome para el overlay (fallback sin framebuffer).
+    const guichrome::FramePixelGeometry& frame = lastFrameGeometry_;
+    int chromeLeftPx = 0;
+    int chromeRightPx = outW;
+    int chromeTopPx = 0;
+    int chromeBottomPx = outH - contentTopInset_;
+    if (frame.valid && frame.exact) {
+        const int contentBottom = layout.content.height * ch;
+        const int gapH = std::min(frame.preChromeSpacerPx,
+                                  chromeBottomPx - contentBottom);
+        chromeLeftPx = 0;
+        chromeRightPx = frame.logicalWidth + frame.rightSpacerPx;
+        chromeTopPx = contentBottom + gapH;
+        // chromeBottomPx ya está seteado a usableH
+    } else if (layout.chrome.height > 0) {
+        const int cw = font_.cellW();
+        chromeLeftPx = layout.chrome.col * cw;
+        chromeRightPx = layout.chrome.width * cw;
+        chromeTopPx = layout.chrome.row * ch;
+        // chromeBottomPx ya está seteado a usableH
+    }
+
     paintWindowChromeOverlays(r, font_, dark_, layout, chromeData,
                               accent, cursor, cursorShown, ch,
                               contentTopInset_, titleBar_,
                               lastChromeGeometry_,
                               chromePaintCalls_, messageBarCursorPaints_,
-                              drawablePixelW_, drawablePixelH_);
+                              drawablePixelW_, drawablePixelH_,
+                              chromeLeftPx, chromeRightPx,
+                              chromeTopPx, chromeBottomPx);
     if (captureEnabled_) captureBackbuffer_(r);
     SDL_RenderPresent(r);
 }

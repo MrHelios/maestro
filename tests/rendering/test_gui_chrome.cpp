@@ -4679,3 +4679,214 @@ TEST(gui_renderer_set_drawable_metrics_acepta_valido_y_mantiene_previas) {
     CHECK(gui.drawableMetricsInitialized());
 }
 
+// El framebuffer cubre EXACTAMENTE el área disponible (drawable menos inset)
+// cuando los sobrantes son los residuos de guiGridSize: pseudo columna a la
+// derecha y pseudo fila entre contenido y chrome. Sin estirar celdas y sin
+// recrear la textura en resizes de pocos píxeles.
+TEST(gui_sdl_frame_pixels_pseudo_fila_columna_y_capacidad) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummy sdl(800, 600);
+    if (!sdl.ok) SKIP("sin video dummy");
+    GuiRenderer gui;
+    gui.initForRenderer(sdl.ren);
+    if (!gui.hasFont()) SKIP("sin fuente");
+    gui.setDrawableMetrics(sdl.drawableW, sdl.drawableH,
+                           gui.contentTopInset());
+    GuiColor probe{};
+    if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
+
+    const int cw = gui.cellW();
+    const int ch = gui.cellH();
+    CHECK(cw > 1);
+    CHECK(ch > 1);
+    const int inset = gui.contentTopInset();
+    const int colsBase = 80;
+    const int contentRows = 20;
+    const int chromeRows = 2;
+    const int gapX = cw / 2;   // 0 < gapX < cw
+    const int gapY = ch / 2;   // 0 < gapY < ch
+    const int targetW = colsBase * cw + gapX;
+    const int targetUsableH = (contentRows + chromeRows) * ch + gapY;
+    const int targetH = inset + targetUsableH;
+
+    auto resizeAndMeasure = [&](int w, int h) {
+        SDL_SetWindowSize(sdl.win, w, h);
+        SDL_PumpEvents();
+        int outW = 0, outH = 0;
+        SDL_GetRendererOutputSize(sdl.ren, &outW, &outH);
+        sdl.drawableW = outW;
+        sdl.drawableH = outH;
+        gui.setDrawableMetrics(outW, outH, gui.contentTopInset());
+        return std::pair<int, int>{outW, outH};
+    };
+
+    auto [outW, outH] = resizeAndMeasure(targetW, targetH);
+    CHECK_EQ(outW, targetW);
+    CHECK_EQ(outH, targetH);
+    const int usableH = outH - inset;
+    CHECK_EQ(usableH % ch, gapY);
+    CHECK_EQ(outW % cw, gapX);
+    const int gridRows = usableH / ch;
+    CHECK_EQ(gridRows, contentRows + chromeRows);
+
+    NullTestSink sink;
+    Document doc;
+    doc.restore({"hola", "mundo", "linea 3"});
+    // Suficientes líneas para que un desplazamiento de viewport sea válido
+    // con 20 filas de contenido.
+    std::vector<std::string> extraLines(gridRows + 10, "");
+    doc.insertBlock(doc.lineCount(), 0, extraLines);
+    Cursor cur;
+    Message msg{std::string("Guardado"), MessageKind::Info, std::nullopt};
+    Viewport vp = makeVp(gridRows - chromeRows, outW / cw);
+
+    gui.setCaptureEnabled(true);
+    auto render = [&] {
+        gui.renderScreenDiff(doc, cur, vp, "t.txt", false,
+                             makeChromeRequest(msg, State::Navegacion), sink,
+                             std::nullopt, std::nullopt, std::nullopt);
+    };
+    render();
+
+    const Layout lo = gui.lastLayout();
+    const guichrome::FramePixelGeometry fg = gui.lastFrameGeometry();
+    CHECK(fg.valid);
+    CHECK(fg.exact);
+    CHECK_EQ(lo.content.height, contentRows);
+    CHECK_EQ(lo.chrome.height, chromeRows);
+    CHECK_EQ(fg.logicalWidth, colsBase * cw);
+    CHECK_EQ(fg.logicalHeight, (contentRows + chromeRows) * ch);
+    CHECK_EQ(fg.rightSpacerPx, gapX);
+    CHECK_EQ(fg.preChromeSpacerPx, gapY);
+    CHECK_EQ(fg.width, outW);
+    CHECK_EQ(fg.height, usableH);
+
+    // El framebuffer activo (no la capacidad reservada) mide exactamente el
+    // área disponible del drawable.
+    std::vector<GuiColor> fb;
+    int fbW = 0, fbH = 0;
+    CHECK(gui.readLastSurfacePixels(fb, fbW, fbH));
+    CHECK_EQ(fbW, outW);
+    CHECK_EQ(fbH, usableH);
+    CHECK_EQ(static_cast<int>(fb.size()), fbW * fbH);
+    const GuiColor bg = guichrome::background(gui.isDarkTheme());
+    auto fbPx = [&](int x, int y) {
+        return fb[static_cast<size_t>(y) * static_cast<size_t>(fbW) +
+                  static_cast<size_t>(x)];
+    };
+    // Pseudo columna: fondo, sin texto ni chrome.
+    CHECK(fbPx(fg.logicalWidth + gapX / 2, ch / 2) == bg);
+    // Pseudo fila (entre contenido y chrome): fondo.
+    CHECK(fbPx(cw / 2, contentRows * ch + gapY / 2) == bg);
+
+    // Ventana compuesta: el borde derecho y la pseudo fila también son fondo,
+    // y el chrome sigue anclado al borde inferior (no se desplaza dos veces).
+    std::vector<GuiColor> win;
+    int winW = 0, winH = 0;
+    CHECK(gui.readWindowPixels(win, winW, winH));
+    CHECK_EQ(winW, outW);
+    CHECK_EQ(winH, outH);
+    auto winPx = [&](int x, int y) {
+        return win[static_cast<size_t>(y) * static_cast<size_t>(winW) +
+                   static_cast<size_t>(x)];
+    };
+    CHECK(winPx(outW - 1, inset + ch / 2) == bg);
+    CHECK(winPx(cw / 2, inset + contentRows * ch + gapY / 2) == bg);
+    const guichrome::BottomChromeGeometry chrome =
+        guichrome::bottomChromeGeometry(usableH, ch, contentRows, chromeRows);
+    CHECK(chrome.anchored);
+    CHECK(winPx(cw / 2, inset + chrome.statusTop + ch / 2) ==
+          guichrome::statusBackground(gui.isDarkTheme()));
+    CHECK(winPx(cw / 2, inset + chrome.messageTop + ch / 2) ==
+          guichrome::messageBackground(gui.isDarkTheme()));
+    gui.setCaptureEnabled(false);
+
+    // Resize de 1 px en ambos ejes, sin cambiar filas/columnas: el área
+    // activa crece, pero la capacidad reservada absorbe el cambio. La
+    // textura NO se recrea.
+    const long long creations = gui.framebufCreations();
+    auto [outW2, outH2] = resizeAndMeasure(targetW + 1, targetH + 1);
+    CHECK_EQ(outW2, targetW + 1);
+    CHECK_EQ(outH2, targetH + 1);
+    render();
+    CHECK_EQ(gui.framebufCreations(), creations);
+    const guichrome::FramePixelGeometry fg2 = gui.lastFrameGeometry();
+    CHECK(fg2.exact);
+    CHECK_EQ(fg2.rightSpacerPx, gapX + 1);
+    CHECK_EQ(fg2.preChromeSpacerPx, gapY + 1);
+    CHECK(gui.readLastSurfacePixels(fb, fbW, fbH));
+    CHECK_EQ(fbW, outW2);
+    CHECK_EQ(fbH, outH2 - inset);
+
+    // Cruzar un borde de columna cambia el layout lógico y exige más
+    // capacidad: la textura se recrea (una vez), como corresponde.
+    auto [outW3, outH3] =
+        resizeAndMeasure(targetW + 1 + cw, targetH + 1);
+    CHECK_EQ(outW3 / cw, outW2 / cw + 1);
+    // La columna lógica nueva debe entrar en el layout: el viewport manda.
+    vp = makeVp(gridRows - chromeRows, outW3 / cw);
+    const long long beforeColumn = gui.framebufCreations();
+    render();
+    CHECK(gui.framebufCreations() > beforeColumn);
+    CHECK(gui.lastFrameGeometry().exact);
+
+    // 1. Scroll rápido (ping-pong entre las dos superficies de contenido).
+    //    Debe ejecutar tryFastScrollLine y no caer al camino full.
+    //    Comprobamos explícitamente con !gui.lastWasFull().
+    Viewport vpScroll = makeVp(gridRows - chromeRows, outW3 / cw);
+    vpScroll.top = 1;
+    Cursor curScroll = cur;
+    curScroll.line = 1;
+    gui.renderScreenDiff(doc, curScroll, vpScroll, "t.txt", false,
+                         makeChromeRequest(msg, State::Navegacion), sink,
+                         std::nullopt, std::nullopt, std::nullopt);
+    CHECK(!gui.lastWasFull());  // tryFastScrollLine tuvo éxito (no cayó a full)
+    CHECK(gui.readLastSurfacePixels(fb, fbW, fbH));
+    CHECK_EQ(fbW, outW3);
+    CHECK_EQ(fbH, outH3 - inset);
+
+    // 2. Render parcial real: modificar una línea del documento entre
+    //    renders para forzar una fila dirty, y comprobar que se usa el
+    //    camino parcial (no full) sobre la textura cuya capacidad puede
+    //    ser mayor que el área activo.
+    doc.insertChar(0, 0, 'X');
+    render();
+    CHECK(!gui.lastWasFull());
+
+    // 3. Reducción del drawable seguida de crecimiento, sin superar la
+    //    capacidad reservada: la textura no debe recrearse y el área activa
+    //    sigue cubierta en modo exacto.
+    const long long beforeShrink = gui.framebufCreations();
+    auto [outW4, outH4] = resizeAndMeasure(targetW - 1, targetH - 1);
+    CHECK_EQ(outW4, targetW - 1);
+    CHECK_EQ(outH4, targetH - 1);
+    {
+        const int rows4 = (outH4 - inset) / ch;
+        vp = makeVp(rows4 - chromeRows, outW4 / cw);
+    }
+    render();
+    CHECK_EQ(gui.framebufCreations(), beforeShrink);
+    const guichrome::FramePixelGeometry fg4 = gui.lastFrameGeometry();
+    CHECK(fg4.exact);
+    CHECK_EQ(fg4.width, outW4);
+    CHECK_EQ(fg4.height, outH4 - inset);
+
+    auto [outW5, outH5] = resizeAndMeasure(targetW + 1, targetH + 1);
+    CHECK_EQ(outW5, targetW + 1);
+    CHECK_EQ(outH5, targetH + 1);
+    {
+        const int rows5 = (outH5 - inset) / ch;
+        vp = makeVp(rows5 - chromeRows, outW5 / cw);
+    }
+    render();
+    CHECK_EQ(gui.framebufCreations(), beforeShrink);
+    const guichrome::FramePixelGeometry fg5 = gui.lastFrameGeometry();
+    CHECK(fg5.exact);
+    CHECK_EQ(fg5.width, outW5);
+    CHECK_EQ(fg5.height, outH5 - inset);
+#endif
+}
+
+
