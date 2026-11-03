@@ -317,6 +317,11 @@ public:
     StyleRole lastAccent() const { return lastAccent_; }
     FrameCursor lastCursor() const { return lastCursor_; }
     Layout lastLayout() const { return lastLayout_; }
+    // Última geometría de pintado del chrome (para tests que verifican la
+    // composición del scrollbar y el gap vertical). Solo lectura.
+    const guichrome::ChromePaintGeometry& lastChromeGeometry() const {
+        return lastChromeGeometry_;
+    }
     // Contenido testeable sin SDL:
     //   - renderScreenDiff deja las filas del Frame (texto + rol por
     //     segmento, con Selection = selección o highlight de búsqueda).
@@ -425,15 +430,20 @@ public:
                               Sink& sink) override;
 
     void setScrollInfo(GuiScrollInfo info);
-    GuiScrollbarPress scrollbarPress(int pxX, int pxY);
-    int scrollbarTopFromY(int pxY, int grabOffsetPx) const;
+    GuiScrollbarPress scrollbarPress(int pxX, int pxY, int resizeBorderPx = 0);
+    int scrollbarTopFromY(int pxY, int grabOffsetPx,
+                          int resizeBorderPx = 0) const;
     bool scrollbarEnabled() const;
     const GuiScrollInfo& scrollInfo() const { return scrollInfo_; }
     // Debug: geometría del scrollbar para diagnóstico
-    // `resizeBorderPx`: margen de redimensionado en píxeles del drawable
-// (a HiDPI 2×, 8 puntos = 16 px). 0 = sin margen (tests sin SDL).
-GuiPixelRect scrollbarTrackRect(const Layout& layout, int resizeBorderPx = 0) const;
-    GuiPixelRect scrollbarThumbRect(const Layout& layout) const;
+    // `resizeBorderPx`: margen de redimensionado en píxeles del drawable.
+    // En el camino de producción se usa 0 para que el track llegue hasta el
+    // borde derecho de la ventana; el borde de resize (kResizeBorderPts) se
+    // solapa con esos últimos píxeles pero el scrollbar tiene prioridad
+    // (se chequea primero en el hit-test y en el hover).
+    GuiPixelRect scrollbarTrackRect(const Layout& layout, int resizeBorderPx = 0) const;
+    GuiPixelRect scrollbarThumbRect(const Layout& layout,
+                                    int resizeBorderPx = 0) const;
     int scrollbarThumbHeightPx(int trackH) const;
     int scrollbarMaxTop() const;
 
@@ -713,6 +723,7 @@ private:
                        const std::vector<ListLine>* listLines,
                        int listSelectedRow, bool withScrollbar);
 
-    void paintVerticalScrollbar(SDL_Renderer* r, const Layout& layout);
+    void paintVerticalScrollbar(SDL_Renderer* r, const Layout& layout,
+                                int resizeBorderPx = 0);
 #endif
 };

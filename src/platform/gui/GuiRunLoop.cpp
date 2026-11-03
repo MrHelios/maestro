@@ -1009,7 +1009,12 @@ int GuiRunLoop::run() {
                     // 2) Hit-test del scrollbar (prioridad sobre redimensionado).
                     if (ev.button.button == SDL_BUTTON_LEFT && gui_) {
                         const DrawablePoint p = toDrawablePoint(ev.button.x, ev.button.y);
-                        const GuiScrollbarPress hit = gui_->scrollbarPress(p.x, p.y);
+                        // resizeBorderPx = 0: el track llega hasta el borde
+                        // derecho. Los últimos kResizeBorderPts px se solapan
+                        // con la zona de resize pero el scrollbar tiene
+                        // prioridad (se chequea primero en el hit-test).
+                        const GuiScrollbarPress hit =
+                            gui_->scrollbarPress(p.x, p.y, /*resizeBorderPx=*/0);
 
                         if (hit.handled) {
                             scrollbarDragging_ = true;
@@ -1132,7 +1137,12 @@ int GuiRunLoop::run() {
                             scrollbarDragging_ = false;
                             sdlCaptureMouseBestEffort(SDL_FALSE);
                         } else {
-                            const int top = gui_->scrollbarTopFromY(p.y, scrollbarGrabOffsetPx_);
+                            // resizeBorderPx = 0: el track llega hasta el borde
+                            // derecho; el borde de resize (kResizeBorderPts = 3)
+                            // se solapa pero el arrastre del scrollbar tiene
+                            // prioridad sobre el resize.
+                            const int top = gui_->scrollbarTopFromY(
+                                p.y, scrollbarGrabOffsetPx_, /*resizeBorderPx=*/0);
 
                             editor_.setViewportTop(top);
                             syncScrollbarInfo();

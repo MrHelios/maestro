@@ -594,7 +594,7 @@ namespace {
 constexpr int kScrollbarMinThumbPx = 24;
 
 int scrollbarWidthPx(int cellW) {
-    return std::max(8, cellW / 2);
+    return std::max(12, cellW / 2);
 }
 
 // Snapshot puro del Frame (sin SDL): copia texto+rol por segmento para
@@ -2415,7 +2415,25 @@ GuiPixelRect GuiRenderer::scrollbarTrackRect(const Layout& layout, int resizeBor
             : logicalWidth;
     const int x = activeRightPx - w - resizeBorderPx;
     const int y = contentTopInset_ + layout.content.row * ch;
-    const int h = layout.content.height * ch;
+    // Altura del track: distancia física entre el inicio del contenido y el
+    // inicio del chrome inferior. Usamos lastChromeGeometry_.statusTop cuando
+    // las métricas del drawable están inicializadas y el chrome está anclado;
+    // si las métricas están inicializadas pero el chrome no está anclado
+    // (gap mayor a una celda), calculamos chromeTop desde drawablePixelH_.
+    // Sin métricas de drawable (tests sin SDL), conservamos el comportamiento
+    // previo (solo altura del contenido).
+    int h;
+    if (drawableMetricsInitialized_) {
+        int chromeTop;
+        if (lastChromeGeometry_.anchored) {
+            chromeTop = contentTopInset_ + lastChromeGeometry_.statusTop;
+        } else {
+            chromeTop = drawablePixelH_ - layout.chrome.height * ch;
+        }
+        h = std::max(0, chromeTop - y);
+    } else {
+        h = layout.content.height * ch;
+    }
 
     if (x < 0 || y < 0 || w <= 0 || h <= 0) {
         return {};
@@ -2442,12 +2460,13 @@ int GuiRenderer::scrollbarThumbHeightPx(int trackH) const {
     return h;
 }
 
-GuiPixelRect GuiRenderer::scrollbarThumbRect(const Layout& layout) const {
+GuiPixelRect GuiRenderer::scrollbarThumbRect(const Layout& layout,
+                                             int resizeBorderPx) const {
     if (!scrollbarEnabled()) {
         return {};
     }
 
-    const GuiPixelRect track = scrollbarTrackRect(layout);
+    const GuiPixelRect track = scrollbarTrackRect(layout, resizeBorderPx);
     if (track.h <= 0) {
         return {};
     }
@@ -2472,15 +2491,16 @@ GuiPixelRect GuiRenderer::scrollbarThumbRect(const Layout& layout) const {
     return r;
 }
 
-GuiScrollbarPress GuiRenderer::scrollbarPress(int pxX, int pxY) {
+GuiScrollbarPress GuiRenderer::scrollbarPress(int pxX, int pxY,
+                                              int resizeBorderPx) {
     GuiScrollbarPress res;
 
     if (!scrollbarEnabled()) {
         return res;
     }
 
-    const GuiPixelRect track = scrollbarTrackRect(lastLayout_);
-    const GuiPixelRect thumb = scrollbarThumbRect(lastLayout_);
+    const GuiPixelRect track = scrollbarTrackRect(lastLayout_, resizeBorderPx);
+    const GuiPixelRect thumb = scrollbarThumbRect(lastLayout_, resizeBorderPx);
 
     if (track.h <= 0 || thumb.h <= 0) {
         return res;
@@ -2502,16 +2522,17 @@ GuiScrollbarPress GuiRenderer::scrollbarPress(int pxX, int pxY) {
         res.grabOffsetPx = thumb.h / 2;
     }
 
-    res.top = scrollbarTopFromY(pxY, res.grabOffsetPx);
+    res.top = scrollbarTopFromY(pxY, res.grabOffsetPx, resizeBorderPx);
     return res;
 }
 
-int GuiRenderer::scrollbarTopFromY(int pxY, int grabOffsetPx) const {
+int GuiRenderer::scrollbarTopFromY(int pxY, int grabOffsetPx,
+                                   int resizeBorderPx) const {
     if (!scrollbarEnabled()) {
         return std::clamp(scrollInfo_.top, 0, scrollbarMaxTop());
     }
 
-    const GuiPixelRect track = scrollbarTrackRect(lastLayout_);
+    const GuiPixelRect track = scrollbarTrackRect(lastLayout_, resizeBorderPx);
     const int thumbH = scrollbarThumbHeightPx(track.h);
     const int travel = track.h - thumbH;
     const int maxTop = scrollbarMaxTop();
@@ -2532,13 +2553,23 @@ int GuiRenderer::scrollbarTopFromY(int pxY, int grabOffsetPx) const {
 }
 
 #ifdef HAVE_SDL2
-void GuiRenderer::paintVerticalScrollbar(SDL_Renderer* r, const Layout& layout) {
+void GuiRenderer::paintVerticalScrollbar(SDL_Renderer* r, const Layout& layout,
+                                         int resizeBorderPx) {
     if (!r || !scrollbarEnabled()) {
         return;
     }
 
-    const GuiPixelRect track = scrollbarTrackRect(layout);
-    const GuiPixelRect thumb = scrollbarThumbRect(layout);
+    // Asegurar que no haya un clip rect previo limitando el área de pintado
+    // del scrollbar. El track debe poder ocupar todo el espacio entre el
+    // inicio del contenido y el inicio del chrome inferior.
+    SDL_RenderSetClipRect(r, nullptr);
+
+    // resizeBorderPx = 0 en el camino de producción: el track llega hasta el
+    // borde derecho de la ventana. El borde de resize (kResizeBorderPts =
+    // 3) se solapa con los últimos píxeles pero el scrollbar tiene prioridad
+    // (se chequea primero en el hit-test nativo y en el hover).
+    const GuiPixelRect track = scrollbarTrackRect(layout, resizeBorderPx);
+    const GuiPixelRect thumb = scrollbarThumbRect(layout, resizeBorderPx);
 
     if (track.w <= 0 || track.h <= 0 || thumb.h <= 0) {
         return;
@@ -2672,7 +2703,9 @@ void GuiRenderer::presentFramebuf(SDL_Renderer* r, SDL_Texture* fb,
     SDL_RenderCopy(r, fb, &src, &dst);
 
     SDL_RenderSetViewport(r, nullptr);
-    paintVerticalScrollbar(r, layout);
+
+    // Primero: composición del chrome y relleno del gap (incluye la columna
+    // del scrollbar). Luego el scrollbar se pinta por encima.
     paintWindowChromeOverlays(r, font_, dark_, layout, chromeData,
                               /*accent=*/lastAccent_, cursor, cursorShown,
                               ch, contentTopInset_, titleBar_,
@@ -2681,6 +2714,7 @@ void GuiRenderer::presentFramebuf(SDL_Renderer* r, SDL_Texture* fb,
                               drawablePixelW_, drawablePixelH_,
                               chromeLeftPx, chromeRightPx,
                               chromeTopPx, chromeBottomPx);
+    paintVerticalScrollbar(r, layout);
     if (captureEnabled_) captureBackbuffer_(r);
     SDL_RenderPresent(r);
 }
@@ -2721,7 +2755,6 @@ void GuiRenderer::presentWindow(SDL_Renderer* r, const GuiColor& bg,
     }
 
     SDL_RenderSetViewport(r, nullptr);
-    if (withScrollbar) paintVerticalScrollbar(r, layout);
 
     // Geometría de pintado del chrome para este drawable. Con las métricas ya
     // medidas por el dueño del ciclo (setDrawableMetrics / WindowSize):
@@ -2753,6 +2786,7 @@ void GuiRenderer::presentWindow(SDL_Renderer* r, const GuiColor& bg,
         // chromeBottomPx ya está seteado a usableH
     }
 
+    // Primero: composición del chrome y relleno del gap.
     paintWindowChromeOverlays(r, font_, dark_, layout, chromeData,
                               accent, cursor, cursorShown, ch,
                               contentTopInset_, titleBar_,
@@ -2761,6 +2795,10 @@ void GuiRenderer::presentWindow(SDL_Renderer* r, const GuiColor& bg,
                               drawablePixelW_, drawablePixelH_,
                               chromeLeftPx, chromeRightPx,
                               chromeTopPx, chromeBottomPx);
+
+    // Después: scrollbar por encima del fondo del gap.
+    if (withScrollbar) paintVerticalScrollbar(r, layout);
+
     if (captureEnabled_) captureBackbuffer_(r);
     SDL_RenderPresent(r);
 }

@@ -10,17 +10,22 @@
 // ---------------------------------------------------------------------------
 
 // Grosor del borde de redimensionado en PUNTOS DE VENTANA (window points).
-// Valor fijo de 8 puntos, usado por:
+// Valor fijo de 3 puntos, usado por:
 // - guiTitleBarHitTest() (hit-test nativo SDL)
 // - guiWindowEdgeAt() (detección geométrica pura)
 // - hoverCursorType() (cursor en hover sin click)
 // - fallback manual de redimensionado (cuando hit-test nativo no disponible)
 //
+// Con border = 3, los últimos 3 puntos de la ventana son zona de resize y el
+// track del scrollbar se desplaza hacia la izquierda para no solaparse:
+// track = [winW - border - trackW, winW - border), borde de resize =
+// [winW - border, winW). Sin solapamiento.
+//
 // NOTA: Un comentario anterior sugería calcularlo como
 // std::max(4, std::min(8, titleH / 4)) según la altura de la barra.
-// Esa fórmula dinámica NO se usa; el borde es fijo en 8 puntos para
+// Esa fórmula dinámica NO se usa; el borde es fijo en 3 puntos para
 // simplicidad y consistencia visual en todas las configuraciones.
-inline constexpr int kResizeBorderPts = 8;
+inline constexpr int kResizeBorderPts = 3;
 
 enum class GuiWindowEdge {
     None,
