@@ -922,6 +922,15 @@ void paintSegmentRow(SDL_Renderer* r, GuiFont& font, bool dark,
     colCells += cols;
 }
 
+// Color de fondo del fill de una fila hasta activeRightPx (incluye el gap
+// horizontal). Debe coincidir con el fondo de los segmentos de relleno de la
+// fila, o el residuo sub-celda queda con otro color.
+static GuiColor rowFillBg(bool isCurrentLine, bool dark) {
+    return guichrome::styleFor(
+               isCurrentLine ? StyleRole::CurrentLine : StyleRole::Default,
+               isCurrentLine, dark).bg;
+}
+
 // Contenido del editor: filas del Frame con gutter + sintaxis + Selection
 // (selección y highlight de búsqueda comparten rol) + BracketMatch +
 // fondo de línea actual. Sin SDL es no-op (el snapshot ya se guardó).
@@ -941,8 +950,7 @@ void paintFrameContent(SDL_Renderer* r, GuiFont& font, bool dark,
         // frame, sin asumir que el contenido empieza en X=0.
         const int rowWpx = activeRightPx - basePx;
         {
-            const GuiColor fillBg =
-                guichrome::styleFor(StyleRole::Default, fr.isCurrentLine, dark).bg;
+            const GuiColor fillBg = rowFillBg(fr.isCurrentLine, dark);
             SDL_Rect fill{basePx, py, rowWpx, ch};
             SDL_SetRenderDrawColor(r, fillBg.r, fillBg.g, fillBg.b, fillBg.a);
             SDL_RenderFillRect(r, &fill);
@@ -1012,8 +1020,7 @@ void paintSnapshotRow(SDL_Renderer* r, GuiFont& font, bool dark,
     // del gap, no el fondo general, así la selección visual no se corta.
     const int rowWpx = activeRightPx - basePx;
     {
-        const GuiColor fillBg =
-            guichrome::styleFor(StyleRole::Default, row.isCurrentLine, dark).bg;
+        const GuiColor fillBg = rowFillBg(row.isCurrentLine, dark);
         SDL_Rect fill{basePx, py, rowWpx, ch};
         SDL_SetRenderDrawColor(r, fillBg.r, fillBg.g, fillBg.b, fillBg.a);
         SDL_RenderFillRect(r, &fill);

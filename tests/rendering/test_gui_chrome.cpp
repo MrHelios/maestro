@@ -4776,8 +4776,9 @@ TEST(gui_sdl_frame_pixels_pseudo_fila_columna_y_capacidad) {
         return fb[static_cast<size_t>(y) * static_cast<size_t>(fbW) +
                   static_cast<size_t>(x)];
     };
-    // Pseudo columna: fondo, sin texto ni chrome.
-    CHECK(fbPx(fg.logicalWidth + gapX / 2, ch / 2) == bg);
+    // Pseudo columna: fondo de la línea actual (CurrentLine) en la fila del cursor.
+    CHECK(fbPx(fg.logicalWidth + gapX / 2, ch / 2) ==
+          guichrome::currentLineBackground(gui.isDarkTheme()));
     // Pseudo fila (entre contenido y chrome): fondo.
     CHECK(fbPx(cw / 2, contentRows * ch + gapY / 2) == bg);
 
@@ -4792,7 +4793,8 @@ TEST(gui_sdl_frame_pixels_pseudo_fila_columna_y_capacidad) {
         return win[static_cast<size_t>(y) * static_cast<size_t>(winW) +
                    static_cast<size_t>(x)];
     };
-    CHECK(winPx(outW - 1, inset + ch / 2) == bg);
+    CHECK(winPx(outW - 1, inset + ch / 2) ==
+          guichrome::currentLineBackground(gui.isDarkTheme()));
     CHECK(winPx(cw / 2, inset + contentRows * ch + gapY / 2) == bg);
     const guichrome::BottomChromeGeometry chrome =
         guichrome::bottomChromeGeometry(usableH, ch, contentRows, chromeRows);
