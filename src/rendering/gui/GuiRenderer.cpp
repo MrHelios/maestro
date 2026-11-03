@@ -2589,13 +2589,16 @@ void GuiRenderer::paintVerticalScrollbar(SDL_Renderer* r, const Layout& layout,
 
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
 
-    const GuiColor trackBg = dark_ ? GuiColor{0, 0, 0, 70} : GuiColor{0, 0, 0, 35};
+    // Track opaco, mismo color que el fondo del status bar (sin alpha:
+    // el fondo del editor no se filtra a través).
+    const GuiColor trackBg = guichrome::statusBackground(dark_);
     SDL_SetRenderDrawColor(r, trackBg.r, trackBg.g, trackBg.b, trackBg.a);
     SDL_Rect trackRect{static_cast<int>(track.x), static_cast<int>(track.y),
                        static_cast<int>(track.w), static_cast<int>(track.h)};
     SDL_RenderFillRect(r, &trackRect);
 
-    const GuiColor thumbBg = dark_ ? GuiColor{255, 255, 255, 110} : GuiColor{0, 0, 0, 120};
+    const GuiColor thumbBg = dark_ ? GuiColor{0xFF, 0xFF, 0xFF, 0xFF}
+                                   : GuiColor{0x40, 0x40, 0x40, 0xFF};
     SDL_SetRenderDrawColor(r, thumbBg.r, thumbBg.g, thumbBg.b, thumbBg.a);
     SDL_Rect thumbRect{static_cast<int>(thumb.x), static_cast<int>(thumb.y),
                        static_cast<int>(thumb.w), static_cast<int>(thumb.h)};
