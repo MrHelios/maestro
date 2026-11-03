@@ -12,7 +12,14 @@
 #include "platform/gui/GuiRunLoop.h"
 #include "rendering/Sink.h"
 #include "rendering/gui/GuiRenderer.h"
+#include "rendering/gui/GuiChrome.h"
 #include "layout/Layout.h"
+
+#ifdef HAVE_SDL2
+#include <SDL2/SDL.h>
+#include <cstdlib>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -299,6 +306,179 @@ TEST(GuiScrollbar_HitTestPredicate) {
 
     // Pista vacía => nunca interactiva
     CHECK(!GuiRunLoop::pointInScrollbarTrack(GuiRunLoop::ScrollbarHitRect{}, 0, 0));
+}
+
+// ---------------------------------------------------------------------------
+// Test 9: GuiScrollbar_Composition_TrackReachesChromeTop
+// Verifica que el track del scrollbar llega exactamente hasta el inicio del
+// chrome inferior (StatusBar), cubriendo el gap vertical sobrante.
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_Composition_TrackReachesChromeTop) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 30; ++i) lines.push_back("line " + std::to_string(i));
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 80);
+    Cursor cur;
+
+    const int cw = gui.cellWForTests();
+    const int ch = gui.cellHForTests();
+    if (cw <= 0 || ch <= 0) SKIP("sin fuente");
+
+    const int vpW = 80;
+    const int drawableW = vpW * cw;
+    // drawableH debe ser tal que usableH - logicalHeight < ch (modo anchored)
+    // para que gapHeight > 0 y el test cubra el escenario de gap vertical.
+    const int contentH = 10;
+    const int chromeH = 2;
+    const int logicalHeight = (contentH + chromeH) * ch;
+    const int drawableH = logicalHeight + ch / 2;  // gap vertical < ch
+
+    gui.setDrawableMetrics(drawableW, drawableH, 0);
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    gui.setScrollInfo({0, 10, 30});
+
+    const Layout& layout = gui.lastLayout();
+    const auto& chromeGeom = gui.lastChromeGeometry();
+    CHECK(chromeGeom.gapHeight > 0);
+
+    const GuiPixelRect track = gui.scrollbarTrackRect(layout);
+    CHECK(track.valid);
+
+    // El track empieza donde empieza el contenido
+    const int expectedY = gui.contentTopInset() + layout.content.row * ch;
+    CHECK_EQ(track.y, expectedY);
+
+    // El track termina donde empieza el chrome inferior (StatusBar)
+    int expectedChromeTop;
+    if (chromeGeom.anchored) {
+        expectedChromeTop = gui.contentTopInset() + chromeGeom.statusTop;
+    } else {
+        expectedChromeTop = drawableH - layout.chrome.height * ch;
+    }
+    CHECK_EQ(track.y + track.h, expectedChromeTop);
+}
+
+// ---------------------------------------------------------------------------
+// Test 10: GuiScrollbar_Composition_ThumbWithinTrackBounds
+// Verifica que el pulgar queda dentro del track y que el track no invade
+// el área del StatusBar.
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_Composition_ThumbWithinTrackBounds) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 30; ++i) lines.push_back("line " + std::to_string(i));
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 80);
+    Cursor cur;
+
+    const int cw = gui.cellWForTests();
+    const int ch = gui.cellHForTests();
+    if (cw <= 0 || ch <= 0) SKIP("sin fuente");
+
+    const int vpW = 80;
+    const int drawableW = vpW * cw;
+    // drawableH debe ser tal que usableH - logicalHeight < ch (modo anchored)
+    // para que gapHeight > 0 y el test cubra el escenario de gap vertical.
+    const int contentH = 10;
+    const int chromeH = 2;
+    const int logicalHeight = (contentH + chromeH) * ch;
+    const int drawableH = logicalHeight + ch / 2;  // gap vertical < ch
+
+    gui.setDrawableMetrics(drawableW, drawableH, 0);
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    gui.setScrollInfo({0, 10, 30});
+
+    const Layout& layout = gui.lastLayout();
+    const auto& chromeGeom = gui.lastChromeGeometry();
+    CHECK(chromeGeom.gapHeight > 0);
+
+    const GuiPixelRect track = gui.scrollbarTrackRect(layout);
+    const GuiPixelRect thumb = gui.scrollbarThumbRect(layout);
+    CHECK(track.valid);
+    CHECK(thumb.valid);
+
+    // El pulgar está dentro del track
+    CHECK(thumb.y >= track.y);
+    CHECK(thumb.y + thumb.h <= track.y + track.h);
+
+    // El track no pasa el inicio del StatusBar
+    int chromeTop;
+    if (chromeGeom.anchored) {
+        chromeTop = gui.contentTopInset() + chromeGeom.statusTop;
+    } else {
+        chromeTop = drawableH - layout.chrome.height * ch;
+    }
+    // El track no invade el StatusBar y llega exactamente hasta él
+    CHECK_EQ(track.y + track.h, chromeTop);
+}
+
+// ---------------------------------------------------------------------------
+// Test 11: GuiScrollbar_Composition_ResizeVerticalConsistency
+// Verifica que la geometría del track se mantiene consistente al cambiar
+// drawableH (resize vertical): track.y + track.h == chromeTop en ambos casos.
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_Composition_ResizeVerticalConsistency) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 30; ++i) lines.push_back("line " + std::to_string(i));
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 80);
+    Cursor cur;
+
+    const int cw = gui.cellWForTests();
+    const int ch = gui.cellHForTests();
+    if (cw <= 0 || ch <= 0) SKIP("sin fuente");
+
+    const int vpW = 80;
+    const int drawableW = vpW * cw;
+
+    // Escenario A: drawableH grande
+    const int drawableH1 = 600;
+    gui.setDrawableMetrics(drawableW, drawableH1, 0);
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    gui.setScrollInfo({0, 10, 30});
+
+    const Layout& layout1 = gui.lastLayout();
+    const auto& chromeGeom1 = gui.lastChromeGeometry();
+    const GuiPixelRect track1 = gui.scrollbarTrackRect(layout1);
+    CHECK(track1.valid);
+
+    int chromeTop1;
+    if (chromeGeom1.anchored) {
+        chromeTop1 = gui.contentTopInset() + chromeGeom1.statusTop;
+    } else {
+        chromeTop1 = drawableH1 - layout1.chrome.height * ch;
+    }
+    CHECK_EQ(track1.y + track1.h, chromeTop1);
+
+    // Escenario B: drawableH chico (resize vertical)
+    const int drawableH2 = 300;
+    gui.setDrawableMetrics(drawableW, drawableH2, 0);
+    gui.invalidateCache();  // forzar render completo
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+
+    const Layout& layout2 = gui.lastLayout();
+    const auto& chromeGeom2 = gui.lastChromeGeometry();
+    const GuiPixelRect track2 = gui.scrollbarTrackRect(layout2);
+    CHECK(track2.valid);
+
+    int chromeTop2;
+    if (chromeGeom2.anchored) {
+        chromeTop2 = gui.contentTopInset() + chromeGeom2.statusTop;
+    } else {
+        chromeTop2 = drawableH2 - layout2.chrome.height * ch;
+    }
+    CHECK_EQ(track2.y + track2.h, chromeTop2);
+
+    // Tras invalidateCache el render debe ser completo
+    CHECK(gui.lastWasFull());
 }
 
 // ---------------------------------------------------------------------------
