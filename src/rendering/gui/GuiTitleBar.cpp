@@ -143,10 +143,11 @@ void GuiTitleBar::paint(void* sdlRenderer, GuiFont& font, int width,
     // se conserva el color del tema (contraste ya correcto).
     const GuiColor fg = dark ? GuiColor{0xFF, 0xFF, 0xFF, 0xFF}
                              : guichrome::toGuiColor(p.statusName);
-    const GuiColor hoverBg = guichrome::currentLineBackground(p);
-    const GuiColor pressedBg = guichrome::selectionBackground(p);
-    const GuiColor closeHover = guichrome::toGuiColor(p.statusModified);
-    const GuiColor closeFg = guichrome::background(p);
+    const GuiColor accentBg = guichrome::toGuiColor(p.statusAccentDefault);
+    // Fondo rojo fijo para cerrar, igual en theme dark y light.
+    const GuiColor closeHover = GuiColor{0xD7, 0x00, 0x00, 0xFF};
+    // La cruz de cerrar pasa a blanco al hacer hover/pressed en ambos temas.
+    const GuiColor closeFg = GuiColor{0xFF, 0xFF, 0xFF, 0xFF};
     const GuiColor separator = guichrome::toGuiColor(p.gutter);
 
     fillRect(r, bg, 0, 0, width, height);
@@ -203,12 +204,16 @@ void GuiTitleBar::paint(void* sdlRenderer, GuiFont& font, int width,
         const bool pressed = pressed_ == button;
         const bool close = button == GuiTitleBarButton::Close;
         if (pressed || hovered) {
-            const GuiColor fill = close
-                                      ? closeHover
-                                      : (pressed ? pressedBg : hoverBg);
+            const GuiColor fill = close ? closeHover : accentBg;
             fillRect(r, fill, rect.x, rect.y, rect.w, rect.h);
         }
-        const GuiColor glyph = close && (hovered || pressed) ? closeFg : fg;
+        const GuiColor glyph = close && (hovered || pressed)
+                                   ? closeFg
+                                   : ((button == GuiTitleBarButton::Minimize ||
+                                       button == GuiTitleBarButton::Maximize) &&
+                                      (hovered || pressed))
+                                     ? GuiColor{0xFF, 0xFF, 0xFF, 0xFF}
+                                     : fg;
         drawButtonGlyph(r, button, rect, glyph, maximized_);
     }
 #else
