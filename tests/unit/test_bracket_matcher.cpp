@@ -44,6 +44,33 @@ TEST(bracket_matcher_single) {
     }
 }
 
+TEST(bracket_matcher_limits_corrects) {
+    Document doc;
+    
+    for(auto lang : getSyntaxLanguages()) {
+        doc.restore({" {} "});
+        auto p = findMatchingBracket(doc, {0,0}, lang);
+        CHECK(!p.has_value());
+        
+        p = findMatchingBracket(doc, {0,3}, lang);
+        CHECK(!p.has_value());
+        
+        doc.restore({" () "});
+        p = findMatchingBracket(doc, {0,0}, lang);
+        CHECK(!p.has_value());
+        
+        p = findMatchingBracket(doc, {0,3}, lang);
+        CHECK(!p.has_value());
+        
+        doc.restore({" [] "});
+        p = findMatchingBracket(doc, {0,0}, lang);
+        CHECK(!p.has_value());
+        
+        p = findMatchingBracket(doc, {0,3}, lang);
+        CHECK(!p.has_value());
+    }
+}
+
 TEST(bracket_matcher_nested) {
     Document doc;
     

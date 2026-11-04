@@ -410,7 +410,8 @@ std::optional<BracketPair> findMatchingBracketGeneric(
         }
     }
 
-    if (!hasBracket && col - 1 >= 0 && col - 1 < (int)line.size() && isBracket(line[col - 1])) {
+    if (!hasBracket && col - 1 >= 0 && col - 1 < (int)line.size()
+                        && isOpen(line[col - 1])) {
         const int c = col - 1;
         if (!isIgnoredInSpans(posSpans, c)) {
             bracket = line[col - 1];
