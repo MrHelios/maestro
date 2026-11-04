@@ -3,6 +3,7 @@
 #include <string>
 #include <algorithm>
 #include <cctype>
+#include <array>
 
 enum class SyntaxLanguage {
     None,
@@ -11,6 +12,16 @@ enum class SyntaxLanguage {
     Markdown,
     Rust
 };
+
+constexpr auto getSyntaxLanguages() {
+    return std::array{
+        SyntaxLanguage::None,
+        SyntaxLanguage::C,
+        SyntaxLanguage::Cpp,
+        SyntaxLanguage::Markdown,
+        SyntaxLanguage::Rust
+    };
+}
 
 /**
  * @brief Deduce lenguaje por extensión.
