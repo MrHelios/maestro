@@ -671,11 +671,17 @@ int GuiRunLoop::run() {
                 SDL_MinimizeWindow(win);
                 break;
             case GuiTitleBarButton::Maximize:
-                if (titleBar_.maximized() ||
-                    (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED) != 0) {
+                // El editor es dueño de su propio estado de maximizado.
+                // titleBar_.maximized_ empieza en false (ventana) y el editor
+                // lo actualiza al pedir maximizar/restaurar, sin depender de
+                // que el gestor de ventanas confirme (o no) el cambio. Esto
+                // evita desincronizaciones al cambiar de escritorio en xfwm4.
+                if (titleBar_.maximized()) {
                     SDL_RestoreWindow(win);
+                    titleBar_.setMaximized(false);
                 } else {
                     SDL_MaximizeWindow(win);
+                    titleBar_.setMaximized(true);
                 }
                 break;
             case GuiTitleBarButton::Close:
