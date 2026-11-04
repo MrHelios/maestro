@@ -25,13 +25,20 @@ void Buffer::rebindCallback() {
                 if (at < 0) at = 0;
                 if (at > oldCount) at = oldCount;
                 syntaxCache.onInsertLines(at, delta);
-                // onInsert ya marca dirty, no hace falta markDirty extra
+                // El splice modifica el contenido de la línea `a` (la primera
+                // línea afectada) además de insertar/borrar líneas. Por tanto
+                // hay que marcarla dirty también; onInsertLines solo cubre
+                // desde `at = a + 1`.
+                syntaxCache.markDirty(a);
                 return;
             } else {
                 int at = a + 1;
                 if (at < 0) at = 0;
                 int rem = -delta;
                 syntaxCache.onRemoveLines(at, rem);
+                // idem: la línea `a` cambia su contenido al fundirse con la
+                // cola de la última línea borrada.
+                syntaxCache.markDirty(a);
                 return;
             }
         }
