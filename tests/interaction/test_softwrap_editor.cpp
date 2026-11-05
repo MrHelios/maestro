@@ -62,29 +62,63 @@ TEST(softwrap_vertical_up_keeps_preferred_column) {
     CHECK_EQ(ed.active().cursor.col, 8); // pref 8 en la línea larga
 }
 
-TEST(softwrap_home_end_stay_inside_intermediate_row) {
+TEST(softwrap_home_end_go_to_logical_line_bounds) {
     Editor ed;
-    setupWrapEditor(ed, {std::string(30, 'a')});
+    setupWrapEditor(ed, {std::string(30, 'a')}); // 3 filas visuales (12 + 12 + 6)
+
+    // Fin desde la primera fila visual -> fin exclusivo de la LINEA LOGICA (col 30).
+    ed.active().cursor.col = 5; // fila visual 0
+    press(ed, InputEventType::MoveEnd);
+    CHECK_EQ(ed.active().cursor.col, 30); // fin de la linea logica
+    CHECK_EQ(ed.active().cursor.col, ed.active().document.lineLength(0));
+
+    // Fin desde el límite entre filas (col 12) -> fin de la linea logica (col 30).
+    ed.active().cursor.col = 12; // límite: fin fila 0 / inicio fila 1
+    press(ed, InputEventType::MoveEnd);
+    CHECK_EQ(ed.active().cursor.col, 30);
+
+    // Fin desde una fila intermedia (continuacion) -> fin de la linea logica (col 30).
+    ed.active().cursor.col = 18; // fila visual 1
+    press(ed, InputEventType::MoveEnd);
+    CHECK_EQ(ed.active().cursor.col, 30);
+
+    // Inicio desde una fila intermedia (continuacion) -> inicio de la linea logica (col 0).
+    press(ed, InputEventType::MoveHome);
+    CHECK_EQ(ed.active().cursor.col, 0);
+
+    // Fin desde el final -> no-op.
+    press(ed, InputEventType::MoveEnd);
+    CHECK_EQ(ed.active().cursor.col, 30);
+
+    // Inicio desde cualquier fila -> col 0 (inicio de la linea logica).
+    press(ed, InputEventType::MoveHome);
+    CHECK_EQ(ed.active().cursor.col, 0);
+}
+
+// Inicio/Fin en modo Seleccion con soft-wrap: operan sobre los extremos de la
+// LINEA LOGICA, no de la fila visual. El ancla de seleccion se mantiene.
+TEST(softwrap_home_end_selection_logical_line_bounds) {
+    Editor ed;
+    setupWrapEditor(ed, {std::string(30, 'a')}); // 3 filas visuales
+
+    // Cursor en fila intermedia (continuacion) de la linea logica.
     ed.active().cursor.col = 18; // fila visual 1
 
-    press(ed, InputEventType::MoveHome);
-    CHECK_EQ(ed.active().cursor.col, 12); // inicio de la fila 1
+    // Entrar en Seleccion: el ancla queda en (0, 18).
+    selectPress(ed, InputEventType::MoveHome);
+    // Inicio -> inicio de la linea logica (col 0), ancla se mantiene en 18.
+    CHECK(ed.hasSelection());
+    CHECK_EQ(ed.active().cursor.col, 0);
+    CHECK_EQ(ed.active().selection->anchor.col, 18);
+    CHECK_EQ(ed.active().selection->position.col, 0);
 
+    // Fin -> fin exclusivo de la linea logica (col 30), ancla se mantiene.
     press(ed, InputEventType::MoveEnd);
-    CHECK_EQ(ed.active().cursor.col, 23); // fin de la fila 1
-
-    // Con el criterio nuevo (Down -> siguiente linea logica) no existe "fila
-    // siguiente" dentro de la misma linea: con una sola linea logica hay que
-    // posicionarse directo en la ultima fila (fin de linea).
-    ed.active().cursor.col = 30; // fila visual 2 (ultima): fin de linea
-
-    CHECK_EQ(ed.active().cursor.col, 30); // fin de linea
-
-    press(ed, InputEventType::MoveHome);
-    CHECK_EQ(ed.active().cursor.col, 24); // inicio de la fila 2
-
-    press(ed, InputEventType::MoveEnd);
-    CHECK_EQ(ed.active().cursor.col, 30); // fin de la línea (posición exclusiva)
+    CHECK(ed.hasSelection());
+    CHECK_EQ(ed.active().cursor.col, 30);
+    CHECK_EQ(ed.active().selection->anchor.col, 18);
+    CHECK_EQ(ed.active().selection->position.col, 30);
+    CHECK_EQ(ed.active().selection->position.col, ed.active().document.lineLength(0));
 }
 
 // End en un .md debe llegar al final EXCLUSIVO de la línea (col ==
@@ -150,13 +184,15 @@ TEST(softwrap_markdown_end_tui_reaches_line_end) {
     }
 }
 
-TEST(softwrap_home_at_continuation_boundary_stays_on_row) {
+TEST(softwrap_home_at_continuation_boundary_goes_to_line_start) {
     Editor ed;
     setupWrapEditor(ed, {std::string(30, 'a')});
-    ed.active().cursor.col = 12; // posición de límite, visualmente fila 1
+    ed.active().cursor.col = 12; // límite: fin fila 0 / inicio fila 1 (misma linea logica)
 
+    // Inicio -> inicio de la LINEA LOGICA (col 0), no se queda en el inicio
+    // de la fila visual 1 (col 12).
     press(ed, InputEventType::MoveHome);
-    CHECK_EQ(ed.active().cursor.col, 12);
+    CHECK_EQ(ed.active().cursor.col, 0); // inicio de la linea logica
 }
 
 TEST(softwrap_zero_text_width_uses_identity_navigation) {
@@ -531,3 +567,4 @@ TEST(softwrap_editor_vertical_dest_long_pref_column) {
     CHECK_EQ(ed.active().cursor.line, 1); // primera linea larga
     CHECK_EQ(ed.active().cursor.col, 4);  // primera fila visual de la linea destino
 }
+

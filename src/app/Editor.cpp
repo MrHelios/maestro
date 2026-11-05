@@ -512,16 +512,18 @@ void Editor::registerCommands() {
         if (state_ == State::Seleccion && b.selectAllActive) return;
         if (isWrapEnabledFor(b)) {
             const softwrap::Index& idx = wrapFor(this, b);
-            int vr = idx.visualRowOf({b.cursor.line, b.cursor.col});
+            // Inicio de la LINEA LOGICA (primera fila visual), no de la fila
+            // visual donde cae el cursor. Soft-wrap solo aplica a archivos .md.
+            int firstRow = idx.firstRowOfLine(b.cursor.line);
             if (state_ == State::Seleccion) {
                 beginSelection();
-                Position np = idx.positionAt(b.document, vr, 0);
+                Position np = idx.positionAt(b.document, firstRow, 0);
                 b.cursor.line = np.line;
                 b.cursor.col = np.col;
                 updateSelectionPosition();
                 resetPreferredVisualColumn();
             } else if (state_ == State::Navegacion || state_ == State::Interaccion) {
-                Position np = idx.positionAt(b.document, vr, 0);
+                Position np = idx.positionAt(b.document, firstRow, 0);
                 b.cursor.line = np.line;
                 b.cursor.col = np.col;
                 resetPreferredVisualColumn();
@@ -543,20 +545,23 @@ void Editor::registerCommands() {
         if (state_ == State::Seleccion && b.selectAllActive) return;
         if (isWrapEnabledFor(b)) {
             const softwrap::Index& idx = wrapFor(this, b);
-            int vr = idx.visualRowOf({b.cursor.line, b.cursor.col});
+            // Fin de la LINEA LOGICA (ultima fila visual: fin exclusivo),
+            // no de la fila visual donde cae el cursor. Soft-wrap solo aplica
+            // a archivos .md.
+            int firstRow = idx.firstRowOfLine(b.cursor.line);
+            int rows = idx.rowsInLine(b.cursor.line);
+            int lastRow = firstRow + rows - 1;
+            const softwrap::VisualRow& lastRowVisual = idx.rowAt(lastRow);
+            int lastRowWidth = lastRowVisual.columnEnd - lastRowVisual.columnBegin;
             if (state_ == State::Seleccion) {
                 beginSelection();
-                const softwrap::VisualRow& row = idx.rowAt(vr);
-                int width = row.columnEnd - row.columnBegin;
-                Position np = idx.positionAt(b.document, vr, width);
+                Position np = idx.positionAt(b.document, lastRow, lastRowWidth);
                 b.cursor.line = np.line;
                 b.cursor.col = np.col;
                 updateSelectionPosition();
                 resetPreferredVisualColumn();
             } else if (state_ == State::Navegacion || state_ == State::Interaccion) {
-                const softwrap::VisualRow& row = idx.rowAt(vr);
-                int width = row.columnEnd - row.columnBegin;
-                Position np = idx.positionAt(b.document, vr, width);
+                Position np = idx.positionAt(b.document, lastRow, lastRowWidth);
                 b.cursor.line = np.line;
                 b.cursor.col = np.col;
                 resetPreferredVisualColumn();
