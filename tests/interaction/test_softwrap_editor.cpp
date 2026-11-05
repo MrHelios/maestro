@@ -30,18 +30,15 @@ TEST(softwrap_vertical_keeps_preferred_column) {
     });
     ed.active().cursor.col = 20; // fila visual 1, columna relativa 8
 
-    press(ed, InputEventType::MoveDown);
-    CHECK_EQ(ed.active().cursor.line, 0);
-    CHECK_EQ(ed.active().cursor.col, 30); // fila corta: fin de línea (exclusivo)
-
+    // Down: debe llegar a la siguiente linea logica conservando la columna pref.
     press(ed, InputEventType::MoveDown);
     CHECK_EQ(ed.active().cursor.line, 1);
-    CHECK_EQ(ed.active().cursor.col, 5);  // "short" también es corta: fin de línea
+    CHECK_EQ(ed.active().cursor.col, 5); // "short": fin de linea (pref 8 adaptada)
 
-    // La preferencia original (8) sobrevive a las filas cortas.
+    // Down: continua hacia la siguiente linea logica.
     press(ed, InputEventType::MoveDown);
     CHECK_EQ(ed.active().cursor.line, 2);
-    CHECK_EQ(ed.active().cursor.col, 8);
+    CHECK_EQ(ed.active().cursor.col, 8); // pref 8 en la linea larga
 }
 
 TEST(softwrap_vertical_up_keeps_preferred_column) {
@@ -54,21 +51,15 @@ TEST(softwrap_vertical_up_keeps_preferred_column) {
     ed.active().cursor.line = 2;
     ed.active().cursor.col = 20; // fila visual 1 dentro de la línea 2
 
-    press(ed, InputEventType::MoveUp);
-    CHECK_EQ(ed.active().cursor.line, 2);
-    CHECK_EQ(ed.active().cursor.col, 8); // primera fila visual de la línea 2
-
+    // Up: debe retroceder a la línea lógica anterior conservando la columna pref.
     press(ed, InputEventType::MoveUp);
     CHECK_EQ(ed.active().cursor.line, 1);
-    CHECK_EQ(ed.active().cursor.col, 5);
+    CHECK_EQ(ed.active().cursor.col, 5); // "short": fin de línea (pref 8 adaptada)
 
+    // Up: continúa hacia la línea lógica anterior.
     press(ed, InputEventType::MoveUp);
     CHECK_EQ(ed.active().cursor.line, 0);
-    CHECK_EQ(ed.active().cursor.col, 30);
-
-    press(ed, InputEventType::MoveUp);
-    CHECK_EQ(ed.active().cursor.line, 0);
-    CHECK_EQ(ed.active().cursor.col, 20); // preferencia 8 en la fila 1
+    CHECK_EQ(ed.active().cursor.col, 8); // pref 8 en la línea larga
 }
 
 TEST(softwrap_home_end_stay_inside_intermediate_row) {
@@ -82,8 +73,12 @@ TEST(softwrap_home_end_stay_inside_intermediate_row) {
     press(ed, InputEventType::MoveEnd);
     CHECK_EQ(ed.active().cursor.col, 23); // fin de la fila 1
 
-    press(ed, InputEventType::MoveDown);   // a la fila 2 (última)
-    CHECK_EQ(ed.active().cursor.col, 30); // columna preferida 11: fin de línea
+    // Con el criterio nuevo (Down -> siguiente linea logica) no existe "fila
+    // siguiente" dentro de la misma linea: con una sola linea logica hay que
+    // posicionarse directo en la ultima fila (fin de linea).
+    ed.active().cursor.col = 30; // fila visual 2 (ultima): fin de linea
+
+    CHECK_EQ(ed.active().cursor.col, 30); // fin de linea
 
     press(ed, InputEventType::MoveHome);
     CHECK_EQ(ed.active().cursor.col, 24); // inicio de la fila 2
@@ -368,4 +363,171 @@ TEST(softwrap_page_selection_when_document_fits_viewport) {
     press(ed, InputEventType::PageUp);
     CHECK(samePosition(ed.active().selection->position, ed.active().cursor));
     CHECK((Position{ed.active().cursor.line, ed.active().cursor.col} == Position{0, 0}));
+}
+
+// ---------------------------------------------------------------------------
+// Navegacion vertical con soft-wrap (flechas Arriba/Abajo) en .md.
+// Una linea logica larga con textWidth=5 ocupa varias filas visuales
+// ("abcdefghijklmno" -> filas [0,5) [5,10) [10,15)). Down debe llegar a la
+// SIGUIENTE linea logica y Up a la anterior: la cantidad de filas visuales de
+// la linea origen no altera la linea logica alcanzada.
+// ---------------------------------------------------------------------------
+
+// Down debe avanzar a la siguiente linea logica (no permanecer en la misma).
+TEST(softwrap_editor_arrow_down_moves_to_next_logical_line) {
+    Editor ed;
+    setupWrapEditor(ed, {"abcdefghijklmno", "12345"}, 12); // textWidth = 5
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 0; // fila visual 0, col relativa 0
+
+    press(ed, InputEventType::MoveDown);
+    CHECK_EQ(ed.active().cursor.line, 1); // down: siguiente linea logica
+}
+
+// Down al terminar las filas de la linea actual cruza a la primera fila de la
+// siguiente linea logica.
+TEST(softwrap_editor_arrow_down_crosses_logical_line) {
+    Editor ed;
+    setupWrapEditor(ed, {"abcdefghijklmno", "12345", "ABCDEFGHIJKLMNO"}, 12);
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 15; // ultima fila visual de la linea 0 (fin exclusivo)
+
+    press(ed, InputEventType::MoveDown);
+    CHECK_EQ(ed.active().cursor.line, 1); // cruzo a la linea logica 1
+    CHECK_EQ(ed.active().cursor.col, 5);  // col preferida (5) aplicada en "12345"
+}
+
+// Up debe retroceder a la linea logica anterior (no permanecer en la misma).
+TEST(softwrap_editor_arrow_up_moves_to_previous_logical_line) {
+    Editor ed;
+    setupWrapEditor(ed, {"abcdefghijklmno", "12345"}, 12); // textWidth = 5
+    ed.active().cursor.line = 1;
+    ed.active().cursor.col = 0; // unica fila de la linea corta
+
+    press(ed, InputEventType::MoveUp);
+    CHECK_EQ(ed.active().cursor.line, 0); // up: linea logica anterior
+}
+
+// Arriba al empezar de una linea cruza a la ultima fila visual de la linea
+// anterior (preservando la columna preferida).
+TEST(softwrap_editor_arrow_up_crosses_logical_line) {
+    Editor ed;
+    setupWrapEditor(ed, {"abcdefghijklmno", "12345"}, 12); // textWidth = 5
+    ed.active().cursor.line = 1;
+    ed.active().cursor.col = 0; // unica fila de la linea corta
+
+    press(ed, InputEventType::MoveUp);
+    CHECK_EQ(ed.active().cursor.line, 0); // cruzo a la linea logica 0
+    CHECK_EQ(ed.active().cursor.col, 0); // pref 0 en la linea logica 0
+}
+
+// En una posicion exactamente en el limite del wrap (col 5 == fin fila 0 ==
+// inicio fila 1), la fila visual debe resolverse con VisualAffinity::Start
+// (pertenece a la fila siguiente) y el movimiento debe respetarlo. Con el nuevo
+// criterio, Down desde el limite debe intentar la siguiente linea logica.
+TEST(softwrap_editor_vertical_wrap_boundary) {
+    Editor ed;
+    setupWrapEditor(ed, {"abcdefghijklmno", "12345"}, 12); // textWidth = 5
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 5; // limite: fin fila 0 / inicio fila 1 (misma linea)
+
+    // El primer MoveDown ejecuta el comando -> wrapFor() -> ensure() habilita
+    // el indice; a partir de ahi visualRowOf() responde con el wrap activo.
+    press(ed, InputEventType::MoveDown);
+    CHECK_EQ(ed.wrapIndex().visualRowOf({0, 5}), 1);
+    CHECK_EQ(ed.active().cursor.line, 1); // down: siguiente linea logica
+}
+
+// La seleccion debe extenderse usando el MISMO destino visual que el
+// movimiento normal de flechas (hasta la siguiente linea logica).
+TEST(softwrap_editor_vertical_selection) {
+    Editor ed;
+    setupWrapEditor(ed, {"abcdefghijklmno", "12345"}, 12); // textWidth = 5
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 2;
+    enterSeleccion(ed);
+    CHECK(ed.active().selection.has_value());
+
+    press(ed, InputEventType::MoveDown);
+    CHECK(ed.active().selection.has_value());
+    CHECK((ed.active().selection->anchor == Position{0, 2}));
+    CHECK(samePosition(ed.active().selection->position, ed.active().cursor));
+    CHECK_EQ(ed.active().cursor.line, 1); // down: siguiente linea logica
+    CHECK_EQ(ed.active().cursor.col, 2);  // pref col 2 adaptada a la linea destino
+}
+
+// Navegacion vertical conservando la columna visual preferida durante varios
+// movimientos (cruce de lineas y vuelta).
+TEST(softwrap_editor_vertical_preserves_preferred_column) {
+    Editor ed;
+    setupWrapEditor(ed, {"abcdefghijklmno", "12345", "ABCDEFGHIJKLMNO"}, 12);
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 2;
+
+    press(ed, InputEventType::MoveDown);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 2); // pref col 2 adaptada a la linea destino
+
+    press(ed, InputEventType::MoveDown);
+    CHECK_EQ(ed.active().cursor.line, 2);
+    CHECK_EQ(ed.active().cursor.col, 2); // pref col 2 en la linea larga
+
+    press(ed, InputEventType::MoveUp);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    CHECK_EQ(ed.active().cursor.col, 2); // pref col 2 conservada al retroceder
+}
+
+// Navegacion en lineas cortas: bajar desde una linea corta hacia una larga
+// (con wrap) conserva la columna y no pierde la fila correcta.
+TEST(softwrap_editor_vertical_short_line) {
+    Editor ed;
+    setupWrapEditor(ed, {"short", "abcdefghijklmno"}, 12); // textWidth = 5
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 3; // linea corta: una sola fila
+
+    press(ed, InputEventType::MoveDown);
+    CHECK_EQ(ed.active().cursor.line, 1); // cruzo a la linea larga
+    CHECK_EQ(ed.active().cursor.col, 3);  // primera fila de la linea larga, col pref 3
+
+    press(ed, InputEventType::MoveUp);
+    CHECK_EQ(ed.active().cursor.line, 0); // up: linea logica anterior
+    CHECK_EQ(ed.active().cursor.col, 3);  // pref col 3
+}
+
+// Limites del documento: Up desde la linea logica 0 y Down desde la ultima
+// linea logica no deben mover el cursor (no-op en ambos extremos).
+TEST(softwrap_editor_vertical_at_document_limits) {
+    Editor ed;
+    setupWrapEditor(ed, {"abcdefghijklmno", "12345", "ABCDEFGHIJKLMNO"}, 12); // textWidth = 5
+    ed.active().cursor.line = 2;
+    ed.active().cursor.col = 0;
+
+    // Down: ya en la ultima linea logica -> no-op.
+    press(ed, InputEventType::MoveDown);
+    CHECK_EQ(ed.active().cursor.line, 2);
+    CHECK_EQ(ed.active().cursor.col, 0);
+
+    // Up: linea 2 -> linea 1 -> linea 0.
+    press(ed, InputEventType::MoveUp);
+    CHECK_EQ(ed.active().cursor.line, 1);
+    press(ed, InputEventType::MoveUp);
+    CHECK_EQ(ed.active().cursor.line, 0);
+
+    // Up: desde la linea logica 0 -> no-op.
+    press(ed, InputEventType::MoveUp);
+    CHECK_EQ(ed.active().cursor.line, 0);
+}
+
+// Columna preferida sobre destino largo: con textWidth=5 y linea destino de
+// 15 chars, el Down debe aterrizar en la PRIMERA fila visual de la linea destino
+// (col 4), no en una fila de continuación.
+TEST(softwrap_editor_vertical_dest_long_pref_column) {
+    Editor ed;
+    setupWrapEditor(ed, {"abcdefghijklmno", "ABCDEFGHIJKLMNO"}, 12); // textWidth = 5
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 4; // pref 4 (< ancho util 5)
+
+    press(ed, InputEventType::MoveDown);
+    CHECK_EQ(ed.active().cursor.line, 1); // primera linea larga
+    CHECK_EQ(ed.active().cursor.col, 4);  // primera fila visual de la linea destino
 }

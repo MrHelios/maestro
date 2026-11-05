@@ -437,29 +437,23 @@ void Editor::registerCommands() {
         }
         if (isWrapEnabledFor(b)) {
             const softwrap::Index& idx = wrapFor(this, b);
-            int visRow = idx.visualRowOf({b.cursor.line, b.cursor.col});
-            int totalRows = idx.totalRows();
-            if (visRow == 0 && totalRows > 0) {
-                // Ya en la primera fila visual: no hacer nada
-            } else {
-                int targetVisRow = std::max(0, visRow - 1);
-                if (targetVisRow < totalRows) {
-                    // Conservar la preferencia ORIGINAL durante toda la
-                    // secuencia vertical: positionAt puede devolver una
-                    // columna menor (fila corta) sin destruir la preferencia.
-                    int prefCol = preferredVisualCol_.value_or(
-                        visualColumnOf(idx, b.document, {b.cursor.line, b.cursor.col}));
-                    preferredVisualCol_ = prefCol;
-                    Position np = idx.positionAt(b.document, targetVisRow, prefCol);
-                    if (state_ == State::Seleccion) {
-                        beginSelection();
-                        b.cursor.line = np.line;
-                        b.cursor.col = np.col;
-                        updateSelectionPosition();
-                    } else if (state_ == State::Navegacion || state_ == State::Interaccion) {
-                        b.cursor.line = np.line;
-                        b.cursor.col = np.col;
-                    }
+            int prevLine = b.cursor.line - 1;
+            if (prevLine >= 0) {
+                // Wrap: navegar entre LINEAS LOGICAS. La fila destino es la
+                // primera fila de la linea anterior; la columna preferida se
+                // conserva y se adapta a los limites de la linea destino.
+                int prefCol = preferredVisualCol_.value_or(
+                    visualColumnOf(idx, b.document, {b.cursor.line, b.cursor.col}));
+                preferredVisualCol_ = prefCol;
+                Position np = idx.positionAt(b.document, idx.firstRowOfLine(prevLine), prefCol);
+                if (state_ == State::Seleccion) {
+                    beginSelection();
+                    b.cursor.line = np.line;
+                    b.cursor.col = np.col;
+                    updateSelectionPosition();
+                } else if (state_ == State::Navegacion || state_ == State::Interaccion) {
+                    b.cursor.line = np.line;
+                    b.cursor.col = np.col;
                 }
             }
         } else {
@@ -482,18 +476,15 @@ void Editor::registerCommands() {
         }
         if (isWrapEnabledFor(b)) {
             const softwrap::Index& idx = wrapFor(this, b);
-            int visRow = idx.visualRowOf({b.cursor.line, b.cursor.col});
-            int totalRows = idx.totalRows();
-            if (visRow >= totalRows - 1 && totalRows > 0) {
-                // Ya en la última fila visual: no hacer nada
-            } else {
-                int targetVisRow = std::min(visRow + 1, totalRows - 1);
-                // Conservar la preferencia ORIGINAL durante toda la
-                // secuencia vertical (ver movimiento hacia arriba).
+            int nextLine = b.cursor.line + 1;
+            if (nextLine < b.document.lineCount()) {
+                // Wrap: navegar entre LINEAS LOGICAS. La fila destino es la
+                // primera fila de la linea siguiente; la columna preferida se
+                // conserva y se adapta a los limites de la linea destino.
                 int prefCol = preferredVisualCol_.value_or(
                     visualColumnOf(idx, b.document, {b.cursor.line, b.cursor.col}));
                 preferredVisualCol_ = prefCol;
-                Position np = idx.positionAt(b.document, targetVisRow, prefCol);
+                Position np = idx.positionAt(b.document, idx.firstRowOfLine(nextLine), prefCol);
                 if (state_ == State::Seleccion) {
                     beginSelection();
                     b.cursor.line = np.line;
