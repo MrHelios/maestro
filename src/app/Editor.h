@@ -576,11 +576,13 @@ private:
     void handleInteraccionEvent(const InputEvent& event);
     void handleSeleccionEvent(const InputEvent& event);
 
-    // RePag/AvPag: desplaza el viewport y el cursor la misma cantidad de
-    // paginas (viewport.height lineas), conservando la posicion relativa
-    // del cursor dentro del viewport. `dir` = -1 retrocede (RePag) y +1
-    // avanza (AvPag). Antes de los bordes el cursor se clampa para que
-    // nunca quede fuera del documento ni el viewport mas alla del EOF.
+    // RePag/AvPag: navegación vertical por páginas.
+    // En modo normal, desplaza el viewport y el cursor la misma cantidad de
+    // filas, conservando la posición relativa del cursor dentro del viewport.
+    // En soft-wrap, el cursor avanza viewport.height líneas lógicas y se
+    // posiciona desde la primera fila visual de la línea destino. El viewport
+    // se ajusta para mantener visible el cursor.
+    // `dir` = -1 retrocede (RePag) y +1 avanza (AvPag).
     void applyPage(int dir);
     // Scroll de rueda: desplaza exclusivamente el viewport (±3 lineas).
     // No reutiliza navegacion de cursor (MoveUp/PageUp) y no debe llamar

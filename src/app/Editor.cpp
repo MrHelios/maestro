@@ -1339,39 +1339,48 @@ void Editor::applyPage(int dir) {
     Buffer& b = active();
     if (isWrapEnabledFor(b)) {
         const softwrap::Index& idx = wrapFor(this, b);
-        int totalRows = idx.totalRows();
-        int h = b.viewport.height;
+        const int count = b.document.lineCount();
+        const int totalRows = idx.totalRows();
+        const int h = b.viewport.height;
         if (h <= 0) return;
-        int prefVisualCol = preferredVisualCol_.value_or(
-            visualColumnOf(idx, b.document, {b.cursor.line, b.cursor.col}));
-        // Página es navegación vertical: conserva la preferencia entre pasos.
-        preferredVisualCol_ = prefVisualCol;
+        const int maxTop = std::max(0, totalRows - h);
 
-        Position target;
-        if (h >= totalRows) {
-            b.viewport.top = 0;
-            int targetRow = (dir < 0) ? 0 : totalRows - 1;
-            target = idx.positionAt(b.document, targetRow, prefVisualCol);
-        } else {
-            int vr = idx.visualRowOf({b.cursor.line, b.cursor.col});
-            int rel = vr - b.viewport.top;
-            int maxTop = totalRows - h;
-            if (dir < 0) {
-                bool alreadyAtTop = (b.viewport.top == 0);
-                b.viewport.top = std::max(0, b.viewport.top - h);
-                target = idx.positionAt(b.document,
-                    alreadyAtTop ? 0 : b.viewport.top + rel, prefVisualCol);
-            } else {
-                bool alreadyAtBottom = (b.viewport.top == maxTop);
-                b.viewport.top = std::min(maxTop, b.viewport.top + h);
-                target = idx.positionAt(b.document,
-                    alreadyAtBottom ? totalRows - 1 : b.viewport.top + rel,
-                    prefVisualCol);
-            }
+        // Repag/AvPag navegan entre LÍNEAS LÓGICAS (misma idea que las flechas
+        // verticales): una página equivale a viewport.height líneas lógicas,
+        // el destino se resuelve desde el inicio de la línea lógica y la
+        // columna preferida se adapta a los límites de la línea destino. Antes
+        // la página se calculaba sobre filas visuales, así que con softwrap un
+        // AvPag/RePag pudo aterrizar en una fila de continuación en vez de en
+        // la línea lógica destino.
+        int targetLine = (dir < 0) ? b.cursor.line - h : b.cursor.line + h;
+        if (dir < 0) targetLine = std::max(0, targetLine);
+        else targetLine = std::min(targetLine, count - 1);
+        const bool move = (dir < 0) ? (targetLine < b.cursor.line)
+                                   : (targetLine > b.cursor.line);
+        if (move) {
+            int prefVisualCol = preferredVisualCol_.value_or(
+                visualColumnOf(idx, b.document, {b.cursor.line, b.cursor.col}));
+            // Página es navegación vertical: conserva la preferencia entre pasos.
+            preferredVisualCol_ = prefVisualCol;
+            Position target = idx.positionAt(b.document, idx.firstRowOfLine(targetLine), prefVisualCol);
+            b.cursor.line = target.line;
+            b.cursor.col = target.col;
         }
-        b.cursor.line = target.line;
-        b.cursor.col = target.col;
         if (state_ == State::Seleccion) updateSelectionPosition();
+
+        // El viewport baja/accede una pagina (viewport.height filas) en la
+        // misma direccion, con los bordes como en el modo sin wrap. El top se
+        // limita al intervalo [minTop, maxVisibleTop] para garantizar que la
+        // fila visual del cursor quede visible: sin este limite el AvPag podia
+        // dejar el cursor por encima del viewport (targetRow < top).
+        const int targetRow = idx.visualRowOf({b.cursor.line, b.cursor.col});
+        const int minTop = std::max(0, targetRow - h + 1);
+        const int maxVisibleTop = std::min(maxTop, targetRow);
+        if (dir < 0) {
+            b.viewport.top = std::clamp(std::max(0, b.viewport.top - h), minTop, maxVisibleTop);
+        } else {
+            b.viewport.top = std::clamp(std::min(maxTop, b.viewport.top + h), minTop, maxVisibleTop);
+        }
         return;
     }
     const int count = b.document.lineCount(); // >= 1: siempre hay una linea

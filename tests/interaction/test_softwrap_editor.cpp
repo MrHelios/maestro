@@ -332,14 +332,14 @@ TEST(softwrap_page_down_selection_tracks_cursor) {
     CHECK(ed.active().selection.has_value());
     CHECK((ed.active().selection->anchor == Position{0, 0}));
     CHECK(samePosition(ed.active().selection->position, ed.active().cursor));
-    CHECK_EQ(ed.active().cursor.line, 2);   // fila visual 8
-    CHECK_EQ(ed.active().cursor.col, 24);
+    CHECK_EQ(ed.active().cursor.line, 8);   // una pagina = viewport.height lineas logicas
+    CHECK_EQ(ed.active().cursor.col, 0);
 
     press(ed, InputEventType::PageDown);
     CHECK((ed.active().selection->anchor == Position{0, 0}));
     CHECK(samePosition(ed.active().selection->position, ed.active().cursor));
-    CHECK_EQ(ed.active().cursor.line, 5);   // fila visual 16
-    CHECK_EQ(ed.active().cursor.col, 12);
+    CHECK_EQ(ed.active().cursor.line, 16);  // sigue avanzando una pagina
+    CHECK_EQ(ed.active().cursor.col, 0);
 }
 
 TEST(softwrap_page_up_selection_tracks_cursor_and_top_limit) {
@@ -353,13 +353,13 @@ TEST(softwrap_page_up_selection_tracks_cursor_and_top_limit) {
     press(ed, InputEventType::PageUp);
     CHECK((ed.active().selection->anchor == Position{4, 5}));
     CHECK(samePosition(ed.active().selection->position, ed.active().cursor));
-    CHECK_EQ(ed.active().cursor.line, 1);   // fila visual 4
-    CHECK_EQ(ed.active().cursor.col, 17);   // columna preferida 5
+    CHECK_EQ(ed.active().cursor.line, 0);   // una pagina = 8 lineas logicas -> linea 0
+    CHECK_EQ(ed.active().cursor.col, 5);    // columna preferida 5
 
     press(ed, InputEventType::PageUp);
     CHECK((ed.active().selection->anchor == Position{4, 5}));
     CHECK(samePosition(ed.active().selection->position, ed.active().cursor));
-    CHECK_EQ(ed.active().cursor.line, 0);   // fila visual 0
+    CHECK_EQ(ed.active().cursor.line, 0);   // ya en el tope: no retrocede mas
     CHECK_EQ(ed.active().cursor.col, 5);    // columna preferida 5
 
     // viewport ya en el tope: la rama de límite debe mover el cursor al
@@ -383,7 +383,7 @@ TEST(softwrap_page_down_selection_at_bottom_limit) {
     CHECK(ed.active().selection.has_value());
     CHECK((ed.active().selection->anchor == Position{19, 0}));
     CHECK(samePosition(ed.active().selection->position, ed.active().cursor));
-    CHECK((Position{ed.active().cursor.line, ed.active().cursor.col} == Position{19, 24})); // última fila visual
+    CHECK((Position{ed.active().cursor.line, ed.active().cursor.col} == Position{19, 0})); // ya en la ultima linea logica
 }
 
 TEST(softwrap_page_selection_when_document_fits_viewport) {
@@ -394,7 +394,7 @@ TEST(softwrap_page_selection_when_document_fits_viewport) {
     press(ed, InputEventType::PageDown);
     CHECK(ed.active().selection.has_value());
     CHECK(samePosition(ed.active().selection->position, ed.active().cursor));
-    CHECK((Position{ed.active().cursor.line, ed.active().cursor.col} == Position{0, 24}));
+    CHECK((Position{ed.active().cursor.line, ed.active().cursor.col} == Position{0, 0}));
 
     press(ed, InputEventType::PageUp);
     CHECK(samePosition(ed.active().selection->position, ed.active().cursor));
@@ -566,5 +566,101 @@ TEST(softwrap_editor_vertical_dest_long_pref_column) {
     press(ed, InputEventType::MoveDown);
     CHECK_EQ(ed.active().cursor.line, 1); // primera linea larga
     CHECK_EQ(ed.active().cursor.col, 4);  // primera fila visual de la linea destino
+}
+
+// ---------------------------------------------------------------------------
+// RepPag / AvPag (PageUp/PageDown) con soft-wrap: navegan entre LINEAS
+// LOGICAS, la misma idea que las flechas verticales. Antes el salto de pagina
+// se calculaba sobre filas visuales (relativo al viewport), asi que con
+// lineas largas que ocupan varias filas visuales el destino podia caer en una
+// fila de continuacion en vez de en la linea logica de destino.
+// ---------------------------------------------------------------------------
+
+// AvPag debe saltar una pagina (viewport.height lineas) entre lineas logicas,
+// no avanzar viewport.height filas visuales desde la posicion actual. Con
+// textWidth=12 y viewport de 8 filas, una linea logica de 30 chars ocupa 3
+// filas visuales: la pagina destino es la linea logica 8 (primera fila visual
+// 24), no la fila visual 8 (que pertenece a la linea 2).
+TEST(softwrap_page_down_moves_to_logical_line_page) {
+    Editor ed;
+    setupWrapEditor(ed, wrappedLines(20));
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 0;
+
+    press(ed, InputEventType::PageDown);
+    CHECK_EQ(ed.active().cursor.line, 8);  // una pagina = viewport.height lineas logicas
+    CHECK_EQ(ed.active().cursor.col, 0);   // primera fila de la linea destino
+}
+
+// RePag debe saltar una pagina (viewport.height lineas) entre lineas logicas,
+// con la columna preferida conservada en la linea destino.
+TEST(softwrap_page_up_moves_to_logical_line_page) {
+    Editor ed;
+    setupWrapEditor(ed, wrappedLines(20));
+    ed.active().cursor.line = 4;
+    ed.active().cursor.col = 5;
+    ed.active().viewport.top = 12; // viewport con contenido visible arriba
+
+    press(ed, InputEventType::PageUp);
+    CHECK_EQ(ed.active().cursor.line, 0); // una pagina = viewport.height lineas logicas
+    CHECK_EQ(ed.active().cursor.col, 5);  // columna preferida 5 en la linea destino
+}
+
+// Salto real de una pagina (viewport.height lineas) sin tocar los limites del
+// documento: desde la linea 12 se debe aterrizar en la linea 12 - 8 = 4,
+// conservando la columna preferida.
+TEST(softwrap_page_up_moves_one_logical_page) {
+    Editor ed;
+    setupWrapEditor(ed, wrappedLines(24));
+
+    ed.active().cursor.line = 12;
+    ed.active().cursor.col = 5;
+
+    press(ed, InputEventType::PageUp);
+
+    CHECK_EQ(ed.active().cursor.line, 4);
+    CHECK_EQ(ed.active().cursor.col, 5);
+}
+
+// AvPag desde la ultima linea logica no debe overselar: ya no existe una
+// pagina valida mas allá del final y el cursor queda en la ultima linea.
+TEST(softwrap_page_down_at_last_logical_line_stays) {
+    Editor ed;
+    setupWrapEditor(ed, wrappedLines(20));
+    ed.active().cursor.line = 19;
+    ed.active().cursor.col = 0;
+    ed.active().viewport.top = 52; // maxTop: ya pegado al final
+
+    press(ed, InputEventType::PageDown);
+    CHECK_EQ(ed.active().cursor.line, 19);
+    CHECK_EQ(ed.active().cursor.col, 0);
+}
+
+// AvPag con destino en una linea logica larga: el viewport baja una pagina
+// pero el destino puede quedar por encima del area visible (top + height).
+// El cursor movido debe quedar dentro del viewport [top, top + height).
+// Repro: viewport.height = 8, cursor en la linea logica 15 (viewport.top = 15)
+// y AvPag que aterriza en la linea logica 18 (primera fila visual 18; ultima
+// linea del documento construido: 18 lineas cortas + 1 larga). Antes el top
+// quedaba por encima del destino y el cursor quedo por encima del viewport
+// (fuera de pantalla).
+TEST(softwrap_page_down_cursor_stays_in_viewport) {
+    Editor ed;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 18; ++i) lines.push_back(std::string(12, 'a')); // 1 fila visual cada una
+    lines.push_back(std::string(130, 'b')); // ultima linea: muchas filas visuales
+    setupWrapEditor(ed, lines);
+    ed.active().cursor.line = 15;
+    ed.active().cursor.col = 0;
+    ed.active().viewport.top = 15;
+
+    press(ed, InputEventType::PageDown);
+
+    // El PageDown debe llegar a la ultima linea logica del documento...
+    CHECK_EQ(ed.active().cursor.line, 18);
+    // ...y su fila visual debe seguir dentro del viewport [top, top + height).
+    const int cursorRow = ed.wrapIndex().visualRowOf({ed.active().cursor.line, ed.active().cursor.col});
+    CHECK(cursorRow >= ed.active().viewport.top);
+    CHECK(cursorRow < ed.active().viewport.top + ed.active().viewport.height);
 }
 
