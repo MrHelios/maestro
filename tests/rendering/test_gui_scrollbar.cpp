@@ -13,6 +13,7 @@
 #include "rendering/Sink.h"
 #include "rendering/gui/GuiRenderer.h"
 #include "rendering/gui/GuiChrome.h"
+#include "layout/Gutter.h"
 #include "layout/Layout.h"
 
 #ifdef HAVE_SDL2
@@ -479,6 +480,236 @@ TEST(GuiScrollbar_Composition_ResizeVerticalConsistency) {
 
     // Tras invalidateCache el render debe ser completo
     CHECK(gui.lastWasFull());
+}
+
+// ---------------------------------------------------------------------------
+// Test 12: GuiScrollbar_ContentAndCursorStayLeftOfTrack
+// Regresión: con scrollbar visible y desplazamiento horizontal, el cursor se
+// pintaba encima de la pista/pulgar porque el contenido ocupaba el ancho
+// completo de la ventana. La reserva horizontal reduce el área de contenido
+// para que el cursor nunca llegue al track, SIN desplazar viewport.left (el
+// mapeo de entrada del Editor se mantiene sincronizado con lo que se pinta).
+//
+// Garantías verificadas:
+//   A. El borde derecho del contenido pintado no llega al track (en píxeles).
+//   B. FrameBuilder clampea el cursor contra layoutEff.content.width:
+//      si el cursor está en la columna reservada, queda inválido y no se pinta.
+//   C. Si el cursor está dentro del área útil, queda a la izquierda del track.
+//   D. viewport.left no se desplaza: el mapeo de entrada (mouse) sigue
+//      sincronizado con lo que se pinta.
+//   E. Los fast paths (tryFastCursorMove / tryFastScrollLine) reciben
+//      layoutEff y mantienen la invariante.
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_ContentAndCursorStayLeftOfTrack) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    // Varias líneas largas para permitir movimientos verticales válidos.
+    std::vector<std::string> lines;
+    for (int i = 0; i < 30; ++i) lines.push_back(std::string(200, 'x'));
+    Document doc;
+    doc.restore(lines);
+
+    const int cw = gui.cellWForTests();
+    const int ch = gui.cellHForTests();
+    if (cw <= 0 || ch <= 0) SKIP("sin fuente");
+
+    const int vpW = 80;
+    Viewport vp = makeVp(10, vpW);
+    Cursor cur;
+    cur.line = 0;
+
+    const int gutter = gutterWidth(doc.lineCount(), vpW);
+    // Columna de texto dentro del área útil (primera columna, siempre válida
+    // si hay al menos 1 columna útil, lo cual garantiza el renderer).
+    const int usefulTextCol = 0;
+    // Columna de texto en el borde derecho de la pantalla (reservada al
+    // scrollbar cuando está visible).
+    const int reservedTextCol = vpW - 1 - gutter;
+
+    // Control explícito de la geometría física del drawable:
+    // drawableW = vpW * cw (sin gap, modo legacy), drawableH = 400.
+    // scrollbarTrackRect usa drawablePixelW_ para calcular activeRightPx.
+    gui.setDrawableMetrics(vpW * cw, 400, 0);
+
+    // El scrollbar debe estar habilitado ANTES del render (como en el loop
+    // real, que sincroniza scrollInfo antes de renderFrame).
+    gui.setScrollInfo({0, vp.height, 30});
+
+    // Helper local para verificar la invariante tras cada render.
+    // `cursorEnAreaUtil` indica si el cursor debe ser válido y a la
+    // izquierda del track.
+    auto verificarInvariante = [&](bool cursorEnAreaUtil) {
+        const Layout layout = gui.lastLayout();
+        const GuiPixelRect track = gui.scrollbarTrackRect(layout);
+        const GuiPixelRect cursorRect = gui.cursorPixelRect();
+
+        CHECK(track.valid);
+        // A. El borde derecho del contenido pintado no llega al track
+        //    (en píxeles, no solo en columnas lógicas).
+        CHECK(layout.content.width < vpW);
+        CHECK(layout.content.width * cw <= track.x);
+        // D. viewport.left no se desplaza.
+        CHECK_EQ(vp.left, 0);
+
+        if (cursorEnAreaUtil) {
+            // B/C. El cursor debe ser válido y quedar a la izquierda del
+            //    track (sin solapamiento con track ni pulgar).
+            CHECK(cursorRect.valid);
+            CHECK(cursorRect.x + cursorRect.w <= track.x);
+        } else {
+            // B. Si el cursor está en la columna reservada, FrameBuilder lo
+            //    clampea y no se pinta (cursorPixelRect().valid == false).
+            CHECK(!cursorRect.valid);
+        }
+    };
+
+    // Render 1 (camino completo): cursor en la columna reservada ->
+    // FrameBuilder lo clampea y no se pinta.
+    cur.col = reservedTextCol;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    verificarInvariante(false);
+
+    // Render 2 (camino completo): cursor dentro del área útil ->
+    // se pinta y queda a la izquierda del track.
+    cur.col = usefulTextCol;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    verificarInvariante(true);
+
+    // Render 3 (equivalencia tras movimiento de cursor, misma geometría):
+    // cursor dentro del área útil, línea 1.
+    cur.col = usefulTextCol;
+    cur.line = 1;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    verificarInvariante(true);
+
+    // Render 4 (equivalencia tras cambio de viewport.top):
+    // Cambiar scrollInfo_ no basta; debe cambiar vp.top, que es lo que
+    // recibe el renderer. Esto verifica que el resultado es equivalente
+    // tras un desplazamiento vertical de una línea, sea cual sea el camino
+    // interno (camino completo o tryFastScrollLine).
+    vp.top = 1;
+    cur.col = usefulTextCol;
+    cur.line = 1;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    verificarInvariante(true);
+
+    // Render 5 (equivalencia tras nuevo render con misma geometría):
+    cur.col = usefulTextCol;
+    cur.line = 2;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    verificarInvariante(true);
+}
+
+// ---------------------------------------------------------------------------
+// Test 13: GuiScrollbar_Aparece_InvalidaFastPath
+// El scrollbar puede aparecer sin que cambien viewport.width ni
+// viewport.height, pero layoutEff.content.width se reduce. Los fast paths
+// deben detectar el cambio de geometría de contenido y forzar un render
+// completo (no reutilizar filas construidas con otro ancho de contenido).
+//
+// Estrategia:
+//   1. Render sin scrollbar + cursor en línea 0 (establece cache).
+//   2. Render sin scrollbar + cursor en línea 1 (movimiento de cursor: el
+//      renderer intenta fast path; mismo layoutEff, debe funcionar).
+//   3. Render con scrollbar + cursor en línea 2 (cambio de layoutEff +
+//      movimiento de cursor: el fast path debe invalidarse y hacer full
+//      repaint).
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_Aparece_InvalidaFastPath) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 30; ++i) lines.push_back(std::string(200, 'x'));
+    Document doc;
+    doc.restore(lines);
+
+    const int cw = gui.cellWForTests();
+    const int ch = gui.cellHForTests();
+    if (cw <= 0 || ch <= 0) SKIP("sin fuente");
+
+    const int vpW = 80;
+    Viewport vp = makeVp(10, vpW);
+    Cursor cur;
+    const int gutter = gutterWidth(doc.lineCount(), vpW);
+    cur.col = vpW - 1 - gutter;  // columna reservada al scrollbar
+
+    gui.setDrawableMetrics(vpW * cw, 400, 0);
+
+    // Render 1: sin scrollbar (total == visible), cursor en línea 0.
+    cur.line = 0;
+    gui.setScrollInfo({0, vp.height, vp.height});
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    const Layout lo1 = gui.lastLayout();
+    CHECK_EQ(lo1.content.width, vpW);  // sin reducción
+    CHECK(gui.cursorPixelRect().valid);  // cursor pinta en última columna
+
+    // Render 2: sin scrollbar, cursor en línea 1 (movimiento, mismo layout).
+    cur.line = 1;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(!gui.lastWasFull());  // fast path reutiliza cache (mismo layoutEff)
+
+    // Render 3: aparece el scrollbar, cursor en línea 2.
+    // Cambio de layoutEff.content.width + movimiento: debe invaladar
+    // fast path y hacer render completo.
+    cur.line = 2;
+    gui.setScrollInfo({0, vp.height, 30});
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    const Layout lo3 = gui.lastLayout();
+    CHECK(lo3.content.width < vpW);  // se redujo por la reserva
+    CHECK(!gui.cursorPixelRect().valid);  // cursor clampeado, no se pinta
+    CHECK(gui.lastWasFull());  // full repaint por cambio de geometría
+}
+
+// ---------------------------------------------------------------------------
+// Test 14: GuiScrollbar_Desaparece_InvalidaFastPath
+// El scrollbar puede desaparecer sin que cambien viewport.width ni
+// viewport.height, pero layoutEff.content.width vuelve al ancho completo.
+// Los fast paths deben detectar el cambio de geometría de contenido y
+// forzar un render completo.
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_Desaparece_InvalidaFastPath) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 30; ++i) lines.push_back(std::string(200, 'x'));
+    Document doc;
+    doc.restore(lines);
+
+    const int cw = gui.cellWForTests();
+    const int ch = gui.cellHForTests();
+    if (cw <= 0 || ch <= 0) SKIP("sin fuente");
+
+    const int vpW = 80;
+    Viewport vp = makeVp(10, vpW);
+    Cursor cur;
+    const int gutter = gutterWidth(doc.lineCount(), vpW);
+    cur.col = vpW - 1 - gutter;  // columna reservada al scrollbar
+
+    gui.setDrawableMetrics(vpW * cw, 400, 0);
+
+    // Render 1: con scrollbar, cursor en línea 0.
+    cur.line = 0;
+    gui.setScrollInfo({0, vp.height, 30});
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    const Layout lo1 = gui.lastLayout();
+    CHECK(lo1.content.width < vpW);  // reducido
+    CHECK(!gui.cursorPixelRect().valid);  // cursor clampeado
+
+    // Render 2: con scrollbar, cursor en línea 1 (movimiento, mismo layout).
+    cur.line = 1;
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(!gui.lastWasFull());  // fast path reutiliza cache (mismo layoutEff)
+
+    // Render 3: desaparece el scrollbar, cursor en línea 2.
+    // Cambio de layoutEff.content.width + movimiento: debe invaladar
+    // fast path y hacer render completo.
+    cur.line = 2;
+    gui.setScrollInfo({0, vp.height, vp.height});
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    const Layout lo3 = gui.lastLayout();
+    CHECK_EQ(lo3.content.width, vpW);  // vuelve al ancho completo
+    CHECK(gui.cursorPixelRect().valid);  // cursor pinta en última columna
+    CHECK(gui.lastWasFull());  // full repaint por cambio de geometría
 }
 
 // ---------------------------------------------------------------------------

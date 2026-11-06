@@ -1936,11 +1936,75 @@ void GuiRenderer::renderScreenDiff(
     const std::optional<BracketPair>& bracketPair, const Layout& layout) {
     (void)sink;  // la GUI pinta en el SDL_Renderer, no en el Sink de bytes.
 
+    // Reserva horizontal del scrollbar: el track es un overlay en el borde
+    // derecho del drawable, así que el área de contenido (texto y cursor)
+    // no debe alcanzar el borde de la ventana. Se descuentan del ancho de
+    // contenido las columnas completas que cubren el ancho del track.
+    //
+    // IMPORTANTE: no se desplaza viewport.left ni se modifica el viewport
+    // del Editor. Solo se reduce el ancho lógico del área de contenido usado
+    // para pintar y para clamp-ear el cursor. De este modo el mapeo de
+    // entrada (mouse) sigue usando el mismo viewport.left del Editor y no
+    // hay desincronización entre lo que se pinta y lo que el usuario
+    // clickea. Si el cursor lógico queda fuera del área reducida, simplemente
+    // no se pinta (el usuario puede desplazarse horizontalmente para traerlo
+    // al área visible).
+    // Solo sin soft-wrap: con wrap el índice visual se construye en el
+    // Editor con el ancho completo; recortar acá dejaría filas y cursor
+    // inconsistentes. El wrap no usa scroll horizontal, así que conserva su
+    // comportamiento previo.
+    //
+    // Nota: layoutEff.content.width es el ancho de pintura (reducido por el
+    // scrollbar). viewport.width se conserva intacto: representan conceptos
+    // distintos (área de contenido vs. ventana de desplazamiento) y no
+    // necesariamente deben ser iguales.
+    Layout layoutEff = layout;
+    const bool railVisible =
+        scrollInfo_.visible > 0 && scrollbarMaxTop() > 0;
+    const int cwEff = font_.cellW();
+    if (railVisible && cwEff > 0 &&
+        !frameBuilder_.isWrapEnabled(wrapIndex_)) {
+        const int railPx = scrollbarWidthPx(cwEff);
+        const int reserveCols = (railPx + cwEff - 1) / cwEff;
+        const int newWidth =
+            std::max(1, layoutEff.content.width - reserveCols);
+        if (newWidth < layoutEff.content.width) {
+            layoutEff.content.width = newWidth;
+        }
+        // Caso límite: ventana muy pequeña. Incluso con el ancho reducido,
+        // el borde derecho del contenido (content.width * cw) puede solaparse
+        // con el track (track.x = activeRightPx - railPx). Reducir más
+        // columnas hasta que el contenido quede a la izquierda del track.
+        // Si ni siquiera 1 columna cabe (track.x < cwEff), no hay área útil
+        // sin solapamiento; se conserva 1 columna y el cursor simplemente no
+        // se pinta si queda fuera del área útil.
+        const int w = railPx;
+        const int fullCols =
+            std::max(layout.chrome.col + layout.chrome.width,
+                     layout.content.col + layout.content.width);
+        const int logicalWidth = fullCols * cwEff;
+        const int rightSpacerPx = drawablePixelW_ - logicalWidth;
+        const int activeRightPx =
+            (rightSpacerPx >= 0 && rightSpacerPx < cwEff)
+                ? logicalWidth + rightSpacerPx
+                : logicalWidth;
+        const int trackX = activeRightPx - w;
+        while (layoutEff.content.width > 1 &&
+               layoutEff.content.width * cwEff > trackX) {
+            --layoutEff.content.width;
+        }
+    }
+
     // Mantener la geometría física del frame sincronizada con el drawable
     // actual, incluso cuando se tome un camino rápido que no pasa por
     // presentFramebuf/presentWindow. Sin esto, lastFrameGeometry_ queda
     // obsoleto tras un resize que no altera el viewport/layout (p. ej. un
     // resize de 1 px que no cambia filas ni columnas).
+    //
+    // Nota: se pasa el layout ORIGINAL (no layoutEff). La reserva del
+    // scrollbar solo afecta al área de contenido pintada (buildFrame,
+    // fast paths, cursor clamp), no a la geometría física del framebuffer
+    // ni del chrome, que debe conservar el ancho completo de la ventana.
     if (drawableMetricsInitialized_) {
         updateChromeGeometry(layout, drawablePixelW_, drawablePixelH_);
     }
@@ -1951,18 +2015,19 @@ void GuiRenderer::renderScreenDiff(
     // camino completo de abajo sin haber mutado nada. Los fast paths se
     // autodescartan con Soft Wrap activo (ver sus precondiciones).
     if (tryFastCursorMove(doc, cursor, viewport, filename, modified, chrome,
-                          selection, searchHighlight, bracketPair, layout)) {
+                          selection, searchHighlight, bracketPair, layoutEff)) {
         return;
     }
     // Camino rápido (etapa scroll ±1): rota snapshots y construye O(1) filas.
     // Mismas garantías de equivalencia; el repintado sigue saliendo del caché
     // hasta la etapa scroll-blit.
     if (tryFastScrollLine(doc, cursor, viewport, filename, modified, chrome,
-                          selection, searchHighlight, bracketPair, layout)) {
+                          selection, searchHighlight, bracketPair, layoutEff)) {
         return;
     }
     Frame f = buildFrame(doc, cursor, viewport, filename, modified, chrome,
-                         selection, searchHighlight, bracketPair, wrapIndex_, layout);
+                         selection, searchHighlight, bracketPair, wrapIndex_,
+                         layoutEff);
     const bool havePrevContent = contentHasCache_;
     const FrameCursor prevContent = contentCursor_;
     lastChrome_ = f.chrome;
@@ -2408,7 +2473,15 @@ GuiPixelRect GuiRenderer::scrollbarTrackRect(const Layout& layout, int resizeBor
     }
 
     const int w = scrollbarWidthPx(cw);
-    const int logicalWidth = (layout.content.col + layout.content.width) * cw;
+    // El ancho lógico del frame es el de la ventana (chrome), no el del área
+    // de contenido: cuando el scrollbar está visible, renderScreenDiff reduce
+    // content.width para que el texto/cursor no invadan el track. El track
+    // debe seguir anclado al borde derecho real de la ventana, no al borde
+    // del contenido reducido.
+    const int fullCols =
+        std::max(layout.content.col + layout.content.width,
+                 layout.chrome.col + layout.chrome.width);
+    const int logicalWidth = fullCols * cw;
     const int rightSpacerPx = drawablePixelW_ - logicalWidth;
     // activeRightPx = borde derecho REAL del área activa (incluye el gap
     // horizontal rightSpacerPx cuando el modo es "exact"; en modo legacy
