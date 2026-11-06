@@ -7,6 +7,8 @@
 #include "document/Document.h"
 #include "test_framework.h"
 
+namespace {
+
 using Lines = std::vector<std::string>;
 using testfw::TempFile;
 
@@ -22,23 +24,23 @@ static std::string fileContent(const std::string& p) {
     return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
 }
 
-// ---------------------------------------------------------------------------
-// 1. Inicio: documento vacio
-// ---------------------------------------------------------------------------
+} // namespace
+
+// Documento vacio
 TEST(doc_new_empty) {
     Document d;
+    
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineLength(0), 0);
     CHECK_EQ(d.lineAt(0), "");
 }
 
-// ---------------------------------------------------------------------------
-// 1. Abrir archivo existente
-// ---------------------------------------------------------------------------
+// abrir archivo tempora que existe
 TEST(doc_load_empty_file) {
-    TempFile f;
-    f.write("");
     Document d;
+    TempFile f;
+    
+    f.write(""); // una mini prueba que el archivo existe.
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "");
@@ -46,8 +48,9 @@ TEST(doc_load_empty_file) {
 
 TEST(doc_load_one_line) {
     TempFile f;
-    f.write("hola");
     Document d;
+    f.write("hola");
+    
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "hola");
@@ -55,8 +58,9 @@ TEST(doc_load_one_line) {
 
 TEST(doc_load_multiple_lines) {
     TempFile f;
-    f.write("uno\ndos\ntres");
     Document d;
+    
+    f.write("uno\ndos\ntres");
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 3);
     CHECK_EQ(d.lineAt(0), "uno");
@@ -66,8 +70,9 @@ TEST(doc_load_multiple_lines) {
 
 TEST(doc_load_trailing_newline) {
     TempFile f;
-    f.write("a\nb\n");
     Document d;
+    
+    f.write("a\nb\n");
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "a");
@@ -76,8 +81,9 @@ TEST(doc_load_trailing_newline) {
 
 TEST(doc_load_no_trailing_newline) {
     TempFile f;
-    f.write("x\ny");
     Document d;
+    
+    f.write("x\ny");
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(1), "y");
@@ -85,8 +91,9 @@ TEST(doc_load_no_trailing_newline) {
 
 TEST(doc_load_crlf) {
     TempFile f;
-    f.write("a\r\nb\r\n");
     Document d;
+    
+    f.write("a\r\nb\r\n");
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "a");
@@ -94,16 +101,20 @@ TEST(doc_load_crlf) {
 }
 
 TEST(doc_load_large_file) {
+    Document d;
     TempFile f;
     std::string big;
+    
     big.reserve(1024 * 1024);
     for (int i = 0; i < 100000; ++i)
         big += "linea\n";
     f.write(big);
-    Document d;
+    
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 100000);
     CHECK_EQ(d.lineAt(0), "linea");
+    CHECK_EQ(d.lineAt(532), "linea");   // valor aleatorio
+    CHECK_EQ(d.lineAt(3110), "linea");  // valor aleatorio
     CHECK_EQ(d.lineAt(99999), "linea");
 }
 
@@ -119,35 +130,39 @@ TEST(doc_load_long_lines) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Archivo inexistente / errores
+// Archivo inexistente / errores
 // ---------------------------------------------------------------------------
+
 TEST(doc_load_nonexistent) {
     Document d;
+    
     CHECK_EQ(d.loadFromFile("/no/such/file/xyz_editor_never"), LoadResult::NotFound);
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "");
 }
 
-// Abrir un directorio no debe crashear: el fallo de lectura se traduce a un
-// documento de una sola linea vacia (sin importar el valor de retorno).
+// Abrir un directorio no debe crashear
 TEST(doc_load_directory_no_crash) {
     Document d;
+    
     d.loadFromFile("/tmp");
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "");
 }
 
-// Un archivo EXISTENTE sin permisos de lectura NO se trata como archivo nuevo:
-// loadFromFile devuelve PermissionDenied y NO toca el contenido del documento.
-// (Bajo root no se puede forzar el fallo de permisos, asi que esa parte se omite).
+// no se puede cargar el contenido origina en el documento
+// en memoria.
+// eso es lo que verifica este test.
 TEST(doc_load_permission_denied_does_not_touch_document) {
     if (::geteuid() == 0) return;
 
     TempFile f;
+    Document d;
+    
     f.write("contenido original\n");
     std::filesystem::permissions(f.path, std::filesystem::perms::none);
 
-    Document d = makeDoc({"texto previo", "no debe borrarse"});
+    d = makeDoc({"texto previo", "no debe borrarse"});
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::PermissionDenied);
     // El documento queda intacto, listo para seguir editando/guardando.
     CHECK_EQ(d.lineCount(), 2);
@@ -158,44 +173,52 @@ TEST(doc_load_permission_denied_does_not_touch_document) {
 // ---------------------------------------------------------------------------
 // 2. Insertar un caracter
 // ---------------------------------------------------------------------------
+
 TEST(doc_insert_into_empty) {
     Document d;
+    
     d.insertChar(0, 0, 'a');
     CHECK_EQ(d.lineAt(0), "a");
 }
 
 TEST(doc_insert_at_start) {
     Document d = makeDoc({"bc"});
+    
     d.insertChar(0, 0, 'a');
     CHECK_EQ(d.lineAt(0), "abc");
 }
 
 TEST(doc_insert_middle) {
     Document d = makeDoc({"ac"});
+    
     d.insertChar(0, 1, 'b');
     CHECK_EQ(d.lineAt(0), "abc");
 }
 
 TEST(doc_insert_at_end) {
     Document d = makeDoc({"ab"});
+    
     d.insertChar(0, 2, 'c');
     CHECK_EQ(d.lineAt(0), "abc");
 }
 
 TEST(doc_insert_col_beyond_clamps) {
     Document d = makeDoc({"ab"});
+    
     d.insertChar(0, 100, 'Z');
     CHECK_EQ(d.lineAt(0), "abZ");
 }
 
 TEST(doc_insert_col_negative_clamps_to_start) {
     Document d = makeDoc({"bc"});
+    
     d.insertChar(0, -1, 'Z');
     CHECK_EQ(d.lineAt(0), "Zbc");
 }
 
 TEST(doc_insert_invalid_line_ignored) {
     Document d = makeDoc({"abc"});
+    
     d.insertChar(50, 0, 'a');
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "abc");
@@ -203,6 +226,7 @@ TEST(doc_insert_invalid_line_ignored) {
 
 TEST(doc_restore_empty_vector) {
     Document d;
+    
     d.restore(Lines{});
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "");
@@ -211,6 +235,7 @@ TEST(doc_restore_empty_vector) {
 TEST(doc_insert_many_characters) {
     Document d;
     const std::string word = "hola";
+    
     for (size_t i = 0; i < word.size(); ++i)
         d.insertChar(0, static_cast<int>(i), word[i]);
     CHECK_EQ(d.lineAt(0), "hola");
@@ -219,6 +244,7 @@ TEST(doc_insert_many_characters) {
 TEST(doc_insert_thousands) {
     Document d;
     const int n = 5000;
+    
     for (int i = 0; i < n; ++i)
         d.insertChar(0, i, 'x');
     CHECK_EQ(d.lineLength(0), n);
@@ -227,6 +253,7 @@ TEST(doc_insert_thousands) {
 
 TEST(doc_insert_special_chars) {
     Document d;
+    
     d.insertChar(0, 0, ' ');
     d.insertChar(0, 1, '\t');
     d.insertChar(0, 2, ',');
@@ -238,8 +265,10 @@ TEST(doc_insert_special_chars) {
 // ---------------------------------------------------------------------------
 // 3. InsertNewline
 // ---------------------------------------------------------------------------
+
 TEST(doc_newline_empty) {
     Document d;
+    
     d.splitLine(0, 0);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "");
@@ -248,6 +277,7 @@ TEST(doc_newline_empty) {
 
 TEST(doc_newline_start) {
     Document d = makeDoc({"abc"});
+    
     d.splitLine(0, 0);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "");
@@ -256,6 +286,7 @@ TEST(doc_newline_start) {
 
 TEST(doc_newline_middle) {
     Document d = makeDoc({"abcd"});
+    
     d.splitLine(0, 2);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "ab");
@@ -264,6 +295,7 @@ TEST(doc_newline_middle) {
 
 TEST(doc_newline_end) {
     Document d = makeDoc({"abc"});
+    
     d.splitLine(0, 3);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "abc");
@@ -272,6 +304,7 @@ TEST(doc_newline_end) {
 
 TEST(doc_newline_repeated) {
     Document d;
+    
     for (int i = 0; i < 5; ++i)
         d.splitLine(0, 0);
     CHECK_EQ(d.lineCount(), 6);
@@ -279,22 +312,26 @@ TEST(doc_newline_repeated) {
 
 TEST(doc_newline_many_lines) {
     Document d = makeDoc({"texto"});
+    
     for (int i = 0; i < 100; ++i)
         d.splitLine(0, 0);
     CHECK_EQ(d.lineCount(), 101);
     CHECK_EQ(d.lineAt(100), "texto");
 }
 
+// indice de linea invalido: no hace nada
 TEST(doc_newline_oob_line_ignored) {
     Document d = makeDoc({"abc"});
-    d.splitLine(5, 0); // indice de linea invalido: no hace nada
+    
+    d.splitLine(5, 0);
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "abc");
 }
 
+// col fuera de rango se recorta al final de la linea: crea nueva linea vacia.
 TEST(doc_newline_col_beyond_clamps_to_end) {
-    // col fuera de rango se recorta al final de la linea: crea nueva linea vacia.
     Document d = makeDoc({"abc"});
+    
     d.splitLine(0, 1000);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "abc");
@@ -303,6 +340,7 @@ TEST(doc_newline_col_beyond_clamps_to_end) {
 
 TEST(doc_newline_col_negative_clamps_to_start) {
     Document d = makeDoc({"abc"});
+    
     d.splitLine(0, -1);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "");
@@ -312,28 +350,33 @@ TEST(doc_newline_col_negative_clamps_to_start) {
 // ---------------------------------------------------------------------------
 // 8. Backspace (deleteCharBefore)
 // ---------------------------------------------------------------------------
+
 TEST(doc_backspace_mid_line) {
     Document d = makeDoc({"abc"});
+    
     CHECK(d.deleteCharBefore(0, 2));
     CHECK_EQ(d.lineAt(0), "ac");
 }
 
+// col fuera de rango se recorta al final: borra el ultimo caracter.
 TEST(doc_backspace_col_beyond_clamps_to_last) {
-    // col fuera de rango se recorta al final: borra el ultimo caracter.
     Document d = makeDoc({"abc"});
+    
     CHECK(d.deleteCharBefore(0, 500));
     CHECK_EQ(d.lineAt(0), "ab");
 }
 
+// col negativa se recorta a 0: en la primera linea no hay nada que borrar.
 TEST(doc_backspace_col_negative_clamps_to_start) {
-    // col negativa se recorta a 0: en la primera linea no hay nada que borrar.
     Document d = makeDoc({"abc"});
+    
     CHECK(!d.deleteCharBefore(0, -1));
     CHECK_EQ(d.lineAt(0), "abc");
 }
 
 TEST(doc_backspace_several) {
     Document d = makeDoc({"abcdef"});
+    
     while (d.lineAt(0).size() > 3)
         CHECK(d.deleteCharBefore(0, static_cast<int>(d.lineAt(0).size())));
     CHECK_EQ(d.lineAt(0), "abc");
@@ -341,16 +384,18 @@ TEST(doc_backspace_several) {
 
 TEST(doc_backspace_erase_whole_line) {
     Document d = makeDoc({"zzz"});
+    
     while (!d.lineAt(0).empty())
         CHECK(d.deleteCharBefore(0, static_cast<int>(d.lineAt(0).size())));
     CHECK_EQ(d.lineAt(0), "");
     CHECK_EQ(d.lineCount(), 1);
 }
 
+// Fundir lineas no borra bytes dentro de una linea: 
+// devuelve 0, pero el efecto (unir ambas lineas) si ocurre.
 TEST(doc_backspace_start_joins_previous) {
     Document d = makeDoc({"aa", "bb"});
-    // Fundir lineas no borra bytes dentro de una linea: devuelve 0, pero
-    // el efecto (unir ambas lineas) si ocurre.
+    
     CHECK_EQ(d.deleteCharBefore(1, 0), 0);
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "aabb");
@@ -358,35 +403,42 @@ TEST(doc_backspace_start_joins_previous) {
 
 TEST(doc_backspace_first_line_noop) {
     Document d = makeDoc({"ab"});
+    
     CHECK(!d.deleteCharBefore(0, 0));
     CHECK_EQ(d.lineAt(0), "ab");
 }
 
 TEST(doc_backspace_empty_doc_noop) {
     Document d;
+    
     CHECK(!d.deleteCharBefore(0, 0));
     CHECK_EQ(d.lineCount(), 1);
 }
 
+// funde: 0 bytes dentro de la linea
 TEST(doc_backspace_empty_line_merges) {
     Document d = makeDoc({"a", "", "b"});
-    CHECK_EQ(d.deleteCharBefore(1, 0), 0); // funde: 0 bytes dentro de la linea
+    
+    CHECK_EQ(d.deleteCharBefore(1, 0), 0); 
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "a");
     CHECK_EQ(d.lineAt(1), "b");
 }
 
 // ---------------------------------------------------------------------------
-// 9. Delete (deleteCharAt)
+// Delete (deleteCharAt)
 // ---------------------------------------------------------------------------
+
 TEST(doc_delete_mid_line) {
     Document d = makeDoc({"abc"});
+    
     CHECK(d.deleteCharAt(0, 1));
     CHECK_EQ(d.lineAt(0), "ac");
 }
 
 TEST(doc_delete_col_beyond_range_noop) {
     Document d = makeDoc({"ab"});
+    
     CHECK(!d.deleteCharAt(0, 100));
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "ab");
@@ -394,19 +446,23 @@ TEST(doc_delete_col_beyond_range_noop) {
 
 TEST(doc_delete_col_negative_clamps_to_start) {
     Document d = makeDoc({"abc"});
+    
     CHECK(d.deleteCharAt(0, -1));
     CHECK_EQ(d.lineAt(0), "bc");
 }
 
+// funde: 0 bytes dentro de la linea
 TEST(doc_delete_end_joins_next) {
     Document d = makeDoc({"ab", "cd"});
-    CHECK_EQ(d.deleteCharAt(0, 2), 0); // funde: 0 bytes dentro de la linea
+    
+    CHECK_EQ(d.deleteCharAt(0, 2), 0); 
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "abcd");
 }
 
 TEST(doc_delete_last_line_noop) {
     Document d = makeDoc({"ab"});
+    
     d.splitLine(0, 2);
     CHECK(!d.deleteCharAt(1, 2));
     CHECK_EQ(d.lineCount(), 2);
@@ -415,12 +471,14 @@ TEST(doc_delete_last_line_noop) {
 
 TEST(doc_delete_empty_doc_noop) {
     Document d;
+    
     CHECK(!d.deleteCharAt(0, 0));
     CHECK_EQ(d.lineCount(), 1);
 }
 
 TEST(doc_delete_till_whole_line) {
     Document d = makeDoc({"abc"});
+    
     CHECK(d.deleteCharAt(0, 0));
     CHECK(d.deleteCharAt(0, 0));
     CHECK(d.deleteCharAt(0, 0));
@@ -428,13 +486,19 @@ TEST(doc_delete_till_whole_line) {
 }
 
 // ---------------------------------------------------------------------------
-// 12. Guardado (nivel Document)
+// Guardado (nivel Document)
 // ---------------------------------------------------------------------------
+
+// este test crea un document en memoria
+// lo guarda usando en un tempfile
+// y despues lo carga en otro documento en memoria
 TEST(doc_save_roundtrip) {
     TempFile f;
-    Document d = makeDoc({"uno", "dos", "tres"});
+    Document d, d2;
+    
+    d = makeDoc({"uno", "dos", "tres"});
     CHECK(d.saveToFile(f.path));
-    Document d2;
+    
     CHECK_EQ(d2.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d2.lineCount(), 3);
     CHECK_EQ(d2.lineAt(0), "uno");
@@ -442,15 +506,17 @@ TEST(doc_save_roundtrip) {
     CHECK_EQ(d2.lineAt(2), "tres");
 }
 
-TEST(doc_save_preserves_trailing_empty_line) {
-    // Representacion canonica: una linea vacia final serializa el '\n' final
-    // y se preserva en round-trip. {"a","b",""} -> "a\nb\n" en disco ->
-    // load devuelve {"a","b",""}. saveToFile y loadFromFile tratan el
-    // terminador de forma coordinada para conservarlo.
+// Representacion canonica: 
+// una linea vacia final serializa el '\n' final y se preserva en round-trip. 
+// {"a","b",""} -> "a\nb\n" en disco -> load devuelve {"a","b",""}. 
+// saveToFile y loadFromFile tratan el terminador de forma coordinada para conservarlo.
+TEST(doc_save_preserves_trailing_empty_line) {    
     TempFile f;
-    Document d = makeDoc({"a", "b", ""});
+    Document d, d2;
+    
+    d = makeDoc({"a", "b", ""});
     CHECK(d.saveToFile(f.path));
-    Document d2;
+    
     CHECK_EQ(d2.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d2.lineCount(), 3);
     CHECK_EQ(d2.lineAt(1), "b");
@@ -459,9 +525,10 @@ TEST(doc_save_preserves_trailing_empty_line) {
 
 TEST(doc_save_empty) {
     TempFile f;
-    Document d;
+    Document d, d2;
+    
     CHECK(d.saveToFile(f.path));
-    Document d2;
+    
     CHECK_EQ(d2.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d2.lineCount(), 1);
     CHECK_EQ(d2.lineAt(0), "");
@@ -469,11 +536,12 @@ TEST(doc_save_empty) {
 
 TEST(doc_save_large) {
     TempFile f;
-    Document d;
+    Document d, d2;
+    
     Lines big(50000, "linea grande de prueba");
     d.restore(big);
     CHECK(d.saveToFile(f.path));
-    Document d2;
+
     CHECK_EQ(d2.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d2.lineCount(), 50000);
     CHECK_EQ(d2.lineAt(0), "linea grande de prueba");
@@ -482,18 +550,21 @@ TEST(doc_save_large) {
 
 TEST(doc_save_to_directory_fails) {
     Document d = makeDoc({"x"});
+    
     CHECK(!d.saveToFile("/tmp"));
 }
 
 // ---------------------------------------------------------------------------
-// 12b. Newline final: abrir+guardar debe respetar (no perder) el '\n' final
+// Newline final: abrir+guardar debe respetar el '\n' final
 // ---------------------------------------------------------------------------
+
+// Un archivo "bien formado" que termina en '\n' debe conservar ese
+// '\n' tras abrirlo y guardarlo (antes se perdia silenciosamente).
 TEST(doc_roundtrip_preserves_trailing_newline) {
-    // Un archivo "bien formado" que termina en '\n' debe conservar ese
-    // '\n' tras abrirlo y guardarlo (antes se perdia silenciosamente).
     TempFile f;
-    f.write("a\nb\n");
     Document d;
+    
+    f.write("a\nb\n");
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "a");
@@ -502,11 +573,12 @@ TEST(doc_roundtrip_preserves_trailing_newline) {
     CHECK_EQ(fileContent(f.path), "a\nb\n");
 }
 
+// Un archivo SIN '\n' final no debe ganarse uno al guardar.
 TEST(doc_roundtrip_preserves_no_trailing_newline) {
-    // Un archivo SIN '\n' final no debe ganarse uno al guardar.
     TempFile f;
-    f.write("a\nb");
     Document d;
+    
+    f.write("a\nb");
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK(d.saveToFile(f.path));
     CHECK_EQ(fileContent(f.path), "a\nb");
@@ -514,8 +586,9 @@ TEST(doc_roundtrip_preserves_no_trailing_newline) {
 
 TEST(doc_open_save_single_line_without_newline) {
     TempFile f;
-    f.write("hola");
     Document d;
+    
+    f.write("hola");
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK(d.saveToFile(f.path));
     CHECK_EQ(fileContent(f.path), "hola");
@@ -523,18 +596,20 @@ TEST(doc_open_save_single_line_without_newline) {
 
 TEST(doc_open_save_single_line_with_newline) {
     TempFile f;
-    f.write("hola\n");
     Document d;
+    
+    f.write("hola\n");
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK(d.saveToFile(f.path));
     CHECK_EQ(fileContent(f.path), "hola\n");
 }
 
+// Editar (agregar una frase) no debe quitar el '\n' final original.
 TEST(doc_roundtrip_trailing_newline_after_edit) {
-    // Editar (agregar una frase) no debe quitar el '\n' final original.
     TempFile f;
-    f.write("a\n");
     Document d;
+    
+    f.write("a\n");
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     d.insertChar(0, d.lineLength(0), 'b');
     CHECK_EQ(d.lineAt(0), "ab");
@@ -542,15 +617,17 @@ TEST(doc_roundtrip_trailing_newline_after_edit) {
     CHECK_EQ(fileContent(f.path), "ab\n");
 }
 
-TEST(doc_enter_at_end_of_newline_file_adds_blank_line) {
-    // Enter al final de "a\n" crea ["a",""]: la linea vacia serializa el
-    // '\n' previo y la nueva linea vacia agrega un '\n' adicional -> "a\n\n".
-    // El flag queda en false (la linea vacia aporta el terminador).
+// Enter al final de "a\n" crea ["a",""]: 
+// la linea vacia serializa el '\n' previo y la nueva linea vacia agrega un '\n'
+// El flag queda en false (la linea vacia aporta el terminador).
+TEST(doc_enter_at_end_of_newline_file_adds_blank_line) {    
     TempFile f;
-    f.write("a\n");
     Document d;
+    
+    f.write("a\n");
     CHECK_EQ(d.loadFromFile(f.path), LoadResult::Success);
     CHECK(d.endsWithNewline());
+    
     d.splitLine(0, 1); // Enter al final de "a"
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(1), "");
@@ -559,114 +636,117 @@ TEST(doc_enter_at_end_of_newline_file_adds_blank_line) {
     CHECK_EQ(fileContent(f.path), "a\n\n");
 }
 
-TEST(doc_fuse_trailing_empty_line_removes_newline) {
-    // La linea vacia final (que serializa el '\n') se puede fundir con
-    // Delete/Backspace, y eso QUITA el '\n' final de verdad. El flag se
-    // mantiene consistente con el nuevo ultimo byte.
+// La linea vacia final (que serializa el '\n') se puede fundir con
+// Delete/Backspace, y eso QUITA el '\n' final de verdad. 
+// El flag se mantiene consistente con el nuevo ultimo byte.
+TEST(doc_fuse_trailing_empty_line_removes_newline) {    
+    TempFile f;
     Document d = makeDoc({"a", ""});
-    CHECK(!d.endsWithNewline()); // la linea vacia final ya aporta el '\n'
-    d.deleteCharAt(0, 1);        // fundir "a" con la linea vacia (devuelve 0)
+    
+    CHECK(!d.endsWithNewline());     // la linea vacia final ya aporta el '\n'
+    d.deleteCharAt(0, 1);            // fundir "a" con la linea vacia (devuelve 0)
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "a");
     CHECK(!d.endsWithNewline());
-    TempFile f;
     CHECK(d.saveToFile(f.path));
     CHECK_EQ(fileContent(f.path), "a");
 }
 
-TEST(doc_insert_block_trailing_empty_keeps_flag_consistent) {
-    // insertBlock multilinea con ultima linea vacia: el flag no puede
-    // quedar en true junto con la linea vacia final (doble '\n' al guardar).
-    // La linea vacia final serializa el '\n', produciendo "ax\n\n".
+// insertBlock multilinea con ultima linea vacia: 
+// el flag no puede quedar en true junto con la linea vacia final 
+// (doble '\n' al guardar).
+// La linea vacia final serializa el '\n', produciendo "ax\n\n".
+TEST(doc_insert_block_trailing_empty_keeps_flag_consistent) {    
+    TempFile f;
     Document d = makeDoc({"a"});
+    
     d.insertBlock(0, 1, {"x", ""}); // col 1: queda "ax" + linea vacia
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "ax");
     CHECK_EQ(d.lineAt(1), "");
     CHECK(!d.endsWithNewline());
-    TempFile f;
     CHECK(d.saveToFile(f.path));
     CHECK_EQ(fileContent(f.path), "ax\n\n");
 }
 
 // ---------------------------------------------------------------------------
-// 14b. deleteRange: guarda de invariante de orden en una sola linea
+// deleteRange: guarda de invariante de orden en una sola linea
 // ---------------------------------------------------------------------------
-TEST(doc_delete_range_requires_ordered_columns) {
-    // Incluso si se llama con (sc > ec) en una sola linea (rango no
-    // normalizado), deleteRange debe rechazarlo y NO borrar nada. Antes
-    // el (ec - sc) negativo se convertia a size_t gigante y erase()
-    // borraba desde sc hasta el final de la linea, silenciosamente.
+
+// Incluso si se llama con (sc > ec) en una sola linea 
+// (rango no normalizado), deleteRange debe rechazarlo y NO borrar nada. 
+// Antes el (ec - sc) negativo se convertia a size_t gigante y erase()
+// borraba desde sc hasta el final de la linea, silenciosamente.
+TEST(doc_delete_range_requires_ordered_columns) {   
     Document d = makeDoc({"abcdef"});
+    
     CHECK(!d.deleteRange(0, 4, 0, 1)); // sc > ec -> rechazado
     CHECK_EQ(d.lineAt(0), "abcdef");   // nada se borro
     CHECK_EQ(d.lineCount(), 1);
 }
 
+// La misma operacion con el rango bien ordenado (sc <= ec) si borra.
 TEST(doc_delete_range_ordered_same_line_still_works) {
-    // La misma operacion con el rango bien ordenado (sc <= ec) si borra.
+
     Document d = makeDoc({"abcdef"});
+    
     CHECK(d.deleteRange(0, 1, 0, 4));
     CHECK_EQ(d.lineAt(0), "aef");
 }
 
 // ---------------------------------------------------------------------------
-// 14c. insertBlock: insertar un bloque de lineas en (line, col)
+// insertBlock: insertar un bloque de lineas en (line, col)
 // ---------------------------------------------------------------------------
-// Primitiva usada por pegar. Contrato:
-//   - bloque de una linea: insercion inline (no parte la linea).
-//   - bloque de varias lineas: parte la linea en col; la 1ra del bloque se
-//     pega a la izquierda, las intermedias son lineas completas y la ultima
-//     se une con la cola derecha.
-//   - devuelve la posicion donde queda el cursor: final de la ultima linea
-//     insertada del bloque.
-//   - bloque vacio o (line,col) invalido: no cambia nada y devuelve la
-//     posicion sin modificar.
-// ---------------------------------------------------------------------------
+
+// Bloque de una linea al comienzo de la linea.
 TEST(doc_insert_block_single_line_at_start) {
-    // Bloque de una linea al comienzo de la linea.
     Document d = makeDoc({"abc"});
     Position p = d.insertBlock(0, 0, {"xyz"});
+    
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "xyzabc");
     CHECK_EQ(p.line, 0);
     CHECK_EQ(p.col, 3);
 }
 
+// Bloque de una linea en el medio de la linea.
 TEST(doc_insert_block_single_line_in_middle) {
-    // Bloque de una linea en el medio de la linea.
     Document d = makeDoc({"abcdef"});
     Position p = d.insertBlock(0, 3, {"xyz"});
+    
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "abcxyzdef");
     CHECK_EQ(p.line, 0);
     CHECK_EQ(p.col, 6);
 }
 
+// Bloque de una linea al final de la linea.
 TEST(doc_insert_block_single_line_at_end) {
-    // Bloque de una linea al final de la linea.
     Document d = makeDoc({"abc"});
     Position p = d.insertBlock(0, 3, {"xyz"});
+    
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "abcxyz");
     CHECK_EQ(p.line, 0);
     CHECK_EQ(p.col, 6);
 }
 
+// Bloque de una linea sobre una linea vacia: queda como unica linea.
 TEST(doc_insert_block_single_line_onto_empty_line) {
-    // Bloque de una linea sobre una linea vacia: queda como unica linea.
     Document d = makeDoc({""});
     Position p = d.insertBlock(0, 0, {"xyz"});
+    
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "xyz");
     CHECK_EQ(p.line, 0);
     CHECK_EQ(p.col, 3);
 }
 
+// Bloque vacio: no cambia nada y devuelve (line,col) sin modificar.
 TEST(doc_insert_block_empty_block_is_noop) {
-    // Bloque vacio: no cambia nada y devuelve (line,col) sin modificar.
     Document d = makeDoc({"abc", "def"});
     Position p = d.insertBlock(1, 1, {});
+    
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "abc");
     CHECK_EQ(d.lineAt(1), "def");
@@ -674,20 +754,23 @@ TEST(doc_insert_block_empty_block_is_noop) {
     CHECK_EQ(p.col, 1);
 }
 
+// (line,col) fuera de rango: 
+// no cambia nada y devuelve la posicion.
 TEST(doc_insert_block_invalid_position_is_noop) {
-    // (line,col) fuera de rango: no cambia nada y devuelve la posicion.
     Document d = makeDoc({"abc"});
     Position p = d.insertBlock(5, 0, {"xyz"});   // linea inexistente
+    
     CHECK_EQ(d.lineCount(), 1);
     CHECK_EQ(d.lineAt(0), "abc");
     CHECK_EQ(p.line, 5);
     CHECK_EQ(p.col, 0);
 }
 
+// Bloque de dos lineas al comienzo de la linea.
 TEST(doc_insert_block_two_lines_at_start) {
-    // Bloque de dos lineas al comienzo de la linea.
     Document d = makeDoc({"ghi"});
     Position p = d.insertBlock(0, 0, {"abc", "def"});
+    
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "abc");
     CHECK_EQ(d.lineAt(1), "defghi");
@@ -695,11 +778,12 @@ TEST(doc_insert_block_two_lines_at_start) {
     CHECK_EQ(p.col, 3);
 }
 
+// Bloque de dos lineas en el medio de la linea: la linea se parte en
+// col; la cola derecha se une a la ultima linea del bloque.
 TEST(doc_insert_block_two_lines_in_middle) {
-    // Bloque de dos lineas en el medio de la linea: la linea se parte en
-    // col; la cola derecha se une a la ultima linea del bloque.
     Document d = makeDoc({"abcdef"});
     Position p = d.insertBlock(0, 3, {"abc", "def"});
+    
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "abcabc");
     CHECK_EQ(d.lineAt(1), "defdef");
@@ -707,10 +791,11 @@ TEST(doc_insert_block_two_lines_in_middle) {
     CHECK_EQ(p.col, 3);
 }
 
+// Bloque de dos lineas al final de la linea.
 TEST(doc_insert_block_two_lines_at_end) {
-    // Bloque de dos lineas al final de la linea.
     Document d = makeDoc({"abc"});
     Position p = d.insertBlock(0, 3, {"abc", "def"});
+    
     CHECK_EQ(d.lineCount(), 2);
     CHECK_EQ(d.lineAt(0), "abcabc");
     CHECK_EQ(d.lineAt(1), "def");
@@ -718,17 +803,19 @@ TEST(doc_insert_block_two_lines_at_end) {
     CHECK_EQ(p.col, 3);
 }
 
+// Caso CENTRAL: 
+// partir una linea en el cursor con un bloque de varias lineas. 
+// "abcdef" con | = abc|def + bloque {X,Y,Z} debe dar:
+//   abcX
+//   Y
+//   Zdef
+// La parte izquierda queda al inicio, las intermedias son lineas
+// completas y la cola derecha se une a la ultima linea del bloque.
+// El Position retornado apunta EXACTAMENTE despues de "Z".
 TEST(doc_insert_block_splits_line_at_cursor) {
-    // Caso CENTRAL: partir una linea en el cursor con un bloque de varias
-    // lineas. "abcdef" con | = abc|def + bloque {X,Y,Z} debe dar:
-    //   abcX
-    //   Y
-    //   Zdef
-    // La parte izquierda queda al inicio, las intermedias son lineas
-    // completas y la cola derecha se une a la ultima linea del bloque.
-    // El Position retornado apunta EXACTAMENTE despues de "Z".
     Document d = makeDoc({"abcdef"});
     Position p = d.insertBlock(0, 3, {"X", "Y", "Z"});
+    
     CHECK_EQ(d.lineCount(), 3);
     CHECK_EQ(d.lineAt(0), "abcX");   // izquierda + 1ra del bloque
     CHECK_EQ(d.lineAt(1), "Y");      // linea intermedia completa
@@ -737,10 +824,11 @@ TEST(doc_insert_block_splits_line_at_cursor) {
     CHECK_EQ(p.col, 1);              // inmediatamente despues de "Z"
 }
 
+// Bloque de cuatro lineas insertado en la linea 1 del documento.
 TEST(doc_insert_block_many_lines) {
-    // Bloque de cuatro lineas insertado en la linea 1 del documento.
     Document d = makeDoc({"cabecera", "fin"});
     Position p = d.insertBlock(1, 0, {"uno", "dos", "tres", "cuatro"});
+    
     CHECK_EQ(d.lineCount(), 5);
     CHECK_EQ(d.lineAt(0), "cabecera");
     CHECK_EQ(d.lineAt(1), "uno");
@@ -751,11 +839,12 @@ TEST(doc_insert_block_many_lines) {
     CHECK_EQ(p.col, 6);               // largo de "cuatro"
 }
 
+// Bloque de cuatro lineas en el medio de una linea existente: la parte
+// izquierda queda al inicio, la derecha se funde con la ultima linea.
 TEST(doc_insert_block_many_lines_in_middle_preserves_edges) {
-    // Bloque de cuatro lineas en el medio de una linea existente: la parte
-    // izquierda queda al inicio, la derecha se funde con la ultima linea.
     Document d = makeDoc({"XabY"});
     Position p = d.insertBlock(0, 1, {"uno", "dos", "tres", "cuatro"});
+    
     CHECK_EQ(d.lineCount(), 4);
     CHECK_EQ(d.lineAt(0), "Xuno");
     CHECK_EQ(d.lineAt(1), "dos");
@@ -766,20 +855,13 @@ TEST(doc_insert_block_many_lines_in_middle_preserves_edges) {
 }
 
 // ---------------------------------------------------------------------------
-// 14d. extractRange: extraer texto como bloque de lineas (solo lectura)
+// extractRange: extraer texto como bloque de lineas (solo lectura)
 // ---------------------------------------------------------------------------
-// Primitiva usada por copiar/cortar. Contrato:
-//   - una sola linea: vector de un elemento con el substring [sc, ec).
-//   - multilinea:     1er el. = cola de sl desde sc; intermedios = lineas
-//                      completas; ultimo el. = cabeza de el hasta ec.
-//   - rango invalido (fuera de linea, invertido) o vacio (sc == ec):
-//     vector vacio.
-//   - NO modifica el documento (es la hermana de solo lectura de
-//     deleteRange).
-// ---------------------------------------------------------------------------
+
 TEST(doc_extract_range_first_char) {
     Document d = makeDoc({"abcdef"});
     auto out = d.extractRange(0, 0, 0, 1);
+    
     CHECK_EQ(out.size(), size_t{1});
     CHECK_EQ(out[0], "a");
 }
@@ -787,6 +869,7 @@ TEST(doc_extract_range_first_char) {
 TEST(doc_extract_range_last_char) {
     Document d = makeDoc({"abcdef"});
     auto out = d.extractRange(0, 5, 0, 6);
+    
     CHECK_EQ(out.size(), size_t{1});
     CHECK_EQ(out[0], "f");
 }
@@ -794,6 +877,7 @@ TEST(doc_extract_range_last_char) {
 TEST(doc_extract_range_middle) {
     Document d = makeDoc({"abcdef"});
     auto out = d.extractRange(0, 1, 0, 4);
+    
     CHECK_EQ(out.size(), size_t{1});
     CHECK_EQ(out[0], "bcd");
 }
@@ -801,122 +885,139 @@ TEST(doc_extract_range_middle) {
 TEST(doc_extract_range_whole_line) {
     Document d = makeDoc({"abcdef"});
     auto out = d.extractRange(0, 0, 0, 6);
+    
     CHECK_EQ(out.size(), size_t{1});
     CHECK_EQ(out[0], "abcdef");
 }
 
+// Rango vacio (sc == ec en una sola linea): vector vacio.
 TEST(doc_extract_range_empty_range_rejected) {
-    // Rango vacio (sc == ec en una sola linea): vector vacio.
     Document d = makeDoc({"abcdef"});
     auto out = d.extractRange(0, 2, 0, 2);
+    
     CHECK(out.empty());
 }
 
+// Rango invertido en una sola linea (sc > ec): vector vacio.
 TEST(doc_extract_range_reverse_single_line_rejected) {
-    // Rango invertido en una sola linea (sc > ec): vector vacio.
     Document d = makeDoc({"abcdef"});
     auto out = d.extractRange(0, 4, 0, 1);
+    
     CHECK(out.empty());
 }
 
+// Rango invertido entre lineas (el < sl): vector vacio.
 TEST(doc_extract_range_reverse_multiline_rejected) {
-    // Rango invertido entre lineas (el < sl): vector vacio.
     Document d = makeDoc({"abc", "def", "ghi"});
     auto out = d.extractRange(2, 0, 0, 0);
+    
     CHECK(out.empty());
 }
 
+// Columna fuera de linea: vector vacio.
 TEST(doc_extract_range_out_of_bounds_rejected) {
-    // Columna fuera de linea: vector vacio.
     Document d = makeDoc({"abc"});
+    
     auto out = d.extractRange(0, 0, 0, 9);
     CHECK(out.empty());
+    
     auto out2 = d.extractRange(5, 0, 5, 1); // linea inexistente
     CHECK(out2.empty());
 }
 
+// Multilinea: desde mitad de la primera hasta mitad de la segunda.
+// Cola de sl desde sc + cabeza de el hasta ec.
 TEST(doc_extract_range_half_to_half) {
-    // Multilinea: desde mitad de la primera hasta mitad de la segunda.
-    // Cola de sl desde sc + cabeza de el hasta ec.
     Document d = makeDoc({"abc", "def", "ghi"});
     auto out = d.extractRange(0, 1, 1, 2);
+    
     CHECK_EQ(out.size(), size_t{2});
     CHECK_EQ(out[0], "bc");
     CHECK_EQ(out[1], "de");
 }
 
+// Multilinea: desde el comienzo del doc hasta el final del doc.
 TEST(doc_extract_range_start_to_end) {
-    // Multilinea: desde el comienzo del doc hasta el final del doc.
     Document d = makeDoc({"abc", "def", "ghi"});
     auto out = d.extractRange(0, 0, 2, 3);
+    
     CHECK_EQ(out.size(), size_t{3});
     CHECK_EQ(out[0], "abc");
     CHECK_EQ(out[1], "def");
     CHECK_EQ(out[2], "ghi");
 }
 
+// Multilinea: lineas completas del medio (col 0 a col len).
 TEST(doc_extract_range_whole_lines) {
-    // Multilinea: lineas completas del medio (col 0 a col len).
     Document d = makeDoc({"abc", "def", "ghi"});
     auto out = d.extractRange(1, 0, 2, 3);
+    
     CHECK_EQ(out.size(), size_t{2});
     CHECK_EQ(out[0], "def");
     CHECK_EQ(out[1], "ghi");
 }
 
+// Multilinea: desde el inicio de la primera hasta el fin de la ultima.
 TEST(doc_extract_range_first_to_last_line) {
-    // Multilinea: desde el inicio de la primera hasta el fin de la ultima.
     Document d = makeDoc({"abc", "def", "ghi"});
     auto out = d.extractRange(0, 0, 1, 3);
+    
     CHECK_EQ(out.size(), size_t{2});
     CHECK_EQ(out[0], "abc");
     CHECK_EQ(out[1], "def");
 }
 
+// "é" (2 bytes UTF-8): el rango respeta el byte de inicio/fin.
 TEST(doc_extract_range_utf8_single_char) {
-    // "é" (2 bytes UTF-8): el rango respeta el byte de inicio/fin.
     Document d = makeDoc({std::string("\xC3\xA9")});
     auto out = d.extractRange(0, 0, 0, 2);
+    
     CHECK_EQ(out.size(), size_t{1});
     CHECK_EQ(out[0], std::string("\xC3\xA9"));
 }
 
+// "—" (3 bytes UTF-8).
 TEST(doc_extract_range_utf8_em_dash) {
-    // "—" (3 bytes UTF-8).
     Document d = makeDoc({std::string("\xE2\x80\x94")});
     auto out = d.extractRange(0, 0, 0, 3);
+    
     CHECK_EQ(out.size(), size_t{1});
     CHECK_EQ(out[0], std::string("\xE2\x80\x94"));
 }
 
+// "😀" (4 bytes UTF-8).
 TEST(doc_extract_range_utf8_emoji) {
-    // "😀" (4 bytes UTF-8).
     Document d = makeDoc({std::string("\xF0\x9F\x98\x80")});
     auto out = d.extractRange(0, 0, 0, 4);
+    
     CHECK_EQ(out.size(), size_t{1});
     CHECK_EQ(out[0], std::string("\xF0\x9F\x98\x80"));
 }
 
+// Mezcla "é—😀" (2+3+4 bytes) y extraer subconjuntos por byte.
 TEST(doc_extract_range_utf8_mixed) {
-    // Mezcla "é—😀" (2+3+4 bytes) y extraer subconjuntos por byte.
     Document d = makeDoc({std::string("\xC3\xA9\xE2\x80\x94\xF0\x9F\x98\x80")});
+    
     auto e = d.extractRange(0, 0, 0, 2);       // "é"
     CHECK_EQ(e.size(), size_t{1});
     CHECK_EQ(e[0], std::string("\xC3\xA9"));
+    
     auto em = d.extractRange(0, 2, 0, 5);      // "—"
     CHECK_EQ(em.size(), size_t{1});
     CHECK_EQ(em[0], std::string("\xE2\x80\x94"));
+    
     auto emoji = d.extractRange(0, 5, 0, 9);   // "😀"
     CHECK_EQ(emoji.size(), size_t{1});
     CHECK_EQ(emoji[0], std::string("\xF0\x9F\x98\x80"));
+    
     auto two = d.extractRange(0, 0, 0, 5);     // "é—"
     CHECK_EQ(two.size(), size_t{1});
     CHECK_EQ(two[0], std::string("\xC3\xA9\xE2\x80\x94"));
 }
 
+// Lo mas importante: extractRange es SOLO lectura. Snapshot antes y
+// despues debe ser identico, para single-line, multilinea y UTF-8.
 TEST(doc_extract_range_does_not_modify_document) {
-    // Lo mas importante: extractRange es SOLO lectura. Snapshot antes y
-    // despues debe ser identico, para single-line, multilinea y UTF-8.
     Document d = makeDoc({"abcdef", "ghijkl"});
     const auto before = d.snapshot();
     auto out = d.extractRange(0, 1, 1, 4);
@@ -934,16 +1035,12 @@ TEST(doc_extract_range_does_not_modify_document) {
 }
 
 // ---------------------------------------------------------------------------
-// 14e. extractRange() + insertBlock(): round-trip de integracion
+// extractRange() + insertBlock(): round-trip de integracion
 // ---------------------------------------------------------------------------
-// El flujo completo "extraer un bloque y reinsertarlo en otra posicion"
-// debe reproducir el contenido extraido EXACTAMENTE (byte a byte). Aqui
-// se comprueba la invariante: lo que sale de extractRange() es lo que
-// insertBlock() vuelve a poner en el documento.
-// ---------------------------------------------------------------------------
+
+// Extraer "mundo" de "hola mundo" y reinsertarlo al comienzo de una
+// copia: el bloque aparece identico y el cursor apunta tras el.
 TEST(doc_roundtrip_ascii) {
-    // Extraer "mundo" de "hola mundo" y reinsertarlo al comienzo de una
-    // copia: el bloque aparece identico y el cursor apunta tras el.
     Document src = makeDoc({"hola mundo"});
     auto block = src.extractRange(0, 5, 0, 10);
     CHECK(block == (Lines{"mundo"}));
@@ -956,12 +1053,12 @@ TEST(doc_roundtrip_ascii) {
     CHECK_EQ(p.col, 5); // final de "mundo"
 }
 
+// Extraer "é — 😀" (bytes UTF-8 de 2/3/4 bytes) de un string mixto y
+// reinsertarlo sobre una linea vacia: los bytes llegan intactos.
+// "café é — 😀" = cafe(4B) + "é"(2B) + " "(1B) + "é"(2B) + " "(1B)
+// + "—"(3B) + " "(1B) + "😀"(4B) => el bloque mixto empieza en la
+// col 7 (4 + 2 + 1) y ocupa 11 bytes.
 TEST(doc_roundtrip_utf8) {
-    // Extraer "é — 😀" (bytes UTF-8 de 2/3/4 bytes) de un string mixto y
-    // reinsertarlo sobre una linea vacia: los bytes llegan intactos.
-    // "café é — 😀" = cafe(4B) + "é"(2B) + " "(1B) + "é"(2B) + " "(1B)
-    // + "—"(3B) + " "(1B) + "😀"(4B) => el bloque mixto empieza en la
-    // col 7 (4 + 2 + 1) y ocupa 11 bytes.
     const std::string mixto = std::string("\xC3\xA9") + " " + "\xE2\x80\x94" + " " + "\xF0\x9F\x98\x80";
     const std::string full = std::string("cafe\xC3\xA9") + " " + mixto;
     Document src = makeDoc({full});
@@ -978,10 +1075,10 @@ TEST(doc_roundtrip_utf8) {
     CHECK_EQ(p.col, static_cast<int>(mixto.size()));
 }
 
+// Extraer un bloque multilinea (con linea intermedia completa) y
+// reinsertarlo en una linea vacia: las tres lineas salen exactas y el
+// cursor queda al final de la ultima insertada.
 TEST(doc_roundtrip_multiline) {
-    // Extraer un bloque multilinea (con linea intermedia completa) y
-    // reinsertarlo en una linea vacia: las tres lineas salen exactas y el
-    // cursor queda al final de la ultima insertada.
     Document src = makeDoc({"aaa", "bbb", "ccc", "ddd"});
     auto block = src.extractRange(1, 0, 3, 3);
     CHECK(block == (Lines{"bbb", "ccc", "ddd"}));
@@ -996,13 +1093,13 @@ TEST(doc_roundtrip_multiline) {
     CHECK_EQ(p.col, 3);               // final de "ddd"
 }
 
+// Extraer un bloque multilinea y reinsertarlo dentro de un documento
+// existente: cada linea del bloque aparece verbatim (la ultima con la
+// cola derecha del documento, segun contrato de insertBlock).
+// {"aaaa","bbbb","cccc"} desde (0,1) hasta (2,3):
+//   cola de line0 desde 1 = "aaa"; linea 1 completa = "bbbb";
+//   cabeza de line2 hasta 3 = "ccc".
 TEST(doc_roundtrip_multiline_into_document) {
-    // Extraer un bloque multilinea y reinsertarlo dentro de un documento
-    // existente: cada linea del bloque aparece verbatim (la ultima con la
-    // cola derecha del documento, segun contrato de insertBlock).
-    // {"aaaa","bbbb","cccc"} desde (0,1) hasta (2,3):
-    //   cola de line0 desde 1 = "aaa"; linea 1 completa = "bbbb";
-    //   cabeza de line2 hasta 3 = "ccc".
     Document src = makeDoc({"aaaa", "bbbb", "cccc"});
     auto block = src.extractRange(0, 1, 2, 3);
     CHECK(block == (Lines{"aaa", "bbbb", "ccc"}));
@@ -1018,13 +1115,14 @@ TEST(doc_roundtrip_multiline_into_document) {
 }
 
 // ---------------------------------------------------------------------------
-// 15. Invariantes / contenido correcto
+// Invariantes / contenido correcto
 // ---------------------------------------------------------------------------
+
 TEST(doc_invariants_after_ops) {
     Document d = makeDoc({"ab", "def"});
 
-    d.insertChar(0, 1, 'X');   // line0: "aXb"
-    d.splitLine(0, 2);       // line0 "aX", line1 "b", line2 "def"
+    d.insertChar(0, 1, 'X');     // line0: "aXb"
+    d.splitLine(0, 2);           // line0 "aX", line1 "b", line2 "def"
     d.deleteCharAt(1, 0);        // line1 "b" -> ""
     d.insertChar(1, 0, 'Z');     // line1 "Z"
 
@@ -1045,18 +1143,20 @@ TEST(doc_invariants_after_ops) {
 
 TEST(doc_no_unexpected_chars) {
     Document d = makeDoc({"abc"});
+    
     d.insertChar(0, 1, 'X');
     CHECK(d.deleteCharBefore(0, 3));
     CHECK_EQ(d.lineAt(0), "aXc");
 }
 
 // ---------------------------------------------------------------------------
-// 16. Archivo grande (1 MB y 10 MB)
+// Archivo grande (1 MB y 10 MB)
 // ---------------------------------------------------------------------------
+
 TEST(doc_large_1MB_operations) {
     const int target = 1 << 20;
+    
     Document d = makeDoc({std::string(target, 'z')});
-
     CHECK(d.deleteCharAt(0, target / 2));
     CHECK_EQ(d.lineLength(0), target - 1);
 
@@ -1103,10 +1203,12 @@ TEST(doc_large_newline_split) {
 }
 
 // ---------------------------------------------------------------------------
-// 17. Operaciones repetidas
+// Operaciones repetidas
 // ---------------------------------------------------------------------------
+
 TEST(doc_repeated_insert_delete) {
     Document d;
+    
     for (int i = 0; i < 20000; ++i)
         d.insertChar(0, 0, 'a');
     for (int i = 0; i < 20000; ++i)
@@ -1117,6 +1219,7 @@ TEST(doc_repeated_insert_delete) {
 
 TEST(doc_repeated_newline_merge) {
     Document d;
+    
     for (int i = 0; i < 1000; ++i)
         d.splitLine(0, 0);
     for (int i = 0; i < 1000; ++i)
@@ -1127,6 +1230,7 @@ TEST(doc_repeated_newline_merge) {
 
 TEST(doc_repeated_edit_consistency) {
     Document d;
+    
     for (int i = 0; i < 1000; ++i)
         d.insertChar(0, static_cast<int>(d.lineAt(0).size()), 'a');
     const int n = d.lineLength(0);
@@ -1137,15 +1241,12 @@ TEST(doc_repeated_edit_consistency) {
 }
 
 // ---------------------------------------------------------------------------
-// 22. Stress: fuzzer deterministico sobre Document
+// Stress: fuzzer deterministico sobre Document
 // ---------------------------------------------------------------------------
+
 // Elige operaciones (y lineas/columnas, algunas fuera de rango) al azar y
 // comprueba los invariantes tras cada paso: nunca 0 lineas, lineLength
-// consistente y flag endsWithNewline normalizado. Incluye primitivas nuevas
-// (insertBlock, deleteRange, extractRange, indentLine) para ejercitar
-// interacciones entre operaciones que los tests dirigidos no cubren.
-// El numero de lineas se topa para que la comprobacion siga siendo O(1) por
-// linea y el test corra rapido.
+// consistente y flag endsWithNewline normalizado.
 TEST(doc_stress_random_operations) {
     Document d;
     std::mt19937 rng(0xC0FFEE);
@@ -1237,11 +1338,12 @@ TEST(doc_stress_random_operations) {
 }
 
 // ---------------------------------------------------------------------------
-// 23. Terminadores de linea (CRLF) se conservan al abrir+guardar
+// Terminadores de linea (CRLF) se conservan al abrir+guardar
 // ---------------------------------------------------------------------------
+
+// Un archivo Windows se detecta como CRLF, carga bien (sin '\r' en las
+// lineas) y al guardar vuelve a escribirse con CRLF: no se traduce a LF.
 TEST(doc_crlf_round_trip_preserved) {
-    // Un archivo Windows se detecta como CRLF, carga bien (sin '\r' en las
-    // lineas) y al guardar vuelve a escribirse con CRLF: no se traduce a LF.
     TempFile src;
     src.write("a\r\nb\r\n");
     TempFile dst;
@@ -1288,8 +1390,8 @@ TEST(doc_crlf_single_line_with_trailing_newline_preserved) {
     CHECK_EQ(fileContent(dst.path), "x\r\n");
 }
 
+// Un archivo Unix queda en LF; no se afecta por la logica de CRLF.
 TEST(doc_lf_stays_lf) {
-    // Un archivo Unix queda en LF; no se afecta por la logica de CRLF.
     TempFile src;
     src.write("a\nb");
     TempFile dst;
@@ -1316,13 +1418,14 @@ TEST(doc_empty_file_is_lf) {
 
 TEST(doc_new_document_defaults_lf) {
     Document d;
+    
     CHECK_EQ(d.lineEnding(), Document::LineEnding::LF);
     d.setLineEnding(Document::LineEnding::CRLF);
     CHECK_EQ(d.lineEnding(), Document::LineEnding::CRLF);
 }
 
+// Editar un archivo CRLF (agregar texto) y guardar: sigue CRLF.
 TEST(doc_crlf_edit_then_save_preserves) {
-    // Editar un archivo CRLF (agregar texto) y guardar: sigue CRLF.
     TempFile src;
     src.write("a\r\nb\r\n");
     TempFile dst;
@@ -1369,6 +1472,7 @@ TEST(doc_trailing_legacy_cr_is_lost_on_save) {
 
 TEST(doc_indent_line_adds_spaces_at_start) {
     Document d;
+    
     d.restore(Lines({"if (x) {", "    foo();", "}", ""}));
     CHECK(d.indentLine(0, true, 4));
     CHECK_EQ(d.lineAt(0), "    if (x) {");
@@ -1379,6 +1483,7 @@ TEST(doc_indent_line_adds_spaces_at_start) {
 
 TEST(doc_indent_line_empty_line) {
     Document d;
+    
     d.restore(Lines({"", "x", ""}));
     CHECK(d.indentLine(0, true, 4));
     CHECK_EQ(d.lineAt(0), "    ");
@@ -1386,6 +1491,7 @@ TEST(doc_indent_line_empty_line) {
 
 TEST(doc_indent_line_bad_args_noop) {
     Document d;
+    
     d.restore(Lines({"x", "y"}));
     CHECK(!d.indentLine(0, true, 0));    // indentLen <= 0
     CHECK(!d.indentLine(-1, true, 4));   // linea invalida
@@ -1395,10 +1501,12 @@ TEST(doc_indent_line_bad_args_noop) {
 
 TEST(doc_dedent_line_removes_up_to_level) {
     Document d;
+    
     d.restore(Lines({"    foo();", "        inner();", "noindent", "\tTab", "  two", ""}));
     // Quita hasta 4 espacios.
     CHECK(d.indentLine(0, false, 4));
     CHECK_EQ(d.lineAt(0), "foo();");
+    
     // Dedenta en dos pasos una indentacion mas profunda.
     CHECK(d.indentLine(1, false, 4));
     CHECK_EQ(d.lineAt(1), "    inner();");
@@ -1408,6 +1516,7 @@ TEST(doc_dedent_line_removes_up_to_level) {
 
 TEST(doc_dedent_line_tab_counts_one_level) {
     Document d;
+    
     d.restore(Lines({"\tfoo();", "  "}));
     CHECK(d.indentLine(0, false, 4));
     CHECK_EQ(d.lineAt(0), "foo();");     // un tab se quita entero
@@ -1417,17 +1526,19 @@ TEST(doc_dedent_line_tab_counts_one_level) {
 
 TEST(doc_dedent_line_no_leading_whitespace_returns_false) {
     Document d;
+    
     d.restore(Lines({"foo();", ""}));
     CHECK(!d.indentLine(0, false, 4));
     CHECK_EQ(d.lineAt(0), "foo();");
     CHECK(!d.indentLine(1, false, 4));   // linea vacia no cambia
 }
 
+// La linea arranca con MENOS de indentLen espacios seguidos de
+// contenido: se quitan solo los que hay (no "mas alla" del contenido),
+// el contenido queda intacto y el resultado nunca es negativo.
 TEST(doc_dedent_line_fewer_than_level_spaces_removes_only_present) {
-    // La linea arranca con MENOS de indentLen espacios seguidos de
-    // contenido: se quitan solo los que hay (no "mas alla" del contenido),
-    // el contenido queda intacto y el resultado nunca es negativo.
     Document d;
+    
     d.restore(Lines({"  foo", "   bar"}));
     CHECK(d.indentLine(0, false, 4));
     CHECK_EQ(d.lineAt(0), "foo");
@@ -1435,28 +1546,31 @@ TEST(doc_dedent_line_fewer_than_level_spaces_removes_only_present) {
     CHECK_EQ(d.lineAt(1), "bar");
 }
 
+// La linea arranca con MAS de indentLen espacios: un solo dedent quita
+// exactamente indentLen, el resto (y el contenido) queda intacto.
 TEST(doc_dedent_line_more_than_level_spaces_removes_only_level) {
-    // La linea arranca con MAS de indentLen espacios: un solo dedent quita
-    // exactamente indentLen, el resto (y el contenido) queda intacto.
     Document d;
+    
     d.restore(Lines({"             foo"}));   // 13 espacios + "foo"
     CHECK(d.indentLine(0, false, 4));
     CHECK_EQ(d.lineAt(0), "         foo");    // 9 espacios + "foo"
 }
 
+// Un tab inicial se quita ENTERO (un solo caracter), NO como si valiera
+// indentLen espacios ni se traduce a nada mas.
 TEST(doc_dedent_line_leading_tab_removed_whole_is_not_spaces) {
-    // Un tab inicial se quita ENTERO (un solo caracter), NO como si valiera
-    // indentLen espacios ni se traduce a nada mas.
     Document d;
+    
     d.restore(Lines({"\tfoo"}));
     CHECK(d.indentLine(0, false, 4));
     CHECK_EQ(d.lineAt(0), "foo");
 }
 
+// Las lineas SIN indentacion (arrancan con texto o estan vacias)
+// devuelven false y no se modifican.
 TEST(doc_dedent_line_no_indentation_returns_false_untouched) {
-    // Las lineas SIN indentacion (arrancan con texto o estan vacias)
-    // devuelven false y no se modifican.
     Document d;
+    
     d.restore(Lines({"foo", "\t", ""}));
     CHECK(!d.indentLine(0, false, 4));
     CHECK_EQ(d.lineAt(0), "foo");
@@ -1464,12 +1578,13 @@ TEST(doc_dedent_line_no_indentation_returns_false_untouched) {
     CHECK_EQ(d.lineAt(2), "");
 }
 
+// " \tfoo": el criterio mira al primer caracter (un espacio), asi que
+// un dedent quita SOLO la corrida de espacios inicial (el tab la corta)
+// y deja "\tfoo"; un segundo dedent quita el tab y deja "foo". El tab
+// nunca se traduce a indentLen espacios.
 TEST(doc_dedent_line_mixed_space_tab_keys_off_first_char) {
-    // " \tfoo": el criterio mira al primer caracter (un espacio), asi que
-    // un dedent quita SOLO la corrida de espacios inicial (el tab la corta)
-    // y deja "\tfoo"; un segundo dedent quita el tab y deja "foo". El tab
-    // nunca se traduce a indentLen espacios.
     Document d;
+    
     d.restore(Lines({" \tfoo"}));
     CHECK(d.indentLine(0, false, 4));
     CHECK_EQ(d.lineAt(0), "\tfoo");
@@ -1477,10 +1592,11 @@ TEST(doc_dedent_line_mixed_space_tab_keys_off_first_char) {
     CHECK_EQ(d.lineAt(0), "foo");
 }
 
+// line negativo o >= lineCount(): devuelve false sin crashear, para
+// indent y dedent por igual.
 TEST(doc_indent_line_out_of_range_safe) {
-    // line negativo o >= lineCount(): devuelve false sin crashear, para
-    // indent y dedent por igual.
     Document d;
+    
     d.restore(Lines({"x", "y"}));
     CHECK(!d.indentLine(-1, true, 4));
     CHECK(!d.indentLine(99, true, 4));
@@ -1490,9 +1606,10 @@ TEST(doc_indent_line_out_of_range_safe) {
     CHECK_EQ(d.lineAt(1), "y");
 }
 
+// indentLen <= 0: false sin modificar, para indent=true Y indent=false.
 TEST(doc_indent_line_invalid_indentlen_noop_both_directions) {
-    // indentLen <= 0: false sin modificar, para indent=true Y indent=false.
     Document d;
+    
     d.restore(Lines({"  foo", "bar"}));
     CHECK(!d.indentLine(0, true, 0));
     CHECK(!d.indentLine(0, false, 0));
@@ -1502,10 +1619,11 @@ TEST(doc_indent_line_invalid_indentlen_noop_both_directions) {
     CHECK_EQ(d.lineAt(1), "bar");
 }
 
+// Indentar/desindentar inserta/quita bytes ASCII antes del contenido
+// sin corromper un caracter UTF-8 multibyte que arranque la linea.
 TEST(doc_indent_line_preserves_multibyte_content) {
-    // Indentar/desindentar inserta/quita bytes ASCII antes del contenido
-    // sin corromper un caracter UTF-8 multibyte que arranque la linea.
     Document d;
+    
     d.restore(Lines({std::string("\xC3\xA9x")}));        // "éx"
     CHECK(d.indentLine(0, true, 4));
     CHECK_EQ(d.lineAt(0), std::string("    \xC3\xA9x")); // "    éx"
@@ -1541,6 +1659,7 @@ TEST(doc_preview_indent_delta_cases) {
     check("\tabc", false, -1);
     check(" \tabc", false, -1);
     check("", false, 0);
+    
     // preview debe ser coherente con indentLine en out-of-range / indentLen invalido
     Document d;
     d.restore(Lines({"x"}));
