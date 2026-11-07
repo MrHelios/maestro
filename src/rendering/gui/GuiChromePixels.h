@@ -44,6 +44,19 @@ struct FramePixelGeometry {
     int preChromeSpacerPx = 0;
 };
 
+// Borde derecho ACTIVO del frame en píxeles del drawable.
+// Si el sobrante horizontal `rightSpacerPx = drawableW - logicalWidth` es un
+// residuo de grilla (0 <= r < cw), el área activa incluye ese gap y termina
+// en el borde del drawable; en cualquier otro caso termina en el borde
+// lógico. Fuente única de esta regla: la usan framePixelGeometry,
+// scrollbarTrackRect y la reserva del scrollbar en renderScreenDiff.
+inline int activeRightPx(int logicalWidth, int drawableW, int cw) {
+    const int rightSpacerPx = drawableW - logicalWidth;
+    return (rightSpacerPx >= 0 && rightSpacerPx < cw)
+               ? logicalWidth + rightSpacerPx
+               : logicalWidth;
+}
+
 inline FramePixelGeometry framePixelGeometry(const Layout& layout,
                                              int drawableW, int usableH,
                                              int cw, int ch) {
@@ -62,14 +75,11 @@ inline FramePixelGeometry framePixelGeometry(const Layout& layout,
     // Solo son sobrantes de división entera si no alcanzan otra celda. Un
     // residuo negativo significa que la grilla no entra en el drawable.
     f.exact = right >= 0 && right < cw && pre >= 0 && pre < ch;
+    f.width = activeRightPx(f.logicalWidth, drawableW, cw);
+    f.height = f.exact ? usableH : f.logicalHeight;
     if (f.exact) {
-        f.width = drawableW;
-        f.height = usableH;
         f.rightSpacerPx = right;
         f.preChromeSpacerPx = pre;
-    } else {
-        f.width = f.logicalWidth;
-        f.height = f.logicalHeight;
     }
     return f;
 }

@@ -325,6 +325,53 @@ TEST(chrome_pixels_frame_sin_chrome_tambien_cubre_sobrantes) {
     CHECK_EQ(f.preChromeSpacerPx, 3);
 }
 
+// ---------------------------------------------------------------------------
+// Caso mixto: sobrante horizontal válido (0 <= right < cw) pero sobrante
+// vertical inválido (pre >= ch). La geometría horizontal puede incluir el
+// gap aunque el modo no sea "exact": width crece hasta drawableW, pero
+// exact sigue siendo false y height se mantiene en logicalHeight.
+// ---------------------------------------------------------------------------
+TEST(chrome_pixels_frame_gap_horizontal_solo) {
+    Layout lo;
+    lo.content = {0, 0, 80, 20};
+    lo.chrome  = {20, 0, 80, 2};
+
+    const int cellWidth = 10, cellHeight = 19;
+    const int logicalW = 80 * cellWidth;            // 800
+    const int logicalH = (20 + 2) * cellHeight;     // 418
+    // Sobrante horizontal válido (7 < 10), sobrante altura >= cellHeight
+    // (no es residuo de una celda vertical).
+    const int drawableW = logicalW + 7;
+    const int drawableHeight = logicalH + cellHeight; // pre = cellHeight >= ch
+
+    const auto f = guichrome::framePixelGeometry(lo, drawableW, drawableHeight,
+                                                 cellWidth, cellHeight);
+
+    CHECK(f.valid);
+    CHECK(!f.exact);  // no es exacto porque el residuo vertical no califica
+    CHECK_EQ(f.logicalWidth, logicalW);
+    CHECK_EQ(f.logicalHeight, logicalH);
+    // width incluye el gap horizontal aunque exact == false
+    CHECK_EQ(f.width, drawableW);
+    // height se mantiene en logicalHeight (sin gap vertical)
+    CHECK_EQ(f.height, logicalH);
+    // rightSpacerPx solo se conserva cuando exact == true
+    CHECK_EQ(f.rightSpacerPx, 0);
+
+    // Lo mismo con pre < 0 (drawable más chico que la grilla en alto)
+    const int drawableH2 = logicalH - cellHeight;
+    const auto f2 = guichrome::framePixelGeometry(lo, drawableW, drawableH2,
+                                                  cellWidth, cellHeight);
+    CHECK(f2.valid);
+    CHECK(!f2.exact);
+    CHECK_EQ(f2.width, drawableW);
+    CHECK_EQ(f2.height, logicalH);
+    CHECK_EQ(f2.rightSpacerPx, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Geometría inválida: parámetros <= 0
+// ---------------------------------------------------------------------------
 TEST(chrome_pixels_frame_geometria_invalida) {
     Layout lo;
     lo.content = {0, 0, 80, 20};

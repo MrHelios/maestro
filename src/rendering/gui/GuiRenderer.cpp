@@ -1967,30 +1967,33 @@ void GuiRenderer::renderScreenDiff(
         const int railPx = scrollbarWidthPx(cwEff);
         const int reserveCols = (railPx + cwEff - 1) / cwEff;
         const int newWidth =
-            std::max(1, layoutEff.content.width - reserveCols);
+            std::max(0, layoutEff.content.width - reserveCols);
         if (newWidth < layoutEff.content.width) {
             layoutEff.content.width = newWidth;
         }
         // Caso límite: ventana muy pequeña. Incluso con el ancho reducido,
-        // el borde derecho del contenido (content.width * cw) puede solaparse
-        // con el track (track.x = activeRightPx - railPx). Reducir más
-        // columnas hasta que el contenido quede a la izquierda del track.
-        // Si ni siquiera 1 columna cabe (track.x < cwEff), no hay área útil
-        // sin solapamiento; se conserva 1 columna y el cursor simplemente no
-        // se pinta si queda fuera del área útil.
-        const int w = railPx;
+        // el borde derecho del contenido ((content.col + content.width) * cw)
+        // puede solaparse con el track. Reducir más columnas hasta que el
+        // contenido quede a la izquierda del track. Si ni siquiera 1 columna
+        // cabe (track.x < cwEff), no hay área útil sin solapamiento: se
+        // reduce a 0 columnas y no se pinta contenido (ni cursor) en ese
+        // frame. El track del scrollbar sigue visible y funcional; es el
+        // comportamiento explícito para ventanas tan estrechas que no dejan
+        // espacio para ni siquiera una columna de texto junto al scrollbar.
+        //
+        // La geometría del borde activo se obtiene de la MISMA función que
+        // usa scrollbarTrackRect, para que ambas no diverjan si cambia la
+        // regla del gap horizontal.
         const int fullCols =
             std::max(layout.chrome.col + layout.chrome.width,
                      layout.content.col + layout.content.width);
-        const int logicalWidth = fullCols * cwEff;
-        const int rightSpacerPx = drawablePixelW_ - logicalWidth;
-        const int activeRightPx =
-            (rightSpacerPx >= 0 && rightSpacerPx < cwEff)
-                ? logicalWidth + rightSpacerPx
-                : logicalWidth;
-        const int trackX = activeRightPx - w;
-        while (layoutEff.content.width > 1 &&
-               layoutEff.content.width * cwEff > trackX) {
+        const int trackX =
+            guichrome::activeRightPx(fullCols * cwEff, drawablePixelW_,
+                                     cwEff) -
+            railPx;
+        while (layoutEff.content.width > 0 &&
+               (layoutEff.content.col + layoutEff.content.width) * cwEff >
+                   trackX) {
             --layoutEff.content.width;
         }
     }
@@ -2481,18 +2484,15 @@ GuiPixelRect GuiRenderer::scrollbarTrackRect(const Layout& layout, int resizeBor
     const int fullCols =
         std::max(layout.content.col + layout.content.width,
                  layout.chrome.col + layout.chrome.width);
-    const int logicalWidth = fullCols * cw;
-    const int rightSpacerPx = drawablePixelW_ - logicalWidth;
     // activeRightPx = borde derecho REAL del área activa (incluye el gap
     // horizontal rightSpacerPx cuando el modo es "exact"; en modo legacy
     // coincide con logicalWidth). El track se ancla a este extremo activo
     // en lugar del borde lógico, de modo que el gap quede a la izquierda del
     // track (dentro del área activa) y sea rellenado por los pintores de filas
-    // (Paso D).
+    // (Paso D). La regla vive en guichrome::activeRightPx para compartirla con
+    // la reserva del scrollbar en renderScreenDiff.
     const int activeRightPx =
-        (rightSpacerPx >= 0 && rightSpacerPx < cw)
-            ? logicalWidth + rightSpacerPx
-            : logicalWidth;
+        guichrome::activeRightPx(fullCols * cw, drawablePixelW_, cw);
     const int x = activeRightPx - w - resizeBorderPx;
     const int y = contentTopInset_ + layout.content.row * ch;
     // Altura del track: distancia física entre el inicio del contenido y el
@@ -2521,6 +2521,30 @@ GuiPixelRect GuiRenderer::scrollbarTrackRect(const Layout& layout, int resizeBor
 
     GuiPixelRect r;
     r.x = x; r.y = y; r.w = w; r.h = h; r.valid = true;
+    return r;
+}
+
+GuiPixelRect GuiRenderer::scrollbarHitRect(const Layout& layout,
+                                           int resizeBorderPx) const {
+    GuiPixelRect r = scrollbarTrackRect(layout, resizeBorderPx);
+    if (!r.valid) {
+        return r;
+    }
+    const int cw = font_.cellW();
+    if (cw <= 0) {
+        return r;
+    }
+    // Borde derecho del contenido pintado. La reserva descuenta columnas
+    // completas, así que el contenido puede terminar antes del track: la
+    // franja intermedia no es texto ni track pintado y debe consumirla el
+    // scrollbar para que el Editor no reciba un clic en una celda invisible.
+    const int contentRightPx =
+        (layout.content.col + layout.content.width) * cw;
+    if (contentRightPx < r.x) {
+        const int newX = std::max(0, contentRightPx);
+        r.w += r.x - newX;
+        r.x = newX;
+    }
     return r;
 }
 
@@ -2580,13 +2604,14 @@ GuiScrollbarPress GuiRenderer::scrollbarPress(int pxX, int pxY,
     }
 
     const GuiPixelRect track = scrollbarTrackRect(lastLayout_, resizeBorderPx);
+    const GuiPixelRect hit = scrollbarHitRect(lastLayout_, resizeBorderPx);
     const GuiPixelRect thumb = scrollbarThumbRect(lastLayout_, resizeBorderPx);
 
-    if (track.h <= 0 || thumb.h <= 0) {
+    if (track.h <= 0 || thumb.h <= 0 || hit.w <= 0) {
         return res;
     }
 
-    if (pxX < track.x || pxX >= track.x + track.w) {
+    if (pxX < hit.x || pxX >= hit.x + hit.w) {
         return res;
     }
     if (pxY < track.y || pxY >= track.y + track.h) {

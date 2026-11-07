@@ -575,14 +575,14 @@ int GuiRunLoop::run() {
             // Margen de redimensionado en píxeles del drawable: kResizeBorderPts (puntos
             // de ventana) convertido a píxeles del drawable.
             const int resizeBorderPx = (kResizeBorderPts * mfb.w) / std::max(1, winW);
-            const GuiPixelRect track = gui_->scrollbarTrackRect(gui_->lastLayout(), resizeBorderPx);
-            if (track.valid && track.w > 0 && track.h > 0) {
+            const GuiPixelRect hitRect = gui_->scrollbarHitRect(gui_->lastLayout(), resizeBorderPx);
+            if (hitRect.valid && hitRect.w > 0 && hitRect.h > 0) {
                 // Convertir drawable px -> puntos de ventana (misma fórmula que toDrawablePoint invertida).
                 GuiRunLoop::ScrollbarHitRect hr;
-                hr.x = (track.x * winW) / std::max(1, mfb.w);
-                hr.y = (track.y * winH) / std::max(1, mfb.h);
-                hr.w = (track.w * winW) / std::max(1, mfb.w);
-                hr.h = (track.h * winH) / std::max(1, mfb.h);
+                hr.x = (hitRect.x * winW) / std::max(1, mfb.w);
+                hr.y = (hitRect.y * winH) / std::max(1, mfb.h);
+                hr.w = (hitRect.w * winW) / std::max(1, mfb.w);
+                hr.h = (hitRect.h * winH) / std::max(1, mfb.h);
                 hitState_.scrollbar.set(hr);
             } else {
                 hitState_.scrollbar.clear();

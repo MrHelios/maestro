@@ -547,7 +547,7 @@ TEST(GuiScrollbar_ContentAndCursorStayLeftOfTrack) {
         // A. El borde derecho del contenido pintado no llega al track
         //    (en píxeles, no solo en columnas lógicas).
         CHECK(layout.content.width < vpW);
-        CHECK(layout.content.width * cw <= track.x);
+        CHECK((layout.content.col + layout.content.width) * cw <= track.x);
         // D. viewport.left no se desplaza.
         CHECK_EQ(vp.left, 0);
 
@@ -614,6 +614,11 @@ TEST(GuiScrollbar_ContentAndCursorStayLeftOfTrack) {
 //   3. Render con scrollbar + cursor en línea 2 (cambio de layoutEff +
 //      movimiento de cursor: el fast path debe invalidarse y hacer full
 //      repaint).
+//
+// El cursor se mantiene SIEMPRE en la columna 0, que es válida en ambas
+// geometrías (con y sin reserva). Así el único motivo posible para el
+// full repaint del render 3 es el cambio de layoutEff.content.width, no
+// un cambio de validez del cursor.
 // ---------------------------------------------------------------------------
 TEST(GuiScrollbar_Aparece_InvalidaFastPath) {
     GuiRenderer gui;
@@ -630,8 +635,10 @@ TEST(GuiScrollbar_Aparece_InvalidaFastPath) {
     const int vpW = 80;
     Viewport vp = makeVp(10, vpW);
     Cursor cur;
-    const int gutter = gutterWidth(doc.lineCount(), vpW);
-    cur.col = vpW - 1 - gutter;  // columna reservada al scrollbar
+    // Columna 0: válida tanto con el ancho completo como con la reserva,
+    // así el cursor nunca pasa de válido a inválido y no puede ser la causa
+    // del full repaint.
+    cur.col = 0;
 
     gui.setDrawableMetrics(vpW * cw, 400, 0);
 
@@ -641,22 +648,23 @@ TEST(GuiScrollbar_Aparece_InvalidaFastPath) {
     renderDoc(gui, sink, doc, cur, vp, navChrome());
     const Layout lo1 = gui.lastLayout();
     CHECK_EQ(lo1.content.width, vpW);  // sin reducción
-    CHECK(gui.cursorPixelRect().valid);  // cursor pinta en última columna
+    CHECK(gui.cursorPixelRect().valid);  // cursor válido en ambas geometrías
 
     // Render 2: sin scrollbar, cursor en línea 1 (movimiento, mismo layout).
     cur.line = 1;
     renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.cursorPixelRect().valid);  // sigue válido
     CHECK(!gui.lastWasFull());  // fast path reutiliza cache (mismo layoutEff)
 
     // Render 3: aparece el scrollbar, cursor en línea 2.
-    // Cambio de layoutEff.content.width + movimiento: debe invaladar
+    // Cambio de layoutEff.content.width + movimiento: debe invalidar
     // fast path y hacer render completo.
     cur.line = 2;
     gui.setScrollInfo({0, vp.height, 30});
     renderDoc(gui, sink, doc, cur, vp, navChrome());
     const Layout lo3 = gui.lastLayout();
     CHECK(lo3.content.width < vpW);  // se redujo por la reserva
-    CHECK(!gui.cursorPixelRect().valid);  // cursor clampeado, no se pinta
+    CHECK(gui.cursorPixelRect().valid);  // el cursor sigue siendo válido
     CHECK(gui.lastWasFull());  // full repaint por cambio de geometría
 }
 
@@ -666,6 +674,10 @@ TEST(GuiScrollbar_Aparece_InvalidaFastPath) {
 // viewport.height, pero layoutEff.content.width vuelve al ancho completo.
 // Los fast paths deben detectar el cambio de geometría de contenido y
 // forzar un render completo.
+//
+// Igual que el test 13, el cursor se mantiene en la columna 0 (válida en
+// ambas geometrías) para que el full repaint del render 3 solo pueda
+// deberse al cambio de layoutEff.content.width.
 // ---------------------------------------------------------------------------
 TEST(GuiScrollbar_Desaparece_InvalidaFastPath) {
     GuiRenderer gui;
@@ -682,8 +694,8 @@ TEST(GuiScrollbar_Desaparece_InvalidaFastPath) {
     const int vpW = 80;
     Viewport vp = makeVp(10, vpW);
     Cursor cur;
-    const int gutter = gutterWidth(doc.lineCount(), vpW);
-    cur.col = vpW - 1 - gutter;  // columna reservada al scrollbar
+    // Columna 0: válida tanto con el ancho completo como con la reserva.
+    cur.col = 0;
 
     gui.setDrawableMetrics(vpW * cw, 400, 0);
 
@@ -693,23 +705,100 @@ TEST(GuiScrollbar_Desaparece_InvalidaFastPath) {
     renderDoc(gui, sink, doc, cur, vp, navChrome());
     const Layout lo1 = gui.lastLayout();
     CHECK(lo1.content.width < vpW);  // reducido
-    CHECK(!gui.cursorPixelRect().valid);  // cursor clampeado
+    CHECK(gui.cursorPixelRect().valid);  // cursor válido en ambas geometrías
 
     // Render 2: con scrollbar, cursor en línea 1 (movimiento, mismo layout).
     cur.line = 1;
     renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.cursorPixelRect().valid);  // sigue válido
     CHECK(!gui.lastWasFull());  // fast path reutiliza cache (mismo layoutEff)
 
     // Render 3: desaparece el scrollbar, cursor en línea 2.
-    // Cambio de layoutEff.content.width + movimiento: debe invaladar
+    // Cambio de layoutEff.content.width + movimiento: debe invalidar
     // fast path y hacer render completo.
     cur.line = 2;
     gui.setScrollInfo({0, vp.height, vp.height});
     renderDoc(gui, sink, doc, cur, vp, navChrome());
     const Layout lo3 = gui.lastLayout();
     CHECK_EQ(lo3.content.width, vpW);  // vuelve al ancho completo
-    CHECK(gui.cursorPixelRect().valid);  // cursor pinta en última columna
+    CHECK(gui.cursorPixelRect().valid);  // el cursor sigue siendo válido
     CHECK(gui.lastWasFull());  // full repaint por cambio de geometría
+}
+
+// ---------------------------------------------------------------------------
+// Test 15: GuiScrollbar_ReservedStripIsConsumedByHitTest
+// La franja reservada al scrollbar no puede producir un clic en el Editor:
+// GuiRunLoop::run() llama a GuiRenderer::scrollbarPress() ANTES de traducir
+// el evento a MousePress y, si devuelve handled == true, corta el dispatch.
+//
+// Este test verifica el contrato que el loop asume: la franja entre el borde
+// derecho del contenido y el borde derecho del track está cubierta por
+// scrollbarPress(). Así un clic en esa zona nunca llega a Editor::handleEvent
+// y no puede posicionar el cursor debajo del overlay.
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_ReservedStripIsConsumedByHitTest) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 30; ++i) lines.push_back(std::string(200, 'x'));
+    Document doc;
+    doc.restore(lines);
+
+    const int cw = gui.cellWForTests();
+    const int ch = gui.cellHForTests();
+    if (cw <= 0 || ch <= 0) SKIP("sin fuente");
+
+    const int vpW = 80;
+    Viewport vp = makeVp(10, vpW);
+    Cursor cur;
+    cur.line = 0;
+    cur.col = 0;
+
+    gui.setDrawableMetrics(vpW * cw, 400, 0);
+    gui.setScrollInfo({0, vp.height, 30});  // scrollbar visible
+
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+
+    const Layout layout = gui.lastLayout();
+    const GuiPixelRect track = gui.scrollbarTrackRect(layout);
+
+    CHECK(track.valid);
+    CHECK(layout.content.width < vpW);  // reserva activa
+
+    // Borde derecho del contenido en píxeles (geometría general).
+    const int contentRightPx =
+        (layout.content.col + layout.content.width) * cw;
+    CHECK(contentRightPx < track.x);
+
+    // El rectángulo de hit-test se extiende hasta el borde del contenido:
+    // cubre la franja muerta (reserva de columnas completas menos ancho real
+    // del track) sin mover ni ensanchar el track pintado.
+    const GuiPixelRect hit = gui.scrollbarHitRect(layout);
+    CHECK(hit.valid);
+    CHECK(hit.x <= contentRightPx);
+    CHECK_EQ(hit.x + hit.w, track.x + track.w);
+    CHECK(hit.w > track.w);  // estricto: realmente incorpora la franja reservada
+
+    // El hit-test nativo que publica GuiRunLoop (puntos de ventana, escala
+    // identidad en este test) también cubre la franja muerta.
+    const GuiRunLoop::ScrollbarHitRect loopHit{hit.x, hit.y, hit.w, hit.h};
+    CHECK(GuiRunLoop::pointInScrollbarTrack(loopHit, contentRightPx,
+                                            track.y + track.h / 2));
+
+    const int y = track.y + track.h / 2;
+
+    // El primer píxel reservado ya pertenece al hit-test: el loop lo consume
+    // y no lo entrega al Editor.
+    CHECK(gui.scrollbarPress(contentRightPx, y).handled);
+
+    // Todo el track (incluido su último píxel) es consumido por el
+    // scrollbar, así que ningún clic dentro del overlay mueve el cursor.
+    CHECK(gui.scrollbarPress(track.x, y).handled);
+    CHECK(gui.scrollbarPress(track.x + track.w - 1, y).handled);
+
+    // El último píxel del contenido NO es consumido: la reserva es la
+    // mínima necesaria y el texto sigue siendo clickeable.
+    CHECK(!gui.scrollbarPress(contentRightPx - 1, y).handled);
 }
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,13 @@
 // con el track del scrollbar.
 // Los tests de geometria viven en tests/rendering/test_gui_scrollbar.cpp;
 // este test cubre el camino Editor -> render -> mapeo de mouse.
+//
+// Los clics en la franja reservada al scrollbar NO llegan a Editor: el
+// GuiRunLoop llama a GuiRenderer::scrollbarPress() antes de traducir el
+// evento a MousePress y corta el dispatch si handled == true. Ese contrato
+// (incluida la franja muerta entre el contenido y el track) se verifica en
+// GuiScrollbar_ReservedStripIsConsumedByHitTest; aqui solo se prueban
+// columnas que si son texto pintado.
 
 #include "test_support.h"
 

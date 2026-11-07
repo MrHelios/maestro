@@ -442,6 +442,15 @@ public:
     // solapa con esos últimos píxeles pero el scrollbar tiene prioridad
     // (se chequea primero en el hit-test y en el hover).
     GuiPixelRect scrollbarTrackRect(const Layout& layout, int resizeBorderPx = 0) const;
+    // Rectángulo de HIT-TEST del scrollbar: como scrollbarTrackRect pero
+    // extendido a la izquierda hasta el borde derecho del contenido. La
+    // reserva del scrollbar descuenta columnas completas, así que puede
+    // quedar una franja de hasta cw-1 px entre el texto y el track; esa
+    // franja no pertenece a ninguna columna pintada y debe consumirla el
+    // scrollbar (no el Editor) para que un clic no mueva el cursor a una
+    // celda invisible bajo el overlay. No afecta al rectángulo pintado.
+    GuiPixelRect scrollbarHitRect(const Layout& layout,
+                                  int resizeBorderPx = 0) const;
     GuiPixelRect scrollbarThumbRect(const Layout& layout,
                                     int resizeBorderPx = 0) const;
     int scrollbarThumbHeightPx(int trackH) const;
