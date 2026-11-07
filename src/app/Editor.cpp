@@ -651,6 +651,18 @@ void Editor::registerCommands() {
     });
 }
 
+const std::vector<std::string>& Editor::requiredCommandNames() {
+    static const std::vector<std::string> k = {
+        "edicion.deshacer", "edicion.rehacer", "buffer.guardar",
+        "buffer.guardar.como", "app.salir", "app.salir.forzado",
+        "cursor.mover.izquierda", "cursor.mover.derecha", "cursor.mover.arriba",
+        "cursor.mover.abajo", "cursor.mover.inicio", "cursor.mover.fin",
+        "cursor.pagina.arriba", "cursor.pagina.abajo", "vista.scroll.arriba",
+        "vista.scroll.abajo",
+    };
+    return k;
+}
+
 void Editor::executeCommand(const std::string& name) {
     commands_.execute(name);
 }

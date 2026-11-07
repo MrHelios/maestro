@@ -391,6 +391,12 @@ private:
     // como lambdas que capturan este editor.
     void registerCommands();
 
+    // Nombres de los comandos sin-parametros que debe conocer la GUI
+    // (puerta de entrada via executeCommand). Lista canonica: se define una
+    // sola vez aqui y tanto Editor::registerCommands como los tests la
+    // leen, evitando escribir los mismos strings dos veces.
+    static const std::vector<std::string>& requiredCommandNames();
+
     State state_ = State::Navegacion;
     // P0 interaction: grupo de escritura sobre seleccion. Cuando se escribe
     // una letra sobre un rango marcado, el reemplazo se empuja UNA vez y la

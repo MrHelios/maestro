@@ -14,3 +14,12 @@ void CommandMap::execute(const std::string& name) {
         it->second();
     }
 }
+
+std::vector<std::string> CommandMap::registeredNames() const {
+    std::vector<std::string> names;
+    names.reserve(commands_.size());
+    for (const auto& pair : commands_) {
+        names.push_back(pair.first);
+    }
+    return names;
+}

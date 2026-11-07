@@ -30,6 +30,10 @@ public:
     // registro/renombrado).
     void execute(const std::string& name);
 
+    // Devuelve los nombres de todos los comandos registrados.
+    // Útil para tests que quieren verificar el catálogo sin duplicar strings.
+    std::vector<std::string> registeredNames() const;
+
 private:
     std::map<std::string, Handler> commands_;
 };
