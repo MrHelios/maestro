@@ -90,10 +90,7 @@ inline bool parseTheme(const std::string& s, GuiTheme& out) {
 inline std::string fontOpenDiagnostic(const GuiOptions& opts) {
     if (opts.fontPath.has_value()) {
         return "maestro: error al abrir la fuente '" + *opts.fontPath +
-               "' especificada con --font (sin fallback: una fuente "
-               "explícita que no abre es error terminal)\n";
+               "' especificada con --font\n";
     }
-    return "maestro: no se encontró ninguna fuente TTF utilizable "
-           "(MAESTRO_FONT, candidatos del sistema o ~/.fonts; instale por "
-           "ejemplo fonts-dejavu-core)\n";
+    return "maestro: no se encontró ninguna fuente TTF utilizable\n";
 }
