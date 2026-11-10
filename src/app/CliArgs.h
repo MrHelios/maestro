@@ -117,8 +117,8 @@ inline Args parseArgs(int argc, char* argv[]) {
                 if (!parseGeometry(val, w, h)) {
                     a.bad = true;
                     a.badReason =
-                        "--geometry requiere WxH con dimensiones entre 1 y 10000 y "
-                        "área total <= 12000000 (ej. 1200x800; recibido '" + val + "')";
+                        "--geometry requiere WxH con ancho entre 1 y 3840 y alto "
+                        "entre 1 y 2160 (ej. 1200x800; recibido '" + val + "')";
                 } else {
                     a.guiOptions.windowWidth = w;
                     a.guiOptions.windowHeight = h;
@@ -180,8 +180,8 @@ inline Args parseArgs(int argc, char* argv[]) {
                 if (!parseGeometry(v, w, h)) {
                     a.bad = true;
                     a.badReason =
-                        "--geometry requiere WxH con dimensiones entre 1 y 10000 y "
-                        "área total <= 12000000 (ej. 1200x800; recibido '" +
+                        "--geometry requiere WxH con ancho entre 1 y 3840 y alto "
+                        "entre 1 y 2160 (ej. 1200x800; recibido '" +
                         std::string(v) + "')";
                 } else {
                     a.guiOptions.windowWidth = w;

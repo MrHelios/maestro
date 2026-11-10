@@ -84,7 +84,7 @@ la ayuda y sale con código `0` sin inicializar SDL ni abrir ventana.
 | `--font-size <px>` | Píxeles lógicos base (default 16; misma altura visual en cualquier monitor). Solo dígitos decimales entre 1 y 200 |
 | `--theme dark\|light` | Tema inicial (default `dark`) |
 | `--no-hidpi` | Desactiva `SDL_WINDOW_ALLOW_HIGHDPI` |
-| `--geometry WxH` | Coords iniciales de ventana, no píxeles físicos (ej. `1200x800`; dimensiones 1–10000, área total ≤ 12000000) |
+| `--geometry WxH` | Coords iniciales de ventana, no píxeles físicos (ej. `1200x800`; ancho 1–3840, alto 1–2160) |
 
 Un valor de opción que empieza con `-` se interpreta como otra opción
 (por ejemplo `--font --theme` es error, no la ruta `--theme`); para esos

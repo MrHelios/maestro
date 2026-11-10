@@ -22,10 +22,11 @@ struct GuiOptions {
     std::optional<int> windowHeight;
 };
 
-// Límite de área total en puntos (w * h) para evitar buffers excesivos con HiDPI.
-// 4000x3000 = 12M puntos -> a 2x = 48M píxeles, razonable para buffers persistentes.
-inline constexpr int kMaxWindowArea = 12000000;
-inline constexpr int kMaxDimension = 10000;
+// Límites por dimensión: 4K (3840x2160) es la geometría más grande que
+// dibujamos. Acotar cada eje ya acota el área total (3840*2160 = 8.29M puntos;
+// a 2x = 33M píxeles), razonable para buffers persistentes con HiDPI.
+inline constexpr int kMaxWindowWidth = 3840;
+inline constexpr int kMaxWindowHeight = 2160;
 
 // GRAMÁTICA (congelada y testeada en test_gui_options.cpp): solo dígitos
 // decimales, sin signo ('+' y '-' no son parte de la gramática; stol los
@@ -59,10 +60,8 @@ inline bool parseGeometry(const std::string& s, int& outW, int& outH) {
     std::string hs = s.substr(pos + 1);
     if (ws.find('x') != std::string::npos || hs.find('x') != std::string::npos) return false;
     int w, h;
-    if (!parseIntStrict(ws, w, 1, kMaxDimension)) return false;
-    if (!parseIntStrict(hs, h, 1, kMaxDimension)) return false;
-    // Límite de área total para evitar buffers excesivos (considera HiDPI 2x-3x).
-    if (static_cast<long long>(w) * static_cast<long long>(h) > kMaxWindowArea) return false;
+    if (!parseIntStrict(ws, w, 1, kMaxWindowWidth)) return false;
+    if (!parseIntStrict(hs, h, 1, kMaxWindowHeight)) return false;
     outW = w;
     outH = h;
     return true;
