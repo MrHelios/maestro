@@ -1594,7 +1594,11 @@ void Editor::handleIrAFilaEvent(const InputEvent& event) {
                 break;
             }
 
-            goToLineQuery_ += digits;
+            const size_t room = kMaxGoToLineDigits - std::min(goToLineQuery_.size(), kMaxGoToLineDigits);
+            if (room == 0) {
+                break;
+            }
+            goToLineQuery_ += digits.substr(0, room);
 
             setStatusMessage(
                 std::string(kHelpIrAFila) + goToLineQuery_,
@@ -1606,7 +1610,8 @@ void Editor::handleIrAFilaEvent(const InputEvent& event) {
         }
         case InputEventType::InsertChar:
             // Solo aceptar dígitos, descartando cualquier otro carácter
-            if (event.text.size() == 1 && event.text[0] >= '0' && event.text[0] <= '9') {
+            if (event.text.size() == 1 && event.text[0] >= '0' && event.text[0] <= '9' &&
+                goToLineQuery_.size() < kMaxGoToLineDigits) {
                 goToLineQuery_ += event.text;
                 setStatusMessage(std::string(kHelpIrAFila) + goToLineQuery_, MessageKind::Prompt,
                                  promptCursor(kHelpIrAFila, goToLineQuery_),

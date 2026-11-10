@@ -25,6 +25,8 @@ constexpr const char* kHelpNavegacion =
 constexpr const char* kHelpEmpty = "";
 constexpr const char* kHelpPrefix = "command: Ctrl+k";
 constexpr const char* kHelpIrAFila = "ir a fila: ";
+// Maximo de digitos aceptados en el prompt "ir a fila".
+constexpr size_t kMaxGoToLineDigits = 10;
 constexpr const char* kHelpNombrar = "Nombre del Archivo: ";
 constexpr const char* kHelpSaveAsSuffix = " (Enter para Guardar)";
 
