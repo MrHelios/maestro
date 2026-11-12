@@ -245,7 +245,7 @@ TEST(gui_render_sin_sdl_no_crashea_y_guarda_chrome) {
     CHECK_EQ(gui.lastCursor().cell.row, gui.lastLayout().chrome.row + 1);
 
     std::vector<std::string> names = {"a.txt", "b.txt"};
-    gui.renderBufferList(names, 1, 40, 5, sink);
+    gui.renderBufferList(names, 1, 0, 40, 5, sink);
     CHECK_EQ(gui.lastChrome().statusBar.estado, "SELECCIONAR");
     CHECK(gui.lastCursor().visible);
 
@@ -318,12 +318,12 @@ TEST(gui_bufferlist_args_invalidos_ocultan_cursor) {
     GuiRenderer gui;
     NullTestSink sink;
     std::vector<std::string> names = {"a.txt", "b.txt"};
-    gui.renderBufferList(names, 7, 40, 5, sink);
+    gui.renderBufferList(names, 7, 0, 40, 5, sink);
     CHECK(!gui.lastCursor().visible);
     CHECK(!gui.lastCursor().cell.valid());
     CHECK_EQ(gui.lastListSelected(), -1);
     CHECK(gui.lastChrome().statusBar.right.find('-') == std::string::npos);
-    gui.renderBufferList(names, 1, 40, 5, sink);
+    gui.renderBufferList(names, 1, 0, 40, 5, sink);
     CHECK(gui.lastCursor().visible);
     CHECK_EQ(gui.lastListSelected(), 1);
     CHECK_EQ(gui.lastChrome().statusBar.right, "2/2");
@@ -578,7 +578,7 @@ TEST(gui_modal_buffer_selector_lineas_y_cursor) {
     GuiRenderer gui;
     NullTestSink sink;
     std::vector<std::string> names = {"a.txt", "b.txt"};
-    gui.renderBufferList(names, 1, 40, 5, sink);
+    gui.renderBufferList(names, 1, 0, 40, 5, sink);
     CHECK_EQ(gui.lastChrome().statusBar.estado, "SELECCIONAR");
     // height=5 son filas de contenido (calculateLayout suma el chrome):
     // 2 items + 3 de relleno.
@@ -658,7 +658,7 @@ TEST(gui_modal_tilde_real_no_es_relleno) {
     CHECK(gui.lastListLines()[2].filler);  // relleno real
 
     std::vector<std::string> names = {"~"};
-    gui.renderBufferList(names, 0, 40, 10, sink);
+    gui.renderBufferList(names, 0, 0, 40, 10, sink);
     CHECK_EQ(gui.lastListLines()[0].text, "  ~");
     CHECK(!gui.lastListLines()[0].filler);
     CHECK(gui.lastListLines()[1].filler);
@@ -2055,7 +2055,7 @@ TEST(gui_sdl_lista_cursor_en_espacio_es_fill_solido) {
     GuiColor probe{};
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
-    gui.renderBufferList({"a.txt", "b.txt"}, 1, 40, 10, sink);
+    gui.renderBufferList({"a.txt", "b.txt"}, 1, 0, 40, 10, sink);
     CHECK(gui.lastCursor().visible);
     CHECK(gui.lastCursor().shape == FrameCursorShape::Block);
     const Layout lo = gui.lastLayout();
@@ -2091,7 +2091,7 @@ TEST(gui_sdl_lista_modal_destaca_seleccionada) {
     if (!readPixel(sdl.ren, 0, 0, probe)) SKIP("ReadPixels no disponible");
     NullTestSink sink;
     std::vector<std::string> names = {"a.txt", "b.txt"};
-    gui.renderBufferList(names, 1, 40, 10, sink);
+    gui.renderBufferList(names, 1, 0, 40, 10, sink);
     const bool dark = gui.isDarkTheme();
     const int cw = gui.cellW(), ch = gui.cellH();
     const Layout lo = gui.lastLayout();
@@ -3593,7 +3593,7 @@ TEST(gui_toggle_pantalla_quieta_repinta_todo) {
     {
         std::vector<std::string> names = {"a.txt", "b.txt"};
         CHECK(gui.isDarkTheme());
-        gui.renderBufferList(names, 0, 40, 5, sink);
+        gui.renderBufferList(names, 0, 0, 40, 5, sink);
         const Layout llo = gui.lastLayout();
         CHECK(pxAt(llo.content.col + 5, llo.content.row + 0, got));
         CHECK(got == guichrome::currentLineBackground(true));
@@ -3601,7 +3601,7 @@ TEST(gui_toggle_pantalla_quieta_repinta_todo) {
         CHECK(got == guichrome::statusBackground(true));
         gui.toggleTheme();  // a light, pantalla quieta
         CHECK(!gui.isDarkTheme());
-        gui.renderBufferList(names, 0, 40, 5, sink);
+        gui.renderBufferList(names, 0, 0, 40, 5, sink);
         CHECK(pxAt(llo.content.col + 5, llo.content.row + 0, got));
         CHECK(got == guichrome::currentLineBackground(false));
         CHECK(pxAt(llo.chrome.col + 20, llo.chrome.row + 0, got));
@@ -4585,7 +4585,7 @@ TEST(gui_sdl_chrome_paint_once_lista_full) {
     std::vector<std::string> names = {"a.txt", "b.txt", "c.txt"};
 
     gui.resetChromePaintCountersForTests();
-    gui.renderBufferList(names, 0, 40, 10, sink);
+    gui.renderBufferList(names, 0, 0, 40, 10, sink);
 
     CHECK(gui.lastWasFull());
     CHECK_EQ(gui.chromePaintCalls(), 1);
@@ -4604,11 +4604,11 @@ TEST(gui_sdl_chrome_paint_once_lista_parcial) {
     NullTestSink sink;
     std::vector<std::string> names = {"a.txt", "b.txt", "c.txt"};
 
-    gui.renderBufferList(names, 0, 40, 10, sink);
+    gui.renderBufferList(names, 0, 0, 40, 10, sink);
     CHECK(gui.lastWasFull());
 
     gui.resetChromePaintCountersForTests();
-    gui.renderBufferList(names, 1, 40, 10, sink); // cambia la seleccion
+    gui.renderBufferList(names, 1, 0, 40, 10, sink); // cambia la seleccion
 
     CHECK(!gui.lastWasFull());
     CHECK_EQ(gui.chromePaintCalls(), 1);
@@ -4629,7 +4629,7 @@ TEST(gui_sdl_chrome_paint_once_lista_fallback_sin_framebuffer) {
 
     gui.setFramebufAcquireFailAfterForTests(0); // acquireFb falla -> presentWindow
     gui.resetChromePaintCountersForTests();
-    gui.renderBufferList(names, 0, 40, 10, sink);
+    gui.renderBufferList(names, 0, 0, 40, 10, sink);
     gui.setFramebufAcquireFailAfterForTests(-1);
 
     CHECK_EQ(gui.chromePaintCalls(), 1);

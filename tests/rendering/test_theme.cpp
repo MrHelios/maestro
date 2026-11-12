@@ -58,7 +58,7 @@ std::string editorFrameWithSelection(const TtyTheme& theme, int width = 200) {
 std::string bufferFrameWithSelection(const TtyTheme& theme, int width = 200) {
     TtyRenderer tr;
     tr.setTheme(theme);
-    return tr.buildBufferListScreen({"aa.txt", "bb.txt"}, 0, width, 5);
+    return tr.buildBufferListScreen({"aa.txt", "bb.txt"}, 0, 0, width, 5);
 }
 
 std::string fileFrameWithSelection(const TtyTheme& theme, int width = 200) {
@@ -235,7 +235,7 @@ TEST(theme_renderer_propagates_to_chrome) {
     // BufferSelector: mismo tema en el backend, misma barra.
     TtyRenderer tr;
     tr.setTheme(t);
-    std::string buf = tr.buildBufferListScreen({"a.txt"}, 0, 80, 5);
+    std::string buf = tr.buildBufferListScreen({"a.txt"}, 0, 0, 80, 5);
     CHECK(buf.find(t.statusBar) != std::string::npos);
 
     // FileBrowser: idem.

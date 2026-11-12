@@ -287,7 +287,7 @@ TEST(chrome_list_screens_use_their_roles) {
     TtyRenderer tr;
     tr.setTheme(t);
 
-    const std::string buf = tr.buildBufferListScreen({"a.txt"}, 0, 80, 5);
+    const std::string buf = tr.buildBufferListScreen({"a.txt"}, 0, 0, 80, 5);
     CHECK(buf.find(t.accentBuffers) != std::string::npos);
     CHECK(buf.find(t.statusBarAccent) == std::string::npos);
 

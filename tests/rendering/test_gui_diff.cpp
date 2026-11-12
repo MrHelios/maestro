@@ -275,9 +275,9 @@ TEST(gui_diff_caches_editor_y_modal_no_hacen_thrash) {
     Cursor cur;
     renderDoc(gui, sink, doc, cur, vp, navChrome());
     std::vector<std::string> names = {"a.txt", "b.txt"};
-    gui.renderBufferList(names, 0, 40, 5, sink);
+    gui.renderBufferList(names, 0, 0, 40, 5, sink);
     CHECK(gui.lastWasFull());  // primer modal: full en su propio caché
-    gui.renderBufferList(names, 0, 40, 5, sink);
+    gui.renderBufferList(names, 0, 0, 40, 5, sink);
     CHECK(!gui.lastWasFull());  // steady del modal: parcial
     CHECK_EQ(gui.lastRepainted(), 0);
     renderDoc(gui, sink, doc, cur, vp, navChrome());
@@ -290,8 +290,8 @@ TEST(gui_diff_modal_mover_seleccion_repinta_vieja_y_nueva) {
     GuiRenderer gui;
     NullTestSink sink;
     std::vector<std::string> names = {"a.txt", "b.txt", "c.txt"};
-    gui.renderBufferList(names, 0, 40, 5, sink);
-    gui.renderBufferList(names, 1, 40, 5, sink);
+    gui.renderBufferList(names, 0, 0, 40, 5, sink);
+    gui.renderBufferList(names, 1, 0, 40, 5, sink);
     CHECK(!gui.lastWasFull());
     // Fila 0 (pierde destacado) + fila 1 (lo gana).
     CHECK_EQ(gui.lastRepainted(), 2);
@@ -399,7 +399,7 @@ TEST(gui_sdl_volver_de_modal_muestra_editor) {
     if (!readSurfaceLocal(gui, editorPx)) SKIP("ReadPixels no disponible");
     // Modal (superficie distinta, su propio full).
     std::vector<std::string> names = {"a.txt", "b.txt"};
-    gui.renderBufferList(names, 0, 40, 10, sink);
+    gui.renderBufferList(names, 0, 0, 40, 10, sink);
     CHECK(gui.lastWasFull());
     std::vector<GuiColor> modalPx;
     CHECK(readSurfaceLocal(gui, modalPx));
@@ -412,7 +412,7 @@ TEST(gui_sdl_volver_de_modal_muestra_editor) {
     CHECK(readSurfaceLocal(gui, back));
     CHECK(back == editorPx);
     // Y de vuelta al modal sin cambios: también su imagen, sin repintar.
-    gui.renderBufferList(names, 0, 40, 10, sink);
+    gui.renderBufferList(names, 0, 0, 40, 10, sink);
     CHECK(!gui.lastWasFull());
     CHECK_EQ(gui.lastRepainted(), 0);
     std::vector<GuiColor> backModal;

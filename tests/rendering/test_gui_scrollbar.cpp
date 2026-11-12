@@ -76,36 +76,75 @@ TEST(GuiScrollbar_DisabledWhenContentFits) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 2: GuiScrollbar_DisabledForLists
+// Test 2: GuiScrollbar_ListOverflow_Enabled
+// Regresion: en listas (BufferSelector / FileBrowser / SaveAs) el scrollbar
+// DEBE aparecer cuando hay overflow (total > visible), igual que en el
+// editor de contenido. Ya no se deshabilita por "lastIsList_".
 // ---------------------------------------------------------------------------
-TEST(GuiScrollbar_DisabledForLists) {
+TEST(GuiScrollbar_ListOverflow_Enabled) {
     GuiRenderer gui;
     NullTestSink sink;
-    Document doc;
-    doc.restore({"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"});
-    Viewport vp = makeVp(5, 80);
-    Cursor cur;
-
-    renderDoc(gui, sink, doc, cur, vp, navChrome());
-
-    // Primero verificar que funciona para contenido normal
-    gui.setScrollInfo({0, 5, 12});  // 12 lines, 5 visible
-    CHECK(gui.scrollbarEnabled());
-
-    // Ahora simular que estamos en una lista (lastIsList_ = true)
-    // Esto se hace internamente en renderBufferList/renderFileList
-    // Podemos verificarlo llamando a renderBufferList
-    std::vector<std::string> names = {"a.txt", "b.txt", "c.txt"};
-    gui.renderBufferList(names, 0, 80, 5, sink);
-
-    // En listas, el scrollbar siempre está deshabilitado
-    CHECK(!gui.scrollbarEnabled());
-
-    // Verificar también con renderFileList
-    std::vector<FileListItem> items = {{"a.txt", false}, {"b.txt", false}};
     MessageBarData msg{"", MessageKind::Info};
-    gui.renderFileList(items, 0, 0, "/tmp", msg, 80, 5, sink);
-    CHECK(!gui.scrollbarEnabled());
+
+    // BufferSelector: 12 buffers, 5 filas visibles -> overflow, habilitado.
+    {
+        std::vector<std::string> names;
+        for (int i = 0; i < 12; ++i)
+            names.push_back("buf" + std::to_string(i) + ".txt");
+        gui.setScrollInfo({0, 5, 12});
+        gui.renderBufferList(names, 0, 0, 80, 5, sink);
+        CHECK(gui.scrollbarEnabled());
+        CHECK(gui.scrollbarMaxTop() > 0);
+    }
+
+    // BufferSelector: 3 buffers, 5 filas visibles -> caben, deshabilitado.
+    {
+        std::vector<std::string> names = {"a.txt", "b.txt", "c.txt"};
+        gui.setScrollInfo({0, 5, 3});
+        gui.renderBufferList(names, 0, 0, 80, 5, sink);
+        CHECK(!gui.scrollbarEnabled());
+        CHECK_EQ(gui.scrollbarMaxTop(), 0);
+    }
+
+    // FileBrowser: 12 entradas, 5 filas visibles -> overflow, habilitado.
+    {
+        std::vector<FileListItem> items;
+        for (int i = 0; i < 12; ++i)
+            items.push_back({{"f" + std::to_string(i)}, false});
+        gui.setScrollInfo({0, 5, 12});
+        gui.renderFileList(items, 0, 0, "/tmp", msg, 80, 5, sink);
+        CHECK(gui.scrollbarEnabled());
+        CHECK(gui.scrollbarMaxTop() > 0);
+    }
+
+    // FileBrowser: 3 entradas, 5 filas visibles -> caben, deshabilitado.
+    {
+        std::vector<FileListItem> items = {{"a.txt", false}, {"b.txt", false}, {"c.txt", false}};
+        gui.setScrollInfo({0, 5, 3});
+        gui.renderFileList(items, 0, 0, "/tmp", msg, 80, 5, sink);
+        CHECK(!gui.scrollbarEnabled());
+        CHECK_EQ(gui.scrollbarMaxTop(), 0);
+    }
+
+    // SaveAs: 12 entradas, 5 filas visibles -> overflow, habilitado.
+    {
+        std::vector<FileListItem> items;
+        for (int i = 0; i < 12; ++i)
+            items.push_back({{"f" + std::to_string(i)}, false});
+        gui.setScrollInfo({0, 5, 12});
+        gui.renderSaveAsFileList(items, 0, 0, "/tmp", msg, 80, 5, sink);
+        CHECK(gui.scrollbarEnabled());
+        CHECK(gui.scrollbarMaxTop() > 0);
+    }
+
+    // SaveAs: 3 entradas, 5 filas visibles -> caben, deshabilitado.
+    {
+        std::vector<FileListItem> items = {{"a.txt", false}, {"b.txt", false}, {"c.txt", false}};
+        gui.setScrollInfo({0, 5, 3});
+        gui.renderSaveAsFileList(items, 0, 0, "/tmp", msg, 80, 5, sink);
+        CHECK(!gui.scrollbarEnabled());
+        CHECK_EQ(gui.scrollbarMaxTop(), 0);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -836,4 +875,191 @@ TEST(GuiScrollbar_BorderConsistency) {
     // Verificar que pointInScrollbarTrack da false en el borde derecho.
     const GuiRunLoop::ScrollbarHitRect track{trackX, 40, 8, 500};
     CHECK(!GuiRunLoop::pointInScrollbarTrack(track, winW - 2, 300));  // en el borde
+}
+
+// ---------------------------------------------------------------------------
+// Test 16: GuiScrollbar_EnabledWhenContentOverflows
+// Regresion del bug del scrollbar: la barra debe aparecer unicamente cuando el
+// contenido NO alcanza para llenar el viewport (total > visible). Con total <=
+// visible NO debe aparecer (caso ya cubierto en DisabledWhenContentFits; aca el
+// caso positivo: DEBE estar habilitado cuando hay overflow).
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_EnabledWhenContentOverflows) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    std::vector<std::string> lines;
+    for (int i = 0; i < 30; ++i) lines.push_back("line " + std::to_string(i));
+    doc.restore(lines);
+    Viewport vp = makeVp(10, 80);
+    Cursor cur;
+
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+
+    // 30 lineas en un viewport de 10: total > visible -> DEBE aparecer.
+    gui.setScrollInfo({0, 10, 30});
+    CHECK(gui.scrollbarEnabled());
+    CHECK(gui.scrollbarMaxTop() > 0);
+
+    // Con el contenido que SI cabe (total <= visible) -> NO debe aparecer.
+    gui.setScrollInfo({0, 10, 10});
+    CHECK(!gui.scrollbarEnabled());
+    gui.setScrollInfo({0, 10, 5});
+    CHECK(!gui.scrollbarEnabled());
+}
+
+// ---------------------------------------------------------------------------
+// Test 17: GuiScrollbar_ListBuffer_EnabledWhenOverflows
+// Modo lista de BUFFERS (Ctrl+k t): cuando la cantidad de buffers supera las
+// filas del viewport, el scrollbar DEBE aparecer; si entran todos, NO debe
+// aparecer (regla de oro).
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_ListBuffer_EnabledWhenOverflows) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    std::vector<std::string> names;
+    for (int i = 0; i < 12; ++i) names.push_back("buf" + std::to_string(i) + ".txt");
+
+    // 12 entradas, viewport de 5 filas -> no caben: DEBE aparecer.
+    gui.setScrollInfo({0, 5, 12});
+    gui.renderBufferList(names, 0, 0, 80, 5, sink);
+    CHECK(gui.scrollbarEnabled());
+    CHECK(gui.scrollbarMaxTop() > 0);
+
+    // 12 entradas, viewport de 2 filas -> aun no caben: DEBE aparecer.
+    gui.setScrollInfo({0, 2, 12});
+    gui.renderBufferList(names, 0, 0, 80, 2, sink);
+    CHECK(gui.scrollbarEnabled());
+
+    // 2 entradas, viewport de 5 filas -> caben: NO debe aparecer.
+    std::vector<std::string> small = {"a.txt", "b.txt"};
+    gui.setScrollInfo({0, 5, 2});
+    gui.renderBufferList(small, 0, 0, 80, 5, sink);
+    CHECK(!gui.scrollbarEnabled());
+}
+
+// ---------------------------------------------------------------------------
+// Test 18: GuiScrollbar_ListFile_EnabledWhenOverflows (load / save-as)
+// Modo lista de ARCHIVOS (explorador: Ctrl+k o para CARGAR, Ctrl+k Ctrl+S para
+// GUARDAR COMO): misma regla de oro. Con mas entradas que filas del viewport el
+// scrollbar DEBE aparecer; si entran todas, NO debe aparecer.
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_ListFile_EnabledWhenOverflows) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    std::vector<FileListItem> overflow;
+    for (int i = 0; i < 12; ++i) overflow.push_back({{"f" + std::to_string(i)}, false});
+    std::vector<FileListItem> small;
+    small.push_back({"a.txt", false});
+    small.push_back({"b.txt", false});
+    MessageBarData msg{"", MessageKind::Info};
+
+    // 12 entradas, viewport de 5 filas -> no caben: DEBE aparecer.
+    gui.setScrollInfo({0, 5, 12});
+    gui.renderFileList(overflow, 0, 0, "/tmp", msg, 80, 5, sink);
+    CHECK(gui.scrollbarEnabled());
+    CHECK(gui.scrollbarMaxTop() > 0);
+
+    // 2 entradas, viewport de 5 filas -> caben: NO debe aparecer.
+    gui.setScrollInfo({0, 5, 2});
+    gui.renderFileList(small, 0, 0, "/tmp", msg, 80, 5, sink);
+    CHECK(!gui.scrollbarEnabled());
+
+    // SaveAs pinta la misma lista: misma regla de oro.
+    gui.setScrollInfo({0, 5, 12});
+    gui.renderSaveAsFileList(overflow, 0, 0, "/tmp", msg, 80, 5, sink);
+    CHECK(gui.scrollbarEnabled());
+    gui.setScrollInfo({0, 5, 2});
+    gui.renderSaveAsFileList(small, 0, 0, "/tmp", msg, 80, 5, sink);
+    CHECK(!gui.scrollbarEnabled());
+}
+
+// ---------------------------------------------------------------------------
+// Test 19: GuiScrollbar_ListScroll_MovesContent
+// Regresion del bug: al scrollear un listado (load/save-as), el scrollbar se
+// mueve y el contenido del viewport cambia (las filas pintadas salen del scroll).
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_ListScroll_MovesContent) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    std::vector<FileListItem> items;
+    for (int i = 0; i < 12; ++i) items.push_back({{"f" + std::to_string(i)}, false});
+    MessageBarData msg{"", MessageKind::Info};
+
+    gui.renderFileList(items, 0, 0, "/tmp", msg, 80, 5, sink);
+    CHECK_EQ(gui.lastListScroll(), 0);
+    CHECK_EQ(gui.lastListLines()[0].text, "  f0");
+
+    // Scroll a 2: el contenido debe cambiar (fila 0 pasa a mostrar f2).
+    gui.renderFileList(items, 2, 2, "/tmp", msg, 80, 5, sink);
+    CHECK_EQ(gui.lastListScroll(), 2);
+    CHECK_EQ(gui.lastListLines()[0].text, "  f2");
+}
+
+// ---------------------------------------------------------------------------
+// Test 20: GuiScrollbar_ListBuffer_SelectionFollowsScroll
+// En el selector de buffers el "scroll" es la posicion seleccionada (la ventana
+// visible arranca en el indice 0); el scrollbar debe reflejarla y mover el
+// contenido al navegar/seleccionar (vía Editor::setViewportTop -> moveListScroll).
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_ListBuffer_SelectionFollowsScroll) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    std::vector<std::string> names;
+    for (int i = 0; i < 12; ++i) names.push_back("buf" + std::to_string(i) + ".txt");
+
+    // 12 buffers, viewport de 5 filas -> overflow: scrollbar habilitado.
+    gui.setScrollInfo({0, 5, 12});
+    gui.renderBufferList(names, 0, 0, 80, 5, sink);
+    CHECK(gui.scrollbarEnabled());
+    CHECK_EQ(gui.lastListSelected(), 0);
+    CHECK_EQ(gui.lastListScroll(), 0);
+    CHECK_EQ(gui.lastListLines()[0].text, "  buf0.txt");
+
+    // Seleccion dentro de la ventana visible, sin mover el scroll:
+    // el contenido sigue arrancando en buf0 y el cursor viaja a la fila 3.
+    gui.setScrollInfo({0, 5, 12});
+    gui.renderBufferList(names, 3, 0, 80, 5, sink);
+    CHECK(gui.scrollbarEnabled());
+    CHECK_EQ(gui.lastListSelected(), 3);
+    CHECK_EQ(gui.lastListScroll(), 0);
+    CHECK_EQ(gui.lastListLines()[0].text, "  buf0.txt");
+
+    // Mover el scroll (thumb) a 3: el contenido cambia (arranca en buf3) y
+    // la seleccion (7) viaja dentro de el (fila relativa 4).
+    gui.setScrollInfo({3, 5, 12});
+    gui.renderBufferList(names, 7, 3, 80, 5, sink);
+    CHECK(gui.scrollbarEnabled());
+    CHECK_EQ(gui.lastListSelected(), 7);
+    CHECK_EQ(gui.lastListScroll(), 3);
+    CHECK_EQ(gui.lastListLines()[0].text, "  buf3.txt");
+    CHECK_EQ(gui.lastListLines()[4].text, "  buf7.txt");
+}
+
+// ---------------------------------------------------------------------------
+// Test 21: GuiScrollbar_ZeroVisibleRowsNoOverflow
+// Cuando visible == 0 (ventana sin filas utiles), no debe considerarse overflow
+// aunque total > visible, y el rail no debe reservar espacio.
+// ---------------------------------------------------------------------------
+TEST(GuiScrollbar_ZeroVisibleRowsNoOverflow) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    std::vector<std::string> names;
+    for (int i = 0; i < 12; ++i) names.push_back("buf" + std::to_string(i) + ".txt");
+
+    // 12 buffers, viewport de 0 filas -> visible == 0, no hay overflow.
+    gui.setScrollInfo({0, 0, 12});
+    CHECK(!gui.scrollbarEnabled());
+    CHECK_EQ(gui.scrollbarMaxTop(), 0);
+
+    // renderBufferList con visible == 0 no debe reservar espacio al rail.
+    gui.renderBufferList(names, 0, 0, 80, 0, sink);
+    CHECK(!gui.scrollbarEnabled());
+
+    // renderFileList con visible == 0 mismo comportamiento.
+    std::vector<FileListItem> items;
+    for (int i = 0; i < 12; ++i) items.push_back({{"f" + std::to_string(i)}, false});
+    MessageBarData msg{"", MessageKind::Info};
+    gui.renderFileList(items, 0, 0, "/tmp", msg, 80, 0, sink);
+    CHECK(!gui.scrollbarEnabled());
 }

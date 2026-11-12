@@ -76,7 +76,7 @@ std::string frameBuffer(int n, int content, int width, int selected = 0) {
     for (int i = 0; i < n; ++i)
         names.push_back("buffer_" + std::to_string(i) + ".txt");
     TtyRenderer tr;
-    return tr.buildBufferListScreen(names, selected, width, content);
+    return tr.buildBufferListScreen(names, selected, 0, width, content);
 }
 
 // FileBrowser: lista de `n` archivos con una ruta y un mensaje de ayuda.

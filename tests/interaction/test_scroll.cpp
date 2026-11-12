@@ -276,6 +276,87 @@ TEST(scroll_bufferselector) {
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::BufferSelector));
 }
 
+// Regresion del bug del scrollbar: en el selector de buffers el scroll del
+// modo lista debe moverse desde el mismo entrypoint que usa el scrollbar
+// (Editor::setViewportTop -> moveListScroll -> bufferSelectorScroll_), y es
+// independiente del indice seleccionado (bufferSelectorIndex_).
+TEST(scroll_bufferselector_scrollbar_mueve) {
+    Editor ed;
+    ed.active().document.restore({"a"});
+    newBuffer(ed);
+    ed.active().document.restore({"b"});
+    newBuffer(ed);
+    ed.active().document.restore({"c"});
+    openSelector(ed);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::BufferSelector));
+
+    // 3 buffers en viewport de 2 filas -> overflow: scrollbar habilitado.
+    // maxScroll = max(0, 3 - 2) = 1.
+    ed.active().viewport.height = 2;
+
+    // 1) Mover el scroll (thumb) no toca el indice seleccionado.
+    ed.bufferSelectorIndex_ = 0;
+    ed.bufferSelectorScroll_ = 0;
+    ed.setViewportTop(1);
+    CHECK_EQ(ed.bufferSelectorScroll_, 1);
+    CHECK_EQ(ed.bufferSelectorIndex_, 0);
+
+    // 2) Mover el indice seleccionado dentro del viewport visible no toca el scroll.
+    ed.bufferSelectorIndex_ = 0;
+    ed.bufferSelectorScroll_ = 0;
+    // ScrollDown: index va de 0 a 1, que sigue dentro de [scroll, scroll+visible) = [0,2).
+    press(ed, InputEventType::ScrollDown);
+    CHECK_EQ(ed.bufferSelectorIndex_, 1);
+    CHECK_EQ(ed.bufferSelectorScroll_, 0);
+
+    // 3) Mover el indice fuera del viewport ajusta el scroll.
+    press(ed, InputEventType::ScrollDown);
+    CHECK_EQ(ed.bufferSelectorIndex_, 2);
+    CHECK_EQ(ed.bufferSelectorScroll_, 1);
+
+    // Regresión: thumb desplazado hacia abajo, selección arriba, pulsación
+    // Down. El índice sale de 0 a 1 pero sigue fuera del viewport [8,10);
+    // el scroll debe re-centrarse para incluir la selección.
+    ed.bufferSelectorIndex_ = 0;
+    ed.bufferSelectorScroll_ = 8;
+    press(ed, InputEventType::ScrollDown);
+    CHECK_EQ(ed.bufferSelectorIndex_, 1);
+    CHECK_EQ(ed.bufferSelectorScroll_, 1);
+
+    // Regresión: thumb desplazado hacia arriba, selección abajo, pulsación
+    // Up. El índice sale de 7 a 6 pero sigue fuera del viewport [0,2);
+    // el scroll debe re-centrarse para incluir la selección.
+    ed.bufferSelectorIndex_ = 7;
+    ed.bufferSelectorScroll_ = 0;
+    press(ed, InputEventType::ScrollUp);
+    CHECK_EQ(ed.bufferSelectorIndex_, 6);
+    CHECK_EQ(ed.bufferSelectorScroll_, 5);
+}
+
+// Regresion del bug del scrollbar: en el explorador de archivos (modo load /
+// save-as) el scroll del listado debe moverse desde Editor::setViewportTop ->
+// moveListScroll (scroll del FileBrowser).
+TEST(scroll_filebrowser_scrollbar_mueve) {
+    TempDir td;
+    td.file("aaa.txt");
+    td.file("bbb.txt");
+    td.file("ccc.txt");
+    CwdGuard cg;
+    cg.enter(td.path);
+    Editor ed;
+    ed.active().viewport.height = 2;
+    ed.active().document.restore({"a"});
+    openFileBrowser(ed);
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::FileBrowser));
+    ed.fileBrowser.index_ = 0;
+    ed.fileBrowser.clampScroll(ed.active().viewport.height);
+    // 3 entradas en viewport de 2 -> overflow: scrollbar habilitado.
+    CHECK((int)ed.fileBrowser.entries_.size() > ed.fileBrowser.scroll_ + ed.active().viewport.height);
+    // El scrollbar (drag/move) mueve el scroll del listado.
+    ed.setViewportTop(1);
+    CHECK_EQ(ed.fileBrowser.scroll_, 1);
+}
+
 TEST(scroll_terminal_event_to_viewport) {
     int savedStdin = dup(STDIN_FILENO);
     int pfd[2];

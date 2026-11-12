@@ -69,7 +69,7 @@ std::string frameEditor(int content, int width) {
 std::string frameBuffer(int content, int width, int selected = 1) {
     TtyRenderer tr;
     return tr.buildBufferListScreen({"b0.txt", "b1.txt", "b2.txt", "b3.txt"},
-                                       selected, width, content);
+                                       selected, 0, width, content);
 }
 
 std::string frameFile(int content, int width) {

@@ -1174,7 +1174,7 @@ TEST(buffer_stress_mixed_operations) {
 
 TEST(renderer_buffer_list_marks_selected) {
     TtyRenderer tr;
-    std::string out = tr.buildBufferListScreen({"a.txt", "b.txt", "SinNombre"}, 1, 80, 10);
+    std::string out = tr.buildBufferListScreen({"a.txt", "b.txt", "SinNombre"}, 1, 0, 80, 10);
     // El item activo de la lista lleva el mismo gris que la fila del cursor
     // (listSelected == currentLine: lenguaje ACTIVO unificado), no video
     // inverso. El fondo debe cubrir TODO el ancho de la fila, no solo el
@@ -1208,7 +1208,7 @@ TEST(renderer_buffer_list_marks_selected) {
 
 TEST(renderer_buffer_list_first_selected) {
     TtyRenderer tr;
-    std::string out = tr.buildBufferListScreen({"a.txt", "b.txt"}, 0, 80, 10);
+    std::string out = tr.buildBufferListScreen({"a.txt", "b.txt"}, 0, 0, 80, 10);
     std::string styledText = std::string(kListSelectedStyle) + "  a.txt";
     size_t stylePos = out.find(styledText);
     CHECK(stylePos != std::string::npos);
@@ -1226,7 +1226,7 @@ TEST(renderer_buffer_list_first_selected) {
 // (Buffers | SELECCIONAR | n/total) y se los entrega al chrome comun.
 TEST(renderer_buffer_list_only_unified_bar) {
     TtyRenderer tr;
-    std::string out = tr.buildBufferListScreen({"a.txt", "b.txt"}, 1, 80, 10);
+    std::string out = tr.buildBufferListScreen({"a.txt", "b.txt"}, 1, 0, 80, 10);
     // Filas vacias con el marcador del editor, alineado con las entradas
     // (misma indentacion de 2 espacios) y sin el texto "BUFFERS".
     CHECK(contains(out, "\x1b[K  " + std::string(kMarkerStyle) + "~" + std::string(tr.theme().reset) + "\r\n"));

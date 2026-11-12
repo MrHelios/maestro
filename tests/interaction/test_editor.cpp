@@ -881,7 +881,7 @@ TEST(editor_toggle_theme_changes_lists_bytes) {
     CHECK(tty.isDarkTheme());
     CHECK_EQ(tty.theme().id, darkTheme().id);
     const std::string before =
-        tty.buildBufferListScreen({"a.txt"}, 0, 80, 5);
+        tty.buildBufferListScreen({"a.txt"}, 0, 0, 80, 5);
 
     // Toggle por el camino público: cambia a claro y las listas pintan
     // con un color concreto del tema nuevo, no con el anterior.
@@ -890,7 +890,7 @@ TEST(editor_toggle_theme_changes_lists_bytes) {
     const TtyTheme light = lightTheme();
     CHECK_EQ(tty.theme().id, light.id);
     const std::string after =
-        tty.buildBufferListScreen({"a.txt"}, 0, 80, 5);
+        tty.buildBufferListScreen({"a.txt"}, 0, 0, 80, 5);
     CHECK(after.find(light.accentBuffers) != std::string::npos);
     CHECK(after != before);
 }

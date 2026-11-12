@@ -27,7 +27,9 @@
 
 #include "test_framework.h"
 
+#define private public
 #include "app/Editor.h"
+#undef private
 #include "filesystem/FileWatcher.h"
 #include "filesystem/InotifyFileWatcher.h"
 #include "filesystem/NullFileWatcher.h"
@@ -709,6 +711,390 @@ bool pushQuitOrForceStop(BlockingWatcher& raw, Editor& ed) {
     raw.release();
     return quitPushed;
 }
+
+// ---------------------------------------------------------------------------
+// SDL_MOUSEBUTTONDOWN + SDL_MOUSEMOTION sobre el pulgar del scrollbar en el
+// MODO LISTA (FileBrowser / load / save-as): el drag por click en el thumb debe
+// mover el scroll del listado y el render posterior debe reflejarlo.
+// ---------------------------------------------------------------------------
+TEST(gui_sdl_scrollbar_drag_list_mueve_scroll) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummyDrivers env;
+    auto watcher = std::make_unique<BlockingWatcher>();
+    BlockingWatcher* raw = watcher.get();
+    Harness h = makeHarness(std::move(watcher));
+
+    h.ed->state_ = State::FileBrowser;
+    h.ed->getActiveBufferForTesting().viewport.height = 5;
+    h.ed->fileBrowser.entries_.clear();
+    for (int i = 0; i < 20; ++i) {
+        FileBrowserEntry e;
+        e.name = "f" + std::to_string(i);
+        e.isDirectory = false;
+        e.fullPath = "/tmp/" + e.name;
+        h.ed->fileBrowser.entries_.push_back(e);
+    }
+    h.ed->fileBrowser.index_ = 0;
+    h.ed->fileBrowser.scroll_ = 0;
+
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer([raw] { raw->release(); }, runner);
+
+    int lastRender = -1;
+    int stable = 0;
+    bool idle = false;
+    for (int i = 0; i < 500 && !idle; ++i) {
+        const int rcNow = h.gui->renderCount.load();
+        if (raw->pollCount.load() >= 1 && rcNow == lastRender) {
+            if (++stable >= 10) idle = true;
+        } else {
+            stable = 0;
+        }
+        lastRender = rcNow;
+        if (!idle) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(idle);
+    if (!idle) return;
+
+    raw->arm();
+    if (!raw->waitBlocked()) return;
+
+    h.ed->getActiveBufferForTesting().viewport.height = 5;
+    h.loop->syncScrollbarInfo();
+    h.ed->renderFrame();
+
+    const Layout layout = h.gui->lastLayout();
+    const GuiPixelRect track = h.gui->scrollbarTrackRect(layout);
+    const GuiPixelRect thumb = h.gui->scrollbarThumbRect(layout);
+    const GuiPixelRect hit = h.gui->scrollbarHitRect(layout);
+    const GuiScrollInfo si = h.gui->scrollInfo();
+
+    CHECK(track.valid);
+    CHECK(thumb.valid);
+    CHECK(si.total > si.visible);
+    CHECK(h.ed->getStateForTesting() == State::FileBrowser);
+    CHECK(hit.valid);
+    if (!track.valid || !thumb.valid || !hit.valid) return;
+
+    int winW = 0, winH = 0, outW = 0, outH = 0;
+    SDL_Window* win = static_cast<SDL_Window*>(h.loop->sdlWinForTesting());
+    auto ren = SDL_GetRenderer(win);
+    SDL_GetWindowSize(win, &winW, &winH);
+    SDL_GetRendererOutputSize(ren, &outW, &outH);
+    auto toWinX = [&](int px) { return (px * winW) / std::max(1, outW); };
+    auto toWinY = [&](int px) { return (px * winH) / std::max(1, outH); };
+
+    const int dragX = thumb.x + thumb.w / 2;
+    const int dragStartY = thumb.y + thumb.h / 2;
+    const int dragEndY = track.y + track.h - 1;
+
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEBUTTONDOWN;
+        ev.button.button = SDL_BUTTON_LEFT;
+        ev.button.state = SDL_PRESSED;
+        ev.button.x = toWinX(dragX);
+        ev.button.y = toWinY(dragStartY);
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEMOTION;
+        ev.motion.state = SDL_BUTTON_LMASK;
+        ev.motion.x = toWinX(dragX);
+        ev.motion.y = toWinY(dragEndY);
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEBUTTONUP;
+        ev.button.button = SDL_BUTTON_LEFT;
+        ev.button.state = SDL_RELEASED;
+        ev.button.x = toWinX(dragX);
+        ev.button.y = toWinY(dragEndY);
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event ev{};
+        ev.type = SDL_WINDOWEVENT;
+        ev.window.event = SDL_WINDOWEVENT_EXPOSED;
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event quit{};
+        quit.type = SDL_QUIT;
+        CHECK(SDL_PushEvent(&quit) == 1);
+    }
+    raw->release();
+
+    runner.join();
+    closer.dismiss();
+    CHECK(rc == 0);
+    CHECK(h.ed->fileBrowser.scroll_ > 0);
+
+    const GuiScrollInfo siAfter = h.gui->scrollInfo();
+    // El drag movio el scroll del modo lista (top del scrollbar > 0).
+    CHECK(siAfter.top > 0);
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// Igual que el anterior pero en modo SaveAsFileBrowser (guardar como):
+// SaveAs comparte implementacion con FileBrowser (mismo scroll_ y mismo
+// moveListScroll), y el drag del thumb debe mover el scroll del listado.
+// ---------------------------------------------------------------------------
+TEST(gui_sdl_scrollbar_drag_saveas_mueve_scroll) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummyDrivers env;
+    auto watcher = std::make_unique<BlockingWatcher>();
+    BlockingWatcher* raw = watcher.get();
+    Harness h = makeHarness(std::move(watcher));
+
+    h.ed->state_ = State::SaveAsFileBrowser;
+    h.ed->getActiveBufferForTesting().viewport.height = 5;
+    h.ed->fileBrowser.entries_.clear();
+    for (int i = 0; i < 20; ++i) {
+        FileBrowserEntry e;
+        e.name = "f" + std::to_string(i);
+        e.isDirectory = false;
+        e.fullPath = "/tmp/" + e.name;
+        h.ed->fileBrowser.entries_.push_back(e);
+    }
+    h.ed->fileBrowser.index_ = 0;
+    h.ed->fileBrowser.scroll_ = 0;
+    h.ed->saveAsFileName_ = "";
+
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer([raw] { raw->release(); }, runner);
+
+    int lastRender = -1;
+    int stable = 0;
+    bool idle = false;
+    for (int i = 0; i < 500 && !idle; ++i) {
+        const int rcNow = h.gui->renderCount.load();
+        if (raw->pollCount.load() >= 1 && rcNow == lastRender) {
+            if (++stable >= 10) idle = true;
+        } else {
+            stable = 0;
+        }
+        lastRender = rcNow;
+        if (!idle) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(idle);
+    if (!idle) return;
+
+    raw->arm();
+    if (!raw->waitBlocked()) return;
+
+    h.ed->getActiveBufferForTesting().viewport.height = 5;
+    h.loop->syncScrollbarInfo();
+    h.ed->renderFrame();
+
+    const Layout layout = h.gui->lastLayout();
+    const GuiPixelRect track = h.gui->scrollbarTrackRect(layout);
+    const GuiPixelRect thumb = h.gui->scrollbarThumbRect(layout);
+    const GuiPixelRect hit = h.gui->scrollbarHitRect(layout);
+    const GuiScrollInfo si = h.gui->scrollInfo();
+
+    CHECK(track.valid);
+    CHECK(thumb.valid);
+    CHECK(si.total > si.visible);
+    CHECK(h.ed->getStateForTesting() == State::SaveAsFileBrowser);
+    CHECK(hit.valid);
+    if (!track.valid || !thumb.valid || !hit.valid) return;
+
+    int winW = 0, winH = 0, outW = 0, outH = 0;
+    SDL_Window* win = static_cast<SDL_Window*>(h.loop->sdlWinForTesting());
+    auto ren = SDL_GetRenderer(win);
+    SDL_GetWindowSize(win, &winW, &winH);
+    SDL_GetRendererOutputSize(ren, &outW, &outH);
+    auto toWinX = [&](int px) { return (px * winW) / std::max(1, outW); };
+    auto toWinY = [&](int px) { return (px * winH) / std::max(1, outH); };
+
+    const int dragX = thumb.x + thumb.w / 2;
+    const int dragStartY = thumb.y + thumb.h / 2;
+    const int dragEndY = track.y + track.h - 1;
+
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEBUTTONDOWN;
+        ev.button.button = SDL_BUTTON_LEFT;
+        ev.button.state = SDL_PRESSED;
+        ev.button.x = toWinX(dragX);
+        ev.button.y = toWinY(dragStartY);
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEMOTION;
+        ev.motion.state = SDL_BUTTON_LMASK;
+        ev.motion.x = toWinX(dragX);
+        ev.motion.y = toWinY(dragEndY);
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEBUTTONUP;
+        ev.button.button = SDL_BUTTON_LEFT;
+        ev.button.state = SDL_RELEASED;
+        ev.button.x = toWinX(dragX);
+        ev.button.y = toWinY(dragEndY);
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event ev{};
+        ev.type = SDL_WINDOWEVENT;
+        ev.window.event = SDL_WINDOWEVENT_EXPOSED;
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event quit{};
+        quit.type = SDL_QUIT;
+        CHECK(SDL_PushEvent(&quit) == 1);
+    }
+    raw->release();
+
+    runner.join();
+    closer.dismiss();
+    CHECK(rc == 0);
+    CHECK(h.ed->fileBrowser.scroll_ > 0);
+
+    const GuiScrollInfo siAfter = h.gui->scrollInfo();
+    // El drag movio el scroll del modo lista (top del scrollbar > 0).
+    CHECK(siAfter.top > 0);
+}
+#endif
+
+// ---------------------------------------------------------------------------
+// Igual que el anterior pero en modo BufferSelector (selector de buffers):
+// moveListScroll() escribe bufferSelectorScroll_ (no index_) y el drag del
+// thumb debe mover el scroll del listado del selector.
+// ---------------------------------------------------------------------------
+TEST(gui_sdl_scrollbar_drag_bufferselector_mueve_scroll) {
+#ifndef HAVE_SDL2
+    SKIP("sin SDL2");
+#else
+    SdlDummyDrivers env;
+    auto watcher = std::make_unique<BlockingWatcher>();
+    BlockingWatcher* raw = watcher.get();
+    Harness h = makeHarness(std::move(watcher));
+
+    h.ed->state_ = State::BufferSelector;
+    h.ed->getActiveBufferForTesting().viewport.height = 5;
+    for (int i = 0; i < 20; ++i) {
+        h.ed->buffers.createBuffer(5, 80);
+    }
+    h.ed->bufferSelectorIndex_ = 0;
+    h.ed->bufferSelectorScroll_ = 0;
+
+    int rc = 1;
+    std::thread runner([&] { rc = h.loop->run(); });
+    LoopCloser closer([raw] { raw->release(); }, runner);
+
+    int lastRender = -1;
+    int stable = 0;
+    bool idle = false;
+    for (int i = 0; i < 500 && !idle; ++i) {
+        const int rcNow = h.gui->renderCount.load();
+        if (raw->pollCount.load() >= 1 && rcNow == lastRender) {
+            if (++stable >= 10) idle = true;
+        } else {
+            stable = 0;
+        }
+        lastRender = rcNow;
+        if (!idle) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    CHECK(idle);
+    if (!idle) return;
+
+    raw->arm();
+    if (!raw->waitBlocked()) return;
+
+    h.ed->getActiveBufferForTesting().viewport.height = 5;
+    h.loop->syncScrollbarInfo();
+    h.ed->renderFrame();
+
+    const Layout layout = h.gui->lastLayout();
+    const GuiPixelRect track = h.gui->scrollbarTrackRect(layout);
+    const GuiPixelRect thumb = h.gui->scrollbarThumbRect(layout);
+    const GuiPixelRect hit = h.gui->scrollbarHitRect(layout);
+    const GuiScrollInfo si = h.gui->scrollInfo();
+
+    CHECK(track.valid);
+    CHECK(thumb.valid);
+    CHECK(si.total > si.visible);
+    CHECK(h.ed->getStateForTesting() == State::BufferSelector);
+    CHECK(hit.valid);
+    if (!track.valid || !thumb.valid || !hit.valid) return;
+
+    int winW = 0, winH = 0, outW = 0, outH = 0;
+    SDL_Window* win = static_cast<SDL_Window*>(h.loop->sdlWinForTesting());
+    auto ren = SDL_GetRenderer(win);
+    SDL_GetWindowSize(win, &winW, &winH);
+    SDL_GetRendererOutputSize(ren, &outW, &outH);
+    auto toWinX = [&](int px) { return (px * winW) / std::max(1, outW); };
+    auto toWinY = [&](int px) { return (px * winH) / std::max(1, outH); };
+
+    const int dragX = thumb.x + thumb.w / 2;
+    const int dragStartY = thumb.y + thumb.h / 2;
+    const int dragEndY = track.y + track.h - 1;
+
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEBUTTONDOWN;
+        ev.button.button = SDL_BUTTON_LEFT;
+        ev.button.state = SDL_PRESSED;
+        ev.button.x = toWinX(dragX);
+        ev.button.y = toWinY(dragStartY);
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEMOTION;
+        ev.motion.state = SDL_BUTTON_LMASK;
+        ev.motion.x = toWinX(dragX);
+        ev.motion.y = toWinY(dragEndY);
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event ev{};
+        ev.type = SDL_MOUSEBUTTONUP;
+        ev.button.button = SDL_BUTTON_LEFT;
+        ev.button.state = SDL_RELEASED;
+        ev.button.x = toWinX(dragX);
+        ev.button.y = toWinY(dragEndY);
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event ev{};
+        ev.type = SDL_WINDOWEVENT;
+        ev.window.event = SDL_WINDOWEVENT_EXPOSED;
+        CHECK(SDL_PushEvent(&ev) == 1);
+    }
+    {
+        SDL_Event quit{};
+        quit.type = SDL_QUIT;
+        CHECK(SDL_PushEvent(&quit) == 1);
+    }
+    raw->release();
+
+    runner.join();
+    closer.dismiss();
+    CHECK(rc == 0);
+    CHECK(h.ed->bufferSelectorScroll_ > 0);
+
+    const GuiScrollInfo siAfter = h.gui->scrollInfo();
+    // El drag movio el scroll del modo lista (top del scrollbar > 0).
+    CHECK(siAfter.top > 0);
+}
+#endif
+
 }  // namespace
 
 TEST(sdl_dummy_drivers_restaura_entorno_al_salir) {
@@ -1652,7 +2038,7 @@ TEST(gui_sdl_mousemotion_durante_arrastre_cambia_viewport) {
 
     // Obtener tamaños de ventana y drawable para convertir coordenadas
     SDL_Window* win = static_cast<SDL_Window*>(h.loop->sdlWinForTesting());
-    SDL_Renderer* ren = static_cast<SDL_Renderer*>(SDL_GetRenderer(win));
+    auto ren = SDL_GetRenderer(win);
     int winW = 0, winH = 0, outW = 0, outH = 0;
     SDL_GetWindowSize(win, &winW, &winH);
     SDL_GetRendererOutputSize(ren, &outW, &outH);
@@ -1808,7 +2194,7 @@ TEST(gui_sdl_scrollbar_drag_cambia_viewport) {
 
     // Geometría en píxeles del drawable -> puntos de ventana (eventos SDL).
     SDL_Window* win = static_cast<SDL_Window*>(h.loop->sdlWinForTesting());
-    SDL_Renderer* ren = static_cast<SDL_Renderer*>(SDL_GetRenderer(win));
+    auto ren = SDL_GetRenderer(win);
     int winW = 0, winH = 0, outW = 0, outH = 0;
     SDL_GetWindowSize(win, &winW, &winH);
     SDL_GetRendererOutputSize(ren, &outW, &outH);

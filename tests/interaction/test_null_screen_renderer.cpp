@@ -38,7 +38,7 @@ TEST(null_screen_renderer_noop_render) {
     Message msg; State st = State::Navegacion;
     nsr.renderScreenDiff(doc, cur, vp, "t", false, makeChromeRequest(msg, st), sink,
                          std::nullopt, std::nullopt, std::nullopt);
-    nsr.renderBufferList({"a"}, 0, 10, 10, sink);
+    nsr.renderBufferList({"a"}, 0, 0, 10, 10, sink);
     std::vector<FileListItem> items;
     nsr.renderFileList(items, 0, 0, "/", toMessageBar(msg), 10, 10, sink);
     CHECK(sink.calls == 0);

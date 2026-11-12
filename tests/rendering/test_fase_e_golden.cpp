@@ -220,14 +220,14 @@ TEST(fase_e_golden_listas_bordes) {
     const int total = content + 2;  // + kChromeRows
 
     // Buffer: vacía no crashea y llena el chrome.
-    std::string empty = tr.buildBufferListScreen({}, 0, width, content);
+    std::string empty = tr.buildBufferListScreen({}, 0, 0, width, content);
     CHECK_EQ((int)testutil::visibleRows(empty).size(), total);
 
     // Buffer: seleccionado inicio y fin visibles.
     std::string first = tr.buildBufferListScreen({"a.txt", "b.txt", "c.txt"},
-                                                    0, width, content);
+                                                    0, 0, width, content);
     std::string last = tr.buildBufferListScreen({"a.txt", "b.txt", "c.txt"},
-                                                   2, width, content);
+                                                   2, 0, width, content);
     CHECK(testutil::contains(testutil::stripAnsi(first), "a.txt"));
     CHECK(testutil::contains(testutil::stripAnsi(last), "c.txt"));
     CHECK(first != last);

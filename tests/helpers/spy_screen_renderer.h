@@ -147,6 +147,7 @@ struct SpyScreenRenderer : public ScreenRenderer {
                           int selected,
                           int,
                           int,
+                          int,
                           Sink&) override {
         ++renderBufferListCount;
         pendingInvalidation = false;

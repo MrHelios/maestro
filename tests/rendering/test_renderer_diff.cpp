@@ -453,7 +453,7 @@ TEST(render_diff_invalidacion_por_modal_y_resize) {
     h.getDiffOutput();
     CHECK(h.r.hasCache());
 
-    tr.renderBufferList({"uno", "dos"}, 0, 80, 24, null);
+    tr.renderBufferList({"uno", "dos"}, 0, 0, 80, 24, null);
     // Idem arriba: el backend no se autoinvalida.
     h.r.invalidateCache();
     CHECK(!h.r.hasCache());
