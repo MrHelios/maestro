@@ -90,6 +90,7 @@ void Editor::handleFileChange(const FileChangeEvent& ev) {
 }
 
 void Editor::handleBufferSelectorEvent(const InputEvent& event) {
+    const int visible = std::max(1, active().viewport.height);
     switch (event.type) {
         case InputEventType::MoveUp:
             if (bufferSelectorIndex_ > 0) bufferSelectorIndex_--;
@@ -119,6 +120,17 @@ void Editor::handleBufferSelectorEvent(const InputEvent& event) {
         default:
             break;
     }
+
+    // Después de mover la selección, asegurar que quede dentro del
+    // viewport visible. Si el usuario arrastró el scrollbar y dejó el
+    // índice fuera de la ventana, navegar debe re-centrar el scroll:
+    // - Selección arriba del viewport → scroll = índice.
+    // - Selección abajo del viewport → scroll = índice - visible + 1.
+    // Esto aplica a los cuatro eventos de navegación por igual.
+    if (bufferSelectorIndex_ < bufferSelectorScroll_)
+        bufferSelectorScroll_ = bufferSelectorIndex_;
+    else if (bufferSelectorIndex_ >= bufferSelectorScroll_ + visible)
+        bufferSelectorScroll_ = bufferSelectorIndex_ - visible + 1;
 }
 
 void Editor::startFileBrowser() {
