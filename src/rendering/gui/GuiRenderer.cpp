@@ -1964,38 +1964,7 @@ void GuiRenderer::renderScreenDiff(
     const int cwEff = font_.cellW();
     if (railVisible && cwEff > 0 &&
         !frameBuilder_.isWrapEnabled(wrapIndex_)) {
-        const int railPx = scrollbarWidthPx(cwEff);
-        const int reserveCols = (railPx + cwEff - 1) / cwEff;
-        const int newWidth =
-            std::max(0, layoutEff.content.width - reserveCols);
-        if (newWidth < layoutEff.content.width) {
-            layoutEff.content.width = newWidth;
-        }
-        // Caso límite: ventana muy pequeña. Incluso con el ancho reducido,
-        // el borde derecho del contenido ((content.col + content.width) * cw)
-        // puede solaparse con el track. Reducir más columnas hasta que el
-        // contenido quede a la izquierda del track. Si ni siquiera 1 columna
-        // cabe (track.x < cwEff), no hay área útil sin solapamiento: se
-        // reduce a 0 columnas y no se pinta contenido (ni cursor) en ese
-        // frame. El track del scrollbar sigue visible y funcional; es el
-        // comportamiento explícito para ventanas tan estrechas que no dejan
-        // espacio para ni siquiera una columna de texto junto al scrollbar.
-        //
-        // La geometría del borde activo se obtiene de la MISMA función que
-        // usa scrollbarTrackRect, para que ambas no diverjan si cambia la
-        // regla del gap horizontal.
-        const int fullCols =
-            std::max(layout.chrome.col + layout.chrome.width,
-                     layout.content.col + layout.content.width);
-        const int trackX =
-            guichrome::activeRightPx(fullCols * cwEff, drawablePixelW_,
-                                     cwEff) -
-            railPx;
-        while (layoutEff.content.width > 0 &&
-               (layoutEff.content.col + layoutEff.content.width) * cwEff >
-                   trackX) {
-            --layoutEff.content.width;
-        }
+        layoutEff = contentLayoutForRail(layout, /*railVisible=*/true);
     }
 
     // Mantener la geometría física del frame sincronizada con el drawable
@@ -2346,31 +2315,45 @@ void GuiRenderer::renderListCommon(std::vector<ListLine> lines,
 }
 
 void GuiRenderer::renderBufferList(const std::vector<std::string>& names,
-                                   int selected, int width, int height,
-                                   Sink& sink) {
+                                   int selected, int scroll, int width,
+                                   int height, Sink& sink) {
     (void)sink;
-    const Layout layout = frameBuilder_.calculateLayout(height, width);
-    // Cursor en la lista (igual que TTY: fila selected, col 0).
-    // Defensivo: ante args fuera de contrato no se pinta un cursor
-    // arbitrario (se oculta). En rango válido es idéntico a TTY.
-    // El snapshot publica el mismo contrato: -1 si vacío/inválido.
+    const Layout baseLayout = frameBuilder_.calculateLayout(height, width);
     const int total = static_cast<int>(names.size());
-    const bool ok = total > 0 && selected >= 0 && selected < total &&
-                    selected < layout.content.height;
-    const int selectedRow = ok ? selected : -1;
+    // `visible` es la altura de contenido del layout base; el rail del
+    // scrollbar es un overlay horizontal que no reduce la cantidad de filas
+    // visibles, por lo que content.height no cambia al reservarlo.
+    const int visible = std::max(0, baseLayout.content.height);
+    // Regla de oro del scrollbar, calculada desde los datos de este listado
+    // (no desde scrollInfo_ residual de un frame o modo anterior).
+    const bool hasOverflow = visible > 0 && total > visible;
+    const Layout layout = listLayoutForScrollbar(baseLayout, hasOverflow);
+    // Cursor en la lista (igual que TTY: fila relativa del seleccionado,
+    // col 0). `scroll` es la primera fila visible (desacoplada del indice
+    // seleccionado), asi arrastrar el thumb mueve el contenido y no solo el
+    // indice. Esto arregla el bug del multibuffer: el scrollbar representa
+    // una posicion real del viewport y la seleccion viaja dentro de el.
+    const bool ok = total > 0 && selected >= 0 && selected < total;
+    const int top = std::clamp(scroll, 0, std::max(0, total - visible));
+    // Las lineas visibles arrancan en `top`.
+    const std::vector<ListLine> lines =
+        buildBufferListLines(names, visible, top);
+    const int rowRel = selected - top;
+    const bool okRow = ok && rowRel >= 0 && rowRel < visible;
+    const int selectedRow = okRow ? rowRel : -1;
     FrameCursor next;
-    if (ok) {
+    if (okRow) {
         next.visible = true;
         next.shape = FrameCursorShape::Block;
-        next.cell = CellPos(layout.content.col, layout.content.row + selected);
+        next.cell = CellPos(layout.content.col, layout.content.row + rowRel);
     } else {
         next.visible = false;
         next.cell = CellPos{};
     }
-    renderListCommon(buildBufferListLines(names, layout.content.height),
+    renderListCommon(std::move(lines),
                      bufferListChrome(names, selected),
                      StyleRole::AccentBuffers, layout, next, selectedRow,
-                     ok ? selected : -1, 0);
+                     ok ? selected : -1, top);
 }
 
 void GuiRenderer::renderFileList(const std::vector<FileListItem>& items,
@@ -2379,17 +2362,20 @@ void GuiRenderer::renderFileList(const std::vector<FileListItem>& items,
                                  const MessageBarData& message, int width,
                                  int height, Sink& sink) {
     (void)sink;
-    const Layout layout = frameBuilder_.calculateLayout(height, width);
+    const Layout baseLayout = frameBuilder_.calculateLayout(height, width);
+    const int total = static_cast<int>(items.size());
+    const int visible = std::max(0, baseLayout.content.height);
+    const bool hasOverflow = visible > 0 && total > visible;
+    const Layout layout = listLayoutForScrollbar(baseLayout, hasOverflow);
     // Cursor en la lista (abrir), nunca en el MessageBar.
     // Defensivo: ante args fuera de contrato (selected < scroll o
     // selected-scroll >= viewport) no se pinta un cursor arbitrario
     // por encima/fuera del contenido: se oculta. En rango válido
     // es idéntico a TTY. El snapshot publica el mismo contrato.
-    const int total = static_cast<int>(items.size());
     const int row = selected - scroll;
     const bool ok = total > 0 && selected >= 0 && selected < total &&
                     scroll >= 0 && scroll <= total && row >= 0 &&
-                    row < layout.content.height;
+                    row < visible;
     const int selectedRow = ok ? row : -1;
     FrameCursor next;
     if (ok) {
@@ -2401,10 +2387,10 @@ void GuiRenderer::renderFileList(const std::vector<FileListItem>& items,
         next.cell = CellPos{};
     }
     renderListCommon(
-        buildFileListLines(items, scroll, layout.content.height),
+        buildFileListLines(items, scroll, visible),
         fileListChrome(path, message, items, selected, scroll, "ABRIR ARCHIVO"),
-        StyleRole::AccentAbrir, layout, next, selectedRow, ok ? selected : -1,
-        scroll);
+        StyleRole::AccentAbrir, layout, next, selectedRow,
+        ok ? selected : -1, scroll);
 }
 
 void GuiRenderer::renderSaveAsFileList(
@@ -2412,16 +2398,19 @@ void GuiRenderer::renderSaveAsFileList(
     const std::string& path, const MessageBarData& message, int width,
     int height, Sink& sink) {
     (void)sink;
-    const Layout layout = frameBuilder_.calculateLayout(height, width);
+    const Layout baseLayout = frameBuilder_.calculateLayout(height, width);
+    const int total = static_cast<int>(items.size());
+    const int visible = std::max(0, baseLayout.content.height);
+    const bool hasOverflow = visible > 0 && total > visible;
+    const Layout layout = listLayoutForScrollbar(baseLayout, hasOverflow);
     // SaveAs pinta la MISMA lista que abrir (solo cambian etiqueta/accent
     // y el cursor al MessageBar): el snapshot comparte constructor.
     // La fila destacada sigue siendo la navegada (selected-scroll), aunque
     // el cursor parpadee en el input: igual que TTY (fondo ListSelected).
-    const int total = static_cast<int>(items.size());
     const int row = selected - scroll;
     const bool okRow = total > 0 && selected >= 0 && selected < total &&
                        scroll >= 0 && scroll <= total && row >= 0 &&
-                       row < layout.content.height;
+                       row < visible;
     const int selectedRow = okRow ? row : -1;
     // Cursor DENTRO del input del MessageBar (igual que TTY: al final del
     // nombre, antes del sufijo decorativo via msg.cursor), nunca en la lista.
@@ -2436,7 +2425,7 @@ void GuiRenderer::renderSaveAsFileList(
         next.cell = CellPos{};
     }
     renderListCommon(
-        buildFileListLines(items, scroll, layout.content.height),
+        buildFileListLines(items, scroll, visible),
         fileListChrome(path, message, items, selected, scroll, "GUARDAR COMO"),
         StyleRole::AccentGuardar, layout, next, selectedRow,
         okRow ? selected : -1, scroll);
@@ -2454,13 +2443,56 @@ int GuiRenderer::scrollbarMaxTop() const {
 }
 
 bool GuiRenderer::scrollbarEnabled() const {
-    if (lastIsList_) {
-        return false;
-    }
+    // Regla de oro del scrollbar: solo aparece cuando el contenido no
+    // alcanza para llenar el viewport (total > visible).
     if (scrollInfo_.visible <= 0) {
         return false;
     }
     return scrollbarMaxTop() > 0;
+}
+
+Layout GuiRenderer::contentLayoutForRail(const Layout& layout,
+                                         bool railVisible) const {
+    // Reserva el rail del scrollbar sobre el area de contenido: descuenta
+    // columnas completas que cubren el ancho del track; en el caso limite
+    // reduce content.width hasta 0 para evitar solapamiento con el track.
+    // La geometria del borde activo usa la MISMA funcion que
+    // scrollbarTrackRect (guichrome::activeRightPx), para que ambas no
+    // diverjan si cambia la regla del gap horizontal.
+    if (!railVisible) {
+        return layout;
+    }
+    Layout eff = layout;
+    const int cw = font_.cellW();
+    if (cw <= 0) {
+        return eff;
+    }
+    const int railPx = scrollbarWidthPx(cw);
+    const int reserveCols = (railPx + cw - 1) / cw;
+    const int newWidth = std::max(0, eff.content.width - reserveCols);
+    if (newWidth < eff.content.width) {
+        eff.content.width = newWidth;
+    }
+    const int fullCols =
+        std::max(layout.chrome.col + layout.chrome.width,
+                 layout.content.col + layout.content.width);
+    const int trackX =
+        guichrome::activeRightPx(fullCols * cw, drawablePixelW_, cw) - railPx;
+    while (eff.content.width > 0 &&
+           (eff.content.col + eff.content.width) * cw > trackX) {
+        --eff.content.width;
+    }
+    return eff;
+}
+
+Layout GuiRenderer::listLayoutForScrollbar(const Layout& layout, bool hasOverflow) const {
+    // Se aplica solo cuando el listado realmente tiene overflow (total >
+    // visible), calculado desde sus propios datos, no desde scrollInfo_
+    // residual.
+    if (!hasOverflow) {
+        return layout;
+    }
+    return contentLayoutForRail(layout, /*railVisible=*/true);
 }
 
 // rectángulo de la pista del scrollbar en PÍXELES DEL DRAWABLE.

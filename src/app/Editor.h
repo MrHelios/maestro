@@ -106,6 +106,14 @@ public:
     };
 
     ScrollInfo scrollInfo();
+    // ScrollInfo del MODO ACTUAL: para content es el del buffer activo
+    // (viewport/documento); para modos lista (BufferSelector / FileBrowser /
+    // SaveAsFileBrowser) es el scroll del modo lista (bufferSelectorScroll_
+    // o scroll_), desacoplado del indice seleccionado, con la misma regla
+    // de oro (visible > 0 && total > visible => overflow).
+    // GuiRunLoop::syncScrollbarInfo lo usa para alimentar el renderer sin
+    // pisar la fuente del scroll segun el state vigente.
+    ScrollInfo scrollInfoForCurrentState();
     void setViewportTop(int top);
 
     // v0.6.2: true si `path` existe y es una carpeta (absoluta o relativa).
@@ -435,6 +443,12 @@ private:
     // Posicion seleccionada en la pantalla del selector de buffers.
     // Es una POSICION MRU (no un indice fisico): 0 = activo, 1 = anterior.
     int bufferSelectorIndex_ = 0;
+    // Primera fila visible del listado del selector de buffers (scroll del
+    // modo lista). Desacoplado de bufferSelectorIndex_: el thumb del
+    // scrollbar mueve el scroll, no la selección; la navegación por teclado
+    // ajusta el scroll solo cuando la selección sale de la ventana visible.
+    // Igual que FileBrowser separa index_ y scroll_.
+    int bufferSelectorScroll_ = 0;
 
     // ---- Explorador de archivos (v0.6.4) ----
     // Estado y navegacion del explorador (ruta actual, entradas, indice y
@@ -600,6 +614,14 @@ private:
     // el Frame resultante lleva cursor.visible==false y ningun backend
     // debe pintar/clamparlo al borde.
     void applyScroll(int delta);
+    // Scroll de los modos lista (BufferSelector / FileBrowser / SaveAs):
+    // reporta si el state actual tiene una fuente de scroll propia (listado)
+    // en vez del viewport de un buffer.
+    bool isScrollableListState(State s) const;
+    // Mueve el scroll del modo lista: la primera fila visible del
+    // listado (bufferSelectorScroll_ para BufferSelector, scroll_ para
+    // FileBrowser/SaveAsFileBrowser). Desacoplado del indice seleccionado.
+    void moveListScroll(int top);
     // Salto a extremo durante seleccion total (prefijo 'a' activo): replica
     // la rama de flechas de handleSelectAllEvent (cursor al extremo,
     // seleccion degenerada sin rango, sale del prefijo 'a'). `toEnd` false

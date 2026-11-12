@@ -195,6 +195,10 @@ public:
     // editor_.pollExternalEvents(), igual que run(). Sin SDL: solo toca
     // Editor + GuiRenderer.
     void idleStep(std::chrono::steady_clock::time_point now);
+    // Sincroniza el ScrollInfo del renderer con el estado actual del Editor
+    // (fuente de verità del scroll). Útil en tests que llaman renderFrame()
+    // directo sin pasar por idleStep() del loop.
+    void syncScrollbarInfo();
     // Cota superior de la espera idle (ms): máximo intervalo de servicio
     // BUSCADO para el polling del watcher (único consumidor real de la
     // cota: SDL no multiplexa el fd de inotify con los eventos de ventana
@@ -362,5 +366,4 @@ private:
     bool scrollbarDragging_ = false;
     int scrollbarGrabOffsetPx_ = 0;
 
-    void syncScrollbarInfo();
 };

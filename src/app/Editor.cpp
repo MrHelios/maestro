@@ -1,6 +1,3 @@
-#include "app/Editor.h"
-#include "app/EditorHandlersCommon.h"
-
 #include <algorithm>
 #include <cctype>
 #include <climits>
@@ -8,6 +5,8 @@
 #include <cerrno>
 #include <sys/stat.h>
 
+#include "app/Editor.h"
+#include "app/EditorHandlersCommon.h"
 #include "base/utf8.h"
 #include "app/ChromePresentation.h"
 #include "layout/Gutter.h"
@@ -308,6 +307,7 @@ void Editor::registerCommands() {
             // La lista esta en orden MRU: el cursor arranca en el buffer
             // anterior (posicion 1), no en el activo (posicion 0).
             bufferSelectorIndex_ = buffers.previousMruPosition();
+            bufferSelectorScroll_ = 0;
             state_ = State::BufferSelector;
             setStatusMessage("Buffers: ↑/↓ mover | Enter abrir | ESC cancelar");
         }
@@ -938,14 +938,30 @@ void Editor::renderFrame() {
     if (state_ == State::BufferSelector) {
         // Pantalla del selector: se dibuja la lista de buffers con la
         // barra MULTIBUFFER al final, manteniendo el aspecto del editor.
+        // Normaliza unicamente el offset al rango valido (sin tocar index_):
+        // cubre cambios de cantidad de buffers o altura de ventana que
+        // dejen bufferSelectorScroll_ fuera de rango.
+        const int n = buffers.count();
+        const int visible = std::max(1, b.viewport.height);
+        const int maxScroll = std::max(0, n - visible);
+        bufferSelectorScroll_ = std::clamp(bufferSelectorScroll_, 0, maxScroll);
         renderer_->renderBufferList(bufferNames(), bufferSelectorIndex_,
-                                  b.viewport.width, b.viewport.height, sink());
+                                    bufferSelectorScroll_,
+                                    b.viewport.width, b.viewport.height, sink());
     } else if (state_ == State::FileBrowser) {
-        fileBrowser.clampScroll(b.viewport.height);
+        // Nota: no se re-normaliza scroll_ desde index_ aca. El scroll movido
+        // por el scrollbar (Editor::moveListScroll -> setViewportTop) es
+        // autoritativo; clampScroll(index-based) lo re-imputir desde el
+        // indice y romperia el drag del thumb. La navegacion (handlers) ya
+        // llama clampScroll despues de cada movimiento.
         // DEUDA (Alcance 1): el vector adaptado se reconstruye por frame
         // (O(n) copias + 1 alloc). Aceptable fuera del camino critico y
         // consistente con bufferNames(); a futuro cachearlo en
         // FileBrowser::reload() o pasar una vista no propietaria al Renderer.
+        // Normaliza unicamente el offset al rango valido (sin tocar index_):
+        // cubre recargas del directorio con menos entradas o cambios de
+        // altura de ventana que dejen scroll_ fuera de rango.
+        fileBrowser.normalizeScroll(b.viewport.height);
         std::vector<FileListItem> items;
         items.reserve(fileBrowser.entries_.size());
         for (const FileBrowserEntry& e : fileBrowser.entries_) {
@@ -956,7 +972,15 @@ void Editor::renderFrame() {
                                 fileBrowser.path_, toMessageBar(statusMessage_),
                                 b.viewport.width, b.viewport.height, sink());
     } else if (state_ == State::SaveAsFileBrowser) {
-        fileBrowser.clampScroll(b.viewport.height);
+        // Nota: no se re-normaliza scroll_ desde index_ aca. El scroll movido
+        // por el scrollbar (Editor::moveListScroll -> setViewportTop) es
+        // autoritativo; clampScroll(index-based) lo re-imputir desde el
+        // indice y romperia el drag del thumb. La navegacion (handlers) ya
+        // llama clampScroll despues de cada movimiento.
+        // Normaliza unicamente el offset al rango valido (sin tocar index_):
+        // cubre recargas del directorio con menos entradas o cambios de
+        // altura de ventana que dejen scroll_ fuera de rango.
+        fileBrowser.normalizeScroll(b.viewport.height);
         std::vector<FileListItem> items;
         items.reserve(fileBrowser.entries_.size());
         for (const FileBrowserEntry& e : fileBrowser.entries_) {
@@ -1850,7 +1874,38 @@ Editor::ScrollInfo Editor::scrollInfo() {
     };
 }
 
+Editor::ScrollInfo Editor::scrollInfoForCurrentState() {
+    // Modos lista: la fuente de scroll es del listado, no del viewport del
+    // buffer. Para el selector de buffers es el scroll del selector
+    // (bufferSelectorScroll_, desacoplado del indice seleccionado); para el
+    // explorador (load/save-as) es el scroll del FileBrowser. La regla de oro
+    // del scrollbar (visible > 0 && total > visible => overflow) se mantiene:
+    // visible = filas del viewport, total = cantidades del listado.
+    if (isScrollableListState(state_)) {
+        if (state_ == State::BufferSelector) {
+            const int n = buffers.count();
+            const int visible = std::max(0, active().viewport.height);
+            return ScrollInfo{bufferSelectorScroll_, visible, n};
+        }
+        const int n = static_cast<int>(fileBrowser.entries_.size());
+        const int visible = std::max(0, active().viewport.height);
+        return ScrollInfo{fileBrowser.scroll_, visible, n};
+    }
+    return scrollInfo();
+}
+
 void Editor::setViewportTop(int top) {
+    // Scroll del modo actual: en editor content se aplica el clamp al
+    // viewport del buffer; en las listas modales (BufferSelector / FileBrowser
+    // / SaveAsFileBrowser) se delega en el scroll del modo lista
+    // (bufferSelectorScroll_ / scroll_), igual que el scrollbar ya hace para
+    // content. Asi un drag del scrollbar (o un setViewportTop directo) mueve
+    // el contenido correcto de cada modo en vez de siempre el viewport del
+    // buffer activo.
+    if (isScrollableListState(state_)) {
+        moveListScroll(top);
+        return;
+    }
     Buffer& b = active();
     const ScrollInfo info = scrollInfo();
 
@@ -1870,6 +1925,40 @@ void Editor::setViewportTop(int top) {
     // manualScroll evita que scrollToCursor devuelva el viewport
     // a la posición del cursor en renders posteriores.
     if (state_ == State::Seleccion) updateSelectionPosition();
+}
+
+bool Editor::isScrollableListState(State s) const {
+    // Modos con un "contenido" desplazable que tiene su propio scroll: los
+    // listados modales del chrome (selector de buffers / explorador / guardar
+    // como). Comparten la regla de oro del scrollbar (solo si no caben las
+    // filas) pero con fuente propia: el scroll del modo lista.
+    return s == State::BufferSelector || s == State::FileBrowser ||
+           s == State::SaveAsFileBrowser;
+}
+
+void Editor::moveListScroll(int top) {
+    // Mueve la fuente del scroll del modo lista actual desde una posicion
+    // cruda (`top`, ya resuelta por el scrollbar: 0..maxTop). En BufferSelector
+    // la fuente es bufferSelectorScroll_ (la primera fila visible del
+    // listado, desacoplada del indice seleccionado); en
+    // FileBrowser/SaveAsFileBrowser es el offset del scroll del listado.
+    if (state_ == State::BufferSelector) {
+        const int n = buffers.count();
+        const int visible = std::max(1, active().viewport.height);
+        const int maxScroll = std::max(0, n - visible);
+        bufferSelectorScroll_ = std::clamp(top, 0, maxScroll);
+        return;
+    }
+    const int n = static_cast<int>(fileBrowser.entries_.size());
+    if (n <= 0) {
+        fileBrowser.scroll_ = 0;
+        return;
+    }
+    // El scroll movido es autoritativo: no se reconstruye desde index_
+    // (clampScroll lo re-imputa desde el indice, lo que anularia drags).
+    const int visible = std::max(1, active().viewport.height);
+    const int maxScroll = std::max(0, n - visible);
+    fileBrowser.scroll_ = std::clamp(top, 0, maxScroll);
 }
 
 

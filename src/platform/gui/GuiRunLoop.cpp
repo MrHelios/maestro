@@ -33,7 +33,12 @@ void GuiRunLoop::syncScrollbarInfo() {
         return;
     }
 
-    const Editor::ScrollInfo si = editor_.scrollInfo();
+    // Modos lista (BufferSelector / FileBrowser / SaveAs): el scroll que
+    // alimenta el scrollbar es el scroll del modo lista
+    // (bufferSelectorScroll_ / scroll_), no el viewport del buffer.
+    // Sino el drag del thumb re-escribe scrollInfo_ con
+    // datos de content y el rail se deshabilita a mitad del drag.
+    const Editor::ScrollInfo si = editor_.scrollInfoForCurrentState();
 
     gui_->setScrollInfo(
         GuiScrollInfo{si.top, si.visible, si.total}

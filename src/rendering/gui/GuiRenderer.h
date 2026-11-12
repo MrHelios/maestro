@@ -407,6 +407,7 @@ public:
 
     void renderBufferList(const std::vector<std::string>& names,
                           int selected,
+                          int scroll,
                           int width,
                           int height,
                           Sink& sink) override;
@@ -442,6 +443,18 @@ public:
     // solapa con esos últimos píxeles pero el scrollbar tiene prioridad
     // (se chequea primero en el hit-test y en el hover).
     GuiPixelRect scrollbarTrackRect(const Layout& layout, int resizeBorderPx = 0) const;
+    // Layout efectivo del area de contenido con el rail del scrollbar ya
+    // reservado (overlay en el borde derecho del drawable): reduce content.width
+    // (y, en el caso limite, hasta 0 columnas) para que texto/cursor no solapen
+    // el track. `railVisible` debe reflejar la regla de oro (visible > 0 y
+    // maxTop > 0 => hay scroll). Usado por content y por listas.
+    Layout contentLayoutForRail(const Layout& layout, bool railVisible) const;
+    // Layout efectivo de un listado (BufferSelector / FileBrowser / SaveAs)
+    // con el rail del scrollbar ya reservado: se aplica solo cuando el rail va
+    // a pintarse. `hasOverflow` se calcula desde los datos del listado que se
+    // va a dibujar (total > visible), no desde el scrollInfo_ residual de un
+    // frame anterior: evita dependencias temporales entre renders.
+    Layout listLayoutForScrollbar(const Layout& layout, bool hasOverflow) const;
     // Rectángulo de HIT-TEST del scrollbar: como scrollbarTrackRect pero
     // extendido a la izquierda hasta el borde derecho del contenido. La
     // reserva del scrollbar descuenta columnas completas, así que puede
