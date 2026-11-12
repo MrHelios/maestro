@@ -33,9 +33,12 @@ struct ListLine {
 };
 
 // Exactamente `contentH` entradas (contentH < 0 se trata como 0):
-// items + relleno con filler=true. BufferSelector sin scroll (desde 0);
-// FileBrowser/SaveAs con scroll (idx = scroll + fila).
+// items a partir de `offset` + relleno con filler=true.
+// `offset` es el scroll del modo lista: la primera fila visible del
+// listado, desacoplada del indice seleccionado. BufferSelector lo usa como
+// bufferSelectorScroll_, FileBrowser y SaveAs como scroll_ del listado.
 std::vector<ListLine> buildBufferListLines(const std::vector<std::string>& names,
-                                           int contentH);
+                                           int contentH,
+                                           int offset = 0);
 std::vector<ListLine> buildFileListLines(const std::vector<FileListItem>& items,
                                          int scroll, int contentH);

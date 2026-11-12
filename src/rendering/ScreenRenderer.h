@@ -84,6 +84,7 @@ public:
 
     virtual void renderBufferList(const std::vector<std::string>& names,
                                   int selected,
+                                  int scroll,
                                   int width,
                                   int height,
                                   Sink& sink) = 0;

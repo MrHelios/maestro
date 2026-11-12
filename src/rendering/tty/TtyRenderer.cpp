@@ -190,26 +190,37 @@ void TtyRenderer::renderChrome(std::string& out, const Rect& area,
 }
 
 std::string TtyRenderer::buildBufferListScreen(
-    const std::vector<std::string>& names, int selected, int width,
+    const std::vector<std::string>& names, int selected, int scroll, int width,
     int height) {
     std::string out;
     encoder_.beginFrame(out);
 
     Layout layout = renderer_.frameBuilder().calculateLayout(height, width);
-    renderBufferListContent(out, names, selected, layout.content);
+
+    // Normaliza el scroll una sola vez antes de pasarlo al renderizado.
+    const int total = static_cast<int>(names.size());
+    const int visible = std::max(0, height);
+    const int maxScroll = std::max(0, total - visible);
+    const int top = std::clamp(scroll, 0, maxScroll);
+
+    renderBufferListContent(out, names, selected, top, layout.content);
 
     ChromeData data;
     data.statusBar.name = "Buffers";
     data.statusBar.estado = "SELECCIONAR";
-    const int total = static_cast<int>(names.size());
     data.statusBar.right = std::to_string(std::min(selected + 1, total)) + "/" +
                  std::to_string(total);
     renderChrome(out, layout.chrome, data, StyleRole::AccentBuffers);
 
-    int rows = std::min(static_cast<int>(names.size()), height);
+    // El cursor solo se coloca cuando la seleccion esta dentro del viewport
+    // visible. Si el indice esta fuera (por scrollbar arrastrado), no se
+    // muestra cursor, igual que en el renderer GUI.
+    int rows = std::min(total - top, visible);
     if (rows > 0) {
-        int cursorRow = std::max(1, std::min(selected + 1, rows));
-        encoder_.moveCursorToRaw(out, cursorRow, 1);
+        const int selectedRow = selected - top;
+        if (selectedRow >= 0 && selectedRow < rows) {
+            encoder_.moveCursorToRaw(out, selectedRow + 1, 1);
+        }
     }
 
     encoder_.endFrame(out);
@@ -218,18 +229,21 @@ std::string TtyRenderer::buildBufferListScreen(
 
 void TtyRenderer::renderBufferListContent(
     std::string& out, const std::vector<std::string>& names, int selected,
-    const Rect& area) {
+    int scroll, const Rect& area) {
     const TtyTheme& T = encoder_.theme();
-    // Texto y relleno salen del builder compartido con la GUI
-    // (rendering/ListLines.h); acá solo se envuelve en ANSI.
+    // Normaliza scroll para evitar offsets negativos en absRow, que haria
+    // que ninguna fila coincidiera con el indice seleccionado.
+    int top = scroll;
+    if (top < 0) top = 0;
     const std::vector<ListLine> lines =
-        buildBufferListLines(names, area.height);
+        buildBufferListLines(names, area.height, top);
     for (size_t r = 0; r < lines.size(); ++r) {
         encoder_.appendClearLine(out);
         if (lines[r].filler) {
             renderEmptyMarkerRow(out, T, area.width);
         } else {
-            const bool isSelected = (static_cast<int>(r) == selected);
+            const int absRow = top + static_cast<int>(r);
+            const bool isSelected = (absRow == selected);
             renderFilledRow(out, lines[r].text, area.width,
                             isSelected ? T.listSelected : "", T.reset);
         }
@@ -238,9 +252,10 @@ void TtyRenderer::renderBufferListContent(
 }
 
 void TtyRenderer::renderBufferList(const std::vector<std::string>& names,
-                                   int selected, int width, int height,
-                                   Sink& sink) {
-    std::string buffer = buildBufferListScreen(names, selected, width, height);
+                                   int selected, int scroll, int width,
+                                   int height, Sink& sink) {
+    std::string buffer = buildBufferListScreen(names, selected, scroll, width,
+                                               height);
     sink.writeStdout(buffer);
 }
 

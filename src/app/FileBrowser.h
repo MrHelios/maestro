@@ -46,6 +46,12 @@ public:
     // de `page` filas.
     void clampScroll(int page);
 
+    // Normaliza unicamente el offset: limita scroll_ al rango valido
+    // [0, max(0, total - page)] sin tocar index_. Cubre cambios del listado
+    // o del tamaño de ventana que no pasan por navegacion ni por el thumb del
+    // scrollbar (p.ej. recargar el directorio con menos entradas o redimensionar).
+    void normalizeScroll(int page);
+
     // Movimiento. Devuelve true si el indice seleccionado cambio.
     bool moveUp();
     bool moveDown();

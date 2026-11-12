@@ -121,11 +121,13 @@ public:
 
     std::string buildBufferListScreen(const std::vector<std::string>& names,
                                       int selected,
+                                      int scroll,
                                       int width,
                                       int height);
 
     void renderBufferList(const std::vector<std::string>& names,
                           int selected,
+                          int scroll,
                           int width,
                           int height,
                           Sink& sink) override;
@@ -218,6 +220,7 @@ private:
     void renderBufferListContent(std::string& out,
                                  const std::vector<std::string>& names,
                                  int selected,
+                                 int scroll,
                                  const Rect& area);
     // Requiere las mismas invariantes de scroll/selected que buildFileListScreen().
     void renderFileListContent(std::string& out,

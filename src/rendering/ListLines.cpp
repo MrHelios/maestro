@@ -15,13 +15,15 @@ ListLine fileLine(const std::string& name, bool isDirectory) {
 }  // namespace
 
 std::vector<ListLine> buildBufferListLines(
-    const std::vector<std::string>& names, int contentH) {
+    const std::vector<std::string>& names, int contentH, int offset) {
     std::vector<ListLine> out;
     if (contentH < 0) contentH = 0;
+    if (offset < 0) offset = 0;
     out.reserve(static_cast<size_t>(contentH));
     for (int r = 0; r < contentH; ++r) {
-        if (r < static_cast<int>(names.size()))
-            out.push_back(bufferLine(names[static_cast<size_t>(r)]));
+        const int idx = offset + r;
+        if (idx >= 0 && idx < static_cast<int>(names.size()))
+            out.push_back(bufferLine(names[static_cast<size_t>(idx)]));
         else
             out.push_back(ListLine{"  ~", true});
     }

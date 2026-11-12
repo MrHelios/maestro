@@ -108,6 +108,18 @@ void FileBrowser::clampScroll(int page) {
         scroll_ = index_ - page + 1;
 }
 
+void FileBrowser::normalizeScroll(int page) {
+    const int n = static_cast<int>(entries_.size());
+    if (n == 0) { scroll_ = 0; return; }
+    // Solo limita el offset al rango valido, sin tocar index_:
+    // uso cuando el listado o el tamaño de la ventana cambian sin pasar
+    // por navegacion ni por el thumb del scrollbar.
+    // Usa max(1, page) para consistencia con moveListScroll: una ventana
+    // de cero filas no puede tener un scroll offset valido mayor a n - 1.
+    const int visible = std::max(1, page);
+    scroll_ = std::clamp(scroll_, 0, std::max(0, n - visible));
+}
+
 bool FileBrowser::moveUp() {
     if (index_ > 0) { index_--; return true; }
     return false;

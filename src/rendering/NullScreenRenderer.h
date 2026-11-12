@@ -50,7 +50,7 @@ public:
         (void)layout;
     }
 
-    void renderBufferList(const std::vector<std::string>&, int, int, int,
+    void renderBufferList(const std::vector<std::string>&, int, int, int, int,
                           Sink&) override {}
 
     void renderFileList(const std::vector<FileListItem>&, int, int,
