@@ -144,6 +144,10 @@ public:
         int winW = 0;
         int winH = 0;
         int titleH = 0;
+        // Una ventana maximizada no ofrece resize ni arrastre desde la barra:
+        // el callback devuelve NORMAL para esas zonas (botones/scrollbar
+        // siguen activos). Se actualiza al maximizar/restaurar.
+        bool maximized = false;
         GuiTitleBar* titleBar = nullptr;
         ScrollbarHitSnapshot scrollbar;
     };

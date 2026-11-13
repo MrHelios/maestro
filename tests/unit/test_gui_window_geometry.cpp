@@ -122,6 +122,56 @@ TEST(gui_window_edge_scrollbar_track_antes_del_borde) {
     CHECK(guiWindowEdgeAt(w - 1, h / 2, w, h, border) == GuiWindowEdge::Right);
 }
 
+// Una ventana maximizada no debe ofrecer cursor de redimensionado en hover:
+// los bordes/esquinas dejan de ser zona de resize.
+TEST(gui_window_hover_cursor_maximizada_no_redimensiona) {
+    const int w = 400, h = 300;
+    const int border = 8;
+
+    // Todos los bordes y esquinas: con maximized=true el cursor es Arrow.
+    const int pts[][2] = {
+        {0, 0}, {w - 1, 0}, {0, h - 1}, {w - 1, h - 1},  // esquinas
+        {0, h / 2}, {w - 1, h / 2},                      // lados
+        {w / 2, 0}, {w / 2, h - 1},
+        {border - 1, border - 1},                         // dentro del borde
+    };
+    for (const auto& p : pts) {
+        CHECK(hoverCursorType(p[0], p[1], w, h, border, true) ==
+              ResizeCursorType::Arrow);
+    }
+
+    // Control: la misma posición en modo ventana sí ofrece resize.
+    CHECK(hoverCursorType(0, 0, w, h, border, false) ==
+          ResizeCursorType::SizeNWSE);
+    CHECK(hoverCursorType(w - 1, h / 2, w, h, border, false) ==
+          ResizeCursorType::SizeWE);
+    CHECK(hoverCursorType(w / 2, 0, w, h, border, false) ==
+          ResizeCursorType::SizeNS);
+}
+
+// Una ventana maximizada no debe permitir iniciar un redimensionado:
+// no se detecta ningún borde/corner en toda la superficie.
+TEST(gui_window_edge_maximizada_no_permite_resize) {
+    const int w = 1920, h = 1080;
+    const int border = 8;
+
+    // Bordes, esquinas y centro: ninguno es zona de resize.
+    CHECK(guiWindowEdgeAt(0, 0, w, h, border, true) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(w - 1, 0, w, h, border, true) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(0, h - 1, w, h, border, true) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(w - 1, h - 1, w, h, border, true) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(0, h / 2, w, h, border, true) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(w - 1, h / 2, w, h, border, true) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(w / 2, 0, w, h, border, true) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(w / 2, h - 1, w, h, border, true) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(w / 2, h / 2, w, h, border, true) == GuiWindowEdge::None);
+
+    // Control: sin maximizar, esas mismas posiciones sí son resize.
+    CHECK(guiWindowEdgeAt(0, 0, w, h, border, false) == GuiWindowEdge::TopLeft);
+    CHECK(guiWindowEdgeAt(w - 1, h / 2, w, h, border, false) == GuiWindowEdge::Right);
+    CHECK(guiWindowEdgeAt(w / 2, h - 1, w, h, border, false) == GuiWindowEdge::Bottom);
+}
+
 TEST(gui_window_edge_ventanas_distintas) {
     const int border = 8;
 

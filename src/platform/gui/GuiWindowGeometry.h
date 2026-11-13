@@ -49,10 +49,14 @@ struct GuiWindowRect {
 // Borde bajo (x,y) con el mismo criterio que el callback SDL: las esquinas
 // ganan a los lados. `border <= 0` o coordenadas fuera de la ventana dan
 // None (el click sigue su camino normal).
+//
+// `maximized`: una ventana maximizada no se puede redimensionar (el WM la
+// ajusta al área de trabajo). Toda la superficie devuelve None, así el
+// fallback manual y el hit-test nativo no ofrecen resize.
 inline GuiWindowEdge guiWindowEdgeAt(int x, int y, int width, int height,
-                                     int border) {
-    if (width <= 0 || height <= 0 || border <= 0 || x < 0 || y < 0 ||
-        x >= width || y >= height) {
+                                     int border, bool maximized = false) {
+    if (maximized || width <= 0 || height <= 0 || border <= 0 || x < 0 ||
+        y < 0 || x >= width || y >= height) {
         return GuiWindowEdge::None;
     }
     const bool left = x < border;
@@ -160,7 +164,11 @@ inline ResizeCursorType cursorTypeForEdge(GuiWindowEdge edge) {
 //
 // NOTA: Esta función NO maneja scrollbar track ni botones de título.
 // El caller debe comprobarlos ANTES y solo llamar a esta función para bordes/contenido.
+//
+// `maximized`: sin cursor de resize en una ventana maximizada (no hay borde
+// redimensionable); devuelve Arrow como el resto de la zona no-redimensionable.
 inline ResizeCursorType hoverCursorType(int ptX, int ptY, int winW, int winH,
-                                         int border) {
+                                         int border, bool maximized = false) {
+    if (maximized) return ResizeCursorType::Arrow;
     return cursorTypeForEdge(guiWindowEdgeAt(ptX, ptY, winW, winH, border));
 }

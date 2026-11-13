@@ -273,6 +273,10 @@ SDL_HitTestResult SDLCALL guiTitleBarHitTest(SDL_Window*,
     }
     // 2) Esquinas y bordes de redimensionado (excluyendo la franja superior
     // de la barra, que ya se gestionó con los botones).
+    // Una ventana maximizada no se redimensiona ni se arrastra: el WM la
+    // mantiene ajustada al área de trabajo. Botones y scrollbar ya se
+    // resolvieron arriba y conservan su comportamiento.
+    if (state->maximized) return SDL_HITTEST_NORMAL;
     // kResizeBorderPts está en PUNTOS DE VENTANA. El track del scrollbar se
     // desplaza hacia dentro la misma cantidad convertida a PÍXELES DEL DRAWABLE
     // (ver renderWithBlink: resizeBorderPx = kResizeBorderPts * mfb.w / winW).
@@ -540,6 +544,7 @@ int GuiRunLoop::run() {
         hitState_.winW = winW;
         hitState_.winH = winH;
         hitState_.titleH = titleBarHeightPoints_;
+        hitState_.maximized = titleBar_.maximized();
         hitState_.titleBar = &titleBar_;
         const int contentH = std::max(1, outH - titleBarHeightPx_);
         // Normalización fase 2: rows/cols salen del área de contenido (post
@@ -640,7 +645,8 @@ int GuiRunLoop::run() {
         // Reusar la medición de currentSize; no se consulta SDL por evento.
         const int winW = lastWinW_;
         const int winH = lastWinH_;
-        GuiWindowEdge edge = guiWindowEdgeAt(ptX, ptY, winW, winH, borderPts);
+        GuiWindowEdge edge = guiWindowEdgeAt(ptX, ptY, winW, winH, borderPts,
+                                             titleBar_.maximized());
         // No ofrecer redimensionado por el borde superior dentro de la barra de título
         // EXCEPTO en la franja de resize (primeros kResizeBorderPts puntos).
         // Esto coincide con el hit-test nativo: Top/TopLeft/TopRight solo en y < border.
@@ -688,6 +694,9 @@ int GuiRunLoop::run() {
                     SDL_MaximizeWindow(win);
                     titleBar_.setMaximized(true);
                 }
+                // El hit-test nativo consulta este snapshot: al maximizar
+                // deja de ofrecer resize hasta restaurar.
+                hitState_.maximized = titleBar_.maximized();
                 break;
             case GuiTitleBarButton::Close:
                 // Mismo camino que SDL_QUIT: respeta buffers modificados.
@@ -912,6 +921,17 @@ int GuiRunLoop::run() {
                         // atajos externos, no solo por nuestros botones.
                         titleBar_.setMaximized(
                             ev.window.event == SDL_WINDOWEVENT_MAXIMIZED);
+                        // Sincronizar el snapshot del hit-test nativo: el WM
+                        // puede maximizar/restaurar por doble click o atajo
+                        // externo, sin pasar por nuestros botones.
+                        hitState_.maximized = titleBar_.maximized();
+                        // Una ventana maximizada no redimensiona: cancelar un
+                        // gesto manual en curso (fallback sin hit-test).
+                        if (titleBar_.maximized() &&
+                            manualResizeEdge_ != GuiWindowEdge::None) {
+                            manualResizeEdge_ = GuiWindowEdge::None;
+                            sdlCaptureMouseBestEffort(SDL_FALSE);
+                        }
                         requestRender();
                     } else if (guiFocusRegainRefreshesIme(ev.window.event)) {
                         // Foco recuperado: el rect IME de SDL puede haber
@@ -1202,12 +1222,19 @@ int GuiRunLoop::run() {
                     // 4. Bordes de redimensionado (usar lógica pura de GuiWindowGeometry)
                     else {
                         ResizeCursorType type = hoverCursorType(
-                            ptX, ptY, winW, winH, kResizeBorderPts);
+                            ptX, ptY, winW, winH, kResizeBorderPts,
+                            titleBar_.maximized());
                         setCursorIfChanged(cursorForType(type));
                     }
 
                     if (manualResizeEdge_ != GuiWindowEdge::None) {
-                        if (!guiLeftHeld(ev.motion.state)) {
+                        // Maximizada en medio del gesto (fallback sin
+                        // hit-test): ya no hay borde que redimensionar.
+                        // Cancelar en vez de seguir aplicando deltas.
+                        if (titleBar_.maximized()) {
+                            manualResizeEdge_ = GuiWindowEdge::None;
+                            sdlCaptureMouseBestEffort(SDL_FALSE);
+                        } else if (!guiLeftHeld(ev.motion.state)) {
                             manualResizeEdge_ = GuiWindowEdge::None;
                             sdlCaptureMouseBestEffort(SDL_FALSE);
                         } else {
