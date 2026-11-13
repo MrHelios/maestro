@@ -2,34 +2,225 @@
 
 #include "platform/gui/GuiWindowGeometry.h"
 
-TEST(gui_window_edge_esquinas_y_lados) {
-    const int w = 300, h = 200, border = 6;
-    
-    CHECK(guiWindowEdgeAt(0, 0, w, h, border) == GuiWindowEdge::TopLeft);
-    CHECK(guiWindowEdgeAt(w - 1, 0, w, h, border) == GuiWindowEdge::TopRight);
-    CHECK(guiWindowEdgeAt(0, h - 1, w, h, border) == GuiWindowEdge::BottomLeft);
-    CHECK(guiWindowEdgeAt(w - 1, h - 1, w, h, border) == GuiWindowEdge::BottomRight);
-    CHECK(guiWindowEdgeAt(0, h / 2, w, h, border) == GuiWindowEdge::Left);
-    CHECK(guiWindowEdgeAt(w - 1, h / 2, w, h, border) == GuiWindowEdge::Right);
-    CHECK(guiWindowEdgeAt(w / 2, 0, w, h, border) == GuiWindowEdge::Top);
-    CHECK(guiWindowEdgeAt(w / 2, h - 1, w, h, border) == GuiWindowEdge::Bottom);
-    CHECK(guiWindowEdgeAt(w / 2, h / 2, w, h, border) == GuiWindowEdge::None);
-}
+/*
+*  GUI WINDOW EDGE
+*/
 
 TEST(gui_window_edge_fuera_o_degenerado_es_none) {
     const int w = 300, h = 200, border = 6;
-
-    // fuera de la ventana
-    CHECK(guiWindowEdgeAt(-1, 0, w, h, border) == GuiWindowEdge::None);   // x < 0
-    CHECK(guiWindowEdgeAt(0, -1, w, h, border) == GuiWindowEdge::None);   // y < 0
-    CHECK(guiWindowEdgeAt(w, 100, w, h, border) == GuiWindowEdge::None);  // x == w (ya afuera)
-    CHECK(guiWindowEdgeAt(100, h, w, h, border) == GuiWindowEdge::None);  // y == h (ya afuera)
 
     // degenerado: ventana o borde de tamaño 0
     CHECK(guiWindowEdgeAt(0, 0, 0, h, border) == GuiWindowEdge::None);    // w = 0
     CHECK(guiWindowEdgeAt(0, 0, w, 0, border) == GuiWindowEdge::None);    // h = 0
     CHECK(guiWindowEdgeAt(0, 0, w, h, 0) == GuiWindowEdge::None);         // border = 0
 }
+
+TEST(gui_window_edge_to_cursor_mapping) {
+    // Esquinas
+    CHECK(cursorTypeForEdge(GuiWindowEdge::TopLeft) == ResizeCursorType::SizeNWSE);
+    CHECK(cursorTypeForEdge(GuiWindowEdge::TopRight) == ResizeCursorType::SizeNESW);
+    CHECK(cursorTypeForEdge(GuiWindowEdge::BottomLeft) == ResizeCursorType::SizeNESW);
+    CHECK(cursorTypeForEdge(GuiWindowEdge::BottomRight) == ResizeCursorType::SizeNWSE);
+
+    // Lados
+    CHECK(cursorTypeForEdge(GuiWindowEdge::Left) == ResizeCursorType::SizeWE);
+    CHECK(cursorTypeForEdge(GuiWindowEdge::Right) == ResizeCursorType::SizeWE);
+    CHECK(cursorTypeForEdge(GuiWindowEdge::Top) == ResizeCursorType::SizeNS);
+    CHECK(cursorTypeForEdge(GuiWindowEdge::Bottom) == ResizeCursorType::SizeNS);
+
+    // Centro / ninguno
+    CHECK(cursorTypeForEdge(GuiWindowEdge::None) == ResizeCursorType::Arrow);
+}
+
+TEST(gui_window_edge_esquinas) {
+    const int w = 400, h = 300;
+    const int border = 8;  // kResizeBorderPx
+
+    // Esquinas exactas (0-based, dentro del borde)
+    CHECK(guiWindowEdgeAt(0, 0, w, h, border) == GuiWindowEdge::TopLeft);
+    CHECK(guiWindowEdgeAt(w - 1, 0, w, h, border) == GuiWindowEdge::TopRight);
+    CHECK(guiWindowEdgeAt(0, h - 1, w, h, border) == GuiWindowEdge::BottomLeft);
+    CHECK(guiWindowEdgeAt(w - 1, h - 1, w, h, border) == GuiWindowEdge::BottomRight);
+
+    // Esquinas: un pixel dentro del borde
+    CHECK(guiWindowEdgeAt(border - 1, border - 1, w, h, border) == GuiWindowEdge::TopLeft);
+    CHECK(guiWindowEdgeAt(w - border, border - 1, w, h, border) == GuiWindowEdge::TopRight);
+    CHECK(guiWindowEdgeAt(border - 1, h - border, w, h, border) == GuiWindowEdge::BottomLeft);
+    CHECK(guiWindowEdgeAt(w - border, h - border, w, h, border) == GuiWindowEdge::BottomRight);
+}
+
+TEST(gui_window_edge_lados) {
+    const int w = 400, h = 300;
+    const int border = 8;
+
+    // Lados verticales (excluyendo esquinas)
+    CHECK(guiWindowEdgeAt(0, h / 2, w, h, border) == GuiWindowEdge::Left);
+    CHECK(guiWindowEdgeAt(w - 1, h / 2, w, h, border) == GuiWindowEdge::Right);
+    CHECK(guiWindowEdgeAt(border - 1, h / 2, w, h, border) == GuiWindowEdge::Left);
+    CHECK(guiWindowEdgeAt(w - border, h / 2, w, h, border) == GuiWindowEdge::Right);
+
+    // Lados horizontales (excluyendo esquinas)
+    CHECK(guiWindowEdgeAt(w / 2, 0, w, h, border) == GuiWindowEdge::Top);
+    CHECK(guiWindowEdgeAt(w / 2, h - 1, w, h, border) == GuiWindowEdge::Bottom);
+    CHECK(guiWindowEdgeAt(w / 2, border - 1, w, h, border) == GuiWindowEdge::Top);
+    CHECK(guiWindowEdgeAt(w / 2, h - border, w, h, border) == GuiWindowEdge::Bottom);
+}
+
+TEST(gui_window_edge_centro_y_fuera) {
+    const int w = 400, h = 300;
+    const int border = 8;
+
+    // Centro de la ventana -> None
+    CHECK(guiWindowEdgeAt(w / 2, h / 2, w, h, border) == GuiWindowEdge::None);
+
+    // Justo fuera del borde interior -> None
+    CHECK(guiWindowEdgeAt(border, border, w, h, border) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(w - border - 1, border, w, h, border) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(border, h - border - 1, w, h, border) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(w - border - 1, h - border - 1, w, h, border) == GuiWindowEdge::None);
+
+    // Fuera de la ventana
+    CHECK(guiWindowEdgeAt(-1, 0, w, h, border) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(0, -1, w, h, border) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(w, 0, w, h, border) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(0, h, w, h, border) == GuiWindowEdge::None);
+}
+
+TEST(gui_window_edge_barra_titulo_excluida) {
+    const int w = 400, h = 300;
+    const int border = 8;
+    const int titleH = 28;
+
+    // guiWindowEdgeAt puro: y < border (8) -> Top
+    CHECK(guiWindowEdgeAt(w / 2, 0, w, h, border) == GuiWindowEdge::Top);
+    CHECK(guiWindowEdgeAt(w / 2, 5, w, h, border) == GuiWindowEdge::Top);
+    CHECK(guiWindowEdgeAt(w / 2, 7, w, h, border) == GuiWindowEdge::Top);
+
+    // y >= border -> None (aunque esté en la barra de título)
+    CHECK(guiWindowEdgeAt(w / 2, 8, w, h, border) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(w / 2, titleH - 1, w, h, border) == GuiWindowEdge::None);
+
+    // Justo debajo de la barra de título -> None
+    CHECK(guiWindowEdgeAt(w / 2, titleH, w, h, border) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(w / 2, titleH + border - 1, w, h, border) == GuiWindowEdge::None);
+}
+
+TEST(gui_window_edge_scrollbar_track_antes_del_borde) {
+    const int w = 400, h = 300;
+    const int border = 8;
+    const int trackWidth = 8;
+
+    int trackX = w - border - trackWidth;   // 400 - 8 - 8 = 384
+    int resizeBorderStartX = w - border;    // 400 - 8 = 392
+
+    // Dentro del track -> None (no es borde de ventana)
+    CHECK(guiWindowEdgeAt(trackX + 2, h / 2, w, h, border) == GuiWindowEdge::None);
+    CHECK(guiWindowEdgeAt(trackX + trackWidth - 1, h / 2, w, h, border) == GuiWindowEdge::None);
+
+    // En el borde de resize -> Right
+    CHECK(guiWindowEdgeAt(resizeBorderStartX, h / 2, w, h, border) == GuiWindowEdge::Right);
+    CHECK(guiWindowEdgeAt(w - 1, h / 2, w, h, border) == GuiWindowEdge::Right);
+}
+
+TEST(gui_window_edge_ventanas_distintas) {
+    const int border = 8;
+
+    // Ventana pequeña
+    {
+        const int w = 200, h = 150;
+        CHECK(guiWindowEdgeAt(0, 0, w, h, border) == GuiWindowEdge::TopLeft);
+        CHECK(guiWindowEdgeAt(w / 2, h / 2, w, h, border) == GuiWindowEdge::None);
+    }
+
+    // Ventana grande
+    {
+        const int w = 1920, h = 1080;
+        CHECK(guiWindowEdgeAt(0, 0, w, h, border) == GuiWindowEdge::TopLeft);
+        CHECK(guiWindowEdgeAt(w / 2, h / 2, w, h, border) == GuiWindowEdge::None);
+    }
+}
+
+// Verifica límites y transiciones
+// Estos checks cubren las fronteras entre zonas (resize vs arrastre vs contenido).
+TEST(gui_window_edge_limites_y_transiciones_criticas) {
+    const int w = 400, h = 300;
+    const int border = 8;
+    const int titleH = 28;
+
+    auto ht = [&](int x, int y) {
+        return hoverCursorType(x, y, w, h, border);
+    };
+
+    // --- Esquinas de la ventana ---
+    CHECK(ht(0, 0) == ResizeCursorType::SizeNWSE);         // TopLeft
+    CHECK(ht(w - 1, 0) == ResizeCursorType::SizeNESW);     // TopRight
+    CHECK(ht(0, h - 1) == ResizeCursorType::SizeNESW);     // BottomLeft
+    CHECK(ht(w - 1, h - 1) == ResizeCursorType::SizeNWSE); // BottomRight
+
+    // --- Borde superior (solo en y < border) ---
+    CHECK(ht(w / 2, 0) == ResizeCursorType::SizeNS);
+    CHECK(ht(w / 2, border - 1) == ResizeCursorType::SizeNS);
+    // y = border ya NO es borde superior -> Arrow (zona arrastrable)
+    CHECK(ht(w / 2, border) == ResizeCursorType::Arrow);
+
+    // --- Barras laterales (resize en TODA la altura, incluyendo barra de título) ---
+    // Izquierda
+    CHECK(ht(0, 0) == ResizeCursorType::SizeNWSE);        // esquina
+    CHECK(ht(0, border) == ResizeCursorType::SizeWE);     // EN barra
+    CHECK(ht(0, titleH - 1) == ResizeCursorType::SizeWE); // EN barra
+    CHECK(ht(0, titleH) == ResizeCursorType::SizeWE);     // fuera de barra
+    CHECK(ht(0, h / 2) == ResizeCursorType::SizeWE);      // centro ventana
+    CHECK(ht(0, h - 1) == ResizeCursorType::SizeNESW);    // esquina inf
+
+    // Derecha
+    CHECK(ht(w - 1, 0) == ResizeCursorType::SizeNESW);        // esquina
+    CHECK(ht(w - 1, border) == ResizeCursorType::SizeWE);     // EN barra
+    CHECK(ht(w - 1, titleH - 1) == ResizeCursorType::SizeWE); // EN barra
+    CHECK(ht(w - 1, titleH) == ResizeCursorType::SizeWE);     // fuera de barra
+    CHECK(ht(w - 1, h / 2) == ResizeCursorType::SizeWE);      // centro ventana
+    CHECK(ht(w - 1, h - 1) == ResizeCursorType::SizeNWSE);    // esquina inf
+
+    // --- Zona arrastrable (centro barra de título) ---
+    CHECK(ht(w / 2, border) == ResizeCursorType::Arrow);
+    CHECK(ht(w / 2, titleH / 2) == ResizeCursorType::Arrow);
+    CHECK(ht(w / 2, titleH - 1) == ResizeCursorType::Arrow);
+
+    // --- Justo debajo de la barra de título -> contenido (Arrow) ---
+    CHECK(ht(w / 2, titleH) == ResizeCursorType::Arrow);
+    CHECK(ht(w / 2, titleH + border - 1) == ResizeCursorType::Arrow);
+
+    // --- Centro de la ventana (contenido) ---
+    CHECK(ht(w / 2, h / 2) == ResizeCursorType::Arrow);
+
+    // --- Borde inferior (y >= h - border) ---
+    CHECK(ht(w / 2, h - 1) == ResizeCursorType::SizeNS);
+    CHECK(ht(w / 2, h - border) == ResizeCursorType::SizeNS);
+    CHECK(ht(w / 2, h - border + 1) == ResizeCursorType::SizeNS);
+    // y = h - border - 1 está en contenido (NO en borde)
+    CHECK(ht(w / 2, h - border - 1) == ResizeCursorType::Arrow);
+
+    // --- Transiciones horizontales en la barra de título (y = border) ---
+    // Izquierda: x=0 -> SizeWE, x=border-1 -> SizeWE, x=border -> Arrow, x=w-border-1 -> Arrow, x=w-1 -> SizeWE
+    CHECK(ht(1, border) == ResizeCursorType::SizeWE);               // en borde izquierdo
+    CHECK(ht(border - 1, border) == ResizeCursorType::SizeWE);      // en borde izquierdo
+    CHECK(ht(border, border) == ResizeCursorType::Arrow);           // inicio zona arrastrable
+    CHECK(ht(w - border - 1, border) == ResizeCursorType::Arrow);   // fin zona arrastrable
+    CHECK(ht(w - border, border) == ResizeCursorType::SizeWE);      // en borde derecho
+    CHECK(ht(w - 2, border) == ResizeCursorType::SizeWE);           // en borde derecho
+    CHECK(ht(border - 1, border - 1) == ResizeCursorType::SizeNWSE);
+    CHECK(ht(w - border, border - 1) == ResizeCursorType::SizeNESW);
+
+    // --- Transiciones verticales en el borde izquierdo (x = 0) ---
+    // y = border-1 -> SizeNWSE (esquina), y = border -> SizeWE, y = titleH-1 -> SizeWE, y = titleH -> SizeWE
+    CHECK(ht(0, border - 1) == ResizeCursorType::SizeNWSE);
+    CHECK(ht(0, border) == ResizeCursorType::SizeWE);
+    CHECK(ht(0, titleH - 1) == ResizeCursorType::SizeWE);
+    CHECK(ht(0, titleH) == ResizeCursorType::SizeWE);
+}
+
+/*
+*  GUI WINDOW RESIZE
+*/
 
 TEST(gui_window_resize_right) {
     // (10,20)  -- (310,20)
@@ -211,13 +402,11 @@ TEST(gui_window_resize_minimo_resize_permitido) {
     const GuiWindowRect right = guiResizeWindowRect(start, GuiWindowEdge::Right, -1000, 0, 160, 120);
     CHECK_EQ(right.x, 10);
     CHECK_EQ(right.w, 160);
-    CHECK_EQ(right.x + right.w + (300 - 160), start.x + start.w);
 
-    // movemos el bottom para la derecha todo lo que podemos
+    // movemos el borde inferior hacia arriba hasta alcanzar el mínimo
     const GuiWindowRect bottom = guiResizeWindowRect(start, GuiWindowEdge::Bottom, 0, -1000, 160, 120);
     CHECK_EQ(bottom.y, 20);
     CHECK_EQ(bottom.h, 120);
-    CHECK_EQ(bottom.y + bottom.h + (200 - 120), start.y + start.h);
 
     // bottom right: achicamos todo lo posible, x e y no cambian
     const GuiWindowRect br = guiResizeWindowRect(start, GuiWindowEdge::BottomRight, -1000, -1000, 160, 120);
@@ -261,3 +450,5 @@ TEST(gui_window_resize_none_es_noop) {
     CHECK_EQ(same.w, start.w);
     CHECK_EQ(same.h, start.h);
 }
+
+
