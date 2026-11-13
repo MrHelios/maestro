@@ -1,32 +1,11 @@
-// Tests del keymap GUI (GuiKeymap: GuiKeyPress -> InputEventType).
-//
-// Espejo de tests/unit/test_keymap.cpp pero en vocabulario propio GUI
-// (GuiKey.h, sin SDL): ninguna prueba incluye <SDL2/SDL.h> ni usa números
-// mágicos de SDL, así compilan con WITH_SDL2=0. La adaptación
-// SDL_Keysym -> GuiKeyPress vive en el límite SDL (GuiRunLoop.cpp,
-// guiKeyFromSdl) y se verifica por compilación con SDL2 + checklist manual.
-//
-// AISLAMIENTO HEADLESS (condición de aceptación): este TU es 100% puro.
-//   - Compilación: cero includes de SDL2 y cero símbolos SDL en código
-//     (SDL solo aparece en comentarios). Verificable con:
-//     `grep "SDL" test_guikeymap.cpp | grep -v "//"` vacío.
-//     Compila con WITH_SDL2=0.
-//   - Ejecución: ningún TEST llama `GuiRunLoop::run()` (el único camino que
-//     crea ventana e inicializa vídeo) ni `SDL_Init`; todo pasa por
-//     `GuiKeyPress` directo + `Editor::handleEvent` (lógica, sin renderer).
-//   - Build: entra en la suite vía `tests/unit/*.cpp` (TEST_SRC) y `make
-//     test-one` lo compila solo (`Compilando solo: test_guikeymap.cpp`).
-//
-// Convenciones bajo prueba:
-//   - Navegación/edición ignoran mods (paridad TTY simpleEscapeForm):
-//     un modificador adicional nunca bloquea la acción (Ctrl+Alt+Escape
-//     sigue siendo Escape). Contraste P1 deliberado con las letras.
-//   - Letras sin Ctrl/Alt NUNCA mapean (el texto viene por SDL_TEXTINPUT).
-//   - Ctrl+Z = Undo en GUI (nunca Suspend: no hay job-control).
-//   - Tab sin enlazar (paridad TTY); keypad mínimo (solo KeyPadEnter).
-//   - Repetición: navegación/borrado repiten; acciones (Save, Quit, Undo,
-//     Prefix, Escape) se suprimen con repeat; Enter repetido solo pasa con
-//     contexto allowRepeatedNewline (Interaccion), nunca en prompts.
+#include <algorithm>
+#include <cstddef>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <unistd.h>
 
 #include "platform/gui/GuiKeymap.h"
 #include "platform/gui/IGuiKeymap.h"
@@ -34,12 +13,7 @@
 #include "platform/InputEvent.h"
 #include "base/utf8.h"
 #include "test_framework.h"
-#include <cstdio>
-#include <filesystem>
-#include <fstream>
-#include <string>
-#include <unistd.h>
-#include <vector>
+
 #define private public
 #include "app/Editor.h"
 #undef private
@@ -57,22 +31,19 @@ GuiKeyPress key(GuiKeySym s, bool ctrl = false, bool alt = false,
     return p;
 }
 
-void checkMaps(GuiKeySym s, InputEventType expected, bool ctrl = false,
-               bool alt = false) {
-    GuiKeymap km;
+void checkMaps(const GuiKeymap& km, GuiKeySym s, InputEventType expected,
+               bool ctrl = false, bool alt = false) {
     const auto t = km.mapKey(key(s, ctrl, alt));
     CHECK(t.has_value());
     if (t) CHECK_EQ(static_cast<int>(*t), static_cast<int>(expected));
 }
 
-void checkUnmapped(GuiKeySym s, bool ctrl = false, bool alt = false,
-                   bool shift = false) {
-    GuiKeymap km;
+void checkUnmapped(const GuiKeymap& km, GuiKeySym s, bool ctrl = false,
+                   bool alt = false, bool shift = false) {
     CHECK(!km.mapKey(key(s, ctrl, alt, shift)).has_value());
 }
 
-// Lleva un Editor fresco a State::Prefix vía el propio keymap
-// (Ctrl+K -> Prefix), como lo haría GuiRunLoop ante SDL_KEYDOWN.
+// Lleva un Editor a State::Prefix vía (Ctrl+K -> Prefix)
 void enterPrefix(Editor& ed, GuiKeymap& km) {
     const auto t = km.mapKey(key(GuiKeySym::KeyK, true));
     CHECK(t.has_value());
@@ -111,152 +82,236 @@ std::string readFileBytes(const std::string& path) {
                        std::istreambuf_iterator<char>());
 }
 
+constexpr GuiKeySym kCtrlLetters[] = {
+    GuiKeySym::KeyK, GuiKeySym::KeyS, GuiKeySym::KeyQ, GuiKeySym::KeyU,
+    GuiKeySym::KeyY, GuiKeySym::KeyZ, GuiKeySym::KeyN
+};
+
+constexpr InputEventType kAllEventTypes[] = {
+    InputEventType::None,          InputEventType::InsertChar,
+    InputEventType::InsertNewline, InputEventType::MoveLeft,
+    InputEventType::MoveRight,     InputEventType::MoveUp,
+    InputEventType::MoveDown,      InputEventType::MoveHome,
+    InputEventType::MoveEnd,       InputEventType::PageUp,
+    InputEventType::PageDown,      InputEventType::Backspace,
+    InputEventType::Delete,        InputEventType::Undo,
+    InputEventType::Redo,          InputEventType::Quit,
+    InputEventType::Prefix,        InputEventType::Save,
+    InputEventType::SaveAs,        InputEventType::Suspend,
+    InputEventType::Escape,
+    InputEventType::ScrollUp,      InputEventType::ScrollDown,
+    InputEventType::MousePress,    InputEventType::MouseDrag,
+    InputEventType::MouseRelease,  InputEventType::Resize,
+    InputEventType::Copy,          InputEventType::Cut,
+    InputEventType::Paste,
+};
+
+constexpr InputEventType kRepeatableEventTypes[] = {
+    InputEventType::MoveLeft,  InputEventType::MoveRight,
+    InputEventType::MoveUp,    InputEventType::MoveDown,
+    InputEventType::MoveHome,  InputEventType::MoveEnd,
+    InputEventType::PageUp,    InputEventType::PageDown,
+    InputEventType::Backspace, InputEventType::Delete,
+};
+
+constexpr GuiKeySym kAllKeySyms[] = {
+    GuiKeySym::Unknown, GuiKeySym::Escape, GuiKeySym::Enter,
+    GuiKeySym::KeyPadEnter, GuiKeySym::Tab, GuiKeySym::Backspace,
+    GuiKeySym::Delete, GuiKeySym::Left, GuiKeySym::Right, GuiKeySym::Up,
+    GuiKeySym::Down, GuiKeySym::Home, GuiKeySym::End, GuiKeySym::PageUp,
+    GuiKeySym::PageDown, GuiKeySym::KeyA, GuiKeySym::KeyB, GuiKeySym::KeyC,
+    GuiKeySym::KeyD, GuiKeySym::KeyE, GuiKeySym::KeyF, GuiKeySym::KeyG,
+    GuiKeySym::KeyH, GuiKeySym::KeyI, GuiKeySym::KeyJ, GuiKeySym::KeyK,
+    GuiKeySym::KeyL, GuiKeySym::KeyM, GuiKeySym::KeyN, GuiKeySym::KeyO,
+    GuiKeySym::KeyP, GuiKeySym::KeyQ, GuiKeySym::KeyR, GuiKeySym::KeyS,
+    GuiKeySym::KeyT, GuiKeySym::KeyU, GuiKeySym::KeyV, GuiKeySym::KeyW,
+    GuiKeySym::KeyX, GuiKeySym::KeyY, GuiKeySym::KeyZ,
+};
+
+constexpr GuiKeySym kNonTextKeySyms[] = {
+    GuiKeySym::Escape, GuiKeySym::Enter, GuiKeySym::KeyPadEnter,
+    GuiKeySym::Tab, GuiKeySym::Backspace, GuiKeySym::Delete,
+    GuiKeySym::Left, GuiKeySym::Right, GuiKeySym::Up, GuiKeySym::Down,
+    GuiKeySym::Home, GuiKeySym::End, GuiKeySym::PageUp, GuiKeySym::PageDown,
+};
+
+template <typename T, std::size_t N>
+bool contains(const T (&values)[N], T value) {
+    return std::find(std::begin(values), std::end(values), value) !=
+           std::end(values);
+}
+
 }  // namespace
 
 // --- Mapeo básico: flechas, Home/End, PgUp/PgDn ---
-TEST(guikeymap_nav_arrows) {
-    checkMaps(GuiKeySym::Left, InputEventType::MoveLeft);
-    checkMaps(GuiKeySym::Right, InputEventType::MoveRight);
-    checkMaps(GuiKeySym::Up, InputEventType::MoveUp);
-    checkMaps(GuiKeySym::Down, InputEventType::MoveDown);
+TEST(gui_keymap_nav_arrows) {
+    GuiKeymap km;
+    checkMaps(km, GuiKeySym::Left, InputEventType::MoveLeft);
+    checkMaps(km, GuiKeySym::Right, InputEventType::MoveRight);
+    checkMaps(km, GuiKeySym::Up, InputEventType::MoveUp);
+    checkMaps(km, GuiKeySym::Down, InputEventType::MoveDown);
 }
 
-TEST(guikeymap_nav_home_end) {
-    checkMaps(GuiKeySym::Home, InputEventType::MoveHome);
-    checkMaps(GuiKeySym::End, InputEventType::MoveEnd);
+TEST(gui_keymap_nav_home_end) {
+    GuiKeymap km;
+    checkMaps(km, GuiKeySym::Home, InputEventType::MoveHome);
+    checkMaps(km, GuiKeySym::End, InputEventType::MoveEnd);
 }
 
-TEST(guikeymap_nav_pages) {
-    checkMaps(GuiKeySym::PageUp, InputEventType::PageUp);
-    checkMaps(GuiKeySym::PageDown, InputEventType::PageDown);
+TEST(gui_keymap_nav_pages) {
+    GuiKeymap km;
+    checkMaps(km, GuiKeySym::PageUp, InputEventType::PageUp);
+    checkMaps(km, GuiKeySym::PageDown, InputEventType::PageDown);
 }
 
 // --- Edición/ent control: Enter (incl. keypad), Backspace, Delete, Escape ---
-TEST(guikeymap_edit_keys) {
-    checkMaps(GuiKeySym::Enter, InputEventType::InsertNewline);
-    checkMaps(GuiKeySym::KeyPadEnter, InputEventType::InsertNewline);
-    checkMaps(GuiKeySym::Backspace, InputEventType::Backspace);
-    checkMaps(GuiKeySym::Delete, InputEventType::Delete);
-    checkMaps(GuiKeySym::Escape, InputEventType::Escape);
-}
-
-TEST(guikeymap_tab_unknown_unmapped) {
-    // Tab sin enlazar por paridad TTY (decisión deliberada, no omisión:
-    // en esta fase Tab no inserta tabulación en GUI).
-    checkUnmapped(GuiKeySym::Tab);
-    checkUnmapped(GuiKeySym::Unknown);
-}
-
-// --- Navegación/edición ignoran mods (paridad TTY simpleEscapeForm) ---
-// P1: un modificador adicional NUNCA bloquea ni cambia la acción
-// no-textual (deliberado, paridad TTY). Se prueban las 8 combinaciones de
-// (ctrl, alt, shift) en cada tecla, Escape incluido: Ctrl+Alt+Escape sigue
-// siendo Escape, Ctrl+Left sigue siendo MoveLeft.
-TEST(guikeymap_nav_ignores_mods) {
+TEST(gui_keymap_edit_keys) {
     GuiKeymap km;
-    for (GuiKeySym s : {GuiKeySym::Left, GuiKeySym::Right, GuiKeySym::Up,
-                        GuiKeySym::Down, GuiKeySym::Home, GuiKeySym::End,
-                        GuiKeySym::PageUp, GuiKeySym::PageDown,
-                        GuiKeySym::Backspace, GuiKeySym::Delete,
-                        GuiKeySym::Enter, GuiKeySym::KeyPadEnter,
-                        GuiKeySym::Escape}) {
+    checkMaps(km, GuiKeySym::Enter, InputEventType::InsertNewline);
+    checkMaps(km, GuiKeySym::KeyPadEnter, InputEventType::InsertNewline);
+    checkMaps(km, GuiKeySym::Backspace, InputEventType::Backspace);
+    checkMaps(km, GuiKeySym::Delete, InputEventType::Delete);
+    checkMaps(km, GuiKeySym::Escape, InputEventType::Escape);
+}
+
+// Regla 1 (no-textual: Escape/Enter/KeyPadEnter/Tab/Backspace/Delete/flechas/
+// Home/End/PgUp/PgDn): IGNORA ctrl/alt/shift en mapKey y boundKey (paridad
+// TTY simpleEscapeForm; un solo enlace por tecla, ver GuiKeymap::normalize).
+// Cubre las 14 teclas no textuales con las ocho combinaciones de
+// (ctrl, alt, shift), comprobando AMBAS vías: mapKey y boundKey deben
+// resolver el mismo evento base (con mods y sin mods).
+TEST(gui_keymap_nontext_modifiers_normalized) {
+    GuiKeymap km;
+
+    // Tab sin default: se enlaza para poder comparar contra la base.
+    CHECK(km.bindKey({GuiKeySym::Tab, false, false, false},
+                     InputEventType::InsertNewline));
+
+    for (GuiKeySym s : kNonTextKeySyms) {
         const auto base = km.mapKey(key(s));
         CHECK(base.has_value());
+
+        // Las ocho combinaciones deben dar el mismo evento que la base
+        // (Escape incluido: Ctrl+Alt+Escape sigue siendo Escape).
         for (bool ctrl : {false, true})
             for (bool alt : {false, true})
                 for (bool shift : {false, true}) {
                     const auto t = km.mapKey(key(s, ctrl, alt, shift));
                     CHECK(t.has_value());
                     CHECK_EQ(static_cast<int>(*t), static_cast<int>(*base));
+                    const auto b = km.boundKey({s, ctrl, alt, shift});
+                    CHECK(b.has_value());
+                    CHECK_EQ(static_cast<int>(*b), static_cast<int>(*base));
                 }
     }
-    // Casos P1 explícitos: modificadores combinados no cambian el evento.
-    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Escape, true, true, false))),
-             static_cast<int>(InputEventType::Escape));
-    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Escape, true, true, true))),
-             static_cast<int>(InputEventType::Escape));
-    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Left, true, true, false))),
-             static_cast<int>(InputEventType::MoveLeft));
-    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Enter, true, true, true))),
-             static_cast<int>(InputEventType::InsertNewline));
-    // boundKey aplica la misma normalización (un solo enlace por tecla).
-    CHECK_EQ(static_cast<int>(*km.boundKey({GuiKeySym::Escape, true, true, true})),
-             static_cast<int>(InputEventType::Escape));
 }
 
-// --- Combos Ctrl ---
-TEST(guikeymap_ctrl_combos) {
-    checkMaps(GuiKeySym::KeyK, InputEventType::Prefix, true);
-    checkMaps(GuiKeySym::KeyS, InputEventType::Save, true);
-    checkMaps(GuiKeySym::KeyQ, InputEventType::Quit, true);
-    checkMaps(GuiKeySym::KeyU, InputEventType::Undo, true);
-    checkMaps(GuiKeySym::KeyY, InputEventType::Redo, true);
-    // Ctrl+Z = Undo en GUI (convención GUI; la GUI nunca produce Suspend:
-    // no hay job-control que suspender).
-    checkMaps(GuiKeySym::KeyZ, InputEventType::Undo, true);
-}
-
-TEST(guikeymap_ctrl_requires_ctrl) {
-    // Sin Ctrl no hay combo: la letra queda sin enlace (su texto, si lo
-    // hay, llegará por SDL_TEXTINPUT, nunca por KEYDOWN).
-    checkUnmapped(GuiKeySym::KeyK);
-    checkUnmapped(GuiKeySym::KeyS);
-    checkUnmapped(GuiKeySym::KeyQ);
-    checkUnmapped(GuiKeySym::KeyU);
-    checkUnmapped(GuiKeySym::KeyY);
-    checkUnmapped(GuiKeySym::KeyZ);
-    checkUnmapped(GuiKeySym::KeyN);
-    // Con Alt tampoco (incluye el caso AltGr: el KEYDOWN queda sin enlace
-    // y el carácter real llega por SDL_TEXTINPUT, que se acepta siempre).
-    checkUnmapped(GuiKeySym::KeyS, false, true);
-    checkUnmapped(GuiKeySym::KeyK, true, true);
-    // Otras letras con Ctrl no están enlazadas.
-    checkUnmapped(GuiKeySym::KeyF, true);
-    checkUnmapped(GuiKeySym::KeyN, true);
-}
-
-TEST(guikeymap_ctrl_shift_ignored) {
-    // Shift no rompe los combos históricos (Caps produzca o no mayúscula,
-    // el adaptador SDL ya normaliza a minúscula lógica): K/Q/U/Y/Z llevan
-    // un enlace explícito por variante. EXCEPCIÓN: S distingue Shift
-    // (Ctrl+S = Save, Ctrl+Shift+S = SaveAs directo).
-    checkMaps(GuiKeySym::KeyK, InputEventType::Prefix, true, false);
+// --- Letras: regla 2 (coincidencia EXACTA en (ctrl, alt, shift)) ---
+// Ctrl+letra sin Alt es el único combo que resuelve por KEYDOWN (Ctrl+letra
+// nunca genera SDL_TEXTINPUT). Shift distingue enlaces: Ctrl+S -> Save,
+// Ctrl+Shift+S -> SaveAs son enlaces distintos. Sin Ctrl (ni con Shift) o con
+// Alt (incl. Ctrl+Alt/AltGr) la pulsación no tiene enlace: el carácter llega
+// por SDL_TEXTINPUT y mapearlo en KEYDOWN duplicaría la acción.
+TEST(gui_keymap_letter_modifiers_exact_match) {
     GuiKeymap km;
-    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyK, true, false, true))),
+
+    // Ctrl+letra sin Alt: tabla de acciones (Solo GUI: Ctrl+Z = Undo).
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyK, true, false, false))),
              static_cast<int>(InputEventType::Prefix));
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyS, true, false, false))),
              static_cast<int>(InputEventType::Save));
-    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyS, true, false, true))),
-             static_cast<int>(InputEventType::SaveAs));
-}
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyQ, true, false, false))),
+             static_cast<int>(InputEventType::Quit));
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyU, true, false, false))),
+             static_cast<int>(InputEventType::Undo));
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyY, true, false, false))),
+             static_cast<int>(InputEventType::Redo));
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyZ, true, false, false))),
+             static_cast<int>(InputEventType::Undo));
+    // Ctrl+C/X/V se cubren en gui_keymap_clipboard_shortcuts.
 
-// Ctrl+Shift+S: tabla explícita de combinaciones de modificadores. El
-// riesgo habitual es mapear solo Ctrl+S y tratar el evento con Shift como
-// acción distinta o como texto: cada combinación se fija por separado.
-TEST(guikeymap_ctrl_shift_s_explicit_modifiers) {
-    GuiKeymap km;
-    // Ctrl+S -> Save; Ctrl+Shift+S -> SaveAs (enlaces distintos).
-    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyS, true, false, false))),
-             static_cast<int>(InputEventType::Save));
+    // Shift distingue enlaces: Ctrl+S -> Save, Ctrl+Shift+S -> SaveAs.
+    // K/Q/U/Y/Z toleran Shift con el MISMO evento (enlaces explícitos, sin
+    // fallback silencioso).
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyS, true, false, true))),
              static_cast<int>(InputEventType::SaveAs));
-    // Sin Ctrl no hay combo: ni S pelada ni Shift+S mapean por KEYDOWN
-    // (su texto, si lo hay, llega por SDL_TEXTINPUT, nunca por KEYDOWN).
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, false, false, false)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, false, false, true)).has_value());
-    // Con Alt tampoco (incluye AltGr y Ctrl+Alt, con o sin Shift).
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, false, true, false)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, false, true, true)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, true, true, false)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, true, true, true)).has_value());
-    // boundKey distingue igual (misma tabla, misma normalización).
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyK, true, false, true))),
+             static_cast<int>(InputEventType::Prefix));
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyQ, true, false, true))),
+             static_cast<int>(InputEventType::Quit));
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyU, true, false, true))),
+             static_cast<int>(InputEventType::Undo));
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyY, true, false, true))),
+             static_cast<int>(InputEventType::Redo));
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyZ, true, false, true))),
+             static_cast<int>(InputEventType::Undo));
+
+    // boundKey aplica la misma regla exacta (misma tabla).
     CHECK_EQ(static_cast<int>(*km.boundKey({GuiKeySym::KeyS, true, false, false})),
              static_cast<int>(InputEventType::Save));
     CHECK_EQ(static_cast<int>(*km.boundKey({GuiKeySym::KeyS, true, false, true})),
              static_cast<int>(InputEventType::SaveAs));
     CHECK(!km.boundKey({GuiKeySym::KeyS, false, false, false}).has_value());
+    CHECK(!km.boundKey({GuiKeySym::KeyS, false, true, false}).has_value());
+    CHECK(!km.boundKey({GuiKeySym::KeyS, true, true, false}).has_value());
     CHECK(!km.boundKey({GuiKeySym::KeyS, true, true, true}).has_value());
-    // Desatar una variante no toca la otra (enlaces independientes).
+    // KeyK coincide en el rechazo con Alt (misma tabla).
+    CHECK(!km.boundKey({GuiKeySym::KeyK, false, true, false}).has_value());
+    CHECK(!km.boundKey({GuiKeySym::KeyK, true, true, false}).has_value());
+    CHECK(!km.boundKey({GuiKeySym::KeyK, true, true, true}).has_value());
+
+    // Sin Ctrl no hay combo: la letra (con o sin Shift) no resuelve por
+    // KEYDOWN; con Ctrl pero con Alt (AltGr incluido) tampoco: el texto
+    // llega por SDL_TEXTINPUT, nunca por KEYDOWN. Se cubren las seis
+    // combinaciones sin enlace (todas menos Ctrl y Ctrl+Shift).
+    for (GuiKeySym s : kCtrlLetters) {
+        checkUnmapped(km, s);
+        checkUnmapped(km, s, false, false, true);
+        checkUnmapped(km, s, false, true);
+        checkUnmapped(km, s, false, true, true);
+        checkUnmapped(km, s, true, true);
+        checkUnmapped(km, s, true, true, true);
+    }
+
+    // Ninguna de las 8 combinaciones resuelve (KeyF).
+    for (bool ctrl : {false, true})
+        for (bool alt : {false, true})
+            for (bool shift : {false, true}) {
+                CHECK(!km.mapKey(key(GuiKeySym::KeyF, ctrl, alt, shift)).has_value());
+                CHECK(!km.boundKey({GuiKeySym::KeyF, ctrl, alt, shift}).has_value());
+            }
+
+    // Un enlace nuevo de una sola variante NO habilita la otra (sin fallback
+    // silencioso). Se verifica en KeyJ y KeyA, sin default, y en KeyX, donde
+    // reemplaza el enlace existente Ctrl+X -> Cut.
+    for (GuiKeySym s : {GuiKeySym::KeyJ, GuiKeySym::KeyA, GuiKeySym::KeyX}) {
+        GuiKeymap fresh;
+
+        CHECK(fresh.bindKey({s, true, false, false}, InputEventType::MoveDown));
+        CHECK_EQ(static_cast<int>(*fresh.mapKey(key(s, true, false, false))),
+                 static_cast<int>(InputEventType::MoveDown));
+        // La variante con Shift sigue sin resolver (enlace distinto).
+        CHECK(!fresh.mapKey(key(s, true, false, true)).has_value());
+        CHECK(!fresh.boundKey({s, true, false, true}).has_value());
+        // ...hasta que se enlaza explícitamente (enlace independiente).
+        CHECK(fresh.bindKey({s, true, false, true}, InputEventType::MoveUp));
+        CHECK_EQ(static_cast<int>(*fresh.mapKey(key(s, true, false, true))),
+                 static_cast<int>(InputEventType::MoveUp));
+        CHECK_EQ(static_cast<int>(*fresh.mapKey(key(s, true, false, false))),
+                 static_cast<int>(InputEventType::MoveDown));
+
+        // ctrl/alt SÍ deciden: sin Ctrl, con Alt o con Ctrl+Alt no hay enlace
+        // (el texto llegaría por SDL_TEXTINPUT; enlazarlo duplicaría).
+        CHECK(!fresh.mapKey(key(s, false, false)).has_value());
+        CHECK(!fresh.mapKey(key(s, false, false, true)).has_value());
+        CHECK(!fresh.mapKey(key(s, false, true)).has_value());
+        CHECK(!fresh.mapKey(key(s, true, true)).has_value());
+        CHECK(!fresh.boundKey({s, false, false}).has_value());
+        CHECK(!fresh.boundKey({s, false, true}).has_value());
+        CHECK(!fresh.boundKey({s, true, true}).has_value());
+    }
+
+    // Desatanar una variante no toca la otra (enlaces distintos por mods).
     km.unbindKey({GuiKeySym::KeyS, true, false, true});
     CHECK(!km.mapKey(key(GuiKeySym::KeyS, true, false, true)).has_value());
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyS, true, false, false))),
@@ -264,83 +319,32 @@ TEST(guikeymap_ctrl_shift_s_explicit_modifiers) {
     km.resetDefaults();
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyS, true, false, true))),
              static_cast<int>(InputEventType::SaveAs));
-    // Repetición: ni Save ni SaveAs repiten al mantener la tecla.
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, true, false, false, true)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, true, false, true, true)).has_value());
-    CHECK(!km.isRepeatable(InputEventType::Save));
-    CHECK(!km.isRepeatable(InputEventType::SaveAs));
-}
-
-// P1: contraste no-textual vs letras ante modificadores combinados.
-// Lo no-textual tolera cualquier modificador extra (paridad TTY deliberada,
-// probada en guikeymap_nav_ignores_mods); las letras exigen coincidencia
-// exacta y Alt SIEMPRE deja la pulsación sin enlace. Esta matriz fija que
-// los modificadores que SDL entrega en los layouts soportados (Alt, AltGr
-// como Ctrl+Alt, Shift) jamás generan comandos accidentales por KEYDOWN:
-// el carácter real llega por SDL_TEXTINPUT.
-TEST(guikeymap_mods_combinados_letras_sin_accidentales) {
-    GuiKeymap km;
-    // KeyK (con default): solo resuelven (Ctrl, sin Alt) en ambas variantes
-    // de Shift; las 6 restantes (todas las que llevan Alt, más las sin Ctrl)
-    // quedan sin enlace.
-    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyK, true, false, false))),
-             static_cast<int>(InputEventType::Prefix));
-    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyK, true, false, true))),
-             static_cast<int>(InputEventType::Prefix));
-    CHECK(!km.mapKey(key(GuiKeySym::KeyK, false, false, false)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyK, false, false, true)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyK, false, true, false)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyK, false, true, true)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyK, true, true, false)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyK, true, true, true)).has_value());
-    // KeyS (con default doble): Save/SaveAs en sus variantes exactas; con
-    // Alt (solo, con Ctrl, con Shift) nada resuelve en ninguna combinación.
-    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyS, true, false, false))),
-             static_cast<int>(InputEventType::Save));
-    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyS, true, false, true))),
-             static_cast<int>(InputEventType::SaveAs));
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, false, false, false)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, false, false, true)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, false, true, false)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, false, true, true)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, true, true, false)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyS, true, true, true)).has_value());
-    // KeyF (sin default): NINGUNA de las 8 combinaciones resuelve (ni con
-    // Ctrl: no está enlazada; el texto iría por SDL_TEXTINPUT).
-    for (bool ctrl : {false, true})
-        for (bool alt : {false, true})
-            for (bool shift : {false, true}) {
-                CHECK(!km.mapKey(key(GuiKeySym::KeyF, ctrl, alt, shift)).has_value());
-                CHECK(!km.boundKey({GuiKeySym::KeyF, ctrl, alt, shift}).has_value());
-            }
-    // boundKey coincide con mapKey en el rechazo con Alt (misma tabla).
-    CHECK(!km.boundKey({GuiKeySym::KeyK, true, true, false}).has_value());
-    CHECK(!km.boundKey({GuiKeySym::KeyK, true, true, true}).has_value());
-    CHECK(!km.boundKey({GuiKeySym::KeyK, false, true, false}).has_value());
 }
 
 // Ctrl+Shift+S llega al Editor por el comando semántico existente
 // (`buffer.guardar.como`), sin sintetizar secuencias de teclas TTY
 // (sin pasar por Prefix): paridad total con executeCommand directo.
-TEST(guikeymap_ctrl_shift_s_editor_via_semantic_command) {
+TEST(gui_keymap_ctrl_shift_s_editor_via_semantic_command) {
     GuiKeymap km;
-    // Vía keymap + handleEvent (lo que hace GuiRunLoop ante SDL_KEYDOWN):
-    // abre el explorador SaveAs SIN pisar Prefix en el medio.
     Editor viaKeys;
     const auto t = km.mapKey(key(GuiKeySym::KeyS, true, false, true));
+    
     CHECK(t.has_value());
     CHECK_EQ(static_cast<int>(*t), static_cast<int>(InputEventType::SaveAs));
+    
     InputEvent e;
     e.type = *t;
     viaKeys.handleEvent(e);
     CHECK_EQ(static_cast<int>(viaKeys.getStateForTesting()),
              static_cast<int>(State::SaveAsFileBrowser));
     CHECK(viaKeys.getStateForTesting() != State::Prefix);
+    
     // Vía comando directo (lo que hace un botón GUI): mismo estado final.
     Editor viaCmd;
     viaCmd.executeCommand("buffer.guardar.como");
     CHECK_EQ(static_cast<int>(viaCmd.getStateForTesting()),
              static_cast<int>(State::SaveAsFileBrowser));
+             
     // Ctrl+S fuera de prefijo sigue siendo no-op (contraste deliberado:
     // Save solo vale tras Prefix; SaveAs es directo).
     Editor plain;
@@ -351,6 +355,7 @@ TEST(guikeymap_ctrl_shift_s_editor_via_semantic_command) {
     CHECK_EQ(static_cast<int>(plain.getStateForTesting()),
              static_cast<int>(State::Navegacion));
     CHECK(plain.isRunning());
+    
     // Dentro del prefijo, SaveAs equivale a Save (Ctrl+K Ctrl+Shift+S abre
     // SaveAs igual que Ctrl+K Ctrl+S).
     Editor pre;
@@ -362,188 +367,193 @@ TEST(guikeymap_ctrl_shift_s_editor_via_semantic_command) {
              static_cast<int>(State::SaveAsFileBrowser));
 }
 
-// P1: política explícita de SaveAs en cada estado modal. En los modales de
-// selección de destino o edición de prompt, SaveAs es no-op por la rama
-// default de su handler: no confirma nombres, no cancela la operación y no
-// pierde el input del prompt (igual que Save fuera de prefijo).
-TEST(guikeymap_saveas_en_modales_noop_explicito) {
-    // Busqueda: conserva estado y query.
-    {
-        Editor ed;
-        ed.executeCommand("navegacion.buscar");
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::Busqueda));
-        ed.handleEvent(insertStr("x"));
-        CHECK_EQ(ed.searchQuery_, "x");
-        ed.handleEvent(saveAsEvent());
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::Busqueda));
-        CHECK_EQ(ed.searchQuery_, "x");
-        CHECK(ed.isRunning());
-    }
-    // BufferSelector: conserva estado e índice.
-    {
-        Editor ed;
-        ed.executeCommand("buffer.nuevo");
-        ed.executeCommand("buffer.selector");
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::BufferSelector));
-        const int idx = ed.bufferSelectorIndex_;
-        ed.handleEvent(saveAsEvent());
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::BufferSelector));
-        CHECK_EQ(ed.bufferSelectorIndex_, idx);
-        CHECK(ed.isRunning());
-    }
-    // FileBrowser: conserva estado y ruta (no abre nada).
-    {
-        Editor ed;
-        ed.executeCommand("buffer.abrir");
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::FileBrowser));
-        const std::string path = ed.fileBrowser.path_;
-        ed.handleEvent(saveAsEvent());
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::FileBrowser));
-        CHECK_EQ(ed.fileBrowser.path_, path);
-        CHECK(ed.isRunning());
-    }
-    // IrAFila: conserva estado y query.
-    {
-        Editor ed;
-        ed.executeCommand("navegacion.ir_a_fila");
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::IrAFila));
-        ed.handleEvent(insertStr("1"));
-        CHECK_EQ(ed.goToLineQuery_, "1");
-        ed.handleEvent(saveAsEvent());
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::IrAFila));
-        CHECK_EQ(ed.goToLineQuery_, "1");
-        CHECK(ed.isRunning());
-    }
-    // Renombrar: conserva estado, query y filename (no renombra nada).
-    {
-        testfw::TempFile tf;
-        tf.write("base");
-        Editor ed;
-        CHECK(ed.loadIntoActiveBuffer(tf.path));
-        ed.executeCommand("archivo.renombrar");
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::Renombrar));
-        const std::string before = ed.renameQuery_;
-        ed.handleEvent(insertStr("X"));
-        CHECK_EQ(ed.renameQuery_, before + "X");
-        ed.handleEvent(saveAsEvent());
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::Renombrar));
-        CHECK_EQ(ed.renameQuery_, before + "X");
-        CHECK_EQ(ed.getActiveBufferForTesting().filename, tf.path);
-        CHECK(ed.isRunning());
-    }
+// SaveAs llega a todos los modales: en cada uno es no-op explícito
+// (conserva estado y datos). Cada test cubre un estado para que un fallo
+// identifique exactamente cuál no está rechazando el evento.
+TEST(gui_keymap_saveas_ignored_in_search) {
+    Editor ed;
+
+    ed.executeCommand("navegacion.buscar");
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Busqueda));
+    ed.handleEvent(insertStr("x"));
+    CHECK_EQ(ed.searchQuery_, "x");
+    ed.handleEvent(saveAsEvent());
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Busqueda));
+    CHECK_EQ(ed.searchQuery_, "x");
+    CHECK(ed.isRunning());
 }
 
-// P1: SaveAs dentro del explorador SaveAs confirma igual que Save (misma
-// rama del handler). Con nombre vacío ninguno confirma: aviso y estado
-// conservado. Con nombre nuevo, SaveAs escribe el archivo y vuelve al
-// estado previo, igual que Save.
-TEST(guikeymap_saveas_en_saveas_confirmacion_explicita) {
-    // Nombre vacío: ni Enter ni Save confirman nada (Save ya no existe en SaveAsFileBrowser).
-    {
-        Editor ed;  // sin nombre: el prompt arranca vacío
-        ed.executeCommand("buffer.guardar.como");
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::SaveAsFileBrowser));
-        CHECK(ed.saveAsFileName_.empty());
-        InputEvent enter; enter.type = InputEventType::InsertNewline;
-        ed.handleEvent(enter);
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::SaveAsFileBrowser));
-        CHECK(ed.saveAsFileName_.empty());
-        CHECK(ed.isRunning());
-        // Save (Ctrl+S) también es no-op porque se removió de SaveAsFileBrowser.
-        InputEvent s;
-        s.type = InputEventType::Save;
-        ed.handleEvent(s);
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::SaveAsFileBrowser));
-        CHECK(ed.saveAsFileName_.empty());
-    }
-    // Con nombre nuevo en /tmp: SaveAs confirma (escribe y sale del modal).
-    {
-        Editor ed;
-        ed.getActiveBufferForTesting().document.restore({"hola"});
-        ed.executeCommand("buffer.guardar.como");
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::SaveAsFileBrowser));
-        ed.fileBrowser.startAt("/tmp");
-        CHECK(ed.fileBrowser.reload().empty());
-        const std::string name = uniqueSaveAsName();
-        const std::string dest = std::string("/tmp/") + name;
-        CHECK(!std::filesystem::exists(dest));
-        ed.saveAsFileName_ = name;
-        InputEvent enter; enter.type = InputEventType::InsertNewline;
-        ed.handleEvent(enter);
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::Navegacion));
-        CHECK_EQ(ed.getActiveBufferForTesting().filename, dest);
-        CHECK_EQ(readFileBytes(dest), "hola");
-        CHECK(!ed.getActiveBufferForTesting().modified);
-        std::remove(dest.c_str());
-        CHECK(!std::filesystem::exists(dest));
-    }
+TEST(gui_keymap_saveas_ignored_in_buffer_selector) {
+    Editor ed;
 
-    // Con nombre válido: Save (Ctrl+S) y SaveAs (Ctrl+Shift+S) NO confirman el guardado.
-    // Solo Enter confirma. El estado sigue siendo SaveAsFileBrowser.
-    {
-        Editor ed;
-        ed.getActiveBufferForTesting().document.restore({"contenido valido"});
-        ed.executeCommand("buffer.guardar.como");
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::SaveAsFileBrowser));
-        ed.fileBrowser.startAt("/tmp");
-        CHECK(ed.fileBrowser.reload().empty());
-        const std::string name = uniqueSaveAsName();
-        const std::string dest = std::string("/tmp/") + name;
-        CHECK(!std::filesystem::exists(dest));
-        ed.saveAsFileName_ = name;
+    ed.executeCommand("buffer.nuevo");
+    ed.executeCommand("buffer.selector");
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::BufferSelector));
+    const int idx = ed.bufferSelectorIndex_;
+    ed.handleEvent(saveAsEvent());
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::BufferSelector));
+    CHECK_EQ(ed.bufferSelectorIndex_, idx);
+    CHECK(ed.isRunning());
+}
 
-        // Ctrl+S (Save) no hace nada: estado e input conservados.
-        InputEvent saveEvt; saveEvt.type = InputEventType::Save;
-        ed.handleEvent(saveEvt);
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::SaveAsFileBrowser));
-        CHECK_EQ(ed.saveAsFileName_, name);
-        CHECK(!std::filesystem::exists(dest));
+TEST(gui_keymap_saveas_ignored_in_filebrowser) {
+    Editor ed;
 
-        // Ctrl+Shift+S (SaveAs) no hace nada: estado e input conservados.
-        InputEvent saveAsEvt; saveAsEvt.type = InputEventType::SaveAs;
-        ed.handleEvent(saveAsEvt);
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::SaveAsFileBrowser));
-        CHECK_EQ(ed.saveAsFileName_, name);
-        CHECK(!std::filesystem::exists(dest));
+    ed.executeCommand("buffer.abrir");
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::FileBrowser));
 
-        // Enter SÍ confirma: sale del modal y guarda el archivo.
-        InputEvent enter; enter.type = InputEventType::InsertNewline;
-        ed.handleEvent(enter);
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::Navegacion));
-        CHECK_EQ(ed.getActiveBufferForTesting().filename, dest);
-        CHECK_EQ(readFileBytes(dest), "contenido valido");
-        CHECK(!ed.getActiveBufferForTesting().modified);
-        std::remove(dest.c_str());
-        CHECK(!std::filesystem::exists(dest));
-    }
+    const std::string path = ed.fileBrowser.path_;
+    ed.handleEvent(saveAsEvent());
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::FileBrowser));
+    CHECK_EQ(ed.fileBrowser.path_, path);
+    CHECK(ed.isRunning());
+}
+
+TEST(gui_keymap_saveas_ignored_in_goto_line) {
+    Editor ed;
+
+    ed.executeCommand("navegacion.ir_a_fila");
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::IrAFila));
+    ed.handleEvent(insertStr("1"));
+    CHECK_EQ(ed.goToLineQuery_, "1");
+    ed.handleEvent(saveAsEvent());
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::IrAFila));
+    CHECK_EQ(ed.goToLineQuery_, "1");
+    CHECK(ed.isRunning());
+}
+
+TEST(gui_keymap_saveas_ignored_in_rename) {
+    testfw::TempFile tf;
+    tf.write("base");
+    Editor ed;
+
+    CHECK(ed.loadIntoActiveBuffer(tf.path));
+    ed.executeCommand("archivo.renombrar");
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Renombrar));
+
+    const std::string before = ed.renameQuery_;
+    ed.handleEvent(insertStr("X"));
+    CHECK_EQ(ed.renameQuery_, before + "X");
+    ed.handleEvent(saveAsEvent());
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Renombrar));
+    CHECK_EQ(ed.renameQuery_, before + "X");
+    CHECK_EQ(ed.getActiveBufferForTesting().filename, tf.path);
+    CHECK(ed.isRunning());
+}
+
+// Nombre vacío: ni Enter ni Save confirman nada (Save ya no existe en
+// SaveAsFileBrowser).
+TEST(gui_keymap_saveas_empty_name_never_confirms) {
+    Editor ed;  // sin nombre: el prompt arranca vacío
+
+    ed.executeCommand("buffer.guardar.como");
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::SaveAsFileBrowser));
+    CHECK(ed.saveAsFileName_.empty());
+    InputEvent enter; enter.type = InputEventType::InsertNewline;
+    ed.handleEvent(enter);
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::SaveAsFileBrowser));
+    CHECK(ed.saveAsFileName_.empty());
+    CHECK(ed.isRunning());
+
+    // Save (Ctrl+S) también es no-op porque se removió de SaveAsFileBrowser.
+    InputEvent s;
+    s.type = InputEventType::Save;
+    ed.handleEvent(s);
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::SaveAsFileBrowser));
+    CHECK(ed.saveAsFileName_.empty());
+}
+
+// Con nombre nuevo en /tmp: Enter confirma (escribe y sale del modal).
+TEST(gui_keymap_saveas_new_name_saved_on_enter) {
+    Editor ed;
+
+    ed.getActiveBufferForTesting().document.restore({"hola"});
+    ed.executeCommand("buffer.guardar.como");
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::SaveAsFileBrowser));
+    ed.fileBrowser.startAt("/tmp");
+    CHECK(ed.fileBrowser.reload().empty());
+    const std::string name = uniqueSaveAsName();
+    const std::string dest = std::string("/tmp/") + name;
+    CHECK(!std::filesystem::exists(dest));
+    ed.saveAsFileName_ = name;
+    InputEvent enter; enter.type = InputEventType::InsertNewline;
+    ed.handleEvent(enter);
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.getActiveBufferForTesting().filename, dest);
+    CHECK_EQ(readFileBytes(dest), "hola");
+    CHECK(!ed.getActiveBufferForTesting().modified);
+    std::remove(dest.c_str());
+    CHECK(!std::filesystem::exists(dest));
+}
+
+// Con nombre válido: Save (Ctrl+S) y SaveAs (Ctrl+Shift+S) NO confirman el
+// guardado. Solo Enter confirma. Save, SaveAs y Enter se mantienen juntos por
+// ser una misma secuencia del contrato de confirmación.
+TEST(gui_keymap_saveas_valid_name_requires_enter) {
+    Editor ed;
+
+    ed.getActiveBufferForTesting().document.restore({"contenido valido"});
+    ed.executeCommand("buffer.guardar.como");
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::SaveAsFileBrowser));
+    ed.fileBrowser.startAt("/tmp");
+    CHECK(ed.fileBrowser.reload().empty());
+    const std::string name = uniqueSaveAsName();
+    const std::string dest = std::string("/tmp/") + name;
+    CHECK(!std::filesystem::exists(dest));
+    ed.saveAsFileName_ = name;
+
+    // Ctrl+S (Save) no hace nada: estado e input conservados.
+    InputEvent saveEvt; saveEvt.type = InputEventType::Save;
+    ed.handleEvent(saveEvt);
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::SaveAsFileBrowser));
+    CHECK_EQ(ed.saveAsFileName_, name);
+    CHECK(!std::filesystem::exists(dest));
+
+    // Ctrl+Shift+S (SaveAs) no hace nada: estado e input conservados.
+    InputEvent saveAsEvt; saveAsEvt.type = InputEventType::SaveAs;
+    ed.handleEvent(saveAsEvt);
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::SaveAsFileBrowser));
+    CHECK_EQ(ed.saveAsFileName_, name);
+    CHECK(!std::filesystem::exists(dest));
+
+    // Enter SÍ confirma: sale del modal y guarda el archivo.
+    InputEvent enter; enter.type = InputEventType::InsertNewline;
+    ed.handleEvent(enter);
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.getActiveBufferForTesting().filename, dest);
+    CHECK_EQ(readFileBytes(dest), "contenido valido");
+    CHECK(!ed.getActiveBufferForTesting().modified);
+    std::remove(dest.c_str());
+    CHECK(!std::filesystem::exists(dest));
 }
 
 // SaveAs directo desde los tres modos de edición (sin Prefix en el medio).
 // Navegacion ya está cubierto en ..._via_semantic_command; acá se fijan
 // Interaccion y Seleccion para cerrar la matriz de estados.
-TEST(guikeymap_saveas_directo_desde_edicion) {
+TEST(gui_keymap_saveas_directo_desde_edicion) {
     // Interaccion: SaveAs abre el explorador sin pasar por Prefix.
     {
         Editor ed;
+        
         ed.handleEvent(insertStr("i"));
         CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
                  static_cast<int>(State::Interaccion));
@@ -556,6 +566,7 @@ TEST(guikeymap_saveas_directo_desde_edicion) {
     // Seleccion (sin rango marcado): idem.
     {
         Editor ed;
+        
         ed.handleEvent(insertStr("s"));
         CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
                  static_cast<int>(State::Seleccion));
@@ -567,92 +578,76 @@ TEST(guikeymap_saveas_directo_desde_edicion) {
     }
 }
 
-// Gestión de errores del commit vía SaveAs (misma rama que Save):
-// nombre inválido se rechaza sin salir del modal; destino existente pide
-// confirmación (primer SaveAs arma, sin escribir) y el segundo SaveAs
-// sobrescribe.
-TEST(guikeymap_saveas_errores_en_saveas_explicito) {
-    // Nombre inválido (".."): rechazo, estado e input conservados.
+// Gestión de errores del commit vía SaveAs (misma rama que Save). Cada test
+// cubre una rama independiente con su propia preparación.
+
+// Nombre inválido (".."): rechazo, estado e input conservados (no sale del
+// modal).
+TEST(gui_keymap_saveas_invalid_name_rejected) {
+    Editor ed;
+
+    ed.getActiveBufferForTesting().document.restore({"x"});
+    ed.executeCommand("buffer.guardar.como");
+    ed.fileBrowser.startAt("/tmp");
+    CHECK(ed.fileBrowser.reload().empty());
+
+    ed.saveAsFileName_ = "..";
+    ed.handleEvent(saveAsEvent());
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::SaveAsFileBrowser));
+    CHECK_EQ(ed.saveAsFileName_, "..");
+    CHECK(ed.isRunning());
+}
+
+// Destino existente: el primer Enter arma la confirmación (sin escribir) y
+// el segundo confirma y sobrescribe.
+TEST(gui_keymap_saveas_existing_destination_requires_confirmation) {
+    const std::string name = uniqueSaveAsName();
+    const std::string dest = std::string("/tmp/") + name;
     {
-        Editor ed;
-        ed.getActiveBufferForTesting().document.restore({"x"});
-        ed.executeCommand("buffer.guardar.como");
-        ed.fileBrowser.startAt("/tmp");
-        CHECK(ed.fileBrowser.reload().empty());
-        ed.saveAsFileName_ = "..";
-        ed.handleEvent(saveAsEvent());
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::SaveAsFileBrowser));
-        CHECK_EQ(ed.saveAsFileName_, "..");
-        CHECK(ed.isRunning());
+        std::ofstream f(dest, std::ios::binary | std::ios::trunc);
+        CHECK(f.good());
+        f << "viejo";
     }
-    // Destino existente: 1.º arma confirmación (sin escribir), 2.º escribe.
-    {
-        const std::string name = uniqueSaveAsName();
-        const std::string dest = std::string("/tmp/") + name;
-        {
-            std::ofstream f(dest, std::ios::binary | std::ios::trunc);
-            CHECK(f.good());
-            f << "viejo";
-        }
-        CHECK_EQ(readFileBytes(dest), "viejo");
-        Editor ed;
-        ed.getActiveBufferForTesting().document.restore({"nuevo"});
-        ed.executeCommand("buffer.guardar.como");
-        ed.fileBrowser.startAt("/tmp");
-        CHECK(ed.fileBrowser.reload().empty());
-        ed.saveAsFileName_ = name;
-        InputEvent enter; enter.type = InputEventType::InsertNewline;
-        ed.handleEvent(enter);  // 1.º: arma confirmación
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::SaveAsFileBrowser));
-        CHECK_EQ(ed.saveAsConfirmPath_, dest);
-        CHECK_EQ(readFileBytes(dest), "viejo");  // aún sin escribir
-        ed.handleEvent(enter);  // 2.º: confirma y sobrescribe
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::Navegacion));
-        CHECK_EQ(ed.getActiveBufferForTesting().filename, dest);
-        CHECK_EQ(readFileBytes(dest), "nuevo");
-        std::remove(dest.c_str());
-        CHECK(!std::filesystem::exists(dest));
-    }
+    CHECK_EQ(readFileBytes(dest), "viejo");
+
+    Editor ed;
+    ed.getActiveBufferForTesting().document.restore({"nuevo"});
+    ed.executeCommand("buffer.guardar.como");
+    ed.fileBrowser.startAt("/tmp");
+    CHECK(ed.fileBrowser.reload().empty());
+    ed.saveAsFileName_ = name;
+
+    InputEvent enter; enter.type = InputEventType::InsertNewline;
+    ed.handleEvent(enter);  // 1.er Enter: arma confirmación
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::SaveAsFileBrowser));
+    CHECK_EQ(ed.saveAsConfirmPath_, dest);
+    CHECK_EQ(readFileBytes(dest), "viejo");  // aún sin escribir
+    ed.handleEvent(enter);  // 2.º Enter: confirma y sobrescribe
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+             static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.getActiveBufferForTesting().filename, dest);
+    CHECK_EQ(readFileBytes(dest), "nuevo");
+    std::remove(dest.c_str());
+    CHECK(!std::filesystem::exists(dest));
 }
 
 // KEYDOWN nunca lleva texto imprimible: sin Ctrl/Alt todo es nullopt,
 // así no hay doble inserción con SDL_TEXTINPUT.
-TEST(guikeymap_printable_never_maps) {
+TEST(gui_keymap_printable_never_maps) {
+    GuiKeymap km;
     for (int i = 0; i < 26; ++i) {
         GuiKeySym s = static_cast<GuiKeySym>(static_cast<int>(GuiKeySym::KeyA) + i);
-        checkUnmapped(s);
-        checkUnmapped(s, false, false, true);
+        checkUnmapped(km, s);
+        checkUnmapped(km, s, false, false, true);
     }
 }
 
 // --- Repetición ---
-TEST(guikeymap_repeat_policy_table) {
+TEST(gui_keymap_repeat_nav_repeats_actions_suppress) {
     GuiKeymap km;
-    CHECK(km.isRepeatable(InputEventType::MoveLeft));
-    CHECK(km.isRepeatable(InputEventType::MoveRight));
-    CHECK(km.isRepeatable(InputEventType::MoveUp));
-    CHECK(km.isRepeatable(InputEventType::MoveDown));
-    CHECK(km.isRepeatable(InputEventType::MoveHome));
-    CHECK(km.isRepeatable(InputEventType::MoveEnd));
-    CHECK(km.isRepeatable(InputEventType::PageUp));
-    CHECK(km.isRepeatable(InputEventType::PageDown));
-    CHECK(km.isRepeatable(InputEventType::Backspace));
-    CHECK(km.isRepeatable(InputEventType::Delete));
-    CHECK(!km.isRepeatable(InputEventType::InsertNewline));
-    CHECK(!km.isRepeatable(InputEventType::Prefix));
-    CHECK(!km.isRepeatable(InputEventType::Save));
-    CHECK(!km.isRepeatable(InputEventType::SaveAs));
-    CHECK(!km.isRepeatable(InputEventType::Quit));
-    CHECK(!km.isRepeatable(InputEventType::Undo));
-    CHECK(!km.isRepeatable(InputEventType::Redo));
-    CHECK(!km.isRepeatable(InputEventType::Escape));
-}
-
-TEST(guikeymap_repeat_nav_repeats_actions_suppress) {
-    GuiKeymap km;
+    
     // Mantener flecha/borrado: repite (un evento por SDL_KEYDOWN con repeat).
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Left, false, false, false, true))),
              static_cast<int>(InputEventType::MoveLeft));
@@ -660,6 +655,7 @@ TEST(guikeymap_repeat_nav_repeats_actions_suppress) {
              static_cast<int>(InputEventType::PageDown));
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Backspace, false, false, false, true))),
              static_cast<int>(InputEventType::Backspace));
+             
     // Mantener Enter/Escape: no repite salvo el contexto explícito de
     // InsertNewline (ver guikeymap_repeat_enter_solo_con_contexto).
     CHECK(!km.mapKey(key(GuiKeySym::Enter, false, false, false, true)).has_value());
@@ -673,8 +669,9 @@ TEST(guikeymap_repeat_nav_repeats_actions_suppress) {
     CHECK(!km.mapKey(key(GuiKeySym::Escape, false, false, false, true)).has_value());
 }
 
-TEST(guikeymap_repeat_enter_solo_con_contexto) {
+TEST(gui_keymap_repeat_enter_solo_con_contexto) {
     GuiKeymap km;
+    
     // Sin contexto (prompts/selectores/confirmaciones), Enter repetido se
     // descarta: no confirma dos veces.
     CHECK(!km.mapKey(key(GuiKeySym::Enter, false, false, false, true)).has_value());
@@ -688,6 +685,7 @@ TEST(guikeymap_repeat_enter_solo_con_contexto) {
                  *km.mapKey(key(GuiKeySym::KeyPadEnter, false, false, false, true),
                             true)),
              static_cast<int>(InputEventType::InsertNewline));
+             
     // El contexto solo habilita InsertNewline; el resto sigue suprimido.
     CHECK(!km.mapKey(key(GuiKeySym::Escape, false, false, false, true), true)
                .has_value());
@@ -701,7 +699,7 @@ TEST(guikeymap_repeat_enter_solo_con_contexto) {
                .has_value());
 }
 
-TEST(guikeymap_enter_repetido_inserta_filas) {
+TEST(gui_keymap_enter_repetido_inserta_filas) {
     GuiKeymap km;
     Editor ed;
     ed.handleEvent(insertStr("i"));  // Interaccion
@@ -723,6 +721,7 @@ TEST(guikeymap_enter_repetido_inserta_filas) {
              static_cast<int>(InputEventType::InsertNewline));
 
     InputEvent enter;
+    
     enter.type = *initial;
     ed.handleEvent(enter);
     enter.type = *repeated;
@@ -734,17 +733,21 @@ TEST(guikeymap_enter_repetido_inserta_filas) {
 }
 
 // --- Remapeo y defaults ---
-TEST(guikeymap_remap_and_reset) {
+TEST(gui_keymap_remap_and_reset) {
     GuiKeymap km;
+    
     km.bindKey({GuiKeySym::KeyN, true, false}, InputEventType::PageDown);
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyN, true))),
              static_cast<int>(InputEventType::PageDown));
+             
     km.unbindKey({GuiKeySym::KeyN, true, false});
     CHECK(!km.mapKey(key(GuiKeySym::KeyN, true)).has_value());
     // Romper un default y restaurarlo.
+    
     km.bindKey({GuiKeySym::KeyK, true, false}, InputEventType::PageDown);
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyK, true))),
              static_cast<int>(InputEventType::PageDown));
+             
     km.resetDefaults();
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyK, true))),
              static_cast<int>(InputEventType::Prefix));
@@ -754,8 +757,9 @@ TEST(guikeymap_remap_and_reset) {
 // sin Ctrl, con Alt o Ctrl+Alt (alias de AltGr) y Unknown se rechazan en
 // bindKey (false, tabla intacta). Solo letras con Ctrl sin Alt y teclas no
 // textuales son enlazables.
-TEST(guikeymap_bind_rejects_text_producing) {
+TEST(gui_keymap_bind_rejects_text_producing) {
     GuiKeymap km;
+    
     CHECK(!km.bindKey({GuiKeySym::KeyJ, false, false}, InputEventType::MoveDown));
     // (sin Ctrl no hay enlace en ninguna variante de Shift: el texto va por
     // SDL_TEXTINPUT; Shift solo distingue enlaces con Ctrl sin Alt.)
@@ -773,7 +777,7 @@ TEST(guikeymap_bind_rejects_text_producing) {
     km.resetDefaults();
 }
 
-TEST(guikeymap_bind_nav_normalizes_mods) {
+TEST(gui_keymap_bind_nav_normalizes_mods) {
     GuiKeymap km;
     // Enlazar navegación con mods vale y se normaliza: resuelve igual sin
     // ellos (un solo enlace por tecla, no uno por combinación).
@@ -789,28 +793,32 @@ TEST(guikeymap_bind_nav_normalizes_mods) {
 // resuelve mapKey (incluido con mods, que se normalizan), y desatarla la
 // deja sin enlace. Sin este test, un atajo codificado fuera de la tabla
 // haría estos casos imposibles.
-TEST(guikeymap_remap_nav_takes_effect) {
+TEST(gui_keymap_remap_nav_takes_effect) {
     GuiKeymap km;
     km.bindKey({GuiKeySym::Left, false, false}, InputEventType::MoveRight);
+    
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Left))),
              static_cast<int>(InputEventType::MoveRight));
     // Con mods también: la normalización consulta el enlace remapeado.
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Left, true, false, true))),
              static_cast<int>(InputEventType::MoveRight));
+             
     km.resetDefaults();
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Left))),
              static_cast<int>(InputEventType::MoveLeft));
 }
 
-TEST(guikeymap_unbind_nav_disables_it) {
+TEST(gui_keymap_unbind_nav_disables_it) {
     GuiKeymap km;
     km.unbindKey({GuiKeySym::Left, false, false});
+    
     CHECK(!km.mapKey(key(GuiKeySym::Left)).has_value());
     CHECK(!km.mapKey(key(GuiKeySym::Left, true)).has_value());
     CHECK(!km.mapKey(key(GuiKeySym::Left, false, false, true)).has_value());
     // El resto de la navegación sigue intacta.
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Right))),
              static_cast<int>(InputEventType::MoveRight));
+             
     km.resetDefaults();
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Left))),
              static_cast<int>(InputEventType::MoveLeft));
@@ -818,15 +826,18 @@ TEST(guikeymap_unbind_nav_disables_it) {
 
 // El remapeo es usable desde la interfaz pública (IGuiKeymap), no solo
 // desde el tipo concreto: es el contrato que ofrece keymapIface().
-TEST(guikeymap_iface_remap) {
+TEST(gui_keymap_iface_remap) {
     Editor ed;
     GuiRunLoop loop(ed);
+    
     IGuiKeymap& iface = loop.keymapIface();
     iface.bindKey({GuiKeySym::Down, false, false}, InputEventType::PageDown);
     CHECK_EQ(static_cast<int>(*iface.mapKey(key(GuiKeySym::Down))),
              static_cast<int>(InputEventType::PageDown));
+             
     iface.unbindKey({GuiKeySym::Down, false, false});
     CHECK(!iface.mapKey(key(GuiKeySym::Down)).has_value());
+    
     iface.resetDefaults();
     CHECK_EQ(static_cast<int>(*iface.mapKey(key(GuiKeySym::Down))),
              static_cast<int>(InputEventType::MoveDown));
@@ -835,10 +846,11 @@ TEST(guikeymap_iface_remap) {
 // El contexto de repeticion tambien debe despacharse por la interfaz
 // virtual (IGuiKeymap), no solo por el tipo concreto: GuiKeymap es el unico
 // implementador, pero el contrato de keymapIface() es la interfaz.
-TEST(guikeymap_iface_contexto_enter_repetido) {
+TEST(gui_keymap_iface_contexto_enter_repetido) {
     Editor ed;
     GuiRunLoop loop(ed);
     IGuiKeymap& iface = loop.keymapIface();
+    
     const GuiKeyPress enterRepeat =
         key(GuiKeySym::Enter, false, false, false, true);
     // Sin contexto: Enter repetido se suprime (prompts/selectores).
@@ -848,158 +860,168 @@ TEST(guikeymap_iface_contexto_enter_repetido) {
              static_cast<int>(InputEventType::InsertNewline));
 }
 
-// El keymap es accesible vía la interfaz GUI del run loop (misma frontera
-// que Terminal::keymapIface()), sin exponer el tipo concreto.
-TEST(guikeymap_runloop_iface) {
-    Editor ed;
-    GuiRunLoop loop(ed);
-    IGuiKeymap& iface = loop.keymapIface();
-    CHECK_EQ(static_cast<int>(*iface.mapKey(key(GuiKeySym::Up))),
-             static_cast<int>(InputEventType::MoveUp));
-    CHECK_EQ(static_cast<int>(*iface.mapKey(key(GuiKeySym::KeyK, true))),
-             static_cast<int>(InputEventType::Prefix));
-}
-
-// --- Integración Prefijo: todos los combos documentados ---
-// Nota Ctrl+K f: README lo documenta como búsqueda, pero
-// Editor::handlePrefixKey no lo implementa en esta fase; 'f' (como
-// cualquier letra no listada) cancela el prefijo. Este test fija el
-// comportamiento real; implementar Ctrl+K f o corregir la doc es
-// seguimiento fuera de este patch (el keymap no inventa semántica).
-
-TEST(guiprefix_n_new_buffer) {
+TEST(gui_keymap_prefix_n_new_buffer) {
     Editor ed;
     GuiKeymap km;
     const size_t before = ed.buffers.buffers_.size();
+    
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("n"));
     CHECK_EQ(ed.buffers.buffers_.size(), before + 1);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
-TEST(guiprefix_t_selector) {
+TEST(gui_keymap_prefix_t_selector) {
     Editor ed;
     GuiKeymap km;
+    
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("n"));  // segundo buffer para que el selector abra
+    
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("t"));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::BufferSelector));
 }
 
-TEST(guiprefix_w_close_buffer) {
+TEST(gui_keymap_prefix_w_close_buffer) {
     Editor ed;
     GuiKeymap km;
+    
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("n"));
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(2));
+    
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("w"));
     CHECK_EQ(ed.buffers.buffers_.size(), size_t(1));
     CHECK(ed.isRunning());
 }
 
-TEST(guiprefix_o_filebrowser) {
+TEST(gui_keymap_prefix_o_filebrowser) {
     Editor ed;
     GuiKeymap km;
+    
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("o"));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::FileBrowser));
 }
 
-TEST(guiprefix_s_save_unnamed_opens_saveas) {
+TEST(gui_keymap_prefix_s_save_unnamed_opens_saveas) {
     Editor ed;  // sin nombre: Ctrl+K s abre el explorador SaveAs
     GuiKeymap km;
+    
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("s"));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAsFileBrowser));
 }
 
-TEST(guiprefix_q_safe_quit) {
+TEST(gui_keymap_prefix_q_safe_quit) {
     Editor ed;  // sin modificados: sale directo
     GuiKeymap km;
+    
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("q"));
     CHECK(!ed.isRunning());
 }
 
-TEST(guiprefix_b_previous_buffer) {
+TEST(gui_keymap_prefix_b_previous_buffer) {
     Editor ed;
     GuiKeymap km;
+
+    const int firstBuffer = ed.buffers.active().id;
+
     enterPrefix(ed, km);
-    ed.handleEvent(insertStr("n"));  // B1; previo = B0
+    ed.handleEvent(insertStr("n"));  // nuevo buffer
+    const int secondBuffer = ed.buffers.active().id;
+    CHECK_EQ(ed.buffers.count(), 2);
+    CHECK(secondBuffer != firstBuffer);
+
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("b"));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.buffers.active().id, firstBuffer);  // volvió al anterior
     CHECK(ed.isRunning());
 }
 
-TEST(guiprefix_l_theme_toggle) {
+TEST(gui_keymap_prefix_l_theme_toggle) {
     Editor ed;
     GuiKeymap km;
+
+    const bool initialDark = ed.renderer_->isDarkTheme();
+
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("l"));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(ed.isRunning());
+    CHECK_EQ(ed.renderer_->isDarkTheme(), !initialDark);  // el tema cambió
+
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("L"));  // mayúscula también alterna
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.renderer_->isDarkTheme(), initialDark);  // volvió al original
 }
 
-TEST(guiprefix_m_bracket_no_bracket) {
+TEST(gui_keymap_prefix_m_bracket_no_bracket) {
     Editor ed;  // documento vacío: sin bracket -> cancela con aviso
     GuiKeymap km;
+    
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("m"));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
-TEST(guiprefix_r_rename_unnamed_cancels) {
+TEST(gui_keymap_prefix_r_rename_unnamed_cancels) {
     Editor ed;  // sin nombre: renombrar no aplica, vuelve al previo
     GuiKeymap km;
+    
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("r"));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(ed.isRunning());
 }
 
-TEST(guiprefix_ctrl_s_inside_prefix_saveas) {
+TEST(gui_keymap_prefix_ctrl_s_inside_prefix_saveas) {
     Editor ed;
     GuiKeymap km;
-    enterPrefix(ed, km);
     InputEvent e;
+    
+    enterPrefix(ed, km);
     e.type = *km.mapKey(key(GuiKeySym::KeyS, true));  // Ctrl+K Ctrl+S
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::Save));
     ed.handleEvent(e);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::SaveAsFileBrowser));
 }
 
-TEST(guiprefix_ctrl_q_inside_prefix_forced_quit) {
+TEST(gui_keymap_prefix_ctrl_q_inside_prefix_forced_quit) {
     Editor ed;
     GuiKeymap km;
-    enterPrefix(ed, km);
     InputEvent e;
+    
+    enterPrefix(ed, km);
     e.type = *km.mapKey(key(GuiKeySym::KeyQ, true));  // Ctrl+K Ctrl+Q
     ed.handleEvent(e);
     CHECK(!ed.isRunning());
 }
 
-// Ctrl+S / Ctrl+Q FUERA de prefijo: el keymap los traduce (no conoce el
-// estado), pero el Editor los ignora (no-op): Save solo vale tras Prefix.
-TEST(guiprefix_ctrl_s_outside_prefix_noop) {
+// Ctrl+S / Ctrl+Q FUERA de prefijo: 
+// el keymap los traduce (no conoce el estado), 
+// pero el Editor los ignora (no-op): Save solo vale tras Prefix.
+TEST(gui_keymap_prefix_ctrl_s_outside_prefix_noop) {
     Editor ed;
     GuiKeymap km;
     InputEvent e;
+    
     e.type = *km.mapKey(key(GuiKeySym::KeyS, true));
     ed.handleEvent(e);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(ed.isRunning());
 }
 
-TEST(guiprefix_ctrl_q_outside_prefix_noop) {
+TEST(gui_keymap_prefix_ctrl_q_outside_prefix_noop) {
     Editor ed;
     GuiKeymap km;
     InputEvent e;
+    
     e.type = *km.mapKey(key(GuiKeySym::KeyQ, true));
     ed.handleEvent(e);
     CHECK(ed.isRunning());
@@ -1007,48 +1029,51 @@ TEST(guiprefix_ctrl_q_outside_prefix_noop) {
 }
 
 // Cancelaciones del prefijo.
-TEST(guiprefix_unknown_f_cancels) {
+TEST(gui_keymap_prefix_unknown_f_cancels) {
     Editor ed;
     GuiKeymap km;
+    
     enterPrefix(ed, km);
-    ed.handleEvent(insertStr("f"));  // ver nota Ctrl+K f arriba
+    ed.handleEvent(insertStr("f"));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
     CHECK(ed.isRunning());
 }
 
-TEST(guiprefix_unknown_letter_cancels) {
+TEST(gui_keymap_prefix_unknown_letter_cancels) {
     Editor ed;
     GuiKeymap km;
+    
     enterPrefix(ed, km);
     ed.handleEvent(insertStr("x"));
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
-TEST(guiprefix_escape_cancels) {
+TEST(gui_keymap_prefix_escape_cancels) {
     Editor ed;
     GuiKeymap km;
-    enterPrefix(ed, km);
     InputEvent e;
+    
+    enterPrefix(ed, km);
     e.type = *km.mapKey(key(GuiKeySym::Escape));
     ed.handleEvent(e);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
-TEST(guiprefix_prefix_cancels) {
-    Editor ed;  // Ctrl+K dentro del prefijo lo cancela (no anida)
+TEST(gui_keymap_prefix_prefix_cancels) {
+    Editor ed;
     GuiKeymap km;
-    enterPrefix(ed, km);
     InputEvent e;
+    
+    enterPrefix(ed, km);
     e.type = *km.mapKey(key(GuiKeySym::KeyK, true));
     ed.handleEvent(e);
     CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
 }
 
-// --- Texto: UTF-8 por celdas; Enter va por KEYDOWN, no por TEXTINPUT ---
-TEST(guitext_utf8_cells_split) {
-    // Commit con varios caracteres confirmados: se trocea por celda sin
-    // cortar secuencias (bytes inválidos = celdas propias de 1 byte).
+// Texto: UTF-8 por celdas
+TEST(gui_keymap_text_utf8_cells_split) {
     const auto cells = utf8::splitCells("a\xC3\xA1\xE2\x80\x94\xF0\x9F\x98\x80");
+    
     CHECK_EQ(cells.size(), size_t(4));
     CHECK_EQ(cells[0], "a");
     CHECK_EQ(cells[1], "\xC3\xA1");          // á
@@ -1056,12 +1081,14 @@ TEST(guitext_utf8_cells_split) {
     CHECK_EQ(cells[3], "\xF0\x9F\x98\x80");  // 😀
 }
 
-TEST(guitext_enter_is_keydown_not_textinput) {
-    // Enter llega como InsertNewline desde KEYDOWN; no se prueba como
-    // commit multilínea de TEXTINPUT (SDL no lo entrega así).
+// Enter llega como InsertNewline desde KEYDOWN; no se prueba como
+// commit multilínea de TEXTINPUT (SDL no lo entrega así).
+TEST(gui_keymap_text_enter_is_keydown_not_textinput) {
     GuiKeymap km;
+    
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Enter))),
              static_cast<int>(InputEventType::InsertNewline));
+
     Editor ed;
     InputEvent e;
     e.type = InputEventType::InsertNewline;
@@ -1069,109 +1096,60 @@ TEST(guitext_enter_is_keydown_not_textinput) {
     (void)e;
 }
 
-// --- Headless extra (GUI sin ventana): vocabulario completo ---
-// P2-3: lista CENTRALIZADA de los 27 InputEventType + comprobación de
-// cantidad. Si se agrega un valor al enum sin actualizar la lista, el
-// CHECK_EQ(size, 27) falla a propósito; si se actualiza la lista pero no se
-// decide su repetibilidad, falla la partición (todo valor debe estar
-// exactamente en un lado: repetible o no). Solo navegación/borrado repiten;
-// InsertNewline tiene una excepción contextual (Interaccion) que no cambia
-// esta política base. Todo lo demás (incluidos eventos que el keymap nunca
-// produce pero isRepeatable debe negar por contrato) no.
-namespace {
-const std::vector<InputEventType>& allEventTypes() {
-    static const std::vector<InputEventType> v = {
-        InputEventType::None,          InputEventType::InsertChar,
-        InputEventType::InsertNewline, InputEventType::MoveLeft,
-        InputEventType::MoveRight,     InputEventType::MoveUp,
-        InputEventType::MoveDown,      InputEventType::MoveHome,
-        InputEventType::MoveEnd,       InputEventType::PageUp,
-        InputEventType::PageDown,      InputEventType::Backspace,
-        InputEventType::Delete,        InputEventType::Undo,
-        InputEventType::Redo,          InputEventType::Quit,
-        InputEventType::Prefix,        InputEventType::Save,
-        InputEventType::SaveAs,        InputEventType::Suspend,
-        InputEventType::Escape,
-        InputEventType::ScrollUp,      InputEventType::ScrollDown,
-        InputEventType::MousePress,    InputEventType::MouseDrag,
-        InputEventType::MouseRelease,  InputEventType::Resize,
-        InputEventType::Copy,          InputEventType::Cut,
-        InputEventType::Paste,
-    };
-    return v;
-}
-const std::vector<InputEventType>& repeatableEventTypes() {
-    static const std::vector<InputEventType> v = {
-        InputEventType::MoveLeft,  InputEventType::MoveRight,
-        InputEventType::MoveUp,    InputEventType::MoveDown,
-        InputEventType::MoveHome,  InputEventType::MoveEnd,
-        InputEventType::PageUp,    InputEventType::PageDown,
-        InputEventType::Backspace, InputEventType::Delete,
-    };
-    return v;
-}
-// P2-3: vocabulario completo de GuiKeySym (41 valores: 1 Unknown + 14
-// no-textuales + 26 letras) + cantidad. Misma idea: agregar un sym sin
-// actualizar la lista rompe el conteo; actualizarla sin decidir su familia
-// rompe la partición de bindable().
-const std::vector<GuiKeySym>& allKeySyms() {
-    static const std::vector<GuiKeySym> v = {
-        GuiKeySym::Unknown, GuiKeySym::Escape, GuiKeySym::Enter,
-        GuiKeySym::KeyPadEnter, GuiKeySym::Tab, GuiKeySym::Backspace,
-        GuiKeySym::Delete, GuiKeySym::Left, GuiKeySym::Right, GuiKeySym::Up,
-        GuiKeySym::Down, GuiKeySym::Home, GuiKeySym::End, GuiKeySym::PageUp,
-        GuiKeySym::PageDown, GuiKeySym::KeyA, GuiKeySym::KeyB, GuiKeySym::KeyC,
-        GuiKeySym::KeyD, GuiKeySym::KeyE, GuiKeySym::KeyF, GuiKeySym::KeyG,
-        GuiKeySym::KeyH, GuiKeySym::KeyI, GuiKeySym::KeyJ, GuiKeySym::KeyK,
-        GuiKeySym::KeyL, GuiKeySym::KeyM, GuiKeySym::KeyN, GuiKeySym::KeyO,
-        GuiKeySym::KeyP, GuiKeySym::KeyQ, GuiKeySym::KeyR, GuiKeySym::KeyS,
-        GuiKeySym::KeyT, GuiKeySym::KeyU, GuiKeySym::KeyV, GuiKeySym::KeyW,
-        GuiKeySym::KeyX, GuiKeySym::KeyY, GuiKeySym::KeyZ,
-    };
-    return v;
-}
-const std::vector<GuiKeySym>& nonTextKeySyms() {
-    static const std::vector<GuiKeySym> v = {
-        GuiKeySym::Escape, GuiKeySym::Enter, GuiKeySym::KeyPadEnter,
-        GuiKeySym::Tab, GuiKeySym::Backspace, GuiKeySym::Delete,
-        GuiKeySym::Left, GuiKeySym::Right, GuiKeySym::Up, GuiKeySym::Down,
-        GuiKeySym::Home, GuiKeySym::End, GuiKeySym::PageUp, GuiKeySym::PageDown,
-    };
-    return v;
-}
-bool containsType(const std::vector<InputEventType>& v, InputEventType t) {
-    for (auto x : v)
-        if (x == t) return true;
-    return false;
-}
-bool containsSym(const std::vector<GuiKeySym>& v, GuiKeySym s) {
-    for (auto x : v)
-        if (x == s) return true;
-    return false;
-}
-}  // namespace
+// Valida los inventarios centrales del test: sin duplicados, coherentes entre
+// sí y con GuiKeymap::isRepeatable. No es exhaustivo respecto de los enums:
+// sin un sentinel/reflexión, un valor nuevo del enum que no se agregue a las
+// listas no se puede detectar automáticamente.
+TEST(gui_keymap_test_inventories_are_valid) {
+    GuiKeymap km;
 
-TEST(guikeymap_listas_centralizadas_cantidad_headless) {
-    // Candados de cantidad: el enum no es contable por reflexión; si alguien
-    // agrega un valor y no actualiza la lista central, esto falla a propósito.
-    CHECK_EQ(allEventTypes().size(), size_t(30));
-    CHECK_EQ(repeatableEventTypes().size(), size_t(10));
-    CHECK_EQ(allKeySyms().size(), size_t(41));
-    CHECK_EQ(nonTextKeySyms().size(), size_t(14));
-    // Partición exacta: todo evento está en un solo lado (repetible o no).
-    for (InputEventType t : allEventTypes()) {
-        const bool rep = containsType(repeatableEventTypes(), t);
+    // Sin duplicados en los inventarios.
+    for (InputEventType t : kAllEventTypes) {
         int inAll = 0;
-        for (auto x : allEventTypes())
+        for (auto x : kAllEventTypes)
             if (x == t) ++inAll;
-        CHECK_EQ(inAll, 1);  // sin duplicados en la lista central
-        (void)rep;
+        CHECK_EQ(inAll, 1);
     }
-    // Partición exacta de syms: Unknown(1) + no-textuales(14) + letras(26).
+    for (InputEventType t : kRepeatableEventTypes) {
+        int inRepeatable = 0;
+        for (auto x : kRepeatableEventTypes)
+            if (x == t) ++inRepeatable;
+        CHECK_EQ(inRepeatable, 1);
+    }
+
+    // Los repetibles son un subconjunto del inventario general y coinciden
+    // con la política del keymap.
+    for (InputEventType t : kRepeatableEventTypes) {
+        CHECK(contains(kAllEventTypes, t));
+        CHECK(km.isRepeatable(t));
+    }
+    for (InputEventType t : kAllEventTypes) {
+        CHECK_EQ(km.isRepeatable(t), contains(kRepeatableEventTypes, t));
+    }
+
+    // Syms únicos y bien clasificados: Unknown(1) + no-textuales(14) +
+    // letras(26). Los conteos son el tamaño esperado de cada familia del
+    // inventario, no una enumeración automática del enum.
+    for (GuiKeySym s : kAllKeySyms) {
+        int inAll = 0;
+        for (auto x : kAllKeySyms)
+            if (x == s) ++inAll;
+        CHECK_EQ(inAll, 1);
+    }
+    for (GuiKeySym s : kNonTextKeySyms) {
+        int inNonText = 0;
+        for (auto x : kNonTextKeySyms)
+            if (x == s) ++inNonText;
+        CHECK_EQ(inNonText, 1);
+        CHECK(contains(kAllKeySyms, s));
+        CHECK(s != GuiKeySym::Unknown);
+        CHECK(!(s >= GuiKeySym::KeyA && s <= GuiKeySym::KeyZ));
+    }
+
     int nUnknown = 0, nNonText = 0, nLetters = 0;
-    for (GuiKeySym s : allKeySyms()) {
+    for (GuiKeySym s : kAllKeySyms) {
         if (s == GuiKeySym::Unknown) ++nUnknown;
-        else if (containsSym(nonTextKeySyms(), s)) ++nNonText;
+        else if (contains(kNonTextKeySyms, s)) ++nNonText;
         else if (s >= GuiKeySym::KeyA && s <= GuiKeySym::KeyZ) ++nLetters;
         else CHECK(false);  // sym sin familia: decidir regla antes de seguir
     }
@@ -1180,21 +1158,21 @@ TEST(guikeymap_listas_centralizadas_cantidad_headless) {
     CHECK_EQ(nLetters, 26);
 }
 
-TEST(guikeymap_no_repeat_exhaustivo_headless) {
+TEST(gui_keymap_no_repeat_exhaustivo_headless) {
     GuiKeymap km;
-    // Partición verificada contra la lista central: cada uno de los 27 tipos
-    // repite exactamente si está en repeatableEventTypes(). Un valor nuevo
-    // del enum sin clasificar rompe el conteo de la lista (test anterior) o
-    // cae aquí como no-clasificado.
-    CHECK_EQ(allEventTypes().size(), size_t(30));
-    for (InputEventType t : allEventTypes()) {
-        CHECK(km.isRepeatable(t) == containsType(repeatableEventTypes(), t));
+    
+    // Partición verificada contra la lista central: 
+    CHECK_EQ(std::size(kAllEventTypes), size_t(30));
+    for (InputEventType t : kAllEventTypes) {
+        CHECK(km.isRepeatable(t) == contains(kRepeatableEventTypes, t));
     }
+    
     // Negados por contrato (default): ni repiten ni deben empezar a hacerlo
     // en silencio si alguien enlaza una letra a ellos.
-    for (InputEventType t : allEventTypes()) {
-        if (!containsType(repeatableEventTypes(), t)) CHECK(!km.isRepeatable(t));
+    for (InputEventType t : kAllEventTypes) {
+        if (!contains(kRepeatableEventTypes, t)) CHECK(!km.isRepeatable(t));
     }
+    
     // mapKey con repeat suprime aunque el enlace exista (evita ráfagas de
     // guardar/salir/deshacer al mantener la tecla).
     CHECK(!km.mapKey(key(GuiKeySym::KeyU, true, false, false, true)).has_value());
@@ -1205,23 +1183,27 @@ TEST(guikeymap_no_repeat_exhaustivo_headless) {
                .has_value());
     CHECK(!km.mapKey(key(GuiKeySym::Unknown, false, false, false, true))
                .has_value());
+               
     // Enter repetido solo pasa con el contexto explícito de Interaccion.
     CHECK(!km.mapKey(key(GuiKeySym::Enter, false, false, false, true))
                .has_value());
     CHECK_EQ(static_cast<int>(
                  *km.mapKey(key(GuiKeySym::Enter, false, false, false, true), true)),
              static_cast<int>(InputEventType::InsertNewline));
+             
     // ...y los repetibles sí pasan con repeat ( Delete/Home/End incluidos ).
     CHECK(km.mapKey(key(GuiKeySym::Delete, false, false, false, true)).has_value());
     CHECK(km.mapKey(key(GuiKeySym::Home, false, false, false, true)).has_value());
     CHECK(km.mapKey(key(GuiKeySym::End, false, false, false, true)).has_value());
 }
 
-// --- Headless extra: Tab enlazable + KeyPadEnter normaliza mods + Unknown ---
-// Tab va sin enlazar por defecto (paridad TTY) pero ES enlazable (no genera
-// TEXTINPUT en ninguna plataforma); KeyPadEnter es no-textual (normaliza).
-TEST(guikeymap_tab_y_keypad_headless) {
+// --- Headless extra
+// Tab no tiene enlace por defecto (paridad TTY), pero puede enlazarse
+// manualmente; tras resetDefaults vuelve a quedar sin enlace. KeyPadEnter
+// normaliza mods. Unknown nunca resuelve. ---
+TEST(gui_keymap_tab_y_keypad_headless) {
     GuiKeymap km;
+    
     CHECK(!km.mapKey(key(GuiKeySym::Tab)).has_value());
     CHECK(km.bindKey({GuiKeySym::Tab, false, false}, InputEventType::InsertNewline));
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Tab))),
@@ -1229,133 +1211,56 @@ TEST(guikeymap_tab_y_keypad_headless) {
     // Con mods también resuelve (normalización no-textual), igual que flechas.
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Tab, true, true, true))),
              static_cast<int>(InputEventType::InsertNewline));
+
     km.resetDefaults();
     CHECK(!km.mapKey(key(GuiKeySym::Tab)).has_value());
     // KeyPadEnter con Ctrl/Alt/Shift sigue siendo InsertNewline por defecto.
-    checkMaps(GuiKeySym::KeyPadEnter, InputEventType::InsertNewline, true);
-    checkMaps(GuiKeySym::KeyPadEnter, InputEventType::InsertNewline, false, true);
+    checkMaps(km, GuiKeySym::KeyPadEnter, InputEventType::InsertNewline, true);
+    checkMaps(km, GuiKeySym::KeyPadEnter, InputEventType::InsertNewline, false, true);
+    
     GuiKeymap km2;
     CHECK(km2.bindKey({GuiKeySym::KeyPadEnter, true, false},
                       InputEventType::MoveDown));
     CHECK_EQ(static_cast<int>(*km2.mapKey(key(GuiKeySym::KeyPadEnter))),
              static_cast<int>(InputEventType::MoveDown));
-    // Unknown nunca resuelve, con o sin mods/repeat, ni se puede enlazar.
-    GuiKeymap km3;
-    CHECK(!km3.mapKey(key(GuiKeySym::Unknown, true, true, true, true)).has_value());
-    CHECK(!km3.bindKey({GuiKeySym::Unknown, false, false},
-                       InputEventType::MoveDown));
+
+    // Unknown nunca resuelve (sin enlace posible).
+    checkUnmapped(km, GuiKeySym::Unknown);
 }
 
-// --- Headless extra: boundKey aplica la misma normalización que mapKey ---
-TEST(guikeymap_boundkey_normaliza_headless) {
+// Headless extra: 
+// boundKey aplica la misma normalización que mapKey
+TEST(gui_keymap_boundkey_normaliza_headless) {
     GuiKeymap km;
+    
     // No-textual: boundKey ignora mods igual que mapKey (un solo enlace).
     CHECK_EQ(static_cast<int>(*km.boundKey({GuiKeySym::Left, false, false})),
              static_cast<int>(InputEventType::MoveLeft));
     CHECK_EQ(static_cast<int>(*km.boundKey({GuiKeySym::Left, true, true})),
              static_cast<int>(InputEventType::MoveLeft));
+
     // Letras: coincidencia exacta (Ctrl sin Alt); con Alt no hay enlace.
     CHECK_EQ(static_cast<int>(*km.boundKey({GuiKeySym::KeyK, true, false})),
              static_cast<int>(InputEventType::Prefix));
     CHECK(!km.boundKey({GuiKeySym::KeyK, true, true}).has_value());
     CHECK(!km.boundKey({GuiKeySym::KeyK, false, false}).has_value());
+    
     // Tras unbind, mapKey y boundKey caen juntos (misma tabla).
     km.unbindKey({GuiKeySym::KeyK, true, false});
     CHECK(!km.boundKey({GuiKeySym::KeyK, true, false}).has_value());
     CHECK(!km.mapKey(key(GuiKeySym::KeyK, true)).has_value());
+    
     km.resetDefaults();
     CHECK_EQ(static_cast<int>(*km.boundKey({GuiKeySym::KeyK, true, false})),
              static_cast<int>(InputEventType::Prefix));
 }
 
-// P2-3: DOS reglas de normalización, fijadas por separado (no generalizar).
-// Regla 1 (no-textual: Escape/Enter/KeyPadEnter/Tab/Backspace/Delete/flechas/
-// Home/End/PgUp/PgDn): IGNORA ctrl/alt/shift en mapKey y boundKey (paridad
-// TTY simpleEscapeForm; un solo enlace por tecla). Regla 2 (textual: letras
-// A-Z): exige coincidencia EXACTA en (ctrl,alt,shift) —Ctrl sin Alt, Shift
-// distingue enlaces (Ctrl+S vs Ctrl+Shift+S)—. Unknown nunca resuelve ni
-// se enlaza.
-TEST(guikeymap_normalizacion_dos_reglas_headless) {
+// Unknown: no es no-textual ni letra, así que ninguna regla lo rescata.
+// Ninguna combinación de mods (con o sin repetición) resuelve y no se puede
+// enlazar.
+TEST(gui_keymap_unknown_never_maps) {
     GuiKeymap km;
-    // Tab no trae default (paridad TTY) pero sigue la regla 1 una vez
-    // enlazado: se enlaza acá para que las 14 resuelvan y la uniformidad sea
-    // comparable (sin enlace, la regla 1 para Tab es "las 8 dan nullopt").
-    CHECK(km.bindKey({GuiKeySym::Tab, false, false},
-                     InputEventType::InsertNewline));
-    // Regla 1: las 14 no-textuales resuelven igual con las 8 combinaciones de
-    // mods (misma tabla, mismo evento que sin mods).
-    for (GuiKeySym s : nonTextKeySyms()) {
-        auto base = km.mapKey(key(s));
-        CHECK(base.has_value());
-        for (bool ctrl : {false, true})
-            for (bool alt : {false, true})
-                for (bool shift : {false, true}) {
-                    auto t = km.mapKey(key(s, ctrl, alt, shift));
-                    CHECK(t.has_value());
-                    CHECK_EQ(static_cast<int>(*t), static_cast<int>(*base));
-                    auto b = km.boundKey({s, ctrl, alt, shift});
-                    CHECK(b.has_value());
-                    CHECK_EQ(static_cast<int>(*b), static_cast<int>(*base));
-                }
-    }
-    // Regla 2: las letras exigen (Ctrl=true, Alt=false, Shift exacto).
-    // Los defaults traen ambas variantes de K/Q/U/Y/Z al MISMO evento
-    // (tolerancia histórica explícita, sin fallback silencioso) y
-    // variantes DISTINTAS en S (Save vs SaveAs).
-    {
-        GuiKeymap def;
-        CHECK_EQ(static_cast<int>(*def.mapKey(key(GuiKeySym::KeyK, true, false, false))),
-                 static_cast<int>(InputEventType::Prefix));
-        CHECK_EQ(static_cast<int>(*def.mapKey(key(GuiKeySym::KeyK, true, false, true))),
-                 static_cast<int>(InputEventType::Prefix));
-        CHECK_EQ(static_cast<int>(*def.mapKey(key(GuiKeySym::KeyS, true, false, false))),
-                 static_cast<int>(InputEventType::Save));
-        CHECK_EQ(static_cast<int>(*def.mapKey(key(GuiKeySym::KeyS, true, false, true))),
-                 static_cast<int>(InputEventType::SaveAs));
-        const GuiKeySym kShiftTolerant[] = {GuiKeySym::KeyQ, GuiKeySym::KeyU,
-                                            GuiKeySym::KeyY, GuiKeySym::KeyZ};
-        for (GuiKeySym q : kShiftTolerant) {
-            const auto noShift = def.mapKey(key(q, true, false, false));
-            const auto withShift = def.mapKey(key(q, true, false, true));
-            CHECK(noShift.has_value());
-            CHECK(withShift.has_value());
-            CHECK_EQ(static_cast<int>(*withShift), static_cast<int>(*noShift));
-        }
-        CHECK_EQ(static_cast<int>(*def.mapKey(key(GuiKeySym::KeyQ, true, false, false))),
-                 static_cast<int>(InputEventType::Quit));
-        CHECK_EQ(static_cast<int>(*def.mapKey(key(GuiKeySym::KeyU, true, false, false))),
-                 static_cast<int>(InputEventType::Undo));
-        CHECK_EQ(static_cast<int>(*def.mapKey(key(GuiKeySym::KeyY, true, false, false))),
-                 static_cast<int>(InputEventType::Redo));
-    }
-    // Un enlace nuevo de una sola variante NO habilita la otra (sin
-    // fallback): se verifica en letras sin default (KeyJ, borde KeyA y
-    // KeyX; KeyZ no vale: trae default con ambas variantes).
-    for (GuiKeySym s : {GuiKeySym::KeyJ, GuiKeySym::KeyA, GuiKeySym::KeyX}) {
-        GuiKeymap fresh;
-        CHECK(fresh.bindKey({s, true, false, false}, InputEventType::MoveDown));
-        CHECK_EQ(static_cast<int>(*fresh.mapKey(key(s, true, false, false))),
-                 static_cast<int>(InputEventType::MoveDown));
-        // La variante con Shift sigue sin resolver (enlace distinto).
-        CHECK(!fresh.mapKey(key(s, true, false, true)).has_value());
-        CHECK(!fresh.boundKey({s, true, false, true}).has_value());
-        // ...hasta que se enlaza explícitamente (enlace independiente).
-        CHECK(fresh.bindKey({s, true, false, true}, InputEventType::MoveUp));
-        CHECK_EQ(static_cast<int>(*fresh.mapKey(key(s, true, false, true))),
-                 static_cast<int>(InputEventType::MoveUp));
-        CHECK_EQ(static_cast<int>(*fresh.mapKey(key(s, true, false, false))),
-                 static_cast<int>(InputEventType::MoveDown));
-        // ctrl/alt SÍ deciden: sin Ctrl, con Alt o con Ctrl+Alt no hay
-        // enlace (el texto llegaría por SDL_TEXTINPUT; enlazarlo duplicaría).
-        CHECK(!fresh.mapKey(key(s, false, false)).has_value());
-        CHECK(!fresh.mapKey(key(s, false, true)).has_value());
-        CHECK(!fresh.mapKey(key(s, true, true)).has_value());
-        CHECK(!fresh.mapKey(key(s, false, false, true)).has_value());
-        CHECK(!fresh.boundKey({s, false, false}).has_value());
-        CHECK(!fresh.boundKey({s, false, true}).has_value());
-        CHECK(!fresh.boundKey({s, true, true}).has_value());
-    }
-    // Unknown: ninguna regla lo rescata (sin enlace posible).
+
     for (bool ctrl : {false, true})
         for (bool alt : {false, true})
             for (bool shift : {false, true})
@@ -1363,29 +1268,31 @@ TEST(guikeymap_normalizacion_dos_reglas_headless) {
                     CHECK(!km.mapKey(key(GuiKeySym::Unknown, ctrl, alt, shift,
                                          repeat))
                                .has_value());
-                    CHECK(!km.boundKey({GuiKeySym::Unknown, ctrl, alt})
+                    CHECK(!km.boundKey({GuiKeySym::Unknown, ctrl, alt, shift})
                                .has_value());
                 }
-    GuiKeymap m2;
-    CHECK(!m2.bindKey({GuiKeySym::Unknown, false, false},
+
+    CHECK(!km.bindKey({GuiKeySym::Unknown, false, false},
                       InputEventType::MoveDown));
-    CHECK(!m2.bindKey({GuiKeySym::Unknown, true, false},
+    CHECK(!km.bindKey({GuiKeySym::Unknown, true, false},
                       InputEventType::MoveDown));
 }
 
-// P2-3: política bindable() particionada por familia (41 syms, lista central).
+// política bindable() 
+// particionada por familia (41 syms, lista central).
 // No-textuales: enlazables con cualquier mods (se normaliza al guardar).
-// Letras: solo con Ctrl sin Alt (invariante anti-doble-acción KEYDOWN +
-// TEXTINPUT). Unknown: nunca. Un sym nuevo sin clasificar rompe el conteo.
-TEST(guikeymap_bindable_particion_por_familia_headless) {
-    CHECK_EQ(allKeySyms().size(), size_t(41));
-    for (GuiKeySym s : allKeySyms()) {
+// Letras: solo con Ctrl sin Alt (invariante anti-doble-acción KEYDOWN + TEXTINPUT). 
+// Unknown: nunca. Un sym nuevo sin clasificar rompe el conteo.
+TEST(gui_keymap_bindable_particion_por_familia_headless) {
+    CHECK_EQ(std::size(kAllKeySyms), size_t(41));
+    
+    for (GuiKeySym s : kAllKeySyms) {
         GuiKeymap km;
         if (s == GuiKeySym::Unknown) {
             CHECK(!km.bindKey({s, false, false}, InputEventType::MoveDown));
             CHECK(!km.bindKey({s, true, false}, InputEventType::MoveDown));
             CHECK(!km.bindKey({s, true, true}, InputEventType::MoveDown));
-        } else if (containsSym(nonTextKeySyms(), s)) {
+        } else if (contains(kNonTextKeySyms, s)) {
             CHECK(km.bindKey({s, false, false}, InputEventType::MoveDown));
             CHECK(km.bindKey({s, true, true}, InputEventType::MoveDown));
         } else {
@@ -1396,41 +1303,36 @@ TEST(guikeymap_bindable_particion_por_familia_headless) {
             CHECK(km.bindKey({s, true, false}, InputEventType::MoveDown));
         }
     }
-    // Tab, caso que motiva el test: sin default pero enlazable (no genera
-    // TEXTINPUT); tras reset vuelve a sin-enlazar.
-    GuiKeymap km;
-    CHECK(!km.mapKey(key(GuiKeySym::Tab)).has_value());
-    CHECK(km.bindKey({GuiKeySym::Tab, false, false},
-                     InputEventType::InsertNewline));
-    km.resetDefaults();
-    CHECK(!km.mapKey(key(GuiKeySym::Tab)).has_value());
 }
 
 // ===========================================================================
 // GuiKeymap: Ctrl+C, Ctrl+X, Ctrl+V
 // ===========================================================================
-TEST(guikeymap_clipboard_shortcuts) {
+
+TEST(gui_keymap_clipboard_shortcuts) {
     GuiKeymap keymap;
     keymap.resetDefaults();
 
-    // 1. Atajos estándar generan los eventos semánticos correctos
-    CHECK(keymap.mapKey(key(GuiKeySym::KeyC, true, false, false)) == InputEventType::Copy);
-    CHECK(keymap.mapKey(key(GuiKeySym::KeyX, true, false, false)) == InputEventType::Cut);
-    CHECK(keymap.mapKey(key(GuiKeySym::KeyV, true, false, false)) == InputEventType::Paste);
+    // Ctrl+letra sin Alt: únicos atajos de portapapeles.
+    CHECK_EQ(static_cast<int>(*keymap.mapKey(key(GuiKeySym::KeyC, true, false, false))),
+             static_cast<int>(InputEventType::Copy));
+    CHECK_EQ(static_cast<int>(*keymap.mapKey(key(GuiKeySym::KeyX, true, false, false))),
+             static_cast<int>(InputEventType::Cut));
+    CHECK_EQ(static_cast<int>(*keymap.mapKey(key(GuiKeySym::KeyV, true, false, false))),
+             static_cast<int>(InputEventType::Paste));
 
-    // 2. Sin modificadores, son caracteres normales (InsertChar) o no-op
-    // (dependiendo de cómo tu keymap maneje las letras sueltas, pero NUNCA
-    // deben ser Copy/Cut/Paste).
-    CHECK(keymap.mapKey(key(GuiKeySym::KeyC, false, false, false)) != InputEventType::Copy);
-    CHECK(keymap.mapKey(key(GuiKeySym::KeyX, false, false, false)) != InputEventType::Cut);
-    CHECK(keymap.mapKey(key(GuiKeySym::KeyV, false, false, false)) != InputEventType::Paste);
+    // Sin Ctrl: la letra va por SDL_TEXTINPUT (sin enlace en KEYDOWN).
+    CHECK(!keymap.mapKey(key(GuiKeySym::KeyC, false, false, false)).has_value());
+    CHECK(!keymap.mapKey(key(GuiKeySym::KeyX, false, false, false)).has_value());
+    CHECK(!keymap.mapKey(key(GuiKeySym::KeyV, false, false, false)).has_value());
 
-    // 3. Modificadores adicionales (Shift/Alt) NO deben confundirse con los
-    // atajos estándar de portapapeles.
-    CHECK(keymap.mapKey(key(GuiKeySym::KeyC, true, true, false)) != InputEventType::Copy);   // Ctrl+Shift+C
-    CHECK(keymap.mapKey(key(GuiKeySym::KeyX, true, true, false)) != InputEventType::Cut);    // Ctrl+Shift+X
-    CHECK(keymap.mapKey(key(GuiKeySym::KeyV, true, true, false)) != InputEventType::Paste);  // Ctrl+Shift+V
-    
-    CHECK(keymap.mapKey(key(GuiKeySym::KeyC, true, false, true)) != InputEventType::Copy);   // Ctrl+Alt+C
-    CHECK(keymap.mapKey(key(GuiKeySym::KeyV, true, false, true)) != InputEventType::Paste);  // Ctrl+Alt+V
+    // Shift distingue enlaces: Ctrl+Shift+C/X/V no están enlazados.
+    CHECK(!keymap.mapKey(key(GuiKeySym::KeyC, true, false, true)).has_value());
+    CHECK(!keymap.mapKey(key(GuiKeySym::KeyX, true, false, true)).has_value());
+    CHECK(!keymap.mapKey(key(GuiKeySym::KeyV, true, false, true)).has_value());
+
+    // Alt (incl. Ctrl+Alt/AltGr) tampoco: no se disparan comandos accidentales.
+    CHECK(!keymap.mapKey(key(GuiKeySym::KeyC, true, true, false)).has_value());
+    CHECK(!keymap.mapKey(key(GuiKeySym::KeyX, true, true, false)).has_value());
+    CHECK(!keymap.mapKey(key(GuiKeySym::KeyV, true, true, false)).has_value());
 }
