@@ -1,10 +1,9 @@
-#include "test_framework.h"
-
 #include <fstream>
 #include <string>
 #include <type_traits>
 #include <vector>
 
+#include "test_framework.h"
 #include "platform/InputEvent.h"
 #include "platform/tty/ITtyKeymap.h"
 #include "platform/MouseEvent.h"
@@ -438,4 +437,129 @@ TEST(inputcmd_cmd_cursor_mover_gui_seleccion) {
         CHECK_EQ(selGui->end.col, selKeys->end.col);
     }
     else CHECK(false);
+}
+
+// CellPos es el tipo común 0-based.
+TEST(inputcmd_cellpos_valid) {
+    // posiciones validas
+    CHECK((CellPos{10, 5}.valid()));
+    CHECK((CellPos{0, 5}.valid()));
+    CHECK((CellPos{10, 0}.valid()));
+    CHECK((CellPos{0, 0}.valid())); // origen: celda válida, no "vacía"
+    
+    // posiciones no validas
+    CHECK((!CellPos{-1, 5}.valid()));
+    CHECK((!CellPos{10, -1}.valid()));
+    CHECK((CellPos{3, 4} == CellPos{3, 4}));
+    CHECK((CellPos{3, 4} != CellPos{3, 5}));
+    
+    // contrato default inválido
+    CHECK((!CellPos{}.valid()));
+    CHECK((!InputEvent{}.cell.valid()));
+}
+
+// fábricas MouseEvent -> InputEvent.
+TEST(inputcmd_mouse_event_factories) {
+    InputEvent p, d;
+    
+    p = makeMousePressEvent(CellPos{4, 2});
+    CHECK_EQ(static_cast<int>(p.type), static_cast<int>(InputEventType::MousePress));
+    CHECK_EQ(p.cell.col, 4);
+    CHECK_EQ(p.cell.row, 2);
+    
+    d = makeMouseDragEvent(CellPos{6, 3});
+    CHECK_EQ(static_cast<int>(d.type), static_cast<int>(InputEventType::MouseDrag));
+    InputEvent r = makeMouseReleaseEvent(CellPos{6, 3});
+    CHECK_EQ(static_cast<int>(r.type), static_cast<int>(InputEventType::MouseRelease));
+}
+
+// Editor común — Resize es un evento AUTÓNOMO: 
+// el payload manda, sin provider ni backend. 
+// Una GUI puede inyectarlo directamente.
+TEST(inputcmd_editor_handles_resize_event) {
+    Editor ed;
+    InputEvent r;
+    
+    r.type = InputEventType::Resize;
+    r.resizeRows = 30;
+    r.resizeCols = 100;
+    ed.handleEvent(r);
+    CHECK(ed.getStateForTesting() == State::Navegacion);
+    
+    // El payload se aplicó: viewport ajustado a 30x100
+    CHECK_EQ(ed.getActiveBufferForTesting().viewport.width, 100);
+    CHECK_EQ(ed.getActiveBufferForTesting().viewport.height, 28);
+}
+
+// Payload inválido se ignora
+TEST(inputcmd_editor_handles_resize_event_bad_input) {
+    Editor ed;
+    InputEvent bad;
+    
+    ed.resize(30, 100); // tamaño previo que el payload inválido debe conservar
+    bad.type = InputEventType::Resize;
+    bad.resizeRows = 0;
+    bad.resizeCols = -5;
+    ed.handleEvent(bad);
+    CHECK_EQ(ed.getActiveBufferForTesting().viewport.width, 100);
+    CHECK_EQ(ed.getActiveBufferForTesting().viewport.height, 28);
+}
+
+// Invariant: handleEvent(Resize) delega en resize() — mismo resultado.
+TEST(inputcmd_fase_c_resize_event_delegates) {
+    Editor viaEvent, viaDirect;
+    InputEvent r;
+    
+    r.type = InputEventType::Resize;
+    r.resizeRows = 30;
+    r.resizeCols = 100;
+    viaEvent.handleEvent(r);
+
+    viaDirect.resize(30, 100);
+    
+    CHECK_EQ(viaEvent.getActiveBufferForTesting().viewport.width,
+             viaDirect.getActiveBufferForTesting().viewport.width);
+    CHECK_EQ(viaEvent.getActiveBufferForTesting().viewport.height,
+             viaDirect.getActiveBufferForTesting().viewport.height);
+}
+
+// Las fábricas son el camino canónico CellPos -> InputEvent del loop.
+TEST(inputcmd_guimouse_press_release_factories_carry_cell) {
+    InputEvent p = makeMousePressEvent(CellPos{3, 4});
+    CHECK_EQ(static_cast<int>(p.type), static_cast<int>(InputEventType::MousePress));
+    CHECK((p.cell == CellPos{3, 4}));
+    
+    InputEvent d = makeMouseDragEvent(CellPos{5, 6});
+    CHECK_EQ(static_cast<int>(d.type), static_cast<int>(InputEventType::MouseDrag));
+    CHECK((d.cell == CellPos{5, 6}));
+    
+    InputEvent r = makeMouseReleaseEvent(CellPos{7, 8});
+    CHECK_EQ(static_cast<int>(r.type), static_cast<int>(InputEventType::MouseRelease));
+    CHECK((r.cell == CellPos{7, 8}));
+}
+
+// requestQuit con resultado: el botón de cierre GUI sabe si salió.
+// Sin modificar sale; modificado bloquea salvo force.
+TEST(inputcmd_fase_c_request_quit) {
+    Editor clean, ed;
+    InputEvent i, x;
+    
+    CHECK(clean.isRunning());
+    CHECK(clean.requestQuit(false));
+    CHECK(!clean.isRunning());
+
+    i.type = InputEventType::InsertChar;
+    i.text = "i";
+    ed.handleEvent(i); // Navegacion -> Interaccion
+    
+    x.type = InputEventType::InsertChar;
+    x.text = "X";
+    ed.handleEvent(x); // modifica el buffer
+    CHECK(ed.getActiveBufferForTesting().modified);
+    CHECK(ed.isRunning());
+    CHECK(!ed.requestQuit(false)); // bloqueado: aviso, sigue corriendo
+    CHECK(ed.isRunning());
+    
+    CHECK(ed.requestQuit(true)); // forzado: sale
+    CHECK(!ed.isRunning());
 }

@@ -3,23 +3,12 @@
 
 #include "platform/InputEvent.h"
 #include "platform/tty/Terminal.h"
+#include "platform/tty/TtyMouse.h"
 #include "test_framework.h"
+
 #define private public
 #include "app/Editor.h"
 #undef private
-
-// ---------------------------------------------------------------------------
-// Paso 9: traduccion de secuencias de escape de la terminal a eventos.
-//
-// Estas pruebas redirigen temporalmente STDIN a un pipe y le escriben
-// la secuencia de bytes que emite la terminal, para verificar que
-// readEvent() la traduce al InputEvent correcto.
-//
-// v0.5: no hay campo shift. La seleccion se activa con la letra 's' dentro
-// del modo Navegacion (no con un modificador); los modificadores
-// (Shift/Ctrl/Alt) que una terminal pueda anadir sobre las flechas se
-// ignoran y solo importa el caracter final.
-// ---------------------------------------------------------------------------
 
 namespace {
 
@@ -61,122 +50,126 @@ InputEvent parse(const char* seq) {
 
 } // namespace
 
-TEST(terminal_plain_right_arrow) {
+TEST(terminal_event_plain_right_arrow) {
     InputEvent e = parse("\x1b[C");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveRight));
 }
 
-TEST(terminal_plain_left_arrow) {
+TEST(terminal_event_plain_left_arrow) {
     InputEvent e = parse("\x1b[D");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveLeft));
 }
 
-TEST(terminal_modified_right_arrow_ignored) {
-    // "ESC [ 1;2C" = flecha derecha con modificador. El modificador (2=
-    // shift... ) se ignora: se traduce al mismo movimiento.
+// "ESC [ 1;2C" = flecha derecha con modificador. El modificador (2=shift... ) 
+// se ignora: se traduce al mismo movimiento.
+TEST(terminal_event_modified_right_arrow_ignored) {
+    
     InputEvent e = parse("\x1b[1;2C");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveRight));
 }
 
-TEST(terminal_modified_left_arrow_ignored) {
+TEST(terminal_event_modified_left_arrow_ignored) {
     InputEvent e = parse("\x1b[1;2D");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveLeft));
 }
 
-TEST(terminal_modified_up_arrow_ignored) {
+TEST(terminal_event_modified_up_arrow_ignored) {
     InputEvent e = parse("\x1b[1;2A");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveUp));
 }
 
-TEST(terminal_modified_down_arrow_ignored) {
+TEST(terminal_event_modified_down_arrow_ignored) {
     InputEvent e = parse("\x1b[1;2B");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveDown));
 }
 
-TEST(terminal_modified_home_ignored) {
+TEST(terminal_event_modified_home_ignored) {
     InputEvent e = parse("\x1b[1;2H");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveHome));
 }
 
-TEST(terminal_modified_end_ignored) {
+TEST(terminal_event_modified_end_ignored) {
     InputEvent e = parse("\x1b[1;2F");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveEnd));
 }
 
-TEST(terminal_bare_modifier_sequence) {
-    // "ESC [ 2 A" (modificador sin parametro "1;"). Con los modificadores
-    // ignorados termina siendo una flecha arriba.
+// "ESC [ 2 A" (modificador sin parametro "1;"). 
+// Con los modificadores ignorados termina siendo una flecha arriba.
+TEST(terminal_event_bare_modifier_sequence) {
     InputEvent e = parse("\x1b[2A");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveUp));
 }
 
-TEST(terminal_ctrl_modifier_ignored) {
-    // Modificador ctrl (codigo 5): tambien se ignora, es una flecha derecha.
+// Modificador ctrl (codigo 5): tambien se ignora, es una flecha derecha.
+TEST(terminal_event_ctrl_modifier_ignored) {
     InputEvent e = parse("\x1b[1;5C");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveRight));
 }
 
-TEST(terminal_remapped_modified_arrow_via_keymap) {
-    // Integración Terminal+Keymap: remapear "[1;2D" (la clave real que
-    // Terminal pasa a Keymap) debe cambiar el evento end-to-end. Sin
-    // remapeo, "[1;2D" cae por fallback a MoveLeft; con binding explícito
-    // debe dar el evento remapeado.
+// Integración Terminal+Keymap: remapear "[1;2D" (la clave real que Terminal pasa a Keymap) 
+// debe cambiar el evento end-to-end. Sin remapeo
+// "[1;2D" cae por fallback a MoveLeft
+// con binding explícito debe dar el evento remapeado.
+TEST(terminal_event_remapped_modified_arrow_via_keymap) {
     PipedStdin p;
-    p.feed("\x1b[1;2D");
     Terminal t;
+    InputEvent e;
+    
+    p.feed("\x1b[1;2D");
     t.keymapIface().bindSequence("[1;2D", InputEventType::PageDown);
-    InputEvent e = t.readEvent();
+    e = t.readEvent();
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::PageDown));
 }
 
-TEST(terminal_plain_home_via_bracket) {
+TEST(terminal_event_plain_home_via_bracket) {
     InputEvent e = parse("\x1b[H");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveHome));
 }
 
-TEST(terminal_plain_end_via_bracket) {
+TEST(terminal_event_plain_end_via_bracket) {
     InputEvent e = parse("\x1b[F");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveEnd));
 }
 
-TEST(terminal_delete_key) {
+TEST(terminal_event_delete_key) {
     InputEvent e = parse("\x1b[3~");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::Delete));
 }
 
-TEST(terminal_home_via_tilde) {
+TEST(terminal_event_home_via_tilde) {
     InputEvent e = parse("\x1b[1~");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveHome));
 }
 
-TEST(terminal_pageup_pagedown) {
+TEST(terminal_event_pageup_pagedown) {
     InputEvent up = parse("\x1b[5~");
     CHECK_EQ(static_cast<int>(up.type), static_cast<int>(InputEventType::PageUp));
+    
     InputEvent down = parse("\x1b[6~");
     CHECK_EQ(static_cast<int>(down.type), static_cast<int>(InputEventType::PageDown));
 }
 
-TEST(terminal_ss3_with_params_unsupported) {
-    // Prefijo SS3 (ESC O) con parametros no se soporta: None.
+// Prefijo SS3 (ESC O) con parametros no se soporta: None.
+TEST(terminal_event_ss3_with_params_unsupported) {
     InputEvent e = parse("\x1bO1;2C");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
 }
 
-TEST(terminal_lone_escape) {
+TEST(terminal_event_lone_escape) {
     InputEvent e = parse("\x1b");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::Escape));
 }
 
-TEST(terminal_incomplete_sequence_times_out) {
-    // ESC + '[' sin caracter final: se descarta (None) tras el timeout,
-    // en lugar de bloquear para siempre esperando el ultimo byte.
+// ESC + '[' sin caracter final: se descarta (None) tras el timeout,
+// en lugar de bloquear para siempre esperando el ultimo byte.
+TEST(terminal_event_incomplete_sequence_times_out) {
     InputEvent e = parse("\x1b[");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
 }
 
-TEST(terminal_escape_followed_by_char_ignored) {
-    // ESC seguido de algo que no sea una secuencia de control conocida
-    // no es un ESC suelto: la secuencia completa se descarta (None).
+// ESC seguido de algo que no sea una secuencia de control conocida
+// no es un ESC suelto: la secuencia completa se descarta (None).
+TEST(terminal_event_escape_followed_by_char_ignored) {
     InputEvent e = parse("\x1bx");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
 }
@@ -184,137 +177,151 @@ TEST(terminal_escape_followed_by_char_ignored) {
 // ---------------------------------------------------------------------------
 // Terminal -> UTF-8: traduccion de entrada multibyte
 // ---------------------------------------------------------------------------
-// readEvent() debe agrupar los bytes de continuacion de un caracter UTF-8
-// y emitirlos juntos en InputEvent.text, nunca un byte suelto.
-// ---------------------------------------------------------------------------
 
-TEST(terminal_utf8_ascii_single_byte) {
+TEST(terminal_event_utf8_ascii_single_byte) {
     InputEvent e = parse("a");
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::InsertChar));
     CHECK_EQ(e.text, "a");
     CHECK_EQ(e.text.size(), size_t{1});
 }
 
-TEST(terminal_utf8_two_bytes) {
-    // "é" = 0xC3 0xA9.
+// "é" = 0xC3 0xA9.
+TEST(terminal_event_utf8_two_bytes) {
     InputEvent e = parse("\xC3\xA9");
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::InsertChar));
     CHECK_EQ(e.text, "\xC3\xA9");
     CHECK_EQ(e.text.size(), size_t{2});
 }
 
-TEST(terminal_utf8_three_bytes) {
-    // "—" (em dash) = 0xE2 0x80 0x94.
+// "—" (em dash) = 0xE2 0x80 0x94.
+TEST(terminal_event_utf8_three_bytes) {
     InputEvent e = parse("\xE2\x80\x94");
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::InsertChar));
     CHECK_EQ(e.text, "\xE2\x80\x94");
     CHECK_EQ(e.text.size(), size_t{3});
 }
 
-TEST(terminal_utf8_four_bytes) {
-    // "😀" = 0xF0 0x9F 0x98 0x80.
+// "😀" = 0xF0 0x9F 0x98 0x80
+TEST(terminal_event_utf8_four_bytes) {
     InputEvent e = parse("\xF0\x9F\x98\x80");
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::InsertChar));
     CHECK_EQ(e.text, "\xF0\x9F\x98\x80");
     CHECK_EQ(e.text.size(), size_t{4});
 }
 
-TEST(terminal_utf8_consecutive_sequences) {
-    // Dos caracteres UTF-8 consecutivos producen dos eventos, cada uno
-    // con su caracter completo.
-    {
-        PipedStdin p;
-        p.feed(std::string("\xC3\xA9") + "\xE2\x80\x94"); // "é—"
-        Terminal t;
-        InputEvent e1 = t.readEvent();
-        InputEvent e2 = t.readEvent();
-        CHECK_EQ(e1.text, "\xC3\xA9");
-        CHECK_EQ(e2.text, "\xE2\x80\x94");
-        CHECK_EQ(static_cast<int>(e1.type), static_cast<int>(InputEventType::InsertChar));
-        CHECK_EQ(static_cast<int>(e2.type), static_cast<int>(InputEventType::InsertChar));
-    }
+// Dos caracteres UTF-8 consecutivos producen dos eventos, 
+// cada uno con su caracter completo.
+TEST(terminal_event_utf8_consecutive_sequences) {
+    PipedStdin p;
+    Terminal t;
+    
+    p.feed(std::string("\xC3\xA9") + "\xE2\x80\x94"); // "é—"
+    
+    InputEvent e1 = t.readEvent();
+    InputEvent e2 = t.readEvent();
+    
+    CHECK_EQ(e1.text, "\xC3\xA9");
+    CHECK_EQ(e2.text, "\xE2\x80\x94");
+    CHECK_EQ(static_cast<int>(e1.type), static_cast<int>(InputEventType::InsertChar));
+    CHECK_EQ(static_cast<int>(e2.type), static_cast<int>(InputEventType::InsertChar));
+
 }
 
-TEST(terminal_utf8_consecutive_same_char) {
-    // Tres emojis seguidos: cada readEvent() entrega uno completo.
-    {
-        PipedStdin p;
-        p.feed(std::string("\xF0\x9F\x98\x80") + "\xF0\x9F\x98\x80"); // "😀😀"
-        Terminal t;
-        InputEvent e1 = t.readEvent();
-        InputEvent e2 = t.readEvent();
-        CHECK_EQ(e1.text, "\xF0\x9F\x98\x80");
-        CHECK_EQ(e2.text, "\xF0\x9F\x98\x80");
-    }
+// Tres emojis seguidos: cada readEvent() entrega uno completo.
+TEST(terminal_event_utf8_consecutive_same_char) {
+    PipedStdin p;
+    Terminal t;
+    
+    p.feed(std::string("\xF0\x9F\x98\x80") + "\xF0\x9F\x98\x80"); // "😀😀"
+    
+    InputEvent e1 = t.readEvent();
+    InputEvent e2 = t.readEvent();
+    
+    CHECK_EQ(e1.text, "\xF0\x9F\x98\x80");
+    CHECK_EQ(e2.text, "\xF0\x9F\x98\x80");
+
 }
 
-TEST(terminal_utf8_mixed_with_escape_key) {
-    // UTF-8 seguido de una secuencia de escape: el UTF-8 sale entero y la
-    // flecha se traduce a su evento. El parser no mezcla bytes.
-    {
-        PipedStdin p;
-        p.feed(std::string("\xC3\xA9") + "\x1b[C"); // "é" + flecha derecha
-        Terminal t;
-        InputEvent e1 = t.readEvent();
-        InputEvent e2 = t.readEvent();
-        CHECK_EQ(e1.text, "\xC3\xA9");
-        CHECK_EQ(static_cast<int>(e2.type), static_cast<int>(InputEventType::MoveRight));
-    }
+// UTF-8 seguido de una secuencia de escape: el UTF-8 sale entero y la
+// flecha se traduce a su evento. El parser no mezcla bytes.
+TEST(terminal_event_utf8_mixed_with_escape_key) {
+    PipedStdin p;
+    Terminal t;
+    
+    p.feed(std::string("\xC3\xA9") + "\x1b[C"); // "é" + flecha derecha
+    
+    InputEvent e1 = t.readEvent();
+    InputEvent e2 = t.readEvent();
+    
+    CHECK_EQ(e1.text, "\xC3\xA9");
+    CHECK_EQ(static_cast<int>(e2.type), static_cast<int>(InputEventType::MoveRight));
 }
 
-TEST(terminal_escape_key_then_utf8) {
-    // Secuencia de escape seguida de UTF-8: la flecha primero, el UTF-8
-    // despues, sin bytes residuales.
-    {
-        PipedStdin p;
-        p.feed(std::string("\x1b[C") + "\xE2\x80\x94"); // flecha + "—"
-        Terminal t;
-        InputEvent e1 = t.readEvent();
-        InputEvent e2 = t.readEvent();
-        CHECK_EQ(static_cast<int>(e1.type), static_cast<int>(InputEventType::MoveRight));
-        CHECK_EQ(e2.text, "\xE2\x80\x94");
-        CHECK_EQ(static_cast<int>(e2.type), static_cast<int>(InputEventType::InsertChar));
-    }
+// Secuencia de escape seguida de UTF-8: la flecha primero, el UTF-8
+// despues, sin bytes residuales.
+TEST(terminal_event_escape_key_then_utf8) {
+    PipedStdin p;
+    Terminal t;
+    
+    p.feed(std::string("\x1b[C") + "\xE2\x80\x94"); // flecha + "—"
+    
+    InputEvent e1 = t.readEvent();
+    InputEvent e2 = t.readEvent();
+    
+    CHECK_EQ(static_cast<int>(e1.type), static_cast<int>(InputEventType::MoveRight));
+    CHECK_EQ(e2.text, "\xE2\x80\x94");
+    CHECK_EQ(static_cast<int>(e2.type), static_cast<int>(InputEventType::InsertChar));
 }
 
-TEST(terminal_utf8_mixed_with_plain_keys) {
-    // ASCII entre caracteres UTF-8 y una flecha al final.
-    {
-        PipedStdin p;
-        p.feed(std::string("a\xC3\xA9") + "\x1b[D"); // "aé" + flecha izquierda
-        Terminal t;
-        InputEvent a = t.readEvent();
-        InputEvent e = t.readEvent();
-        InputEvent arrow = t.readEvent();
-        CHECK_EQ(a.text, "a");
-        CHECK_EQ(e.text, "\xC3\xA9");
-        CHECK_EQ(static_cast<int>(arrow.type), static_cast<int>(InputEventType::MoveLeft));
-    }
+// ASCII entre caracteres UTF-8 y una flecha al final.
+TEST(terminal_event_utf8_mixed_with_plain_keys) {
+    PipedStdin p;
+    Terminal t;
+    
+    p.feed(std::string("a\xC3\xA9") + "\x1b[D"); // "aé" + flecha izquierda
+    
+    InputEvent a = t.readEvent();
+    InputEvent e = t.readEvent();
+    InputEvent arrow = t.readEvent();
+    
+    CHECK_EQ(a.text, "a");
+    CHECK_EQ(e.text, "\xC3\xA9");
+    CHECK_EQ(static_cast<int>(arrow.type), static_cast<int>(InputEventType::MoveLeft));
 }
 
-TEST(terminal_scroll_up_basic) {
+TEST(terminal_event_scroll_up_basic) {
     InputEvent e = parse("\x1b[<64;12;5M");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollUp));
 }
 
-TEST(terminal_scroll_then_char) {
+TEST(terminal_event_scroll_then_char) {
     PipedStdin p;
-    p.feed(std::string("\x1b[<64;12;5M") + "a");
     Terminal t;
+    
+    p.feed(std::string("\x1b[<64;12;5M") + "a");
+    
     InputEvent s = t.readEvent();
     InputEvent c = t.readEvent();
+    
     CHECK_EQ(static_cast<int>(s.type), static_cast<int>(InputEventType::ScrollUp));
     CHECK_EQ(static_cast<int>(c.type), static_cast<int>(InputEventType::InsertChar));
     CHECK_EQ(c.text, "a");
 }
 
-TEST(terminal_char_scroll_char) {
+TEST(terminal_event_char_scroll_char) {
     PipedStdin p;
-    p.feed(std::string("a\x1b[<64;12;5M") + "b");
     Terminal t;
+    
+    p.feed(std::string("a\x1b[<64;12;5M") + "b");
+    
     InputEvent a = t.readEvent();
     InputEvent s = t.readEvent();
     InputEvent b = t.readEvent();
+    
     CHECK_EQ(static_cast<int>(a.type), static_cast<int>(InputEventType::InsertChar));
     CHECK_EQ(a.text, "a");
     CHECK_EQ(static_cast<int>(s.type), static_cast<int>(InputEventType::ScrollUp));
@@ -322,63 +329,72 @@ TEST(terminal_char_scroll_char) {
     CHECK_EQ(b.text, "b");
 }
 
-TEST(parse_mouse_sgr_direct_up) {
+TEST(terminal_event_parse_mouse_sgr_direct_up) {
     InputEvent e;
     Terminal::parseMouseSgr("[<64;10;5M", e);
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollUp));
 }
 
-TEST(parse_mouse_sgr_direct_down) {
+TEST(terminal_event_parse_mouse_sgr_direct_down) {
     InputEvent e;
     Terminal::parseMouseSgr("[<65;10;5M", e);
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollDown));
 }
 
-TEST(parse_mouse_sgr_direct_with_modifiers) {
+TEST(terminal_event_parse_mouse_sgr_direct_with_modifiers) {
     InputEvent e;
     Terminal::parseMouseSgr("[<68;10;5M", e);
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollUp));
 }
 
-TEST(parse_mouse_sgr_direct_release_ignored) {
+TEST(terminal_event_parse_mouse_sgr_direct_release_ignored) {
     InputEvent e;
     Terminal::parseMouseSgr("[<64;10;5m", e);
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
 }
 
-TEST(parse_mouse_sgr_direct_click_ignored) {
-    // Fase 1 mouse: left press genera MousePress (ya no None).
+// left press genera MousePress (ya no None).
+// Decoder convierte SGR 1-based a CellPos 0-based: (10,5) -> (9,4)
+TEST(terminal_event_parse_mouse_sgr_direct_click_ignored) {
     InputEvent e;
     Terminal::parseMouseSgr("[<0;10;5M", e);
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MousePress));
-    // Decoder convierte SGR 1-based a CellPos 0-based: (10,5) -> (9,4)
     CHECK_EQ(e.cell.col, 9);
     CHECK_EQ(e.cell.row, 4);
 }
 
-TEST(parse_mouse_sgr_direct_unknown) {
+TEST(terminal_event_parse_mouse_sgr_direct_unknown) {
     InputEvent e;
     Terminal::parseMouseSgr("[<99;10;5M", e);
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
 }
 
-TEST(parse_mouse_sgr_direct_malformed) {
+TEST(terminal_event_parse_mouse_sgr_direct_malformed) {
     InputEvent e;
     Terminal::parseMouseSgr("[<64M", e);
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
 }
 
-TEST(parse_mouse_sgr_direct_down_with_ctrl) {
+TEST(terminal_event_parse_mouse_sgr_direct_down_with_ctrl) {
     InputEvent e;
     Terminal::parseMouseSgr("[<81;10;5M", e);
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollDown));
 }
 
 // Terminal (bytes) -> TtyKeymap -> Editor (con soft-wrap .md): End llega
 // al final exclusivo de la línea en la última fila visual.
-TEST(terminal_end_key_reaches_line_end_in_markdown) {
-    // Configurar Editor con .md y soft-wrap (ancho ~12 columnas).
+// Configurar Editor con .md y soft-wrap (ancho ~12 columnas).
+TEST(terminal_event_end_key_reaches_line_end_in_markdown) {
     Editor ed;
+    
     ed.active().filename = "notes.md";
     ed.active().document.restore({std::string(30, 'a')});
     ed.active().cursor.line = 0;
@@ -400,4 +416,51 @@ TEST(terminal_end_key_reaches_line_end_in_markdown) {
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 30);
     CHECK_EQ(ed.active().cursor.col, ed.active().document.lineLength(0));
+}
+
+// Terminal es un IEventSource.
+TEST(terminal_event_is_event_source) {
+    Terminal t;
+    
+    IEventSource* src = &t;
+    CHECK(src != nullptr);
+}
+
+// decoder SGR -> CellPos + InputEvent.
+TEST(terminal_event_mouse_decoder_cellpos) {
+    struct Case {
+        const char* seq;
+        InputEventType type;
+        bool checkPos;   // los casos sin coordenadas validas no chequean posicion
+        CellPos pos;
+    };
+
+    const Case cases[] = {
+        {"[<0;10;5M",  InputEventType::MousePress,   true,  {9, 4}},
+        {"[<32;11;6M", InputEventType::MouseDrag,    true,  {10, 5}},
+        {"[<3;11;6m",  InputEventType::MouseRelease, true,  {10, 5}},
+        // Rueda con Shift (68 = 64|4) sigue siendo ScrollUp.
+        {"[<68;10;5M", InputEventType::ScrollUp,     false, {}},
+        // Secuencia incompleta -> None.
+        {"[<64M",      InputEventType::None,         false, {}},
+    };
+
+    for (const Case& c : cases) {
+        InputEvent e;
+        CellPos p;
+        decodeMouseSgr(c.seq, e, p);
+        CHECK_EQ(static_cast<int>(e.type), static_cast<int>(c.type));
+        if (c.checkPos) {
+            CHECK((p == c.pos));
+            CHECK_EQ(e.cell.col, c.pos.col);
+            CHECK_EQ(e.cell.row, c.pos.row);
+        }
+    }
+
+    // Terminal delega en el mismo decoder (sin duplicar tabla Cb).
+    InputEvent e;
+    Terminal::parseMouseSgr("[<0;10;5M", e);
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MousePress));
+    CHECK_EQ(e.cell.col, 9);
+    CHECK_EQ(e.cell.row, 4);
 }
