@@ -1,13 +1,26 @@
 #include <string>
 #include <vector>
 
+#include "app/Editor.h"
 #include "document/Cursor.h"
 #include "document/Document.h"
+#include "helpers/test_tty_renderer.h"
+#include "layout/Viewport.h"
+#include "rendering/Sink.h"
 #include "test_framework.h"
 
 namespace {
 
 using Lines = std::vector<std::string>;
+
+// Sink capturador: retiene lo escrito para assertar el primer frame
+struct CaptureSink : public Sink {
+    std::string data;
+    bool writeStdout(const std::string& s) override {
+        data += s;
+        return true;
+    };
+};
 
 static Document docOf(const std::vector<const char*>& lines) {
     Document d;
@@ -953,4 +966,32 @@ TEST(cursor_jk_utf8_mixed_character_moves) {
     CHECK_EQ(c.col, 10); // "hola café"
     
     assertCursorValidUtf8(c, d);
+}
+
+// Creamos un documento con varias linea, dejamos viewport en posicion (0,0)
+// movemsos cursor a ultima linea
+// verificamos que el viewport cambio via scroll
+TEST(cursor_fase_c_first_render_scrolls_cursor_into_view) {
+    Editor ed;
+    CaptureSink cap;
+    std::vector<std::string> lines;
+    
+    ed.setRenderer(makeTtyTestRenderer());
+    ed.setSink(cap);
+    ed.resize(30, 100); // contenido: 28 filas
+    
+    for (int i = 0; i < 60; ++i) 
+        lines.push_back("l" + std::to_string(i));
+    
+    ed.getActiveBufferForTesting().document.restore(lines); // actualizamos el documento
+    ed.getActiveBufferForTesting().cursor.line = 59;
+    ed.getActiveBufferForTesting().cursor.col = 0;
+    ed.getActiveBufferForTesting().viewport.top = 0; // el viewport esta al inicio
+    ed.renderFrame();
+    
+    CHECK_EQ(ed.getActiveBufferForTesting().viewport.top, 60 - 28); // el viewport hizo el scroll
+    CHECK_EQ(ed.getActiveBufferForTesting().cursor.line, 59);
+    CHECK(!cap.data.empty());
+    CHECK(cap.data.find("\x1b[2J") != std::string::npos);
+    CHECK(ed.isRunning());
 }
