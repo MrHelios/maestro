@@ -1,14 +1,28 @@
-#include "test_framework.h"
-#include "syntax/SyntaxHighlighter.h"
-#include "syntax/SyntaxLanguage.h"
-#include "syntax/SyntaxSpan.h"
-// #include "syntax/SyntaxCache.h" // Descomentar si se vuelven a agregar tests de cache
-#include "document/Document.h"
 #include <string>
 #include <vector>
 #include <cstring>
 #include <cctype>
 #include <algorithm>
+
+#include "test_framework.h"
+#include "syntax/SyntaxHighlighter.h"
+#include "syntax/SyntaxLanguage.h"
+#include "syntax/SyntaxSpan.h"
+#include "app/Editor.h"
+#include "document/Document.h"
+#include "rendering/Sink.h"
+#include "helpers/test_tty_renderer.h"
+
+
+namespace {
+struct CaptureSink : public Sink {
+    std::string data;
+    bool writeStdout(const std::string& s) override {
+        data += s;
+        return true;
+    };
+};
+
 
 // --- Helpers Reutilizables ---
 
@@ -48,6 +62,7 @@ static bool hasSpanText(const std::vector<SyntaxSpan>& spans,
     }
     return false;
 }
+} // namespace
 
 // --- Tests Originales (con invariants agregados donde aplica) ---
 
@@ -312,7 +327,7 @@ TEST(Clike_LineCommentWithKeyword) {
     }
 }
 
-// --- Nuevos Tests P1: Identificadores y Palabras Reservadas ---
+// --- Identificadores y Palabras Reservadas ---
 
 TEST(Clike_IdentifierBoundaries_NoPartialKeywords) {
     SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
@@ -324,7 +339,7 @@ TEST(Clike_IdentifierBoundaries_NoPartialKeywords) {
         CHECK(!hasSpan(spans, badBegin, badEnd, tok));
     };
 
-    checkNoPartial("integer", 0, 3, SyntaxToken::Type);       // "int" dentro de "integer"
+    checkNoPartial("integer", 0, 3, SyntaxToken::Type);        // "int" dentro de "integer"
     checkNoPartial("returnValue", 0, 6, SyntaxToken::Keyword); // "return" dentro de "returnValue"
     checkNoPartial("className", 0, 5, SyntaxToken::Keyword);   // "class" dentro de "className"
     checkNoPartial("namespace2", 0, 9, SyntaxToken::Keyword);  // "namespace" dentro de "namespace2"
@@ -346,7 +361,7 @@ TEST(Clike_IdentifierBoundaries_StandaloneKeywordsStillWork) {
     CHECK(hasSpan(spansClass, 0, 5, SyntaxToken::Keyword));
 }
 
-// --- Nuevos Tests P1: Variantes de Números ---
+// --- Variantes de Números ---
 
 TEST(Clike_NumberVariants_BasicFloatingAndHexFloat) {
     SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
@@ -389,7 +404,7 @@ TEST(Clike_NumberVariants_DigitSeparators) {
     CHECK(!hasAnyToken(spans3, SyntaxToken::Character));
 }
 
-// --- Nuevos Tests P1: Prefijos de Strings/Chars Ordinarios ---
+// --- Prefijos de Strings/Chars Ordinarios ---
 
 TEST(Clike_OrdinaryStringPrefixes) {
     SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
@@ -443,7 +458,7 @@ TEST(Clike_PrefixedStringDoesNotSwallowFollowingCode) {
     CHECK(hasSpan(spans, 5, 8, SyntaxToken::Type));
 }
 
-// --- Nuevos Tests P1: Transiciones de Estado Límite ---
+// --- Transiciones de Estado Límite ---
 
 TEST(Clike_BlockComment_EmptyLineKeepsState) {
     SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
@@ -503,7 +518,7 @@ TEST(Clike_RawString_UnclosedAtEofPreservesState) {
     CHECK(st.rawDelimLen == 3);
 }
 
-// --- Nuevos Tests P2: Interacciones Cruzadas ---
+// --- Interacciones Cruzadas ---
 
 TEST(Clike_MarkersInsideStringAreNotTokens) {
     SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
@@ -681,4 +696,42 @@ TEST(Clike_Language_FromFilename) {
     CHECK(languageFromFilename("test.markdown")==SyntaxLanguage::Markdown);
     CHECK(languageFromFilename("TEST.MD")==SyntaxLanguage::Markdown);
     CHECK(languageFromFilename("README")==SyntaxLanguage::None);
+}
+
+// Inyección tardía del renderer 
+// crea dos editores con el mismo documento (misma lógica de armado vía makeDoc) pero con distinto 
+// momento de inyección del renderer, y compara que el primer frame pintado sea byte a byte idéntico.
+TEST(Clike_fase_c_late_setRenderer_matches_early_renderer_highlight) {
+    auto makeDoc = [](Editor& ed) {
+        ed.getActiveBufferForTesting().document.restore(
+            {"int main() {", "  int x = 1;", "  return x;", "}"});
+        ed.getActiveBufferForTesting().filename = "t.cpp";
+        ed.resize(24, 80);
+    };
+    
+    // editor 1
+
+    Editor early;
+    CaptureSink ref;
+    
+    early.setRenderer(makeTtyTestRenderer());
+    makeDoc(early);
+    early.setSink(ref);
+    early.renderFrame();
+    CHECK(!ref.data.empty());
+    
+    // editor 2
+
+    Editor late;
+    CaptureSink nullCap, got;
+    
+    makeDoc(late);
+    late.setSink(nullCap);
+    late.renderFrame();  // con Null: corre scroll/brackets pero no pinta
+    CHECK(nullCap.data.empty());
+    
+    late.setRenderer(makeTtyTestRenderer());  // tardío (tests; main usa el ctor)
+    late.setSink(got);
+    late.renderFrame();
+    CHECK_EQ(got.data, ref.data);
 }

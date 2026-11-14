@@ -1,10 +1,16 @@
 #include <functional>
+#include <string>
 
-#include "syntax/SyntaxCache.h"
-#include "test_framework.h"
+#include "app/Editor.h"
 #include "document/Document.h"
+#include "document/Position.h"
 #include "layout/BracketMatcher.h"
+#include "rendering/Sink.h"
+#include "syntax/SyntaxCache.h"
 #include "syntax/SyntaxLanguage.h"
+#include "test_framework.h"
+#include "helpers/test_tty_renderer.h"
+#include "helpers/spy_screen_renderer.h"
 
 /*
 *  simulamos un cache caliente para poder comprobar los find, sin necesidad
@@ -12,6 +18,15 @@
 *  esto hace que sea mas de verificar test y mantenerlos
 */
 namespace {
+
+// Sink capturador: retiene lo escrito para assertar el primer frame
+struct CaptureSink : public Sink {
+    std::string data;
+    bool writeStdout(const std::string& s) override {
+        data += s;
+        return true;
+    };
+};
 
 BracketSpanSource makeWarmCacheSource(SyntaxCache& cache) {
     BracketSpanSource src;
@@ -24,7 +39,7 @@ BracketSpanSource makeWarmCacheSource(SyntaxCache& cache) {
     return src;
 }
 
-}
+} // namespace
 
 TEST(bracket_matcher_single) {
     Document doc;
@@ -459,4 +474,33 @@ TEST(bracket_matcher_from_backward_forward_equivalence_contours) {
     checkCase({"{[}]"}, {0, 0});
     checkCase({"{[}]"}, {0, 2});
     checkCase({"([)]"}, {0, 0});
+}
+
+// El highlight real, sin hacks de private: el SpyScreenRenderer ve el
+// BracketPair que el Editor entrega al render. Con el cursor sobre el '('
+// de "main()" el par debe ser exactamente open=(0,8), close=(0,9). Esto
+// distingue "el camino de brackets corre" de "el par se pinta".
+TEST(bracket_matcher_fase_c_first_render_passes_bracket_pair_to_renderer) {
+    Editor ed;
+    CaptureSink cap;
+    SpyScreenRenderer& spy = injectSpy(ed);
+    
+    ed.setSink(cap);
+    ed.resize(30, 100);
+    ed.getActiveBufferForTesting().document.restore({"int main() {", "  return 0;", "}"});
+    ed.getActiveBufferForTesting().filename = "test.cpp";
+    ed.getActiveBufferForTesting().cursor.line = 0;
+    ed.getActiveBufferForTesting().cursor.col = 8; // '(' de "main()"
+    
+    ed.renderFrame();
+    
+    CHECK_EQ(spy.renderScreenDiffCount, 1);
+    CHECK(spy.lastBracketPair.has_value());
+    if (spy.lastBracketPair) {
+        CHECK((spy.lastBracketPair->open == Position{0, 8}));
+        CHECK((spy.lastBracketPair->close == Position{0, 9}));
+    }
+    CHECK_EQ(ed.getActiveBufferForTesting().cursor.line, 0);
+    CHECK_EQ(ed.getActiveBufferForTesting().cursor.col, 8);
+    CHECK(ed.isRunning());
 }
