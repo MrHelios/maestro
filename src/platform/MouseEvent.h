@@ -13,9 +13,6 @@
 // canonico para construir eventos de mouse en dominio 0-based.
 // No mezclan Clipboard/Watcher/TTY: son datos puros, sin fd ni terminal.
 
-// Botón físico (lo que SGR distingue).
-enum class MouseButton { Left, Middle, Right, None };
-
 // Evento de mouse ya decodificado: posición común + botón.
 // La rueda (64/65) viaja como ScrollUp/Down en InputEvent, no acá.
 struct MouseEvent {

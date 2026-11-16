@@ -100,8 +100,12 @@ enum class InputEventType {
     Paste,
 };
 
+// Botón físico del mouse (lo que SGR distingue en Cb).
+enum class MouseButton { Left, Middle, Right, None };
+
 struct InputEvent {
     InputEventType type = InputEventType::None;
+    MouseButton button = MouseButton::None;
     // Texto a insertar (solo relevante para InsertChar). Guarda los
     // BYTES UTF-8 de un solo caracter: un ASCII (1 byte) o un caracter
     // multibyte (2-4 bytes, p.ej. "á", "ñ", "—", "😀"). Asi el Editor
