@@ -18,6 +18,7 @@ void TtyKeymap::resetDefaults() {
     bindControl(17, InputEventType::Quit);                // Ctrl+Q -> salir
     bindControl(19, InputEventType::Save);                // Ctrl+S -> guardar (solo tras Ctrl+K)
     bindControl(11, InputEventType::Prefix);              // Ctrl+K -> prefijo de comando
+    bindControl(23, InputEventType::ForceCloseBuffer);    // Ctrl+W -> cerrar buffer descartando cambios (solo tras Ctrl+K)
     bindControl(21, InputEventType::Undo);                // Ctrl+U -> deshacer
     bindControl(25, InputEventType::Redo);                // Ctrl+Y -> rehacer
     bindControl(26, InputEventType::Suspend);             // Ctrl+Z -> suspender (el loop se auto-envía SIGTSTP)

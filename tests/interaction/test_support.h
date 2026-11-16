@@ -77,6 +77,9 @@ inline void save(Editor& ed){ press(ed, InputEventType::Prefix); InputEvent e; e
 inline void newBuffer(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('n')); }
 inline void openSelector(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('t')); }
 inline void closeBuffer(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('w')); }
+// forceCloseBuffer(): Ctrl+K Ctrl+W (InputEventType::ForceCloseBuffer) -> cierra
+// el buffer activo aunque tenga cambios sin guardar (los descarta).
+inline void forceCloseBuffer(Editor& ed){ press(ed, InputEventType::Prefix); press(ed, InputEventType::ForceCloseBuffer); }
 inline void openFileBrowser(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('o')); }
 inline void previousBuffer(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('b')); }
 inline void safeQuit(Editor& ed){ press(ed, InputEventType::Prefix); pressEvent(ed, insert('q')); }

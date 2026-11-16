@@ -315,6 +315,12 @@ void Editor::registerCommands() {
     commands_.registerCommand("buffer.cerrar", [this] {
         closeActiveBuffer();
     });
+    // Ctrl+K Ctrl+W: cerrar el buffer activo aunque tenga cambios sin
+    // guardar. En el ultimo buffer se mantiene la invariante de Ctrl+K w
+    // (se reinicia vacio y sin nombre, nunca desaparece).
+    commands_.registerCommand("buffer.cerrar.forzado", [this] {
+        closeActiveBuffer(true);
+    });
     commands_.registerCommand("buffer.abrir", [this] {
         startFileBrowser();
     });
@@ -760,13 +766,13 @@ void Editor::createBuffer() {
     setActionMessage("Buffer nuevo: " + buffers.at(idx).unnamedName, MessageKind::Success);
 }
 
-void Editor::closeActiveBuffer() {
+void Editor::closeActiveBuffer(bool force) {
     invalidateWrapIndex();
     resetPreferredVisualColumn();
     Buffer& cur = active();
     std::string oldPath = cur.filename;
     const int rows = currentRows_, cols = currentCols_;
-    auto cr = buffers.closeActive(rows, cols);
+    auto cr = buffers.closeActive(rows, cols, force);
     if (cr != CloseResult::ModifiedBlocked) unwatchFile(oldPath);
     switch (cr) {
         case CloseResult::ModifiedBlocked:

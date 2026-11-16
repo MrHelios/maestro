@@ -117,6 +117,11 @@ void GuiKeymap::resetDefaults() {
     bindKey({GuiKeySym::KeyS, true, false, true}, InputEventType::SaveAs);
     bindKey({GuiKeySym::KeyQ, true, false, false}, InputEventType::Quit);
     bindKey({GuiKeySym::KeyQ, true, false, true}, InputEventType::Quit);
+    // Ctrl+W es el segundo paso de Ctrl+K Ctrl+W (cerrar descartando
+    // cambios). Se enlaza también con Shift por la misma tolerancia
+    // histórica que Quit/Undo/Redo.
+    bindKey({GuiKeySym::KeyW, true, false, false}, InputEventType::ForceCloseBuffer);
+    bindKey({GuiKeySym::KeyW, true, false, true}, InputEventType::ForceCloseBuffer);
     bindKey({GuiKeySym::KeyU, true, false, false}, InputEventType::Undo);
     bindKey({GuiKeySym::KeyU, true, false, true}, InputEventType::Undo);
     bindKey({GuiKeySym::KeyY, true, false, false}, InputEventType::Redo);

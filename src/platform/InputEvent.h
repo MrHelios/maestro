@@ -60,6 +60,11 @@ enum class InputEventType {
     // en TTY este evento nunca llega. Dentro del prefijo equivale a Save;
     // en el explorador SaveAs confirma igual que Save.
     SaveAs,
+    // Ctrl+K Ctrl+W: cerrar el buffer activo aunque tenga cambios sin
+    // guardar (se descartan). El TTY lo produce como byte de control 23
+    // (Ctrl+W) tras el prefijo; la GUI como Ctrl+W. Solo tiene efecto en
+    // State::Prefix; fuera de el se ignora como cualquier otra tecla.
+    ForceCloseBuffer,
     // Ctrl+Z: pedir suspensión (job control, como vim). El Editor solo
     // marca la petición (vale en cualquier modo, incluidos los modales);
     // el loop de plataforma la consume y se auto-envía SIGTSTP, cuyos

@@ -212,7 +212,7 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 | **Navegación**        | por defecto                   | No se escribe. Comandos `i`/`s`/`j`/`k`/`c`/`x`/`p`. Flechas mueven sin seleccionar
 | **Interacción**       | `i` en Navegación             | Edición libre, todo inserta. `Esc` vuelve a Navegación
 | **Selección**         | `s` en Navegación             | Flechas/`j`/`k`/RePag/AvPag extienden selección (anchor fijo). `c`/`x`/`Esc` salen
-| **Prefijo**           | `Ctrl+K`                      | Siguiente tecla decide: `s` guardar, `Ctrl+S` guardar en otra ubicación, `q` salir verificando guardado, `Ctrl+Q` salir forzado, `n`/`t`/`w`/`o` buffers/archivos
+| **Prefijo**           | `Ctrl+K`                      | Siguiente tecla decide: `s` guardar, `Ctrl+S` guardar en otra ubicación, `q` salir verificando guardado, `Ctrl+Q` salir forzado, `n`/`t`/`w`/`o`/`Ctrl+W` buffers/archivos (Ctrl+W cierra descartando cambios)
 | **BufferSelector**    | `Ctrl+K t`                    | Lista modal de buffers (`↑`/`↓`, `Enter`, `Esc`)
 | **SaveAs**            | `Ctrl+K s` sin nombre / `Ctrl+K Ctrl+S` | Prompt `Guardar archivo:` (`↑`/`↓`/RePag/AvPag en la lista, `Enter` guarda, `Esc` cancela; en `Ctrl+K Ctrl+S` la ruta inicial es editable)
 | **FileBrowser**       | `Ctrl+K o`                    | Explorador modal (`↑`/`↓`/RePag/AvPag, `Enter` carpeta/archivo, `Esc`); arranca en el directorio del archivo activo o en el directorio de trabajo si el buffer no tiene ruta
@@ -239,7 +239,8 @@ Runner imprime cada caso y resumen `N tests, M failure(s)`; exit 0 solo si todo 
 | `Ctrl+K n`                | Buffer nuevo sin nombre
 | `Ctrl+K o`                | Explorador de archivos (directorio del archivo activo, o cwd si sin ruta)
 | `Ctrl+K t`                | Selector de buffers
-| `Ctrl+K w`                | Cerrar buffer activo
+| `Ctrl+K w`                | Cerrar buffer activo (bloquea si tiene cambios sin guardar)
+| `Ctrl+K Ctrl+W`           | Cerrar buffer activo descartando cambios sin guardar
 | `Esc`                     | Salir de Interacción/Selección/Busqueda
 | `Backspace` / `Delete`    | Borrar (en Interacción)
 

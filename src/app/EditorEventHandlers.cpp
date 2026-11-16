@@ -1085,6 +1085,12 @@ void Editor::handlePrefixKey(const InputEvent& event) {
             commands_.execute("app.salir.forzado");
             break;
 
+        // Ctrl+K Ctrl+W: cerrar el buffer activo descartando cambios sin
+        // guardar (a diferencia de Ctrl+K w, que los bloquea).
+        case InputEventType::ForceCloseBuffer:
+            commands_.execute("buffer.cerrar.forzado");
+            break;
+
         // v0.6.3: comandos de buffer dentro del prefijo. El mapeo tecla ->
         // comando -> handler vive en commands_.
         case InputEventType::InsertChar:

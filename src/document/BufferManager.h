@@ -68,7 +68,10 @@ public:
     //   - ultimo buffer: se reinicia vacio y sin nombre (ResetLast).
     //   - varios buffers: se elimina y devuelve Removed (deja el indice
     //     en 0; el Editor abre el selector).
-    CloseResult closeActive(int rows, int cols);
+    // Con `force` (Ctrl+K Ctrl+W) el flag `modified` no bloquea: los
+    // cambios se descartan y se aplica el mismo desenlace (ResetLast si
+    // es el ultimo buffer, Removed si hay varios).
+    CloseResult closeActive(int rows, int cols, bool force = false);
 
     // Activa el buffer en el indice FISICO `idx`. Devuelve true si ese
     // buffer tiene seleccion NO vacia (para que el Editor reconcilie el

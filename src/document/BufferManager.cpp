@@ -103,13 +103,14 @@ int BufferManager::createBuffer(int rows, int cols) {
     return push(std::move(nuevo));
 }
 
-CloseResult BufferManager::closeActive(int rows, int cols) {
+CloseResult BufferManager::closeActive(int rows, int cols, bool force) {
     Buffer& b = active();
 
     // Invariante 10 (v0.6.3): un buffer modificado no se puede cerrar.
     // Hay que guardar los cambios (Ctrl+K s) o restaurarlo (undo hasta el
     // ultimo estado guardado). No se ofrece confirmacion: se bloquea.
-    if (b.modified) {
+    // Excepcion explicita: Ctrl+K Ctrl+W (`force`) descarta los cambios.
+    if (b.modified && !force) {
         return CloseResult::ModifiedBlocked;
     }
 

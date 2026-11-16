@@ -333,7 +333,10 @@ private:
     //   - modificado: NO cierra; muestra aviso (hay que guardar o restaurar).
     //   - ultimo buffer: no se elimina; se convierte en vacio sin nombre.
     //   - varios buffers: se elimina y se pasa al selector de buffers.
-    void closeActiveBuffer();
+    // Con `force` (Ctrl+K Ctrl+W) se descartan los cambios sin guardar:
+    // el buffer modificado se cierra igual, manteniendo el comportamiento
+    // del ultimo buffer (se reinicia, nunca desaparece).
+    void closeActiveBuffer(bool force = false);
     // v0.6.3: activa el buffer en el indice FISICO `idx` y reconcilia el
     // modo con el estado de su seleccion (Seleccion si tiene rango no
     // vacio, si no Navegacion). Uso interno/tests.

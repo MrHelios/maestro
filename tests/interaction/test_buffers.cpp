@@ -671,6 +671,78 @@ TEST(ctrl_k_w_modified_blocked_until_save) {
     CHECK(ed.state_ == State::Navegacion);
 }
 
+// Ctrl+K Ctrl+W sobre un archivo SIN cambios: cierra el buffer activo
+// igual que Ctrl+K w y deja la sesion en condiciones de salir.
+TEST(ctrl_k_ctrl_w_clean_file_closes_and_can_quit) {
+    TempFile f;
+    f.write("original");
+    Editor ed;
+    CHECK(ed.loadIntoActiveBuffer(f.path));  // B0 limpio con nombre
+    newBuffer(ed);                            // B1 activo, para que B0 se elimine
+    ed.activateBuffer(0);
+    CHECK(!ed.active().modified);
+    CHECK_EQ(ed.buffers.count(), 2);
+
+    forceCloseBuffer(ed);
+    CHECK_EQ(ed.buffers.count(), 1);
+    CHECK_EQ(ed.active().filename, "");       // queda el buffer nuevo
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK(ed.isRunning());
+
+    safeQuit(ed);                             // nada modificado: sale
+    CHECK(!ed.isRunning());
+}
+
+// Ctrl+K Ctrl+W con cambios sin guardar: descarta los cambios, cierra el
+// buffer y permite salir sin bloquear por el flag modified. El archivo en
+// disco conserva su contenido original.
+TEST(ctrl_k_ctrl_w_modified_file_discards_and_can_quit) {
+    TempFile f;
+    f.write("original");
+    Editor ed;
+    CHECK(ed.loadIntoActiveBuffer(f.path));
+    newBuffer(ed);
+    ed.activateBuffer(0);                     // B0 con nombre, activo
+    type(ed, "cambio");                       // lo deja modificado
+    press(ed, InputEventType::Escape);
+    CHECK(ed.active().modified);
+
+    forceCloseBuffer(ed);
+    CHECK_EQ(ed.buffers.count(), 1);          // se cerro pese a estar modificado
+    CHECK_EQ(fileContent(f.path), "original");// los cambios NO se guardaron
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Navegacion));
+    CHECK(ed.isRunning());
+
+    safeQuit(ed);                             // ya no hay modificados: sale
+    CHECK(!ed.isRunning());
+}
+
+// Con un solo buffer, Ctrl+K Ctrl+W conserva el comportamiento de
+// Ctrl+K w: el buffer no desaparece, se reinicia vacio y sin nombre.
+TEST(ctrl_k_ctrl_w_single_buffer_same_as_ctrl_k_w) {
+    // Ctrl+K Ctrl+W sobre el unico buffer, incluso modificado.
+    Editor forzado;
+    type(forzado, "cambios");
+    press(forzado, InputEventType::Escape);
+    CHECK(forzado.active().modified);
+    forceCloseBuffer(forzado);
+
+    // Referencia: Ctrl+K w sobre un unico buffer limpio (ResetLast).
+    Editor normal;
+    closeBuffer(normal);
+
+    for (Editor* ed : {&forzado, &normal}) {
+        CHECK_EQ(ed->buffers.count(), 1);
+        CHECK_EQ(ed->buffers.activeIndex(), 0);
+        CHECK_EQ(ed->active().document.lineCount(), 1);
+        CHECK_EQ(ed->active().document.lineAt(0), "");
+        CHECK(ed->active().filename.empty());
+        CHECK(!ed->active().modified);
+        CHECK_EQ(static_cast<int>(ed->state_), static_cast<int>(State::Navegacion));
+        CHECK_EQ(ed->active().unnamedName, "SinNombre1");
+    }
+}
+
 TEST(ctrl_k_w_modified_multi_buffer_blocked) {
     Editor ed;
     type(ed, "x");                         // B0 modificado
