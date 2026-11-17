@@ -312,6 +312,43 @@ TEST(softwrap_renderer_uses_effective_wrap_mode) {
     CHECK(spy.lastWrapIndex == nullptr);
 }
 
+// Softwrap se extiende a buffers SIN extension (category None: buffer nuevo
+// con filename vacio / "SinNombre1" o archivo sin sufijo). Antes solo los
+// archivos ".md" habilitaban el wrap; ahora esos buffers tambien deben ver
+// las filas completas sin scroll horizontal.
+TEST(softwrap_nameless_buffer_applies_softwrap) {
+    Editor ed;
+    SpyScreenRenderer& spy = injectSpy(ed);
+    NullSink sink;
+    ed.setSink(sink);
+
+    const std::vector<std::string> lines = {std::string(30, 'a')}; // 3 filas visuales (12 + 12 + 6)
+
+    // Nombres candidatos: archivo sin extension ("notas") y buffers nuevos
+    // (filename vacio -> "SinNombre1", "SinNombre2", ...).
+    const std::vector<std::string> names = {"notas", "", "SinNombre1"};
+    for (const std::string& fname : names) {
+        ed.active().filename = fname;
+        ed.active().document.restore(lines);
+        ed.resize(10, 19); // gutter 7, content width 12
+        ed.active().viewport.top = 0;
+        ed.active().cursor.line = 0;
+        ed.active().cursor.col = 0;
+
+        ed.renderFrame();
+        // El renderer recibe el wrap index habilitado (antes: nullptr para
+        // cualquier buffer que no sea .md).
+        CHECK(spy.lastWrapIndex != nullptr);
+        CHECK(spy.lastWrapIndex->enabled());
+        // 30 chars con textWidth 12 -> 3 filas visuales (12 + 12 + 6).
+        CHECK_EQ(spy.lastWrapIndex->totalRows(), 3);
+
+        // El wrap activo debe estar en el indice: el limite entre filas
+        // (col 12) resuelve a la fila visual 1, no a la linea logica 0.
+        CHECK_EQ(ed.wrapIndex().visualRowOf({0, 12}), 1);
+    }
+}
+
 static std::vector<std::string> wrappedLines(int count) {
     std::vector<std::string> lines;
     for (int i = 0; i < count; ++i) lines.push_back(std::string(30, 'a'));

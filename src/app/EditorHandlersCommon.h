@@ -64,10 +64,11 @@ inline int textWidthFor(const Viewport& vp, int totalLines) {
 
 // Helpers de soft-wrap para el Editor.
 // Condición EFECTIVA compartida por navegación, mouse y renderizado: un
-// archivo Markdown no usa soft-wrap si no queda ancho útil para el texto.
-// El índice aplica la misma regla (wantWrap = enabled && textWidth > 0).
+// archivo Markdown o un buffer sin extensión usa soft-wrap si queda ancho
+// útil para el texto. El índice aplica la misma regla (wantWrap = enabled &&
+// textWidth > 0).
 inline bool isWrapEnabledFor(const Buffer& b) {
-    return softwrap::isMarkdownFilename(b.filename) &&
+    return softwrap::isWrapEnabledForFilename(b.filename) &&
            textWidthFor(b.viewport, b.document.lineCount()) > 0;
 }
 

@@ -40,6 +40,19 @@ inline bool isMarkdownFilename(const std::string& filename) {
     return ext == ".md";
 }
 
+// Soft-wrap habilitado para un filename: Markdown siempre, y cualquier
+// buffer SIN extension (o sin nombre: p.ej. "SinNombre1", el buffer nuevo,
+// o un archivo sin sufijo). Se extiende el wrap a esos buffers para que el
+// usuario vea las filas completas sin scroll horizontal, igual que en .md.
+// Un filename con extension conocida y NO markdown (ej. .txt, .cpp) no usa
+// soft-wrap (modo identidad).
+inline bool isWrapEnabledForFilename(const std::string& filename) {
+    if (isMarkdownFilename(filename)) return true;
+    // Sin "." => sin extension (o filename vacio: buffer sin nombre).
+    if (filename.find_last_of('.') == std::string::npos) return true;
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // Índice de wrap: proyección visual plana con actualización incremental.
 // ---------------------------------------------------------------------------
