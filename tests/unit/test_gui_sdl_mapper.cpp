@@ -1,9 +1,14 @@
 #include "test_framework.h"
 
+#include <cstdint>
+#include <vector>
+
 #include "platform/gui/GuiSdlMapper.h"
 #include "platform/InputEvent.h"
 #include "platform/MouseEvent.h"
 #include "platform/gui/GuiKeymap.h"
+#include "rendering/gui/GuiFont.h"
+#include "rendering/gui/GuiRenderer.h"
 
 #define private public
 #include "app/Editor.h"
@@ -588,6 +593,210 @@ TEST(gui_sdl_window_flags_escala1_celulas_intactas_sin_hidpi) {
     CHECK_EQ(g.cellH, 18);
 }
 #endif  // HAVE_SDL2
+
+// Regresion --gui: con el emoji LITERAL "abc😀def" la fuente monoespaciada no
+// tiene glifo para el emoji y SDL_ttf lo sustituye por .notdef, que avanza UNA
+// celda. El renderer, en cambio, avanza la grilla DOS celdas (politica Unicode
+// del emoji), asi que 'd' se pinta una columna a la izquierda de su celda y el
+// cursor (que si usa columnas visuales) queda una columna a la derecha: al
+// escribir se modifica la columna anterior a la que se ve.
+//
+// NOTE: textWidth() conserva la METRICA CRUDA de TTF_SizeUTF8 (70 para
+// "abc😀def", 10 para "😀"), NO el ancho de grilla. El pintor GUI avanza
+// por columnas visuales (chrome::colCount * cellW), que SÍ da 80 y 20.
+// TODO(correccion-semantica): en el futuro textWidth() debería devolver
+// columnOf(text) * cellW() (ancho de grilla). Mientras tanto este test
+// documenta la brecha: las dos primeras CHECK_EQ documentan la metrica cruda,
+// las dos ultimas verifican que el ancho de grilla es el correcto.
+//
+// hasEmojiGlyph() solo indica que el codepoint existe en la fuente de emoji;
+// SDL_ttf puede no poder rasterizar fuentes de color (Noto Color Emoji).
+// Este test verifica adicionalmente que emojiTexture() devuelve una textura
+// valida cuando hay un renderer disponible (si no hay video, se skipea esa
+// parte y el pintor cae a placeholder graceful).
+TEST(gui_emoji_literal_advance_matches_visual_grid) {
+#ifdef HAVE_SDL2
+    GuiFont font;
+    if (!font.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    const std::string line = "abc😀def";
+    const int cw = font.cellW();
+    // Ancho de grilla correcto (lo que el pintor debe respetar): 8 celdas.
+    CHECK_EQ(utf8::columnOf(line, static_cast<int>(line.size())), 8);
+    CHECK_EQ(utf8::columnOf("😀", static_cast<int>(sizeof("😀") - 1)), 2);
+    // Metrica cruda de textWidth (TTF_SizeUTF8): .notdef avanza 1 celda,
+    // no 2. Esto es el bug documentado, no se corrige hasta cambiar la
+    // semantica de textWidth (ver TODO en GuiFont.h).
+    CHECK_EQ(font.textWidth(line), 7 * cw);   // "abc"=3 + ".notdef"=1 + "def"=3
+    CHECK_EQ(font.textWidth("😀"), 1 * cw);   // .notdef = 1 celda
+    // La fuente principal no tiene glifo de emoji; la de emoji sí.
+    char32_t cp = 0x1F600;
+    CHECK(!font.hasGlyph(cp));
+    // hasEmojiGlyph solo indica que el codepoint existe en la fuente;
+    // SDL_ttf puede no poder rasterizar fuentes de color (Noto Color Emoji).
+    // Verificar que realmente se puede crear una textura para el emoji
+    // (si hay renderer disponible; en entornos headless sin video se skipea).
+    {
+        if (SDL_InitSubSystem(SDL_INIT_VIDEO) == 0) {
+            SDL_Window* win = SDL_CreateWindow("emoji-test", 0, 0, 64, 64,
+                                               SDL_WINDOW_HIDDEN);
+            if (win) {
+                SDL_Renderer* ren =
+                    SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+                if (ren) {
+                    void* tex = font.emojiTexture(ren, cp, 0xFF, 0xFF, 0xFF);
+                    // La primera llamada debe devolver una textura valida.
+                    CHECK(tex != nullptr);
+                    // Mismo cp+color: el caché debe devolver la misma textura.
+                    void* tex2 = font.emojiTexture(ren, cp, 0xFF, 0xFF, 0xFF);
+                    if (tex != nullptr)
+                        CHECK(tex2 == tex);
+                    // Renderer nulo: debe devolver nullptr (defensiva).
+                    CHECK(font.emojiTexture(nullptr, cp, 0xFF, 0xFF, 0xFF) ==
+                          nullptr);
+                    font.clearCache();
+                    SDL_DestroyRenderer(ren);
+                }
+                SDL_DestroyWindow(win);
+            }
+            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        }
+    }
+    font.unload();
+#else
+    SKIP("sin SDL2");
+#endif
+}
+
+// Integracion: dibuja "abc😀def" en un renderer SDL usando el pintor
+// productivo paintGridText() y verifica que:
+//   - la 'd' empieza en la columna 5,
+//   - no hay desbordamiento de texto mas alla de la columna 7,
+//   - si hay una fuente de emoji disponible y SDL_ttf puede rasterizarla,
+//     el emoji produce pixeles visibles en su caja de dos celdas (cols 3 y 4).
+// La fuente de emoji es opcional: si no existe o SDL_ttf no puede rasterizar
+// fuentes de color (p. ej. Noto Color Emoji), el pintor deja el fondo del
+// emoji sin glifo (placeholder graceful) y el test sigue validando el
+// avance lógico y la posicion de d.
+TEST(gui_emoji_pintado_ocupa_caja_de_dos_celdas) {
+#ifdef HAVE_SDL2
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0)
+        SKIP("sin SDL video");
+    SDL_Window* win =
+        SDL_CreateWindow("emoji-paint-test", 0, 0, 200, 40,
+                         SDL_WINDOW_HIDDEN);
+    if (!win) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SKIP("sin ventana SDL");
+    }
+    SDL_Renderer* ren =
+        SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+    if (!ren) {
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SKIP("sin renderer SDL");
+    }
+
+    GuiFont font;
+    if (!font.load(16)) {
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SKIP("sin fuentes del sistema para GuiFont");
+    }
+    const int cw = font.cellW();
+    const int ch = font.cellH();
+    if (cw <= 0 || ch <= 0) {
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SKIP("metricas de celda invalidas");
+    }
+
+    // Fondo negro para distinguir pixeles de texto.
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+
+    // Pintar "abc😀def" usando el pintor productivo paintGridText.
+    // Avance por celdas visuales: 3 + 2 + 3 = 8 celdas.
+    const GuiColor fg{0xFF, 0xFF, 0xFF, 0xFF};
+    const int cols = paintGridTextForTests(ren, font, "abc😀def", fg, 0, 0,
+                                           cw, ch);
+    CHECK_EQ(cols, 8);
+
+    SDL_RenderPresent(ren);
+
+    // Leer pixeles del render target para verificar el pintado.
+    const int fw = 200;
+    const int fh = 40;
+    std::vector<Uint32> pixels32(static_cast<size_t>(fw * fh));
+    int pitch = fw * 4;
+    if (SDL_RenderReadPixels(ren, nullptr, SDL_PIXELFORMAT_RGBA8888,
+                             pixels32.data(), pitch) != 0) {
+        // El renderer dummy puede no soportar lectura de pixeles en todos
+        // los entornos: se salta la verificacion de pixeles pero se mantiene
+        // la verificacion de columnas y avance.
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SKIP("SDL_RenderReadPixels no disponible en este renderer");
+    }
+
+    // SDL_GetRGBA decodifica cada pixel respetando el formato y el
+    // endianess de la plataforma, evitando falsos positivos en little-endian
+    // donde SDL_PIXELFORMAT_RGBA8888 no guarda los bytes en orden RGBA.
+    SDL_PixelFormat* fmt = SDL_AllocFormat(SDL_PIXELFORMAT_RGBA8888);
+    auto pixelDiffersFromBg = [&](int px, int py) -> bool {
+        Uint8 r = 0, g = 0, b = 0, a = 0;
+        SDL_GetRGBA(pixels32[static_cast<size_t>(py * fw + px)], fmt,
+                    &r, &g, &b, &a);
+        return r != 0 || g != 0 || b != 0;
+    };
+
+    // Verificar siempre: la 'd' empieza en la columna 5.
+    bool dVisible = false;
+    for (int py = 0; py < ch && !dVisible; ++py) {
+        for (int px = 5 * cw; px < 6 * cw && px < fw; ++px) {
+            if (pixelDiffersFromBg(px, py)) {
+                dVisible = true;
+                break;
+            }
+        }
+    }
+    CHECK(dVisible);
+
+    // El emoji es opcional: solo exigir visibilidad si la fuente auxiliar
+    // existe y se pudo crear una textura para el glifo.
+    const bool emojiAvailable =
+        font.hasEmojiGlyph(0x1F600);
+    if (emojiAvailable) {
+        void* emojiTex = font.emojiTexture(ren, 0x1F600, 0xFF, 0xFF, 0xFF);
+        if (emojiTex != nullptr) {
+            // Region del emoji: columnas 3 y 4 -> x en [3*cw, 5*cw).
+            // Debe haber al menos un pixel distinto del fondo (emoji visible).
+            bool emojiVisible = false;
+            for (int py = 0; py < ch && !emojiVisible; ++py) {
+                for (int px = 3 * cw; px < 5 * cw && px < fw; ++px) {
+                    if (pixelDiffersFromBg(px, py)) {
+                        emojiVisible = true;
+                        break;
+                    }
+                }
+            }
+            CHECK(emojiVisible);
+        }
+        // Si emojiTexture devolvió nullptr, el pintor cae a placeholder
+        // graceful y no se exige visibilidad de pixeles del emoji.
+    }
+
+    SDL_FreeFormat(fmt);
+    font.clearCache();
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+#else
+    SKIP("sin SDL2");
+#endif
+}
 
 // división entera píxeles/celda -> CellPos 0-based.
 TEST(gui_sdl_guimouse_pixels_to_cell) {

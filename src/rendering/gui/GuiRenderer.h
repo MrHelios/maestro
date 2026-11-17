@@ -103,6 +103,15 @@ struct SDL_Renderer;
 struct SDL_Texture;
 #endif
 
+#ifdef HAVE_SDL2
+// Solo tests: expone paintGridText para verificar el pintado por celdas.
+// Llama al helper productivo. Permite probar el pintor real en lugar de
+// reproducir el pintado en el test.
+int paintGridTextForTests(void* sdlRenderer, GuiFont& font,
+                          std::string_view text, const GuiColor& fg,
+                          int px, int py, int cw, int ch);
+#endif
+
 class GuiTitleBar;
 
 class GuiRenderer : public ScreenRenderer {

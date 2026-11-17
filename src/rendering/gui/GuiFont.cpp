@@ -44,6 +44,12 @@ void* GuiFont::textTexture(void*, std::string_view, uint8_t, uint8_t, uint8_t,
     return nullptr;
 }
 int GuiFont::textWidth(std::string_view) const { return 0; }
+bool GuiFont::hasGlyph(char32_t) const { return false; }
+bool GuiFont::hasEmojiGlyph(char32_t) const { return false; }
+void* GuiFont::emojiTexture(void*, char32_t, uint8_t, uint8_t, uint8_t,
+                            uint8_t) {
+    return nullptr;
+}
 void GuiFont::clearCache() {}
 size_t GuiFont::cacheSize() const { return 0; }
 size_t GuiFont::maxCacheSize() const { return testMaxCache_ ? testMaxCache_ : 512; }
@@ -103,18 +109,76 @@ struct TextCache {
     unsigned long long destroys = 0;
 };
 
+// Clave del caché de emoji: codepoint + color (rgba empaquetado).
+struct EmojiCacheKey {
+    char32_t cp = 0;
+    uint32_t rgba = 0;
+    bool operator==(const EmojiCacheKey& o) const {
+        return cp == o.cp && rgba == o.rgba;
+    }
+};
+struct EmojiCacheKeyHash {
+    size_t operator()(const EmojiCacheKey& k) const noexcept {
+        size_t h = std::hash<uint32_t>{}(static_cast<uint32_t>(k.cp));
+        h ^= std::hash<uint32_t>{}(k.rgba) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+// Caché LRU independiente para texturas de emoji. Misma política que el
+// caché principal: tope acotado, una evicción por inserción, destruye al
+// salir. Separado del caché de texto para no mezclar claves y porque el
+// renderer propietario y el ciclo de vida son los mismos.
+struct EmojiCache {
+    struct Entry {
+        SDL_Texture* tex = nullptr;
+        std::list<EmojiCacheKey>::iterator lruIt;
+    };
+    std::unordered_map<EmojiCacheKey, Entry, EmojiCacheKeyHash> map;
+    std::list<EmojiCacheKey> lru;
+    unsigned long long hits = 0;
+    unsigned long long misses = 0;
+    unsigned long long evictions = 0;
+    unsigned long long destroys = 0;
+};
+
 void destroyTextureCounted(TextCache* c, SDL_Texture* t) {
     SDL_DestroyTexture(t);
     if (c) ++c->destroys;
 }
 
-void destroyCache(TextCache* c) {
+// Destruye todas las texturas de un cache (texto o emoji) y libera la
+// estructura. Ambas estructuras (TextCache y EmojiCache) tienen map con
+// Entry{SDL_Texture* tex, ...} y un contador destroys; una template evita
+// duplicar el recorrido.
+template <typename Cache>
+void destroyTextureCache(Cache* c) {
     if (!c) return;
     for (auto& kv : c->map) {
         SDL_DestroyTexture(kv.second.tex);
         ++c->destroys;
     }
     delete c;
+}
+
+// Vacía todas las texturas de un cache sin liberar la estructura. Mismo
+// patrón que destroyTextureCache pero conserva el objeto para reusarlo.
+template <typename Cache>
+void clearTextureCache(Cache* c) {
+    if (!c) return;
+    for (auto& kv : c->map) {
+        SDL_DestroyTexture(kv.second.tex);
+        ++c->destroys;
+    }
+    c->map.clear();
+    c->lru.clear();
+}
+
+void destroyCache(TextCache* c) {
+    destroyTextureCache(c);
+}
+
+void destroyEmojiCache(EmojiCache* c) {
+    destroyTextureCache(c);
 }
 
 // Métricas de celda de una fuente ABIERTA (helper del swap transaccional:
@@ -196,6 +260,8 @@ GuiFont::~GuiFont() {
     unload();
     destroyCache(static_cast<TextCache*>(cache_));
     cache_ = nullptr;
+    destroyEmojiCache(static_cast<EmojiCache*>(emojiCache_));
+    emojiCache_ = nullptr;
 }
 
 bool GuiFont::load(int pixelSize) {
@@ -256,11 +322,24 @@ bool GuiFont::openWithMetrics(int pixelSize,
         clearCache();
         if (old) {
             TTF_CloseFont(old);
+            // Cerrar tambien la fuente de emoji vieja antes de que
+            // TTF_Quit() pueda desinicializar la biblioteca.
+            if (emojiFont_) {
+                TTF_CloseFont(static_cast<TTF_Font*>(emojiFont_));
+                emojiFont_ = nullptr;
+            }
             if (--g_tffInitCount == 0) TTF_Quit();
         }
         // P2: aviso único si la fuente no parece monoespaciada (nunca
         // rechazo).
         maybeWarnNonMonospaceOnce(f, path_);
+
+        // Fuente auxiliar de emoji (independiente de la principal): se abre
+        // tras el commit exitoso para no bloquear la carga de la principal.
+        // Si no hay fuente de emoji, emojiFont_ queda nullptr y el pintor
+        // usará placeholder para glifos ausentes. Intenta env MAESTRO_EMOJI_FONT
+        // y, de fallback, el candidato del sistema.
+        loadEmojiFont(pixelSize);
         return true;
     }
 
@@ -270,7 +349,36 @@ bool GuiFont::openWithMetrics(int pixelSize,
     return false;
 }
 
+// Intenta abrir una fuente auxiliar de emoji para renderizar glifos que
+// la fuente principal no cubre (p. ej. U+1F600 😀). No es error terminal:
+// si no hay fuente de emoji, emojiFont_ queda nullptr y el pintor usa
+// placeholder. Intenta, en orden:
+//   1. env MAESTRO_EMOJI_FONT (override explícito opcional)
+//   2. Noto Color Emoji del sistema
+void GuiFont::loadEmojiFont(int pixelSize) {
+    if (emojiFont_) return;  // ya cargada
+    const char* candidates[] = {
+        std::getenv("MAESTRO_EMOJI_FONT"),
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+    };
+    for (const char* path : candidates) {
+        if (!path || !*path) continue;
+        TTF_Font* ef = TTF_OpenFont(path, pixelSize);
+        if (ef) {
+            emojiFont_ = static_cast<void*>(ef);
+            return;
+        }
+    }
+}
+
 void GuiFont::unload() {
+    // Cerrar la fuente auxiliar de emoji ANTES que la principal para que
+    // TTF_Quit() (disparado cuando g_tffInitCount llega a 0 al cerrar
+    // font_) no se ejecute mientras aun hay una fuente TTF abierta.
+    if (emojiFont_) {
+        TTF_CloseFont(static_cast<TTF_Font*>(emojiFont_));
+        emojiFont_ = nullptr;
+    }
     if (font_) {
         TTF_CloseFont(static_cast<TTF_Font*>(font_));
         font_ = nullptr;
@@ -299,7 +407,10 @@ void* GuiFont::textTexture(void* sdlRenderer, std::string_view text,
     // y SDL_ttf exige C-string. La copia es además la clave del caché.
     const size_t cap = testMaxCache_ ? testMaxCache_ : kMaxCachedLines;
     CacheKey key{std::string(text),
-                 static_cast<uint32_t>(r | (g << 8) | (b << 16) | (a << 24))};
+                 static_cast<uint32_t>(r) |
+                     (static_cast<uint32_t>(g) << 8) |
+                     (static_cast<uint32_t>(b) << 16) |
+                     (static_cast<uint32_t>(a) << 24)};
     auto it = cache->map.find(key);
     if (it != cache->map.end()) {
         // Hit: promociona a MRU y devuelve la textura viva. Nunca se devuelve
@@ -361,17 +472,89 @@ int GuiFont::textWidth(std::string_view text) const {
     return w;
 }
 
+bool GuiFont::hasGlyph(char32_t cp) const {
+    if (!font_) return false;
+    return TTF_GlyphIsProvided32(static_cast<TTF_Font*>(font_), cp) != 0;
+}
+
+bool GuiFont::hasEmojiGlyph(char32_t cp) const {
+    if (!emojiFont_) return false;
+    return TTF_GlyphIsProvided32(static_cast<TTF_Font*>(emojiFont_), cp) != 0;
+}
+
+void* GuiFont::emojiTexture(void* sdlRenderer, char32_t cp,
+                            uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+    if (!emojiFont_ || !sdlRenderer) return nullptr;
+    auto* cache = static_cast<EmojiCache*>(emojiCache_);
+    if (!cache) {
+        // Crea el caché perezosamente en la primera inserción.
+        emojiCache_ = new EmojiCache();
+        cache = static_cast<EmojiCache*>(emojiCache_);
+    }
+    // Si cambió el renderer, las texturas del caché son para el viejo y no
+    // son válidas para el nuevo: se vacía el caché antes de buscar/crear nada.
+    if (sdlRenderer != emojiRenderer_) {
+        clearTextureCache(static_cast<EmojiCache*>(emojiCache_));
+        emojiRenderer_ = sdlRenderer;
+    }
+    const uint32_t rgba = static_cast<uint32_t>(r) |
+        (static_cast<uint32_t>(g) << 8) |
+        (static_cast<uint32_t>(b) << 16) |
+        (static_cast<uint32_t>(a) << 24);
+    EmojiCacheKey key{cp, rgba};
+    auto it = cache->map.find(key);
+    if (it != cache->map.end()) {
+        // Hit: promociona a MRU y devuelve la textura viva.
+        cache->lru.splice(cache->lru.begin(), cache->lru, it->second.lruIt);
+        ++cache->hits;
+        return static_cast<void*>(it->second.tex);
+    }
+    ++cache->misses;
+
+    // Renderiza un solo glifo de la fuente de emoji. SDL_ttf ignora la
+    // talla de Noto Color Emoji (bitmap nativo); el caller dibuja la
+    // textura dentro de su caja de celdas (cells * cellW × cellH).
+    SDL_Surface* surf = TTF_RenderGlyph32_Blended(
+        static_cast<TTF_Font*>(emojiFont_), cp, SDL_Color{r, g, b, a});
+    if (!surf) return nullptr;
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(
+        static_cast<SDL_Renderer*>(sdlRenderer), surf);
+    SDL_FreeSurface(surf);
+    if (!tex) return nullptr;
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+
+    // Evicción LRU de una sola entrada si se supera el tope.
+    const size_t cap = kMaxCachedLines;
+    if (cache->map.size() >= cap && !cache->lru.empty()) {
+        const EmojiCacheKey& victim = cache->lru.back();
+        auto vit = cache->map.find(victim);
+        if (vit != cache->map.end()) {
+            SDL_DestroyTexture(vit->second.tex);
+            ++cache->destroys;
+            cache->map.erase(vit);
+            ++cache->evictions;
+        }
+        cache->lru.pop_back();
+    }
+    // Publica como MRU.
+    cache->lru.push_front(key);
+    EmojiCache::Entry e;
+    e.tex = tex;
+    e.lruIt = cache->lru.begin();
+    cache->map.emplace(std::move(key), e);
+    return static_cast<void*>(tex);
+}
+
 void GuiFont::clearCache() {
     // Invariante (HAVE_SDL2_TTF): cache_ siempre existe desde construcción
     // hasta destrucción; solo se vacía en el lugar (una sola liberación por
     // textura). Además olvida el renderer activo (ver invariante en el header).
-    auto* cache = static_cast<TextCache*>(cache_);
-    if (cache) {
-        for (auto& kv : cache->map) destroyTextureCounted(cache, kv.second.tex);
-        cache->map.clear();
-        cache->lru.clear();
-    }
+    clearTextureCache(static_cast<TextCache*>(cache_));
+    // También vacía el caché independiente de emoji: destruye sus texturas
+    // una a una y olvida su renderer dueño.
+    clearTextureCache(static_cast<EmojiCache*>(emojiCache_));
     renderer_ = nullptr;
+    emojiRenderer_ = nullptr;
 }
 
 size_t GuiFont::cacheSize() const {

@@ -122,6 +122,54 @@ inline int codepointWidth(uint32_t cp) {
     return 1;
 }
 
+// Decodifica el codepoint UTF-8 que comienza en `pos` de `line` (n = size).
+// Devuelve 0 si los bytes no forman una secuencia valida (byte invalido,
+// continuacion huérfana, sobrecarga, surrogate, ...). `len` recibe el numero
+// de bytes consumidos (>= 1). Usado por el pintor GUI para decidir, glifo a
+// glifo, si usa la fuente principal, la fuente de emoji o placeholder.
+inline uint32_t codepointAt(std::string_view line, int pos, int n, int& len) {
+    len = 0;
+    if (pos < 0) return 0;
+    if (pos >= static_cast<int>(line.size())) return 0;
+    if (n > static_cast<int>(line.size())) n = static_cast<int>(line.size());
+    if (n <= 0 || pos >= n) return 0;
+
+    int consumedLen = cellLen(line, pos, n);
+    if (consumedLen <= 0) consumedLen = 1;
+    if (pos + consumedLen > n) consumedLen = n - pos;
+    unsigned char c = static_cast<unsigned char>(line[pos]);
+    if (c < 0x80) { len = consumedLen; return c; }
+    if ((c & 0xC0) == 0x80) { len = 1; return 0; }  // continuacion huérfana
+    int expect = 0;
+    if ((c & 0xE0) == 0xC0) expect = 1;
+    else if ((c & 0xF0) == 0xE0) expect = 2;
+    else if ((c & 0xF8) == 0xF0) expect = 3;
+    else { len = 1; return 0; }
+    if (pos + expect >= n) { len = 1; return 0; }
+    for (int k = 1; k <= expect; ++k)
+        if ((static_cast<unsigned char>(line[pos + k]) & 0xC0) != 0x80) { len = 1; return 0; }
+    uint32_t cp = 0;
+    if (expect == 1) {
+        if (c < 0xC2) { len = 1; return 0; }
+        cp = ((c & 0x1F) << 6) | (static_cast<unsigned char>(line[pos + 1]) & 0x3F);
+    } else if (expect == 2) {
+        unsigned char c1 = static_cast<unsigned char>(line[pos + 1]);
+        if (c == 0xE0 && c1 < 0xA0) { len = 1; return 0; }
+        if (c == 0xED && c1 > 0x9F) { len = 1; return 0; }
+        cp = ((c & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (static_cast<unsigned char>(line[pos + 2]) & 0x3F);
+    } else {
+        unsigned char c1 = static_cast<unsigned char>(line[pos + 1]);
+        if (c == 0xF0 && c1 < 0x90) { len = 1; return 0; }
+        if (c == 0xF4 && c1 > 0x8F) { len = 1; return 0; }
+        if (c >= 0xF5) { len = 1; return 0; }
+        cp = ((c & 0x07) << 18) | ((c1 & 0x3F) << 12) | ((static_cast<unsigned char>(line[pos + 2]) & 0x3F) << 6) | (static_cast<unsigned char>(line[pos + 3]) & 0x3F);
+        if (cp > 0x10FFFF) { len = 1; return 0; }
+    }
+    if (cp >= 0xD800 && cp <= 0xDFFF) { len = 1; return 0; }
+    len = consumedLen;
+    return cp;
+}
+
 inline int cellWidth(std::string_view line, int pos, int n) {
     unsigned char c = static_cast<unsigned char>(line[pos]);
     if (c < 0x80) return 1;

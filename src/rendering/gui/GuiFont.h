@@ -141,9 +141,41 @@ public:
                       uint8_t r, uint8_t g, uint8_t b, uint8_t a = 0xFF);
 
     // Ancho en píxeles de `text` con la fuente actual (0 si no hay fuente).
-    // Acepta string_view con la misma disciplina que textTexture: se copia
-    // a un NUL-terminado antes de TTF_SizeUTF8 (nunca view.data() directo).
+    // METRICA CRUDA: devuelve el avance real reportado por TTF_SizeUTF8, NO
+    // el ancho de grilla. Con fuente monoespaciada y un glifo de 1 columna
+    // coincide con cellW(); con un glifo de 2 celdas coincide con 2*cellW();
+    // pero con un glifo ausente (.notdef) SDL_ttf puede reportar 1 celda
+    // aunque el renderer reserve 2. Por eso NO debe usarse para decidir
+    // dónde pintar cada carácter: el pintor avanza por columnas visuales
+    // (chrome::colCount / utf8::columnOf), no por textWidth.
+    //
+    // TODO(correccion-semantica): en el futuro textWidth debería devolver
+    // columnOf(text) * cellW() (ancho de grilla). Mientras tanto se conserva
+    // la métrica cruda para no romper contratos existentes y el test
+    // gui_emoji_literal_advance_matches_visual_grid documenta la brecha.
     int textWidth(std::string_view text) const;
+
+    // Glifo disponible en la FUENTE PRINCIPAL (monoespaciada). true si
+    // SDL_ttf reporta que el codepoint tiene glifo. Usado por el pintor para
+    // decidir si renderiza el carácter con la fuente principal o debe
+    // recurrir a la fuente auxiliar de emoji / placeholder.
+    bool hasGlyph(char32_t cp) const;
+
+    // Glifo disponible en la FUENTE AUXILIAR DE EMOJI (p. ej. Noto Color
+    // Emoji). true si el codepoint tiene glifo ahí. Se usa para emoji que
+    // la fuente principal no cubre.
+    bool hasEmojiGlyph(char32_t cp) const;
+
+    // Renderiza UN codepoint de la fuente auxiliar de emoji a textura.
+    // Devuelve nullptr si no hay fuente emoji/renderer o falla el raster.
+    // El caller dibuja la textura dentro de su caja de celdas
+    // (cells * cellW × cellH), nunca avanza X por el ancho real de la
+    // textura. Incluye el color en la clave del caché interno LRU
+    // (separado del caché de texto principal), con el mismo tope y política
+    // de evicción. Las texturas se liberan en clearCache() y unload().
+    void* emojiTexture(void* sdlRenderer, char32_t cp,
+                       uint8_t r, uint8_t g, uint8_t b,
+                       uint8_t a = 0xFF);
 
     // Libera todas las texturas (cambio de renderer o de tema si se quiere
     // forzar; el color ya va en la clave así que el toggle no lo exige).
@@ -194,15 +226,24 @@ public:
     static void resetEnvWarnStateForTests();
 
 private:
+    // Abre la fuente auxiliar de emoji (no error terminal si falla).
+    // Llamada internamente por openWithMetrics tras cargar la fuente
+    // principal. No forma parte de la API pública por ser un detalle de
+    // implementación del proceso de carga.
+    void loadEmojiFont(int pixelSize);
+
     // Reemplazo transaccional (implementado en el .cpp sobre SDL_ttf):
     // explicitPath vacío = resolución con FontOrder (load); con valor =
     // ruta única Cli sin fallback (loadWithPath).
     bool openWithMetrics(int pixelSize,
                          const std::optional<std::string>& explicitPath);
     void* font_ = nullptr;     // TTF_Font* opaco (solo el .cpp conoce SDL_ttf)
+    void* emojiFont_ = nullptr; // TTF_Font* opaco de fuente auxiliar de emoji
     void* cache_ = nullptr;    // caché (texto,color)->SDL_Texture*, opaco
+    void* emojiCache_ = nullptr; // caché (cp,color)->SDL_Texture*, opaco
     void* renderer_ = nullptr;  // SDL_Renderer* opaco dueño del caché (o
                                 // nullptr si el caché está vacío/desconocido)
+    void* emojiRenderer_ = nullptr; // SDL_Renderer* dueño del caché de emoji
     std::string path_;
     int pixelSize_ = 16;
     // Override del tope LRU solo para tests (0 = default kMaxCachedLines).

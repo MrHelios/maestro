@@ -345,7 +345,6 @@ TEST(mouse_map_past_eol_clamps) {
 // pero la representacion real es una
 TEST(mouse_map_wide_char_both_cells) {
     Document d;
-    // @cleanup no se que emoji se puso, pero no se ve en el editor y ademas el cursor se bugea, agg una columna demas
     d.restore({"abc\xF0\x9F\x98\x80" "def"}); // abc😀def, emoji = 2 celdas
     
     Viewport vp = testViewport();

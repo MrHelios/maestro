@@ -815,3 +815,31 @@ TEST(splitCells_bytes_invalidos_byte_safe) {
     CHECK_EQ(v.size(), 1u);
     CHECK_EQ(v[0], s);
 }
+
+// codepointAt con secuencia invalida seguida de ASCII: debe consumir
+// solamente el byte inicial invalido (len=1) para que el ASCII siguiente
+// siga decodificandose normalmente.
+TEST(codepointAt_invalido_despuis_consume_un_byte) {
+    // Byte inicial de 3 bytes seguido de continuacion invalida, luego 'A'.
+    // La secuencia invalida se rechaza (len=1) y la 'A' se decodifica como 65.
+    const std::string s("\xE2" "A", 3);  // 0xE2 lead invalido, 0x41 = 'A'
+    int len = 0;
+    uint32_t cp = utf8::codepointAt(s, 0, 3, len);
+    CHECK_EQ(cp, 0u);             // secuencia invalida
+    CHECK_EQ(len, 1);             // consume solo el byte inicial
+
+    cp = utf8::codepointAt(s, 1, 3, len);
+    CHECK_EQ(cp, 65u);            // 'A'
+    CHECK_EQ(len, 1);
+
+    // Byte inicial de 4 bytes seguido de ASCII sin continuaciones: se rechaza.
+    const std::string s2("\xF0" "A", 3);  // 0xF0 lead de 4 bytes, 0x41 = 'A'
+    len = 0;
+    cp = utf8::codepointAt(s2, 0, 3, len);
+    CHECK_EQ(cp, 0u);             // secuencia invalida (faltan continuaciones)
+    CHECK_EQ(len, 1);             // consume solo el byte inicial
+
+    cp = utf8::codepointAt(s2, 1, 3, len);
+    CHECK_EQ(cp, 65u);            // 'A'
+    CHECK_EQ(len, 1);
+}

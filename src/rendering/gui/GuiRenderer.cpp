@@ -8,6 +8,7 @@
 
 #include "rendering/RenderUtil.h"
 #include "rendering/gui/GuiTitleBar.h"
+#include "base/utf8.h"
 
 #ifdef HAVE_SDL2
 #include <SDL2/SDL.h>
@@ -31,7 +32,14 @@ bool prepareFramebufferTarget(SDL_Renderer* r, SDL_Texture* fb) {
 GuiRenderer::GuiRenderer(const GuiOptions& opts) : options_(opts) {
     if (opts.theme == GuiTheme::Light) dark_ = false;
 }
-GuiRenderer::~GuiRenderer() { destroyFramebuf(); }
+GuiRenderer::~GuiRenderer() {
+    // Vaciar los cachés de texturas ANTES de que se destruya el renderer
+    // (font_ es miembro y se destruye tras este cuerpo). SDL_DestroyRenderer
+    // destruye las texturas asociadas; si no las liberamos primero, el
+    // destructor de GuiFont intentaría destruirlas nuevamente (doble liberacion).
+    font_.clearCache();
+    destroyFramebuf();
+}
 
 void GuiRenderer::destroyFb(FrameSurface& s) {
 #ifdef HAVE_SDL2
@@ -589,6 +597,16 @@ ChromeData GuiRenderer::fileListChrome(
     return data;
 }
 
+// Forward declarations globales (definidas después del namespace) para que
+// las funciones del namespace anónimo (paintSegmentRow, etc.) puedan llamar a
+// paintText/paintGridText.
+#ifdef HAVE_SDL2
+int paintGridText(SDL_Renderer*, GuiFont&, std::string_view, const GuiColor&,
+                  int, int, int, int);
+int paintText(SDL_Renderer*, GuiFont&, std::string_view, const GuiColor&,
+              int, int);
+#endif
+
 namespace {
 
 constexpr int kScrollbarMinThumbPx = 24;
@@ -873,23 +891,6 @@ bool sameOptSelection(const std::optional<Selection>& a,
     return a->anchor == b->anchor && a->position == b->position;
 }
 
-#ifdef HAVE_SDL2
-// Pinta un texto en (px,py) con color fg; devuelve el ancho en celdas
-// consumido (para avanzar la grilla monoespaciada).
-// string_view: GuiFont copia a NUL-terminado antes de SDL_ttf (ver GuiFont.h).
-int paintText(SDL_Renderer* r, GuiFont& font, std::string_view text,
-              const GuiColor& fg, int px, int py) {
-    if (text.empty() || !font.ok()) return chrome::colCount(text);
-    void* tex = font.textTexture(r, text, fg.r, fg.g, fg.b);
-    if (!tex) return chrome::colCount(text);
-    SDL_Texture* t = static_cast<SDL_Texture*>(tex);
-    int tw = 0, th = 0;
-    SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-    SDL_Rect dst{px, py, tw, th};
-    SDL_RenderCopy(r, t, nullptr, &dst);
-    return chrome::colCount(text);
-}
-
 void paintSegmentRow(SDL_Renderer* r, GuiFont& font, bool dark,
                      int basePx, int basePy, int cw, int ch,
                      const char* text, size_t len, StyleRole role,
@@ -1103,14 +1104,7 @@ void paintContentCursor(SDL_Renderer* r, GuiFont& font, bool dark,
                                     ? glyph.cellBg
                                     : guichrome::background(dark);
         const GuiColor fg = guichrome::cursorGlyphFg(cellBg, dark);
-        void* tex = font.textTexture(r, glyph.text, fg.r, fg.g, fg.b);
-        if (tex) {
-            SDL_Texture* t = static_cast<SDL_Texture*>(tex);
-            int tw = 0, th = 0;
-            SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-            SDL_Rect dst{px, py, tw, th};
-            SDL_RenderCopy(r, t, nullptr, &dst);
-        }
+        paintGridText(r, font, glyph.text, fg, px, py, cw, ch);
     }
 }
 
@@ -1140,14 +1134,8 @@ void paintStatusBarAt(SDL_Renderer* r, GuiFont& font, bool dark,
                 sg.text.find_first_not_of(' ') == std::string::npos;
             if (!onlySpaces) {
                 const GuiColor fg = guichrome::colorFor(sg.role, dark);
-                void* tex = font.textTexture(r, sg.text, fg.r, fg.g, fg.b);
-                if (tex) {
-                    SDL_Texture* t = static_cast<SDL_Texture*>(tex);
-                    int tw = 0, th = 0;
-                    SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-                    SDL_Rect dst{baseX + consumed * cw, y, tw, th};
-                    SDL_RenderCopy(r, t, nullptr, &dst);
-                }
+                paintGridText(r, font, sg.text, fg,
+                              baseX + consumed * cw, y, cw, ch);
             }
             consumed += cols;
         }
@@ -1198,20 +1186,9 @@ void paintMessageBarOverlay(SDL_Renderer* r, GuiFont& font, bool dark,
                 sg.text.find_first_not_of(' ') == std::string::npos;
             if (!onlySpaces) {
                 const GuiColor fg = guichrome::colorFor(sg.role, dark);
-                void* tex = font.textTexture(r, sg.text, fg.r, fg.g, fg.b);
-                if (tex) {
-                    SDL_Texture* t = static_cast<SDL_Texture*>(tex);
-                    int tw = 0, th = 0;
-                    SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-                    // messageTextTop es el top de la celda de texto (alto ch)
-                    // centrada en la banda; el ajuste fino por tinta solo
-                    // actúa si una fuente violara el contrato th == ch.
-                    const int gap = ch - th;
-                    const int y = topInset + geometry.messageTextTop +
-                                  (gap > 0 ? gap / 2 : 0);
-                    SDL_Rect dst{baseX + consumed * cw, y, tw, th};
-                    SDL_RenderCopy(r, t, nullptr, &dst);
-                }
+                paintGridText(r, font, sg.text, fg,
+                              baseX + consumed * cw,
+                              topInset + geometry.messageTextTop, cw, ch);
             }
             consumed += cols;
         }
@@ -1337,19 +1314,88 @@ void paintContentCursorFromSnapshot(SDL_Renderer* r, GuiFont& font, bool dark,
                                     ? glyph.cellBg
                                     : guichrome::background(dark);
         const GuiColor fg = guichrome::cursorGlyphFg(cellBg, dark);
-        void* tex = font.textTexture(r, glyph.text, fg.r, fg.g, fg.b);
-        if (tex) {
-            SDL_Texture* t = static_cast<SDL_Texture*>(tex);
-            int tw = 0, th = 0;
-            SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-            SDL_Rect dst{px, py, tw, th};
-            SDL_RenderCopy(r, t, nullptr, &dst);
-        }
+        paintGridText(r, font, glyph.text, fg, px, py, cw, ch);
     }
 }
-#endif
 
 }  // namespace
+
+#ifdef HAVE_SDL2
+// Pinta `text` avanzando X por columnas visuales (w * cw por glifo) y nunca
+// por el ancho real de la textura. Cada glifo se dibuja dentro de su caja de
+// celdas (w * cw × ch), centrado si la textura no la llena. Si el glifo no
+// esta en la fuente principal pero sí en la fuente auxiliar de emoji, se
+// renderiza desde alla; si no esta en ninguna, se deja solo el fondo
+// (placeholder). Devuelve el total de columnas visuales consumidas.
+int paintGridText(SDL_Renderer* r, GuiFont& font, std::string_view text,
+                  const GuiColor& fg, int px, int py, int cw, int ch) {
+    if (text.empty() || !font.ok() || cw <= 0 || ch <= 0)
+        return chrome::colCount(text);
+    const int totalCols = chrome::colCount(text);
+    int x = px;
+    int i = 0;
+    const int n = static_cast<int>(text.size());
+    while (i < n) {
+        int len = 0;
+        uint32_t cp = utf8::codepointAt(text, i, n, len);
+        int w = utf8::cellWidth(text, i, n);
+        if (w <= 0) w = 1;
+        SDL_Texture* t = nullptr;
+        if (cp != 0 && font.hasGlyph(cp)) {
+            void* tex = font.textTexture(r, text.substr(i, len),
+                                         fg.r, fg.g, fg.b);
+            t = static_cast<SDL_Texture*>(tex);
+        } else if (cp != 0 && font.hasEmojiGlyph(cp)) {
+            void* tex = font.emojiTexture(r, cp, fg.r, fg.g, fg.b);
+            t = static_cast<SDL_Texture*>(tex);
+        }
+        // Glifo sin textura (ausente en ambas fuentes): solo fill, sin
+        // textura que desalinee la grilla.
+        if (t) {
+            int tw = 0, th = 0;
+            SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+            const int dstW = w * cw;
+            const int dstH = ch;
+            // Dibujar la textura dentro de su caja de celdas (dstW x dstH),
+            // preservando su aspect ratio y centrada. NotoColorEmoji entrega
+            // un bitmap nativo (p. ej. 136x128) que no coincide con la caja
+            // de 2 celdas; se escala proporcionalmente para no desbordar ni
+            // desalinear la grilla. Para ASCII de 1 columna dstW == cw == tw
+            // y dstH == ch == th, por lo que el escalado es identidad.
+            int drawW = tw;
+            int drawH = th;
+            if (tw > 0 && th > 0 && (tw != dstW || th != dstH)) {
+                const double scale = std::min(
+                    static_cast<double>(dstW) / tw,
+                    static_cast<double>(dstH) / th);
+                drawW = std::max(1, static_cast<int>(std::lround(tw * scale)));
+                drawH = std::max(1, static_cast<int>(std::lround(th * scale)));
+            }
+            const int dstX = x + (dstW - drawW) / 2;
+            const int dstY = py + (dstH - drawH) / 2;
+            SDL_Rect dst{dstX, dstY, drawW, drawH};
+            SDL_RenderCopy(r, t, nullptr, &dst);
+        }
+        x += w * cw;
+        i += len;
+    }
+    return totalCols;
+}
+
+int paintText(SDL_Renderer* r, GuiFont& font, std::string_view text,
+              const GuiColor& fg, int px, int py) {
+    return paintGridText(r, font, text, fg, px, py, font.cellW(),
+                         font.cellH());
+}
+
+// Solo tests: expone paintGridText para verificar el pintado por celdas.
+int paintGridTextForTests(void* sdlRenderer, GuiFont& font,
+                          std::string_view text, const GuiColor& fg,
+                          int px, int py, int cw, int ch) {
+    return paintGridText(static_cast<SDL_Renderer*>(sdlRenderer), font,
+                         text, fg, px, py, cw, ch);
+}
+#endif
 
 bool GuiRenderer::tryFastCursorMove(
     const Document& doc, const Cursor& cursor, const Viewport& viewport,
