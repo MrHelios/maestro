@@ -6,32 +6,9 @@
 #include "test_framework.h"
 #include "document/Document.h"
 
-using testfw::TempFile;
+namespace {
 
-// ---------------------------------------------------------------------------
-// Round-trip de archivos: load -> save -> load
-// ---------------------------------------------------------------------------
-// La propiedad mas fuerte que puede pedirse de carga/guardado: tras abrir,
-// guardar y volver a abrir, el contenido en DISCO debe ser EXACTAMENTE el
-// original (comparacion byte a byte). Esto comprueba de una sola vez
-// loadFromFile + saveToFile + deteccion de terminador + el flag del '\n'
-// final: cualquier desincronizacion entre la representacion en lineas y el
-// byte stream (p.ej. el problema del '\n' final, o un CRLF mal traducido)
-// se delata sola.
-//
-// ALCANCE de la propiedad: el round-trip byte-exacto se exige SOLO para
-// archivos con terminador HOMOGENEO (todo LF o todo CRLF) y que no pongan
-// casos que el modelo de lineas no conserva por decision de diseño. En
-// concreto NO aplica (dejado anotado, no testeado como propiedad):
-//   - archivos con terminadores MIXTOS (p.ej. "a\nb\r\nc"): loadFromFile
-//     detecta CRLF si cualquier linea lo usa (Document.cpp:50) y convierte
-//     el archivo entero a CRLF al guardar. Decisión documentada en
-//     Document.h (LineEnding).
-//   - archivos que terminan en CR legacy (p.ej. "abc\ndef\r"): CR no se
-//     auto-detecta en load (solo se conserva con setLineEnding), asi que el
-//     '\r' final se pierde al guardar. Documentado en Document.h.
-// Ambos son comportamientos intencionales, no bugs; este test los excluye
-// para no exigir una propiedad que la especificacion no promete.
+using testfw::TempFile;
 
 // Lee un archivo como cadena de bytes cruda.
 static std::string readBytes(const std::string& path) {
@@ -52,20 +29,22 @@ struct RtCase {
     std::string content;
 };
 
-// La tabla cubre todos los casos de borde que pueden desincronizar el
-// modelo de lineas con el byte stream. '"..."' con ESC para cr/lf.
 static void assertRoundTripTable(const std::vector<RtCase>& cases) {
     for (const RtCase& c : cases) {
         TempFile f;
-        // Paso 1: escribir el archivo tal cual.
+        Document d1, d2;
+        
+        // escribir el archivo tal cual.
         writeBytes(f.path, c.content);
-        // Paso 2: load del original.
-        Document d1;
+        
+        // d1
+        // load del original.
+        // save (mismo path; un editor normal guarda sobre el mismo).
         CHECK_EQ(d1.loadFromFile(f.path), LoadResult::Success);
-        // Paso 3: save (mismo path; un editor normal guarda sobre el mismo).
         CHECK(d1.saveToFile(f.path));
-        // Paso 4: reload del archivo ya guardado.
-        Document d2;
+        
+        // d2
+        // reload del archivo ya guardado.
         CHECK_EQ(d2.loadFromFile(f.path), LoadResult::Success);
 
         // Propiedad: el archivo en disco quedo byte a byte como el original.
@@ -80,7 +59,7 @@ static void assertRoundTripTable(const std::vector<RtCase>& cases) {
                       << persisted.size() << " bytes\n";
         }
 
-        // Reflexividad de la carga: ambos documentos cargados del mismo
+        // ambos documentos cargados del mismo
         // archivo ven exactamente las mismas lineas y el mismo '\n' final.
         CHECK(d1.snapshot() == d2.snapshot());
         if (d1.snapshot() != d2.snapshot())
@@ -94,9 +73,11 @@ static void assertRoundTripTable(const std::vector<RtCase>& cases) {
     }
 }
 
+} // namespace
+
 TEST(roundtrip_empty_file) {
     assertRoundTripTable({
-        {"empty", ""},
+        {"empty",""},
     });
 }
 
@@ -117,11 +98,10 @@ TEST(roundtrip_multiple_lines) {
     });
 }
 
-TEST(roundtrip_trailing_newline_flag) {
-    // El caso del '\n' final: el modelo de lineas no representa la nueva
-    // linea final, asi que loadFromFile + saveToFile deben llevar el flag
-    // sincronizado. Si se desincroniza, el archivo reaparece igual o con
-    // un '\n' de mas/menos.
+// El caso del '\n' final: 
+// el modelo de lineas no representa la nueva linea final, asi que loadFromFile + saveToFile deben llevar el flag
+// sincronizado. Si se desincroniza, el archivo reaparece igual o con un '\n' de mas/menos.
+TEST(roundtrip_trailing_newline_flag) { 
     assertRoundTripTable({
         {"trailing", "abc\ndef\n"},
         {"no_trailing", "abc\ndef"},
@@ -129,88 +109,119 @@ TEST(roundtrip_trailing_newline_flag) {
     });
 }
 
+// Bytes UTF-8 multibyte: 
+// deben sobrevivir intactos (editor binariamente seguro), 
+// tanto ASCII dentro de lineas como secuencias multibyte alrededor.
 TEST(roundtrip_utf8) {
-    // Bytes UTF-8 multibyte: deben sobrevivir intactos (editor
-    // binariamente seguro), tanto ASCII dentro de lineas como secuencias
-    // multibyte alrededor.
     assertRoundTripTable({
         {"utf8_accents", "caf\xc3\xa9 \xe2\x80\x94 \xf0\x9f\x98\x80\n"},
         {"utf8_multiline", "h\xc3\xa9llo\nm\xc3\xa9t\nb\xc3\xbat\n"},
-        // OJO: tras el byte multibyte va un caracter ASCII que es digito
-        // hex ('b','f'); hay que separar los literales o el escape \xa1b se
-        // tragaria el 'b' como parte del byte (0x1b), no 'á' + 'b'.
+        // OJO: 
+        // tras el byte multibyte va un caracter ASCII que es digito hex ('b','f'); 
+        // hay que separar los literales o el escape \xa1b
         {"utf8_crlf", "\xc3\xa1" "b\r\n" "\xc3\xa9" "f\r\n"},
     });
 }
 
-TEST(roundtrip_empty_final_line) {
-    // Con la representacion canonica, una linea vacia final serializa un
-    // '\n' final. El roundtrip preserva el contenido semantico (lineas),
-    // pero el byte stream puede crecer en un '\n' final extra.
-    // Ajustamos las expectativas: el contenido semantico (snapshot) se
-    // preserva, no necesariamente el byte stream exacto.
-    TempFile f1;
-    writeBytes(f1.path, "a\nb\n");
-    Document d1; CHECK_EQ(d1.loadFromFile(f1.path), LoadResult::Success);
-    CHECK(d1.saveToFile(f1.path));
-    Document d2; CHECK_EQ(d2.loadFromFile(f1.path), LoadResult::Success);
-    CHECK(d1.snapshot() == d2.snapshot());
-    CHECK(d1.endsWithNewline() == d2.endsWithNewline());
-
-    TempFile f2;
-    writeBytes(f2.path, "a\n\n");
-    Document d3; CHECK_EQ(d3.loadFromFile(f2.path), LoadResult::Success);
-    CHECK(d3.saveToFile(f2.path));
-    Document d4; CHECK_EQ(d4.loadFromFile(f2.path), LoadResult::Success);
-    CHECK(d3.snapshot() == d4.snapshot());
-    CHECK(d3.endsWithNewline() == d4.endsWithNewline());
-
-    TempFile f3;
-    writeBytes(f3.path, "\n\n\n");
-    Document d5; CHECK_EQ(d5.loadFromFile(f3.path), LoadResult::Success);
-    CHECK(d5.saveToFile(f3.path));
-    Document d6; CHECK_EQ(d6.loadFromFile(f3.path), LoadResult::Success);
-    CHECK(d5.snapshot() == d6.snapshot());
-    CHECK(d5.endsWithNewline() == d6.endsWithNewline());
-
-    TempFile f4;
-    writeBytes(f4.path, "a\r\n\r\n");
-    Document d7; CHECK_EQ(d7.loadFromFile(f4.path), LoadResult::Success);
-    CHECK(d7.saveToFile(f4.path));
-    Document d8; CHECK_EQ(d8.loadFromFile(f4.path), LoadResult::Success);
-    CHECK(d7.snapshot() == d8.snapshot());
-    CHECK(d7.endsWithNewline() == d8.endsWithNewline());
-}
-
+// Bytes arbitrarios no-UTF-8 y con bytes de control no deben destruirse:
 TEST(roundtrip_byte_safety) {
-    // Bytes arbitrarios no-UTF-8 y con bytes de control no deben destruirse:
-    // editor binariamente seguro.
     assertRoundTripTable({
         {"latin1", "caf\xe9\na\xff\xfe\n"},
-        // std::string(const char*) se corta en el primer '\0'; hay que
-        // pasar el largo para que el NUL interno sobreviva.
+        // std::string(const char*) se corta en el primer '\0'
+        // hay que pasar el largo para que el NUL interno sobreviva.
         {"control_bytes", std::string("\x00\x01\x02\n\x1b\x07\n", 7)},
     });
 }
 
-TEST(roundtrip_huge_file) {
-    // Archivo grande: el round-trip debe conservarse sin truncar nada,
-    // incluyendo si termina (o no) en '\n'.
-    std::string big;
-    for (int i = 0; i < 20000; ++i)
-        big += "linea " + std::to_string(i) + " de contenido\n";
-    big += "ultima sin fin\n";
+// caso: guardando un emoji
+// abc😀def
+TEST(roundtrip_emoticon_safety) {
+    assertRoundTripTable({
+        {"emoji_con_n", "abc😀def"},
+        // std::string(const char*) se corta en el primer '\0'
+        // hay que pasar el largo para que el NUL interno sobreviva.
+        {"emoji_sin_n", "abc😀def\n"},
+    });
+}
 
-    TempFile f;
-    writeBytes(f.path, big);
-    Document d1;
-    CHECK_EQ(d1.loadFromFile(f.path), LoadResult::Success);
-    CHECK(d1.saveToFile(f.path));
-    Document d2;
-    CHECK_EQ(d2.loadFromFile(f.path), LoadResult::Success);
-    CHECK_EQ(readBytes(f.path), big);
+// Con la representacion canonica, una linea vacia final serializa un '\n' final. 
+// El roundtrip preserva el contenido,
+// pero el byte stream puede crecer en un '\n' final extra.
+TEST(roundtrip_empty_final_line) {
+    TempFile f1, f2, f3, f4;
+    Document d1, d2, d3, d4, d5, d6, d7, d8;
+
+    writeBytes(f1.path, "a\nb\n");
+    
+    // d1
+    CHECK_EQ(d1.loadFromFile(f1.path), LoadResult::Success);
+    CHECK(d1.saveToFile(f1.path));
+
+    // d2 
+    CHECK_EQ(d2.loadFromFile(f1.path), LoadResult::Success);
     CHECK(d1.snapshot() == d2.snapshot());
     CHECK(d1.endsWithNewline() == d2.endsWithNewline());
-    CHECK_EQ(d1.lineEnding(), d2.lineEnding());
-    CHECK_EQ(d1.lineCount(), d2.lineCount());
+    
+    writeBytes(f2.path, "a\n\n");
+    
+    // d3
+    CHECK_EQ(d3.loadFromFile(f2.path), LoadResult::Success);
+    CHECK(d3.saveToFile(f2.path));
+    
+    // d4
+    CHECK_EQ(d4.loadFromFile(f2.path), LoadResult::Success);
+    CHECK(d3.snapshot() == d4.snapshot());
+    CHECK(d3.endsWithNewline() == d4.endsWithNewline());
+
+    writeBytes(f3.path, "\n\n\n");
+    
+    // d5
+    CHECK_EQ(d5.loadFromFile(f3.path), LoadResult::Success);
+    CHECK(d5.saveToFile(f3.path));
+
+    // d6
+    CHECK_EQ(d6.loadFromFile(f3.path), LoadResult::Success);
+    CHECK(d5.snapshot() == d6.snapshot());
+    CHECK(d5.endsWithNewline() == d6.endsWithNewline());
+    
+    writeBytes(f4.path, "a\r\n\r\n");
+    
+    // d7
+    CHECK_EQ(d7.loadFromFile(f4.path), LoadResult::Success);
+    CHECK(d7.saveToFile(f4.path));
+    
+    // d8
+    CHECK_EQ(d8.loadFromFile(f4.path), LoadResult::Success);
+    CHECK(d7.snapshot() == d8.snapshot());
+    CHECK(d7.endsWithNewline() == d8.endsWithNewline());
+}
+
+// Archivo grande: 
+// el round-trip debe conservarse sin truncar nada,
+// incluyendo si termina (o no) en '\n'.
+TEST(roundtrip_huge_file) {
+    TempFile f1, f2;
+    std::string withNl, withoutNl;
+
+    for (int i = 0; i < 20000; ++i)
+        withNl += "linea " + std::to_string(i) + " de contenido\n";
+    withoutNl = withNl + "ultima sin fin";
+
+    writeBytes(f1.path, withNl);
+    writeBytes(f2.path, withoutNl);
+
+    struct Case { TempFile* f; const std::string* expected; };
+    for (Case c : {Case{&f1, &withNl}, Case{&f2, &withoutNl}}) {
+        Document d1, d2;
+
+        CHECK_EQ(d1.loadFromFile(c.f->path), LoadResult::Success);
+        CHECK(d1.saveToFile(c.f->path));
+
+        CHECK_EQ(d2.loadFromFile(c.f->path), LoadResult::Success);
+        CHECK_EQ(readBytes(c.f->path), *c.expected);
+        CHECK(d1.snapshot() == d2.snapshot());
+        CHECK(d1.endsWithNewline() == d2.endsWithNewline());
+        CHECK_EQ(d1.lineEnding(), d2.lineEnding());
+        CHECK_EQ(d1.lineCount(), d2.lineCount());
+    }
 }
