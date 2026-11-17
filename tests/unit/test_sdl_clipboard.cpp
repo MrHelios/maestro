@@ -25,6 +25,72 @@ static void muteRender(Editor& ed) {
     ed.setSink(nullSink);
 }
 
+// Parte un string UTF-8 en codepoints (cada elemento es un caracter completo).
+std::vector<std::string> utf8Chars(const std::string& s) {
+    std::vector<std::string> out;
+    for (size_t i = 0; i < s.size();) {
+        unsigned char b = static_cast<unsigned char>(s[i]);
+        size_t len = b < 0x80 ? 1 : (b >> 5) == 0x6 ? 2 : (b >> 4) == 0xE ? 3 : 4;
+        out.push_back(s.substr(i, len));
+        i += len;
+    }
+    return out;
+}
+
+std::unique_ptr<SdlClipboard> makeClipboard(SdlClipboard*& raw) {
+    auto sc = std::make_unique<SdlClipboard>();
+    raw = sc.get();
+    return sc;
+}
+
+struct ClipFixture {
+    SdlClipboard* clip = nullptr;
+    Editor ed;
+
+    ClipFixture() : ed(makeClipboard(clip)) { muteRender(ed); }
+
+    // Un evento simple (MoveRight, Escape, ...), repetible n veces.
+    void press(InputEventType t, int times = 1) {
+        for (int k = 0; k < times; ++k) {
+            InputEvent e;
+            e.type = t;
+            ed.handleEvent(e);
+        }
+    }
+
+    // Una tecla de comando ("i", "s", "c", "p", "a"...).
+    void key(const std::string& k) {
+        InputEvent e;
+        e.type = InputEventType::InsertChar;
+        e.text = k;
+        ed.handleEvent(e);
+    }
+
+    // Entra en modo insercion, escribe (UTF-8 seguro) y vuelve a modo normal.
+    void typeText(const std::string& s) {
+        key("i");
+        for (const auto& ch : utf8Chars(s)) {
+            if (ch == "\n") press(InputEventType::InsertNewline);
+            else            key(ch);
+        }
+        press(InputEventType::Escape);
+    }
+
+    // Selecciona con 's': mueve el cursor n veces a la derecha y copia con 'c'.
+    void selectRightAndCopy(int n) {
+        key("s");
+        press(InputEventType::MoveRight, n);
+        key("c");
+    }
+
+    // Cursor al final del documento (clamp), y pega.
+    void pasteAtEndOfDoc() {
+        press(InputEventType::MoveDown, 100);
+        press(InputEventType::MoveEnd);
+        key("p");
+    }
+};
+
 } // namespace
 
 TEST(sdl_clipboard_factory_returns_nonnull) {
@@ -35,6 +101,7 @@ TEST(sdl_clipboard_factory_returns_nonnull) {
 
 TEST(sdl_clipboard_copy_paste_simple) {
     SdlClipboard cb;
+    
     CHECK(cb.copy("hola"));
     CHECK(cb.ownsClipboard());
     
@@ -45,6 +112,7 @@ TEST(sdl_clipboard_copy_paste_simple) {
 
 TEST(sdl_clipboard_empty_initial) {
     SdlClipboard cb;
+    
     CHECK(!cb.ownsClipboard());
     
     auto p = cb.paste();
@@ -54,12 +122,14 @@ TEST(sdl_clipboard_empty_initial) {
 
 TEST(sdl_clipboard_utf8_multiline) {
     SdlClipboard cb;
+    
     std::string cafe = std::string("caf\xC3\xA9");
     std::string emoji = std::string("\xF0\x9F\x98\x80");
     std::string multi = "linea 1\nlinea 2\nlinea 3";
     
     for (auto s : {cafe, emoji, multi}) {
         CHECK(cb.copy(s));
+        
         auto p = cb.paste();
         CHECK(p.has_value());
         CHECK_EQ(*p, s);
@@ -71,8 +141,9 @@ TEST(sdl_clipboard_sync_no_fd_no_pending) {
     
     CHECK_EQ(cb.fd(), -1);
     CHECK(!cb.hasPending());
+    
     cb.copy("x");
-    cb.processEvents();  // no-op, no debe romper nada
+    cb.processEvents();      // no-op, no debe romper nada
     CHECK(!cb.hasPending());
     
     auto p = cb.paste();
@@ -81,74 +152,106 @@ TEST(sdl_clipboard_sync_no_fd_no_pending) {
 }
 
 TEST(sdl_clipboard_editor_copy_paste) {
-    auto sc = std::make_unique<SdlClipboard>();
-    SdlClipboard* raw = sc.get();
-    Editor ed(std::move(sc));
-    
-    muteRender(ed);
-    
-    // type "hola" en Interacción, vuelve a Navegación, copia "ho", pega al final.
-    InputEvent i;
-    i.type = InputEventType::InsertChar;
-    i.text = "i";
-    ed.handleEvent(i);
-    for (char c : std::string("hola")) {
-        InputEvent ch;
-        ch.type = InputEventType::InsertChar;
-        ch.text = std::string(1, c);
-        ed.handleEvent(ch);
-    }
-    
-    InputEvent esc;
-    esc.type = InputEventType::Escape;
-    ed.handleEvent(esc);
-    
-    InputEvent home;
-    home.type = InputEventType::MoveHome;
-    ed.handleEvent(home);
-    
-    InputEvent s;
-    s.type = InputEventType::InsertChar;
-    s.text = "s";
-    ed.handleEvent(s);
-    
-    InputEvent r;
-    r.type = InputEventType::MoveRight;
-    ed.handleEvent(r);
-    ed.handleEvent(r);
-    
-    InputEvent c;
-    c.type = InputEventType::InsertChar;
-    c.text = "c";
-    ed.handleEvent(c);
-    CHECK_EQ(raw->paste().value(), "ho");
-    
-    InputEvent end;
-    end.type = InputEventType::MoveEnd;
-    ed.handleEvent(end);
-    
-    InputEvent p;
-    p.type = InputEventType::InsertChar;
-    p.text = "p";
-    ed.handleEvent(p);
-    CHECK_EQ(ed.active().document.lineAt(0), "holaho");
+    ClipFixture f;
+    f.typeText("hola");
+    f.press(InputEventType::MoveHome);
+
+    f.selectRightAndCopy(2);
+    CHECK_EQ(f.clip->paste().value(), "ho");
+
+    f.press(InputEventType::MoveEnd);
+    f.key("p");
+    CHECK_EQ(f.ed.active().document.lineAt(0), "holaho");
 }
 
-// El loop GUI bombea el watcher reusado (inotify tal cual) UNA vez al tope
-// de cada vuelta de run(), sin fd ni ppoll; idleStep() es solo tick+render.
-// Este test replica esa secuencia (bombeo + idleStep): un cambio externo en
-// disco recarga antes del render.
+TEST(sdl_clipboard_editor_copy_paste_multiline) {
+    ClipFixture f;
+    f.typeText("uno\ndos\ntres");
+
+    // cursor a (0,0)
+    f.press(InputEventType::MoveUp, 2);
+    f.press(InputEventType::MoveHome);
+
+    // seleccion de "uno\nd"
+    f.key("s");
+    f.press(InputEventType::MoveDown);
+    f.press(InputEventType::MoveRight);
+    f.key("c");
+    CHECK_EQ(f.clip->paste().value(), "uno\nd");
+
+    f.pasteAtEndOfDoc();
+    CHECK_EQ(f.ed.active().document.lineAt(0), "uno");
+    CHECK_EQ(f.ed.active().document.lineAt(1), "dos");
+    CHECK_EQ(f.ed.active().document.lineAt(2), "tresuno");
+    CHECK_EQ(f.ed.active().document.lineAt(3), "d");
+}
+
+TEST(sdl_clipboard_editor_copy_paste_utf8) {
+    ClipFixture f;
+    f.typeText("áéíóú");
+    f.press(InputEventType::MoveHome);
+
+    f.selectRightAndCopy(2);              // 2 codepoints = 4 bytes
+    CHECK_EQ(f.clip->paste().value(), "áé");
+
+    f.press(InputEventType::MoveEnd);
+    f.key("p");
+    CHECK_EQ(f.ed.active().document.lineAt(0), "áéíóúáé");
+}
+
+TEST(sdl_clipboard_editor_copy_paste_emoji) {
+    ClipFixture f;
+    f.typeText("a😀b🎉c");
+    f.press(InputEventType::MoveHome);
+    f.press(InputEventType::MoveRight);   // despues de 'a'
+
+    f.selectRightAndCopy(2);              // "😀b"
+    CHECK_EQ(f.clip->paste().value(), "😀b");
+
+    f.press(InputEventType::MoveEnd);
+    f.key("p");
+    CHECK_EQ(f.ed.active().document.lineAt(0), "a😀b🎉c😀b");
+}
+
+TEST(sdl_clipboard_editor_select_all_copy_paste) {
+    ClipFixture f;
+    const std::string text = "uno\ndos\ntres";
+    f.typeText(text);
+
+    f.key("a");                           // selecciona todo
+    f.key("c");
+    CHECK_EQ(f.clip->paste().value(), text);
+
+    f.pasteAtEndOfDoc();
+    CHECK_EQ(f.ed.active().document.lineAt(0), "uno");
+    CHECK_EQ(f.ed.active().document.lineAt(1), "dos");
+    CHECK_EQ(f.ed.active().document.lineAt(2), "tresuno");
+    CHECK_EQ(f.ed.active().document.lineAt(3), "dos");
+    CHECK_EQ(f.ed.active().document.lineAt(4), "tres");
+}
+
+// --- FILEWATCHER
+// @cleanup: posiblemente lo movamos a otro archivo
+// ademas solo tiene un caso, deberia que extenderlo
+
+// abrimos un archivo en el editor
+// inyectamos un cambio por afuera
+// y verificamos que el filewatcher, detecta el cambio
 TEST(sdl_clipboard_watcher_idle_step_reloads_external_change) {
     TempFile f;
     f.write("A\n");
+    
     auto sc = std::make_unique<SdlClipboard>();
     auto w = std::make_unique<InotifyFileWatcher>();
     Editor ed(std::move(sc), std::move(w));
     
+    // desactivamos render real del editor
     muteRender(ed);
+    
     CHECK(ed.loadIntoActiveBuffer(f.path));
     CHECK_EQ(ed.active().document.lineAt(0), "A");
     {
+        // inyectamos nuevo contenido al archivo    
         std::ofstream out(f.path, std::ios::binary | std::ios::trunc);
         out << "B\n";
     }
