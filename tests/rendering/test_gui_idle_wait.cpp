@@ -297,6 +297,8 @@ TEST(idle_blink_deadline_cursor_invisible) {
     // barra invisible no se pinta nunca -> nada que animar, aunque el shape
     // sea Bar (cubre el guard de visibilidad, no el de Block).
     Harness h = makeHarness();
+    h.ed->getActiveBufferForTesting().filename =
+        "test.cpp";  // sin soft-wrap: scroll por lineas
     std::vector<std::string> lines;
     for (int i = 0; i < 20; ++i) lines.push_back("l" + std::to_string(i));
     h.ed->getActiveBufferForTesting().document.restore(lines);
@@ -374,6 +376,8 @@ TEST(idle_wait_autoscroll_armado) {
     // intervalo de 100ms: antes del deadline el viewport NO avanza; tras
     // vencerlo, idleOnTimeout hace tick y el viewport avanza un paso.
     Harness h = makeHarness();
+    h.ed->getActiveBufferForTesting().filename =
+        "test.cpp";  // sin soft-wrap: autoscroll por lineas
     std::vector<std::string> lines;
     for (int i = 0; i < 20; ++i) lines.push_back("l" + std::to_string(i));
     h.ed->getActiveBufferForTesting().document.restore(lines);
@@ -2009,6 +2013,8 @@ TEST(gui_sdl_mousemotion_durante_arrastre_cambia_viewport) {
 
     auto watcher = std::make_unique<NullFileWatcher>();
     Harness h = makeHarness(std::move(watcher));
+    h.ed->getActiveBufferForTesting().filename =
+        "test.cpp";  // sin soft-wrap: autoscroll por lineas
 
     // Documento lo bastante largo para exceder el viewport real.
     std::vector<std::string> lines;

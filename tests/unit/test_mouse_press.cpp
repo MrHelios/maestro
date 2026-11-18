@@ -773,7 +773,7 @@ TEST(mouse_drag_without_press_ignored) {
 TEST(mouse_drag_last_visible_row_is_exact_no_scroll) {
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
-    
+    b.filename = "test.cpp";  // sin soft-wrap: el test mide semantica sin wrap
     b.document.restore({"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7"});
     b.viewport.height = 4;
     b.viewport.width = 20;
@@ -824,7 +824,7 @@ TEST(mouse_drag_autoscroll_up) {
 TEST(mouse_drag_autoscroll_horizontal) {
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
-    
+    b.filename = "test.cpp";  // sin soft-wrap: el test mide semantica sin wrap
     b.document.restore({"0123456789ABCDEFGHIJ0123456789"});
     b.viewport.height = 10;
     b.viewport.width = 16; // gutter 7 + 9 de texto
@@ -858,7 +858,7 @@ TEST(mouse_drag_autoscroll_horizontal) {
 TEST(mouse_drag_chrome_scrolls_when_content_below) {
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
-    
+    b.filename = "test.cpp";  // sin soft-wrap: el test mide semantica sin wrap
     b.document.restore({"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7"});
     b.viewport.height = 4;
     b.viewport.width = 20;

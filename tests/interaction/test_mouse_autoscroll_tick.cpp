@@ -45,6 +45,7 @@ std::chrono::steady_clock::time_point now() {
 
 TEST(mouse_tick_scrolls_down_periodically) {
     Editor ed;
+    ed.active().filename = "test.cpp";  // sin soft-wrap: autoscroll por lineas
     std::vector<std::string> lines;
     for (int i = 0; i < 20; ++i) lines.push_back("l" + std::to_string(i));
     ed.active().document.restore(lines);
@@ -85,6 +86,7 @@ TEST(mouse_tick_scrolls_down_periodically) {
 
 TEST(mouse_tick_scrolls_up_periodically) {
     Editor ed;
+    ed.active().filename = "test.cpp";  // sin soft-wrap: autoscroll por lineas
     std::vector<std::string> lines;
     for (int i = 0; i < 20; ++i) lines.push_back("l" + std::to_string(i));
     ed.active().document.restore(lines);

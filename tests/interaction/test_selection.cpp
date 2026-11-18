@@ -505,6 +505,9 @@ TEST(editor_selection_arrow_down_clears) {
 // vertical, el cursor conserva la columna deseada y se clampa a lineas
 // mas cortas.
 static void editorOfLines(const std::vector<std::string>& lines, int line, int col, Editor& ed) {
+    // Estos tests asumen la navegacion/paginacion SIN soft-wrap (preferredCol
+    // de Cursor): un filename con extension mantiene esa semantica.
+    ed.active().filename = "test.cpp";
     ed.active().document.restore(lines);
     ed.active().cursor.line = line;
     ed.active().cursor.col = col;

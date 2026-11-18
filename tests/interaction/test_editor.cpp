@@ -304,6 +304,7 @@ TEST(editor_move_up_down) {
 TEST(editor_vertical_clamps_to_shorter_line) {
     // "abcdef" / "xy": bajar desde col 5 debe aterrizar en col 2 (fin de "xy").
     Editor ed;
+    ed.active().filename = "test.cpp";  // sin soft-wrap: semantica vertical clasica
     type(ed, "abcdef");
     press(ed, InputEventType::InsertNewline); // (1,0), line0 sigue "abcdef"
     type(ed, "xy");                      // line1="xy", cursor (1,2)
@@ -317,6 +318,7 @@ TEST(editor_vertical_clamps_to_shorter_line) {
 
 TEST(editor_vertical_remembers_preferred_column) {
     Editor ed;
+    ed.active().filename = "test.cpp";  // sin soft-wrap: semantica vertical clasica
     type(ed, "abcdef");
     press(ed, InputEventType::InsertNewline); // line0 sigue "abcdef"
     type(ed, "xy");                      // line1="xy", cursor (1,2)
