@@ -798,6 +798,201 @@ TEST(gui_emoji_pintado_ocupa_caja_de_dos_celdas) {
 #endif
 }
 
+// Optimización de pintado: un tramo contiguo de glifos de 1 columna de la
+// fuente principal se renderiza con UNA sola textura, no una por codepoint.
+// Se observa en el caché de GuiFont: pintar "abcdef" produce una única
+// entrada (y un único miss), y repetir el pintado es un hit sin crecer.
+TEST(gui_paintgridtext_agrupa_tramo_principal_en_una_textura) {
+#ifdef HAVE_SDL2
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0)
+        SKIP("sin SDL video");
+    SDL_Window* win = SDL_CreateWindow(
+        "paintgrid-group-test", 0, 0, 200, 40, SDL_WINDOW_HIDDEN);
+    if (!win) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SKIP("sin ventana SDL");
+    }
+    SDL_Renderer* ren =
+        SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+    if (!ren) {
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SKIP("sin renderer SDL");
+    }
+
+    GuiFont font;
+    if (!font.load(16)) {
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SKIP("sin fuentes del sistema para GuiFont");
+    }
+    const int cw = font.cellW();
+    const int ch = font.cellH();
+    const char* run = "abcdef";
+    bool glyphsOk = cw > 0 && ch > 0;
+    for (const char* p = run; glyphsOk && *p; ++p)
+        glyphsOk = font.hasGlyph(static_cast<unsigned char>(*p));
+    if (!glyphsOk) {
+        font.unload();
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SKIP("fuente sin metricas o sin glifos ASCII");
+    }
+
+    // Probe para descartar renderers dummy que no crean texturas.
+    font.clearCache();
+    void* probe = font.textTexture(ren, "a", 0xFF, 0xFF, 0xFF);
+    if (!probe) {
+        font.unload();
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SKIP("el renderer dummy no crea texturas");
+    }
+    font.clearCache();
+    const unsigned long long misses0 = font.cacheMisses();
+    const unsigned long long hits0 = font.cacheHits();
+
+    const GuiColor fg{0xFF, 0xFF, 0xFF, 0xFF};
+    const int cols =
+        paintGridTextForTests(ren, font, run, fg, 0, 0, cw, ch);
+    CHECK_EQ(cols, 6);
+    CHECK_EQ(font.cacheSize(), 1u);
+    CHECK_EQ(font.cacheMisses(), misses0 + 1);
+
+    // Segundo frame idéntico: reutiliza la textura del tramo (hit) sin
+    // agregar entradas.
+    const int cols2 =
+        paintGridTextForTests(ren, font, run, fg, 0, 0, cw, ch);
+    CHECK_EQ(cols2, 6);
+    CHECK_EQ(font.cacheSize(), 1u);
+    CHECK_EQ(font.cacheMisses(), misses0 + 1);
+    CHECK_EQ(font.cacheHits(), hits0 + 1);
+
+    font.clearCache();
+    font.unload();
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+#else
+    SKIP("sin SDL2");
+#endif
+}
+
+// Verificación visual de alineación con agrupamiento: una secuencia con
+// pares propensos a kerning (AV, To, WA) y puntuación debe producir los
+// mismos píxeles que pintar cada carácter por separado en su celda. Si el
+// kerning desplazara un glifo dentro de la cadena agrupada, la comparación
+// fallaría aunque el ancho total de la textura fuera correcto.
+TEST(gui_paintgridtext_agrupado_alinea_glifos_igual_que_por_celda) {
+#ifdef HAVE_SDL2
+    if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0)
+        SKIP("sin SDL video");
+    const int fw = 512;
+    const int fh = 48;
+    SDL_Window* win = SDL_CreateWindow(
+        "paintgrid-align-test", 0, 0, fw, fh, SDL_WINDOW_HIDDEN);
+    if (!win) {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SKIP("sin ventana SDL");
+    }
+    SDL_Renderer* ren =
+        SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+    if (!ren) {
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        SKIP("sin renderer SDL");
+    }
+
+    GuiFont font;
+    auto cleanup = [&] {
+        font.clearCache();
+        font.unload();
+        SDL_DestroyRenderer(ren);
+        SDL_DestroyWindow(win);
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    };
+    if (!font.load(16)) {
+        cleanup();
+        SKIP("sin fuentes del sistema para GuiFont");
+    }
+    const int cw = font.cellW();
+    const int ch = font.cellH();
+    if (cw <= 0 || ch <= 0) {
+        cleanup();
+        SKIP("metricas de celda invalidas");
+    }
+
+    const std::string text = "AVATARToToWMWM.,;:!?()[]{}";
+    for (unsigned char c : text) {
+        if (!font.hasGlyph(c)) {
+            cleanup();
+            SKIP("fuente sin algun glifo ASCII del test");
+        }
+    }
+
+    const GuiColor fg{0xFF, 0xFF, 0xFF, 0xFF};
+    auto readPixels = [&](std::vector<Uint32>& out) -> bool {
+        out.resize(static_cast<size_t>(fw) * fh);
+        return SDL_RenderReadPixels(ren, nullptr, SDL_PIXELFORMAT_RGBA8888,
+                                    out.data(), fw * 4) == 0;
+    };
+
+    // Referencia: cada carácter en su celda, centrado como el pintor previo
+    // al agrupamiento.
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+    int x = 0;
+    for (size_t i = 0; i < text.size(); ++i) {
+        void* tex = font.textTexture(ren, std::string_view(text).substr(i, 1),
+                                     fg.r, fg.g, fg.b);
+        if (!tex) {
+            cleanup();
+            SKIP("el renderer dummy no crea texturas");
+        }
+        int tw = 0, th = 0;
+        SDL_QueryTexture(static_cast<SDL_Texture*>(tex), nullptr, nullptr, &tw,
+                         &th);
+        SDL_Rect dst{x + (cw - tw) / 2, (ch - th) / 2, tw, th};
+        SDL_RenderCopy(ren, static_cast<SDL_Texture*>(tex), nullptr, &dst);
+        x += cw;
+    }
+    std::vector<Uint32> individual;
+    if (!readPixels(individual)) {
+        cleanup();
+        SKIP("SDL_RenderReadPixels no disponible en este renderer");
+    }
+
+    // Agrupado: una sola textura para todo el tramo ASCII de la fuente
+    // principal.
+    font.clearCache();
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_RenderClear(ren);
+    const int cols =
+        paintGridTextForTests(ren, font, text, fg, 0, 0, cw, ch);
+    CHECK_EQ(cols, static_cast<int>(text.size()));
+    // El camino optimizado debe haberse usado de verdad: exactamente UNA
+    // textura cacheada para todo el tramo. Si paintGridText() hubiera caído
+    // al fallback individual (dimensiones distintas de la grilla), habría
+    // dejado la textura agrupada sin usar MÁS una por codepoint (cacheSize
+    // > 1) y la comparación de píxeles podría pasar sin probar el
+    // agrupamiento.
+    CHECK_EQ(font.cacheSize(), 1u);
+    std::vector<Uint32> grouped;
+    if (!readPixels(grouped)) {
+        cleanup();
+        SKIP("SDL_RenderReadPixels no disponible en este renderer");
+    }
+
+    CHECK(individual == grouped);
+    cleanup();
+#else
+    SKIP("sin SDL2");
+#endif
+}
+
 // división entera píxeles/celda -> CellPos 0-based.
 TEST(gui_sdl_guimouse_pixels_to_cell) {
     CHECK((guiCellFromPixels(0, 0, 9, 18) == CellPos{0, 0}));

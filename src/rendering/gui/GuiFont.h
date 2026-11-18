@@ -31,6 +31,13 @@
 //     (texto, color). Las texturas dependen del renderer: clearCache() se
 //     llama al cambiar/recrear el SDL_Renderer (la fuente CPU se conserva).
 //
+// ALINEACIÓN DE GRILLA (kerning): la fuente principal se abre con kerning
+// desactivado (TTF_SetFontKerning(0)). Así una cadena renderizada en UNA
+// textura mantiene el avance de una celda por glifo y puede dibujarse alineada
+// a la grilla sin desplazamientos internos (AV, To, WA, etc.).
+// REQUISITO: SDL_ttf >= 2.0.18 (api de kerning); GuiFont.cpp falla en
+// compilación con un #error si la versión instalada es anterior.
+//
 // Invariante de renderer: un GuiFont solo puede utilizarse con un único
 // SDL_Renderer activo a la vez. GuiFont recuerda el renderer dueño de las
 // texturas cacheadas y vacía el caché automáticamente si textTexture()

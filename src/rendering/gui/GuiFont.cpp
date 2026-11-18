@@ -9,6 +9,18 @@
 #ifdef HAVE_SDL2_TTF
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
+
+// REQUISITO DE COMPILACIÓN: SDL_ttf >= 2.0.18.
+//
+// La grilla exige avance constante por celda y por eso la fuente principal se
+// abre con kerning desactivado. TTF_SetFontKerning()/TTF_GetFontKerning()
+// existen desde SDL_ttf 2.0.18; sin ellas no hay forma de garantizar el
+// invariante y el agrupamiento de paintGridText() (que renderiza cadenas
+// completas en una textura) podría desalinear glifos internos. No se soportan
+// versiones anteriores: se falla en compilación con un mensaje explícito.
+#if !SDL_TTF_VERSION_ATLEAST(2, 0, 18)
+#error "Maestro requiere SDL_ttf >= 2.0.18 (TTF_SetFontKerning/TTF_GetFontKerning). Actualice libsdl2-ttf-dev."
+#endif
 #endif
 
 #ifndef HAVE_SDL2_TTF
@@ -199,6 +211,14 @@ void measureCell(TTF_Font* f, int pixelSize, int& cellW, int& cellH) {
     if (cellH <= 0) cellH = pixelSize;
 }
 
+// El editor asume avance constante por celda. SDL_ttf aplica kerning por
+// defecto en fuentes que lo declaran (p. ej. AV, To, WA): al renderizar una
+// cadena agrupada eso puede desplazar glifos internos aunque el ancho total
+// coincida con columnas*cellW. Se desactiva al abrir la fuente principal;
+// cada prefijo avanza exactamente una celda por carácter.
+// Requiere SDL_ttf >= 2.0.18, garantizado en compilación (ver guard arriba).
+void disableKerning(TTF_Font* f) { TTF_SetFontKerning(f, 0); }
+
 // Refcount de TTF_Init/TTF_Quit entre todas las GuiFont vivas.
 int g_tffInitCount = 0;
 
@@ -300,6 +320,9 @@ bool GuiFont::openWithMetrics(int pixelSize,
             if (cand.origin == FontOrigin::Cli) break;
             continue;
         }
+        // La grilla exige avance constante por celda: sin kerning la cadena
+        // agrupada coloca cada glifo exactamente en su columna.
+        disableKerning(f);
         int cw = 0, ch = 0;
         measureCell(f, pixelSize, cw, ch);
         if (cw <= 0) {

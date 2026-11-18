@@ -1327,6 +1327,17 @@ void paintContentCursorFromSnapshot(SDL_Renderer* r, GuiFont& font, bool dark,
 // esta en la fuente principal pero sí en la fuente auxiliar de emoji, se
 // renderiza desde alla; si no esta en ninguna, se deja solo el fondo
 // (placeholder). Devuelve el total de columnas visuales consumidas.
+//
+// AGRUPACIÓN (perf): los tramos contiguos de glifos de 1 columna cubiertos
+// por la fuente principal se renderizan con una sola textura y una llamada
+// SDL_RenderCopy. La inspección sigue siendo por codepoint (codepointAt,
+// cellWidth, hasGlyph): lo que se evita es crear/consultar una textura
+// individual por glifo y ejecutar un RenderCopy por glifo. Emoji, glifos
+// anchos y codepoints fuera de la fuente principal conservan el camino
+// individual. El avance sigue siendo por celdas: nunca se usa el ancho real
+// de la textura para decidir dónde empieza el siguiente glifo. GuiFont abre
+// la fuente con kerning desactivado, de modo que los glifos dentro del tramo
+// también quedan en su celda (no solo el ancho total).
 int paintGridText(SDL_Renderer* r, GuiFont& font, std::string_view text,
                   const GuiColor& fg, int px, int py, int cw, int ch) {
     if (text.empty() || !font.ok() || cw <= 0 || ch <= 0)
@@ -1335,14 +1346,40 @@ int paintGridText(SDL_Renderer* r, GuiFont& font, std::string_view text,
     int x = px;
     int i = 0;
     const int n = static_cast<int>(text.size());
-    while (i < n) {
-        int len = 0;
-        uint32_t cp = utf8::codepointAt(text, i, n, len);
-        int w = utf8::cellWidth(text, i, n);
-        if (w <= 0) w = 1;
+
+    // Dibuja `t` dentro de la caja de `cols` celdas que empieza en `boxX`,
+    // preservando su aspect ratio y centrándola. Para texturas que ya miden
+    // exactamente cols*cw × ch (el caso normal de la fuente principal) el
+    // escalado es identidad.
+    auto drawInCellBox = [&](SDL_Texture* t, int boxX, int cols) {
+        int tw = 0, th = 0;
+        SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+        const int dstW = cols * cw;
+        const int dstH = ch;
+        // NotoColorEmoji entrega un bitmap nativo (p. ej. 136x128) que no
+        // coincide con la caja de 2 celdas; se escala proporcionalmente para
+        // no desbordar ni desalinear la grilla.
+        int drawW = tw;
+        int drawH = th;
+        if (tw > 0 && th > 0 && (tw != dstW || th != dstH)) {
+            const double scale = std::min(
+                static_cast<double>(dstW) / tw,
+                static_cast<double>(dstH) / th);
+            drawW = std::max(1, static_cast<int>(std::lround(tw * scale)));
+            drawH = std::max(1, static_cast<int>(std::lround(th * scale)));
+        }
+        const int dstX = boxX + (dstW - drawW) / 2;
+        const int dstY = py + (dstH - drawH) / 2;
+        SDL_Rect dst{dstX, dstY, drawW, drawH};
+        SDL_RenderCopy(r, t, nullptr, &dst);
+    };
+
+    // Camino individual por codepoint: emoji, glifos anchos o caracteres
+    // fuera de la fuente principal. Mantiene el avance por columnas.
+    auto paintCodepoint = [&](int pos, int len, uint32_t cp, int w, int atX) {
         SDL_Texture* t = nullptr;
         if (cp != 0 && font.hasGlyph(cp)) {
-            void* tex = font.textTexture(r, text.substr(i, len),
+            void* tex = font.textTexture(r, text.substr(pos, len),
                                          fg.r, fg.g, fg.b);
             t = static_cast<SDL_Texture*>(tex);
         } else if (cp != 0 && font.hasEmojiGlyph(cp)) {
@@ -1351,31 +1388,65 @@ int paintGridText(SDL_Renderer* r, GuiFont& font, std::string_view text,
         }
         // Glifo sin textura (ausente en ambas fuentes): solo fill, sin
         // textura que desalinee la grilla.
-        if (t) {
-            int tw = 0, th = 0;
-            SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
-            const int dstW = w * cw;
-            const int dstH = ch;
-            // Dibujar la textura dentro de su caja de celdas (dstW x dstH),
-            // preservando su aspect ratio y centrada. NotoColorEmoji entrega
-            // un bitmap nativo (p. ej. 136x128) que no coincide con la caja
-            // de 2 celdas; se escala proporcionalmente para no desbordar ni
-            // desalinear la grilla. Para ASCII de 1 columna dstW == cw == tw
-            // y dstH == ch == th, por lo que el escalado es identidad.
-            int drawW = tw;
-            int drawH = th;
-            if (tw > 0 && th > 0 && (tw != dstW || th != dstH)) {
-                const double scale = std::min(
-                    static_cast<double>(dstW) / tw,
-                    static_cast<double>(dstH) / th);
-                drawW = std::max(1, static_cast<int>(std::lround(tw * scale)));
-                drawH = std::max(1, static_cast<int>(std::lround(th * scale)));
+        if (t) drawInCellBox(t, atX, w);
+    };
+
+    while (i < n) {
+        int len = 0;
+        uint32_t cp = utf8::codepointAt(text, i, n, len);
+        int w = utf8::cellWidth(text, i, n);
+        if (w <= 0) w = 1;
+
+        if (cp != 0 && w == 1 && font.hasGlyph(cp)) {
+            // Extiende el tramo mientras cada codepoint siga siendo texto
+            // de 1 columna cubierto por la fuente principal.
+            int end = i + len;
+            int cols = 1;
+            while (end < n) {
+                int nextLen = 0;
+                uint32_t nextCp = utf8::codepointAt(text, end, n, nextLen);
+                int nextW = utf8::cellWidth(text, end, n);
+                if (nextW <= 0) nextW = 1;
+                if (nextCp == 0 || nextW != 1 || !font.hasGlyph(nextCp))
+                    break;
+                end += nextLen;
+                ++cols;
             }
-            const int dstX = x + (dstW - drawW) / 2;
-            const int dstY = py + (dstH - drawH) / 2;
-            SDL_Rect dst{dstX, dstY, drawW, drawH};
-            SDL_RenderCopy(r, t, nullptr, &dst);
+            void* tex =
+                font.textTexture(r, text.substr(i, end - i), fg.r, fg.g, fg.b);
+            SDL_Texture* t = static_cast<SDL_Texture*>(tex);
+            int tw = 0, th = 0;
+            if (t) SDL_QueryTexture(t, nullptr, nullptr, &tw, &th);
+            if (t && tw == cols * cw && th == ch) {
+                // La textura del tramo coincide con la grilla: copia directa
+                // sin escalado ni centrado (equivale a pintar celda a celda).
+                SDL_Rect dst{x, py, tw, th};
+                SDL_RenderCopy(r, t, nullptr, &dst);
+            } else {
+                // @cleanup(perf): la textura agrupada ya quedó creada y
+                // almacenada en la caché antes de saber que no sirve. Este
+                // fallback deja esa entrada sin usar + una textura por
+                // codepoint, así que es visualmente correcto pero no
+                // recupera el consumo de caché anterior. Resolver a futuro
+                // (p. ej. validar dimensiones antes de cachear o descartar
+                // la entrada agrupada); no es urgente ni bloquea el patch.
+                int cx = x;
+                for (int p = i; p < end;) {
+                    int oneLen = 0;
+                    uint32_t oneCp = utf8::codepointAt(text, p, n, oneLen);
+                    int oneW = utf8::cellWidth(text, p, n);
+                    if (oneW <= 0) oneW = 1;
+                    paintCodepoint(p, oneLen, oneCp, oneW, cx);
+                    cx += oneW * cw;
+                    p += oneLen;
+                }
+            }
+            x += cols * cw;
+            i = end;
+            continue;
         }
+
+        paintCodepoint(i, len, cp, w, x);
         x += w * cw;
         i += len;
     }

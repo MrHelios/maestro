@@ -66,6 +66,31 @@ TEST(guifont_load_exitoso_metricas) {
     CHECK(!f.path().empty());
 }
 
+// La agrupación de paintGridText renderiza una cadena completa en una sola
+// textura. Para no desplazar glifos internos, GuiFont desactiva kerning al
+// abrir: cada PREFIJO debe avanzar exactamente una celda por carácter, no
+// solo el ancho total. AV/To/WA son pares clásicos con kerning. El
+// comportamiento se verifica por la API pública (textWidth); la equivalencia
+// visual con el pintado celda a celda está cubierta en
+// gui_paintgridtext_agrupado_alinea_glifos_igual_que_por_celda.
+TEST(guifont_kerning_desactivado_avance_por_celda) {
+    GuiFont f;
+    if (!f.load(16)) SKIP("sin fuentes del sistema para GuiFont");
+    const int cw = f.cellW();
+    CHECK(cw > 0);
+    for (const char* seq : {"AVATAR", "ToTo", "WMWM", ".,;:!?()[]{}"}) {
+        const std::string s(seq);
+        for (size_t i = 1; i <= s.size(); ++i) {
+            const std::string_view prefix(s.data(), i);
+            CHECK_EQ(f.textWidth(prefix), static_cast<int>(i) * cw);
+        }
+    }
+    CHECK_EQ(f.textWidth("AV"), 2 * cw);
+    CHECK_EQ(f.textWidth("To"), 2 * cw);
+    CHECK_EQ(f.textWidth("WA"), 2 * cw);
+    f.unload();
+}
+
 TEST(guifont_clearCache_repetido_no_falla) {
     GuiFont f;
     f.clearCache();  // sin fuente: no crash

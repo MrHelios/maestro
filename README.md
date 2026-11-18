@@ -48,6 +48,17 @@ que nombra el paquete faltante. `WITH_SDL2_TTF=0` no está permitido con
 GUI. Además se necesita una fuente en runtime (`MAESTRO_FONT` o una del
 sistema como DejaVuSansMono, ver "Selección de fuente").
 
+**Versión mínima: SDL_ttf >= 2.0.18.** Es un requisito de compilación, no
+solo una recomendación: el editor asume avance constante por celda y
+desactiva el kerning al abrir la fuente (`TTF_SetFontKerning`, disponible
+desde 2.0.18). Con versiones anteriores el agrupamiento de texto podría
+desalinear glifos dentro de una celda, por lo que el build falla con un
+`#error` que indica la versión requerida. Para comprobar la instalada:
+
+```bash
+pkg-config --modversion SDL2_ttf
+```
+
 En un binario compilado `WITH_SDL2=0`, ejecutar `./build/maestro --gui`
 **no** abre ventana ni degrada en silencio: informa
 `maestro: --gui requiere compilar con SDL2 (WITH_SDL2=1, falta
