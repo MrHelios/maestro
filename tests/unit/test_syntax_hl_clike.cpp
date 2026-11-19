@@ -6,15 +6,17 @@
 
 #include "test_framework.h"
 #include "syntax/SyntaxHighlighter.h"
+#include "syntax/SyntaxCache.h"
 #include "syntax/SyntaxLanguage.h"
 #include "syntax/SyntaxSpan.h"
+#include "syntax/SyntaxToken.h"
 #include "app/Editor.h"
 #include "document/Document.h"
 #include "rendering/Sink.h"
 #include "helpers/test_tty_renderer.h"
 
-
 namespace {
+
 struct CaptureSink : public Sink {
     std::string data;
     bool writeStdout(const std::string& s) override {
@@ -22,9 +24,6 @@ struct CaptureSink : public Sink {
         return true;
     };
 };
-
-
-// --- Helpers Reutilizables ---
 
 static bool hasSpan(const std::vector<SyntaxSpan>& spans, size_t b, size_t e, SyntaxToken tok) {
     for (auto &s : spans) if (s.begin==b && s.end==e && s.token==tok) return true;
@@ -62,87 +61,120 @@ static bool hasSpanText(const std::vector<SyntaxSpan>& spans,
     }
     return false;
 }
+
+std::vector<std::string> makeCodeLines(int n) {
+    std::vector<std::string> lines;
+    lines.reserve(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+        lines.push_back("int var" + std::to_string(i) + " = " + std::to_string(i) + ";");
+    }
+    return lines;
+}
+
+// SyntaxSpan no define operator==: comparación elemento a elemento.
+bool spansEqual(const std::vector<SyntaxSpan>& a, const std::vector<SyntaxSpan>& b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (a[i].begin != b[i].begin || a[i].end != b[i].end || a[i].token != b[i].token) return false;
+    }
+    return true;
+}
+
 } // namespace
 
-// --- Tests Originales (con invariants agregados donde aplica) ---
-
 TEST(Clike_EmptyLine) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl;
+    
+    hl.setLanguage(SyntaxLanguage::Cpp);
     auto spans = hl.highlight("");
+    
     CHECK(spans.empty());
 }
 
 TEST(Clike_SimpleKeywordsAndTypes) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    
+    hl.setLanguage(SyntaxLanguage::Cpp);
     std::string line = "int x = 0; return x;";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
     CHECK(hasSpan(spans, 0, 3, SyntaxToken::Type));
+    CHECK(hasSpan(spans, 8, 9, SyntaxToken::Number));
     CHECK(hasSpan(spans, 11, 17, SyntaxToken::Keyword));
 }
 
+TEST(Clike_BoolTrueFalse) {
+    SyntaxHighlighter hl; 
+    
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    std::string line = "bool a = true; bool b = false;";
+    auto spans = hl.highlight(line);
+    
+    checkSpanInvariants(spans, line);
+    CHECK(hasSpan(spans, 0, 4, SyntaxToken::Type));
+    CHECK(hasSpan(spans, 9, 13, SyntaxToken::Keyword));
+    CHECK(hasSpan(spans, 15, 19, SyntaxToken::Type));
+    CHECK(hasSpan(spans, 24, 29, SyntaxToken::Keyword));
+}
+
 TEST(Clike_StringWithEscapes) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl;
+
+    hl.setLanguage(SyntaxLanguage::Cpp);
     std::string line = "const char* s = \"hello \\\"world\\\"\";";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
+    CHECK(hasSpan(spans, 0, 5, SyntaxToken::Keyword));
+    CHECK(hasSpan(spans, 6, 10, SyntaxToken::Type));
     CHECK(hasSpan(spans, 16, 33, SyntaxToken::String));
 }
 
 TEST(Clike_UnclosedString) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl;
+
+    hl.setLanguage(SyntaxLanguage::Cpp);
     std::string line = "const char* s = \"unclosed";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
+    CHECK(hasSpan(spans, 0, 5, SyntaxToken::Keyword));
+    CHECK(hasSpan(spans, 6, 10, SyntaxToken::Type));
     CHECK(hasSpan(spans, 16, 25, SyntaxToken::String));
 }
 
 TEST(Clike_LineComment) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line = "int x; // comment";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
+    CHECK(!hasSpan(spans, 0, 7, SyntaxToken::Comment));
     CHECK(hasSpan(spans, 7, 17, SyntaxToken::Comment));
 }
 
 TEST(Clike_BlockCommentSingleLine) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line = "/* comment */ int x;";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
     CHECK(hasSpan(spans, 0, 13, SyntaxToken::Comment));
     CHECK(hasSpan(spans, 14, 17, SyntaxToken::Type));
 }
 
-TEST(Clike_BlockCommentMultiLine_State) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
-    SyntaxState st{}; st.inBlockComment=false;
-    SyntaxState out;
-    
-    std::string l1 = "/* start";
-    auto spans1 = hl.highlight(l1, st, out); st=out;
-    checkSpanInvariants(spans1, l1);
-    CHECK(hasSpan(spans1, 0, 8, SyntaxToken::Comment));
-    CHECK(st.inBlockComment);
-    
-    std::string l2 = " middle ";
-    auto spans2 = hl.highlight(l2, st, out); st=out;
-    checkSpanInvariants(spans2, l2);
-    CHECK(hasSpan(spans2, 0, 8, SyntaxToken::Comment));
-    CHECK(st.inBlockComment);
-    
-    std::string l3 = " end */ int x;";
-    auto spans3 = hl.highlight(l3, st, out); st=out;
-    checkSpanInvariants(spans3, l3);
-    CHECK(hasSpan(spans3, 0, 7, SyntaxToken::Comment));
-    CHECK(!st.inBlockComment);
-    CHECK(hasSpan(spans3, 8, 11, SyntaxToken::Type));
-}
-
 TEST(Clike_Preprocessor) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line1 = "#include <iostream>";
     auto spans = hl.highlight(line1);
+    
     checkSpanInvariants(spans, line1);
     CHECK(hasSpan(spans, 0, 19, SyntaxToken::Preprocessor));
     
@@ -153,37 +185,41 @@ TEST(Clike_Preprocessor) {
 }
 
 TEST(Clike_PreprocessorAfterBlockComment) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line1 = "/* comment */ #define FOO";
     auto spans = hl.highlight(line1);
+    
     checkSpanInvariants(spans, line1);
     CHECK(hasSpan(spans, 0, 13, SyntaxToken::Comment));
     CHECK(hasSpan(spans, 14, 25, SyntaxToken::Preprocessor));
-    
-    SyntaxState st{}; st.inBlockComment=true;
-    SyntaxState out;
-    std::string line2 = " still */ #define BAR";
-    auto spans2 = hl.highlight(line2, st, out);
-    checkSpanInvariants(spans2, line2);
-    CHECK(hasSpan(spans2, 0, 9, SyntaxToken::Comment));
-    CHECK(hasSpan(spans2, 10, 21, SyntaxToken::Preprocessor));
 }
 
 TEST(Clike_PreprocessorWithCodeBefore) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line = "/* comment */ foo #define BAR";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
     CHECK(hasSpan(spans, 0, 13, SyntaxToken::Comment));
     CHECK(!hasSpan(spans, 14, 25, SyntaxToken::Preprocessor));
-    bool hasPP=false; for(auto &s:spans) if(s.token==SyntaxToken::Preprocessor) hasPP=true;
+    
+    bool hasPP=false;
+    for(auto &s:spans) 
+        if(s.token==SyntaxToken::Preprocessor) hasPP=true;
     CHECK(!hasPP);
 }
 
 TEST(Clike_PreprocessorMultipleLeadingComments) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl;
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line = "/**/ /* */ #define X";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
     CHECK(hasSpan(spans, 0, 4, SyntaxToken::Comment));
     CHECK(hasSpan(spans, 5, 10, SyntaxToken::Comment));
@@ -191,9 +227,12 @@ TEST(Clike_PreprocessorMultipleLeadingComments) {
 }
 
 TEST(Clike_Numbers) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line = "42 0xFF 0b1010 3.14 1e10";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
     CHECK(hasSpan(spans, 0, 2, SyntaxToken::Number));
     CHECK(hasSpan(spans, 3, 7, SyntaxToken::Number));
@@ -203,9 +242,12 @@ TEST(Clike_Numbers) {
 }
 
 TEST(Clike_InvalidHexBin) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl;
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line1 = "0xG";
     auto spans = hl.highlight(line1);
+    
     checkSpanInvariants(spans, line1);
     CHECK(hasSpan(spans, 0, 1, SyntaxToken::Number));
     CHECK(!hasSpan(spans, 0, 3, SyntaxToken::Number));
@@ -222,60 +264,46 @@ TEST(Clike_InvalidHexBin) {
 }
 
 TEST(Clike_RawString) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
-    std::string l1 = "auto s = R\"(hello \"world\")\";";
-    auto spans = hl.highlight(l1);
-    checkSpanInvariants(spans, l1);
-    CHECK(spans.size() >= 2);
-    bool hasRaw=false;
-    for(auto &s:spans) if(s.token==SyntaxToken::String) hasRaw=true;
-    CHECK(hasRaw);
-    
-    std::string l2 = "auto s = R\"delim(Hello \"world\")delim\";";
-    auto spans2 = hl.highlight(l2);
-    checkSpanInvariants(spans2, l2);
-    CHECK(hasSpan(spans2, 9, l2.size()-1, SyntaxToken::String));
+    SyntaxHighlighter hl;
+    hl.setLanguage(SyntaxLanguage::Cpp);
+
+    std::string line = R"(auto s = R"(hello "world")";
+    auto spans = hl.highlight(line);
+
+    checkSpanInvariants(spans, line);
+    CHECK(hasSpan(spans, 9, line.size(), SyntaxToken::String));
 }
 
-TEST(Clike_RawStringMultiline) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
-    SyntaxState st{}; SyntaxState out;
-    
-    std::string l1 = "auto s = R\"foo(";
-    auto s1 = hl.highlight(l1, st, out); st=out;
-    checkSpanInvariants(s1, l1);
-    CHECK(st.inRawString);
-    CHECK(std::string_view(st.rawDelim, st.rawDelimLen)=="foo");
-    
-    std::string l2 = "still raw";
-    auto s2 = hl.highlight(l2, st, out); st=out;
-    checkSpanInvariants(s2, l2);
-    CHECK(hasSpan(s2, 0, l2.size(), SyntaxToken::String));
-    CHECK(st.inRawString);
-    
-    std::string l3 = ")foo\"; int x=1;";
-    auto s3 = hl.highlight(l3, st, out); st=out;
-    checkSpanInvariants(s3, l3);
-    CHECK(!st.inRawString);
-    CHECK(st.rawDelimLen==0);
-    CHECK(std::string_view(st.rawDelim, st.rawDelimLen).empty());
-    CHECK(hasSpan(s3, 0, 5, SyntaxToken::String));
-    CHECK(hasSpan(s3, 7, 10, SyntaxToken::Type));
+TEST(Clike_RawString_CustomDelimiter) {
+    SyntaxHighlighter hl;
+    hl.setLanguage(SyntaxLanguage::Cpp);
+
+    std::string line = R"(auto s = R"delim(Hello "world")delim";)";
+    auto spans = hl.highlight(line);
+
+    checkSpanInvariants(spans, line);
+    CHECK(hasSpan(spans, 9, line.size() - 1, SyntaxToken::String));
 }
 
 TEST(Clike_StringVsComment_Interaction) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl;
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line = "\"/* not a comment */\"";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
     CHECK(hasSpan(spans, 0, 21, SyntaxToken::String));
     CHECK(spans.size()==1);
 }
 
 TEST(Clike_CMode) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::C);
+    SyntaxHighlighter hl;
+    hl.setLanguage(SyntaxLanguage::C);
+    
     std::string line = "class template restrict _Bool int";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
     CHECK(!hasSpan(spans, 0, 5, SyntaxToken::Keyword));
     CHECK(!hasSpan(spans, 6, 14, SyntaxToken::Keyword));
@@ -283,15 +311,23 @@ TEST(Clike_CMode) {
     CHECK(hasSpan(spans, 24, 29, SyntaxToken::Keyword));
     CHECK(hasSpan(spans, 30, 33, SyntaxToken::Type));
     
-    SyntaxHighlighter hlCpp; hlCpp.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hlCpp; 
+    hlCpp.setLanguage(SyntaxLanguage::Cpp);
+    
     auto spansCpp = hlCpp.highlight(line);
+    
     checkSpanInvariants(spansCpp, line);
     CHECK(hasSpan(spansCpp, 0, 5, SyntaxToken::Keyword));
     CHECK(hasSpan(spansCpp, 6, 14, SyntaxToken::Keyword));
+    CHECK(hasSpan(spansCpp, 15, 23, SyntaxToken::Keyword));
+    CHECK(hasSpan(spansCpp, 24, 29, SyntaxToken::Keyword));
+    CHECK(hasSpan(spansCpp, 30, 33, SyntaxToken::Type));
 }
 
 TEST(Clike_CharacterLiteral) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string l1 = "'a'";
     auto s1 = hl.highlight(l1);
     checkSpanInvariants(s1, l1);
@@ -314,23 +350,27 @@ TEST(Clike_CharacterLiteral) {
 }
 
 TEST(Clike_LineCommentWithKeyword) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line = "int x; // int y; class foo";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
     CHECK(hasSpan(spans, 0, 3, SyntaxToken::Type));
     CHECK(hasSpan(spans, 7, line.size(), SyntaxToken::Comment));
-    for (auto &s : spans) {
-        if (s.token==SyntaxToken::Type || s.token==SyntaxToken::Keyword) {
+    for (auto &s : spans)
+        if (s.token==SyntaxToken::Type || s.token==SyntaxToken::Keyword) 
             CHECK(s.end <= 7);
-        }
-    }
 }
+
+
 
 // --- Identificadores y Palabras Reservadas ---
 
 TEST(Clike_IdentifierBoundaries_NoPartialKeywords) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
 
     auto checkNoPartial = [&](const char* text, size_t badBegin, size_t badEnd, SyntaxToken tok) {
         std::string line = text;
@@ -349,7 +389,8 @@ TEST(Clike_IdentifierBoundaries_NoPartialKeywords) {
 }
 
 TEST(Clike_IdentifierBoundaries_StandaloneKeywordsStillWork) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
 
     auto spansInt = hl.highlight("int");
     CHECK(hasSpan(spansInt, 0, 3, SyntaxToken::Type));
@@ -364,7 +405,9 @@ TEST(Clike_IdentifierBoundaries_StandaloneKeywordsStillWork) {
 // --- Variantes de Números ---
 
 TEST(Clike_NumberVariants_BasicFloatingAndHexFloat) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     auto expectWholeNumber = [&](const char* text) {
         std::string line = text;
         auto spans = hl.highlight(line);
@@ -386,7 +429,8 @@ TEST(Clike_NumberVariants_BasicFloatingAndHexFloat) {
 }
 
 TEST(Clike_NumberVariants_DigitSeparators) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
 
     auto spans1 = hl.highlight("1'000");
     checkSpanInvariants(spans1, "1'000");
@@ -407,7 +451,8 @@ TEST(Clike_NumberVariants_DigitSeparators) {
 // --- Prefijos de Strings/Chars Ordinarios ---
 
 TEST(Clike_OrdinaryStringPrefixes) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
 
     std::string l1 = "u8\"x\"";
     auto spansU8 = hl.highlight(l1);
@@ -431,7 +476,8 @@ TEST(Clike_OrdinaryStringPrefixes) {
 }
 
 TEST(Clike_CharacterLiteralPrefixes) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl;
+    hl.setLanguage(SyntaxLanguage::Cpp);
 
     std::string l1 = "u'x'";
     auto spansu = hl.highlight(l1);
@@ -450,7 +496,9 @@ TEST(Clike_CharacterLiteralPrefixes) {
 }
 
 TEST(Clike_PrefixedStringDoesNotSwallowFollowingCode) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line = "L\"x\" int y;";
     auto spans = hl.highlight(line);
     checkSpanInvariants(spans, line);
@@ -461,69 +509,62 @@ TEST(Clike_PrefixedStringDoesNotSwallowFollowingCode) {
 // --- Transiciones de Estado Límite ---
 
 TEST(Clike_BlockComment_EmptyLineKeepsState) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
     SyntaxState st{};
-    st.inBlockComment = true;
     SyntaxState out;
+    
+    st.inBlockComment = true;
     auto spans = hl.highlight("", st, out);
+    
     CHECK(spans.empty());
     CHECK(out.inBlockComment);
 }
 
 TEST(Clike_BlockComment_CloseReopenSameLine) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
     SyntaxState st{};
-    st.inBlockComment = true;
     SyntaxState out;
+    
+    st.inBlockComment = true;
     std::string line = "*/ int x; /* y */";
     auto spans = hl.highlight(line, st, out);
+    
     checkSpanInvariants(spans, line);
-    CHECK(hasSpan(spans, 0, 2, SyntaxToken::Comment)); // Cierre previo
-    CHECK(hasSpan(spans, 3, 6, SyntaxToken::Type));    // Código normal
+    CHECK(hasSpan(spans, 0, 2, SyntaxToken::Comment));   // Cierre previo
+    CHECK(hasSpan(spans, 3, 6, SyntaxToken::Type));      // Código normal
     CHECK(hasSpan(spans, 10, 17, SyntaxToken::Comment)); // Nuevo comentario
     CHECK(!out.inBlockComment);
 }
 
 TEST(Clike_RawString_WrongDelimiterDoesNotCloseEarly) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     SyntaxState st{};
     SyntaxState out;
+    
     // Delimitador es "foo", cierre debe ser ")foo"". 
     // El texto contiene ")bar"", que NO cierra el raw string.
     std::string line = "R\"foo(x)bar\")foo\"";
     auto spans = hl.highlight(line, st, out);
+    
     checkSpanInvariants(spans, line);
     CHECK(hasSpan(spans, 0, line.size(), SyntaxToken::String));
     CHECK(!out.inRawString);
     CHECK(out.rawDelimLen == 0);
 }
 
-TEST(Clike_RawString_UnclosedAtEofPreservesState) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
-    SyntaxState st{};
-    SyntaxState out;
-
-    std::string line1 = "R\"foo(";
-    auto spans1 = hl.highlight(line1, st, out);
-    st = out;
-    CHECK(st.inRawString);
-    CHECK(std::string_view(st.rawDelim, st.rawDelimLen) == "foo");
-
-    std::string line2 = "still raw";
-    auto spans2 = hl.highlight(line2, st, out);
-    st = out;
-    checkSpanInvariants(spans2, line2);
-    CHECK(hasSpan(spans2, 0, line2.size(), SyntaxToken::String));
-    CHECK(st.inRawString);
-    CHECK(st.rawDelimLen == 3);
-}
-
 // --- Interacciones Cruzadas ---
 
 TEST(Clike_MarkersInsideStringAreNotTokens) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line = "const char* url = \"http://example.com/*x*/\";";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
     CHECK(hasSpanText(spans, line, "\"http://example.com/*x*/\"", SyntaxToken::String));
     for (const auto& s : spans) {
@@ -533,9 +574,12 @@ TEST(Clike_MarkersInsideStringAreNotTokens) {
 }
 
 TEST(Clike_StringMarkersInsideLineCommentAreNotStrings) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line = "// \"esto no abre un string\"";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
     CHECK(hasSpanText(spans, line, line, SyntaxToken::Comment));
     for (const auto& s : spans) {
@@ -545,20 +589,25 @@ TEST(Clike_StringMarkersInsideLineCommentAreNotStrings) {
 }
 
 TEST(Clike_PreprocessorMarkersInsideStringAreNotPreprocessor) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line = "const char* directive = \"#include <x>\";";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
     CHECK(hasSpanText(spans, line, "\"#include <x>\"", SyntaxToken::String));
-    for (const auto& s : spans) {
+    for (const auto& s : spans) 
         CHECK(s.token != SyntaxToken::Preprocessor);
-    }
 }
 
 TEST(Clike_MarkersInsideRawStringAreNotTokens) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line = "auto raw = R\"(// /* #define FOO)\";";
     auto spans = hl.highlight(line);
+    
     checkSpanInvariants(spans, line);
     CHECK(hasSpanText(spans, line, "R\"(// /* #define FOO)\"", SyntaxToken::String));
     for (const auto& s : spans) {
@@ -570,23 +619,26 @@ TEST(Clike_MarkersInsideRawStringAreNotTokens) {
 // --- Fortalecimiento de Assertions Existentes ---
 
 TEST(Clike_RawStringOnlyCpp_Strong) {
-    SyntaxHighlighter hlC; hlC.setLanguage(SyntaxLanguage::C);
-    SyntaxHighlighter hlCpp; hlCpp.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hlC; 
+    hlC.setLanguage(SyntaxLanguage::C);
     
-    // Caso 1: R"(hello)"
+    SyntaxHighlighter hlCpp; 
+    hlCpp.setLanguage(SyntaxLanguage::Cpp);
+    
     std::string line1 = R"TEST(R"(hello)")TEST";
     
     // En C++: Raw string válido
     SyntaxState stCpp{}; SyntaxState outCpp;
     auto spansCpp1 = hlCpp.highlight(line1, stCpp, outCpp);
+    
     checkSpanInvariants(spansCpp1, line1);
     CHECK(hasSpan(spansCpp1, 0, line1.size(), SyntaxToken::String));
     CHECK(!outCpp.inRawString);
     
     // En C: No es raw string. Debe degradar.
-    // Asumimos comportamiento: 'R' es identificador/plano, "(...)" es string ordinario.
     SyntaxState stC{}; SyntaxState outC;
     auto spansC1 = hlC.highlight(line1, stC, outC);
+    
     checkSpanInvariants(spansC1, line1);
     CHECK(!outC.inRawString);
     CHECK(outC.rawDelimLen==0);
@@ -595,30 +647,34 @@ TEST(Clike_RawStringOnlyCpp_Strong) {
     // Debería haber un string que empiece en la comilla (pos 1)
     CHECK(hasSpan(spansC1, 1, line1.size(), SyntaxToken::String));
 
-    // Caso 2: u8R"(x)"
     std::string line2 = R"TEST(u8R"(x)")TEST";
     
     // En C++: Raw string válido con prefijo
     SyntaxState stCpp2{}; SyntaxState outCpp2;
     auto spansCpp2 = hlCpp.highlight(line2, stCpp2, outCpp2);
+    
     checkSpanInvariants(spansCpp2, line2);
     CHECK(hasSpan(spansCpp2, 0, line2.size(), SyntaxToken::String));
     
     // En C: No raw. "u8R" es plano/ident, "(x)" es string.
     SyntaxState stC2{}; SyntaxState outC2;
     auto spansC2 = hlC.highlight(line2, stC2, outC2);
+    
     checkSpanInvariants(spansC2, line2);
     CHECK(!outC2.inRawString);
     CHECK(!hasSpan(spansC2, 0, line2.size(), SyntaxToken::String));
-    CHECK(hasSpan(spansC2, 3, line2.size(), SyntaxToken::String)); // Empieza en la comilla tras u8R
+    CHECK(hasSpan(spansC2, 3, line2.size(), SyntaxToken::String));  // Empieza en la comilla tras u8R
 }
 
 TEST(Clike_RawStringInvalidDelim_Strong) {
-    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
     
     auto checkValidRaw = [&](std::string line){
-        SyntaxState st{}; SyntaxState out;
+        SyntaxState st{}; 
+        SyntaxState out;
         auto spans = hl.highlight(line, st, out);
+        
         checkSpanInvariants(spans, line);
         CHECK(hasSpan(spans, 0, line.size(), SyntaxToken::String));
         CHECK(!out.inRawString);
@@ -626,8 +682,10 @@ TEST(Clike_RawStringInvalidDelim_Strong) {
     };
 
     auto checkInvalidRawFallbackToString = [&](std::string line){
-        SyntaxState st{}; SyntaxState out;
+        SyntaxState st{}; 
+        SyntaxState out;
         auto spans = hl.highlight(line, st, out);
+        
         checkSpanInvariants(spans, line);
         
         // 1. No debe quedar estado raw
@@ -699,8 +757,7 @@ TEST(Clike_Language_FromFilename) {
 }
 
 // Inyección tardía del renderer 
-// crea dos editores con el mismo documento (misma lógica de armado vía makeDoc) pero con distinto 
-// momento de inyección del renderer, y compara que el primer frame pintado sea byte a byte idéntico.
+// crea dos editores con el mismo documento pero con distinto momento de inyección del renderer
 TEST(Clike_fase_c_late_setRenderer_matches_early_renderer_highlight) {
     auto makeDoc = [](Editor& ed) {
         ed.getActiveBufferForTesting().document.restore(
@@ -708,7 +765,26 @@ TEST(Clike_fase_c_late_setRenderer_matches_early_renderer_highlight) {
         ed.getActiveBufferForTesting().filename = "t.cpp";
         ed.resize(24, 80);
     };
-    
+
+    auto checkHighlight = [](Editor& ed) {
+        SyntaxHighlighter hl;
+        hl.setLanguage(SyntaxLanguage::Cpp);
+        auto& doc = ed.getActiveBufferForTesting().document;
+
+        // línea 0: "int main() {"  ->  int es Type en [0,3)
+        auto s0 = hl.highlight(doc.lineAt(0));
+        CHECK(hasSpan(s0, 0, 3, SyntaxToken::Type));
+
+        // línea 1: "  int x = 1;"  ->  int es Type en [2,5), 1 es Number en [9,10)
+        auto s1 = hl.highlight(doc.lineAt(1));
+        CHECK(hasSpan(s1, 2, 5, SyntaxToken::Type));
+        CHECK(hasSpan(s1, 10, 11, SyntaxToken::Number));
+
+        // línea 2: "  return x;"  ->  return es Keyword en [2,8)
+        auto s2 = hl.highlight(doc.lineAt(2));
+        CHECK(hasSpan(s2, 2, 8, SyntaxToken::Keyword));
+    };
+
     // editor 1
 
     Editor early;
@@ -720,6 +796,8 @@ TEST(Clike_fase_c_late_setRenderer_matches_early_renderer_highlight) {
     early.renderFrame();
     CHECK(!ref.data.empty());
     
+    checkHighlight(early);
+    
     // editor 2
 
     Editor late;
@@ -727,11 +805,308 @@ TEST(Clike_fase_c_late_setRenderer_matches_early_renderer_highlight) {
     
     makeDoc(late);
     late.setSink(nullCap);
-    late.renderFrame();  // con Null: corre scroll/brackets pero no pinta
+    late.renderFrame();          // con Null: corre scroll/brackets pero no pinta
     CHECK(nullCap.data.empty());
     
     late.setRenderer(makeTtyTestRenderer());  // tardío (tests; main usa el ctor)
     late.setSink(got);
     late.renderFrame();
     CHECK_EQ(got.data, ref.data);
+    
+    checkHighlight(late);
+}
+
+// --- Multilinea
+
+TEST(Clike_BlockCommentMultiLine_State) {
+    SyntaxHighlighter hl; 
+    SyntaxState st{};
+    SyntaxState out;
+    
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    st.inBlockComment=false;
+    
+    // fila 1
+    std::string l1 = "/* start";
+    auto spans1 = hl.highlight(l1, st, out); 
+    st=out;
+    
+    checkSpanInvariants(spans1, l1);
+    CHECK(hasSpan(spans1, 0, 8, SyntaxToken::Comment));
+    CHECK(st.inBlockComment);
+    
+    // fila 2
+    std::string l2 = " middle ";
+    auto spans2 = hl.highlight(l2, st, out); 
+    st=out;
+    
+    checkSpanInvariants(spans2, l2);
+    CHECK(hasSpan(spans2, 0, 8, SyntaxToken::Comment));
+    CHECK(st.inBlockComment);
+    
+    // fila 3
+    std::string l3 = " end */ int x;";
+    auto spans3 = hl.highlight(l3, st, out); 
+    st=out;
+    
+    checkSpanInvariants(spans3, l3);
+    CHECK(hasSpan(spans3, 0, 7, SyntaxToken::Comment));
+    CHECK(!st.inBlockComment);
+    CHECK(hasSpan(spans3, 8, 11, SyntaxToken::Type));
+}
+
+TEST(Clike_Preprocessor_Miltiline_AfterBlockComment) {
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    
+    // fila 1
+    std::string line1 = "/* comment";
+    auto spans = hl.highlight(line1);
+    
+    checkSpanInvariants(spans, line1);
+    CHECK(hasSpan(spans, 0, line1.size(), SyntaxToken::Comment));
+    
+    SyntaxState st{};
+    SyntaxState out;
+    st.inBlockComment=true;
+    
+    // fila 2
+    std::string line2 = " still */ #define BAR";
+    auto spans2 = hl.highlight(line2, st, out);
+    
+    checkSpanInvariants(spans2, line2);
+    CHECK(hasSpan(spans2, 0, 9, SyntaxToken::Comment));
+    CHECK(hasSpan(spans2, 10, 21, SyntaxToken::Preprocessor));
+}
+
+TEST(Clike_RawStringMultiline) {
+    SyntaxHighlighter hl; 
+    hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxState st{}; 
+    SyntaxState out;
+    
+    // fila 1
+    std::string l1 = "auto s = R\"foo(";
+    auto s1 = hl.highlight(l1, st, out); 
+    st=out;
+    
+    checkSpanInvariants(s1, l1);
+    CHECK(st.inRawString);
+    CHECK(std::string_view(st.rawDelim, st.rawDelimLen)=="foo");
+    
+    // fila 2
+    std::string l2 = "still raw";
+    auto s2 = hl.highlight(l2, st, out); 
+    st=out;
+    
+    checkSpanInvariants(s2, l2);
+    CHECK(hasSpan(s2, 0, l2.size(), SyntaxToken::String));
+    CHECK(st.inRawString);
+    
+    // fila 3
+    std::string l3 = ")foo\"; int x=1;";
+    auto s3 = hl.highlight(l3, st, out); 
+    st=out;
+    
+    checkSpanInvariants(s3, l3);
+    CHECK(!st.inRawString);
+    CHECK(st.rawDelimLen==0);
+    CHECK(std::string_view(st.rawDelim, st.rawDelimLen).empty());
+    CHECK(hasSpan(s3, 0, 5, SyntaxToken::String));
+    CHECK(hasSpan(s3, 7, 10, SyntaxToken::Type));
+}
+
+TEST(Clike_RawString_UnclosedAtEofPreservesState) {
+    SyntaxHighlighter hl; hl.setLanguage(SyntaxLanguage::Cpp);
+    SyntaxState st{};
+    SyntaxState out;
+
+    std::string line1 = "R\"foo(";
+    auto spans1 = hl.highlight(line1, st, out);
+    st = out;
+    
+    CHECK(st.inRawString);
+    CHECK(std::string_view(st.rawDelim, st.rawDelimLen) == "foo");
+
+    std::string line2 = "still raw";
+    auto spans2 = hl.highlight(line2, st, out);
+    st = out;
+    
+    checkSpanInvariants(spans2, line2);
+    CHECK(hasSpan(spans2, 0, line2.size(), SyntaxToken::String));
+    CHECK(st.inRawString);
+    CHECK(st.rawDelimLen == 3);
+}
+
+// --- Comentario de multiple lineas ---
+
+TEST(Clike_syntax_cache_two_dirty_regions_partial_ensure) {
+    Document doc;
+    doc.restore(makeCodeLines(200));
+
+    SyntaxCache c;
+    c.setLanguage(SyntaxLanguage::Cpp);
+    c.ensureValid(doc, 200);
+
+    // Dos regiones dirty separadas.
+    doc.insertText(5, 0, "/* ");
+    c.markDirty(5);
+
+    doc.insertText(100, 0, "*/");
+    c.markDirty(100);
+
+    c.ensureValid(doc, 200);
+
+    SyntaxCache fresh;
+    fresh.setLanguage(SyntaxLanguage::Cpp);
+    fresh.ensureValid(doc, 200);
+
+    for (int l = 0; l < 200; ++l) {
+        CHECK(c.stateBefore(l) == fresh.stateBefore(l));
+        CHECK(spansEqual(c.spansFor(l), fresh.spansFor(l)));
+    }
+}
+
+TEST(Clike_syntax_cache_dirty_regions_partial_ensure) {
+    Document doc;
+    doc.restore(makeCodeLines(200));
+
+    SyntaxCache c;
+    c.setLanguage(SyntaxLanguage::Cpp);
+    // cache caliente
+    c.ensureValid(doc, 200);
+
+    // neutra: no cambia el estado propagado
+    doc.insertText(5, 0, "x");      
+    c.markDirty(5);
+    
+    // abre comentario: cambia before_[101+]
+    doc.insertText(100, 0, "/* ");  
+    c.markDirty(100);
+
+    // no llega a la segunda edición
+    c.ensureValid(doc, 30);
+    CHECK(!c.stateBefore(101).inBlockComment);
+    
+    c.ensureValid(doc, 200);
+    CHECK(c.stateBefore(101).inBlockComment);
+}
+
+TEST(Clike_syntax_cache_partial_without_convergence_stays_dirty) {
+    Document doc;
+    doc.restore({
+        "int a = 1;",
+        "int b = 2;",
+        "int c = 3;",
+        "int d = 4;",
+        "int e = 5;",
+        "int f = 6;",
+    });
+
+    SyntaxCache c;
+    c.setLanguage(SyntaxLanguage::Cpp);
+    c.ensureValid(doc, 6);
+    
+    // abre bloque sin cerrar
+    doc.insertText(1, 0, "/* ");
+    c.markDirty(1);
+    
+    // parcial: solo la fila editada
+    c.ensureValid(doc, 2);
+    
+    // como ha sido parcial el final del archivo
+    // no deberia haber detectado
+    CHECK(c.dirtyFrom() != INT_MAX);
+    CHECK(!c.isValidThrough(6));
+    
+    // el rango pedido sí quedó válido.
+    CHECK(c.isValidThrough(2));
+    CHECK(c.stateBefore(2).inBlockComment);
+
+    // hacemos una validacion total
+    c.ensureValid(doc, 6);
+    
+    CHECK(c.dirtyFrom() == INT_MAX);
+    CHECK(c.isValidThrough(6));
+}
+
+// creamos un documento de 2k lineas, agregamos al inicio un comentario
+// y se va a ir actualizando hasta el final del archivo.
+TEST(Clike_syntax_cache_block_comment_2k_viewport_budget_and_tail) {
+    const int n = 2000;
+    const int viewport = 40;
+    
+    Document doc;
+    doc.restore(makeCodeLines(n));
+
+    SyntaxCache c;
+    c.setLanguage(SyntaxLanguage::Cpp);
+    c.ensureValid(doc, n);
+
+    doc.insertText(0, 0, "/* "); // comentario hasta EOF
+    c.markDirty(0);
+
+    instrument::enable(true);
+    instrument::resetFrame();
+    c.ensureValid(doc, viewport); // lo que necesita una tecla interactiva
+    
+    auto m = instrument::snapshotAndReset();
+    instrument::enable(false);
+
+    // Budget:
+    CHECK(m.syntaxHighlighterCalls <= 64);
+    CHECK(m.syntaxHighlighterCalls >= 1);
+    
+    // Viewport correcto
+    CHECK(c.stateBefore(1).inBlockComment);
+    CHECK(c.stateBefore(viewport).inBlockComment);
+    
+    bool tailSpanComment = false;
+    for (auto& s : c.spansFor(viewport - 1))
+        if (s.token == SyntaxToken::Comment) tailSpanComment = true;
+        
+    CHECK(tailSpanComment);
+    
+    // todavia no se detecto que el inicio del comentario va hasta el final del archivo
+    CHECK(c.dirtyFrom() != INT_MAX);
+    CHECK(!c.isValidThrough(n));
+
+    // validamos hasta el final del archivo
+    c.ensureValid(doc, n);
+    CHECK(c.stateBefore(n - 1).inBlockComment);
+    
+    bool lastComment = false;
+    for (auto& s : c.spansFor(n - 1))
+        if (s.token == SyntaxToken::Comment) lastComment = true;
+        
+    CHECK(lastComment);
+    CHECK(c.dirtyFrom() == INT_MAX);
+}
+
+TEST(Clike_syntax_cache_neutral_edit_converges_fast) {
+    const int n = 2000;
+    
+    Document doc;
+    doc.restore(makeCodeLines(n));
+
+    SyntaxCache c;
+    c.setLanguage(SyntaxLanguage::Cpp);
+    c.ensureValid(doc, n);
+
+    // neutra: no cambia el estado propagado
+    doc.insertText(100, 0, "x"); 
+    c.markDirty(100);
+
+    instrument::enable(true);
+    instrument::resetFrame();
+    
+    c.ensureValid(doc, n);
+    auto m = instrument::snapshotAndReset();
+    instrument::enable(false);
+
+    CHECK(m.syntaxHighlighterCalls <= 4);
+    CHECK(c.dirtyFrom() == INT_MAX);
+    
+    // verificamos que no lo marque como comentario
+    CHECK(!c.stateBefore(101).inBlockComment);
 }
