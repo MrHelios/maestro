@@ -355,6 +355,22 @@ private:
     // Maneja los eventos mientras state_ == State::BufferSelector.
     void handleBufferSelectorEvent(const InputEvent& event);
 
+    // Click izquierdo en los modos lista (BufferSelector / FileBrowser /
+    // SaveAsFileBrowser). La fila de la celda (0-based, el contenido arranca
+    // en la fila 0) se mapea a un indice con el scroll del modo:
+    //   - click sobre OTRA entrada: mueve el cursor de la lista (no activa);
+    //   - click sobre la entrada YA seleccionada: la activa.
+    // BufferSelector: activa ese buffer (equivale a Enter).
+    // FileBrowser: ".." sube, carpeta entra, archivo lo abre (igual que Enter).
+    // SaveAsFileBrowser: ".." sube y carpeta entra; un archivo NO se abre
+    // (misma restriccion que enterDirectoryOnly/Enter).
+    // Un click fuera de una entrada real (chrome o relleno) es no-op.
+    void handleBufferSelectorClick(CellPos cell);
+    void handleFileBrowserClick(CellPos cell, bool directoryOnly);
+    // Indice de la entrada bajo `cell` en el listado visible, o -1 si la
+    // celda no cae sobre una entrada real (chrome, relleno, fuera de rango).
+    int listIndexAtCell(CellPos cell, int scroll, int count) const;
+
     // ---- Explorador de archivos (v0.6.4) ----
     // Ctrl+K o -> startFileBrowser(). El estado y la navegacion viven en
     // fileBrowser (FileBrowser); el Editor decide las consecuencias

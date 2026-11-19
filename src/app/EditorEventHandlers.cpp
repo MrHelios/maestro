@@ -243,6 +243,47 @@ void Editor::openFileInBuffer(const std::string& path) {
     }
 }
 
+void Editor::handleBufferSelectorClick(CellPos cell) {
+    const int idx = listIndexAtCell(cell, bufferSelectorScroll_, buffers.count());
+    if (idx < 0) return;
+    if (idx != bufferSelectorIndex_) {
+        // Primer click sobre otra fila: solo mueve el cursor de la lista.
+        bufferSelectorIndex_ = idx;
+        return;
+    }
+    // Click sobre la fila seleccionada: abre ese buffer (como Enter).
+    activateBufferAtMruPosition(bufferSelectorIndex_);
+}
+
+void Editor::handleFileBrowserClick(CellPos cell, bool directoryOnly) {
+    const int idx = listIndexAtCell(cell, fileBrowser.scroll_,
+                                    static_cast<int>(fileBrowser.entries_.size()));
+    if (idx < 0) return;
+    if (idx != fileBrowser.index_) {
+        // Primer click sobre otra fila: solo mueve el cursor de la lista.
+        // La fila ya esta visible, asi que el scroll no cambia.
+        fileBrowser.index_ = idx;
+        return;
+    }
+    // Click sobre la fila seleccionada: misma accion que Enter.
+    if (directoryOnly)
+        fileBrowserEnterDirectoryOnly();
+    else
+        fileBrowserEnterSelected();
+}
+
+int Editor::listIndexAtCell(CellPos cell, int scroll, int count) const {
+    if (!cell.valid()) return -1;
+    // El listado ocupa las primeras `viewport.height` filas del contenido
+    // (el renderer compone las lineas con esa misma altura); debajo empieza
+    // el chrome, que no es clicable.
+    const int visible = std::max(0, buffers.active().viewport.height);
+    if (cell.row < 0 || cell.row >= visible) return -1;
+    const int idx = scroll + cell.row;
+    if (idx < 0 || idx >= count) return -1;
+    return idx;
+}
+
 void Editor::handleFileBrowserEvent(const InputEvent& event) {
     switch (event.type) {
         case InputEventType::PageUp:
@@ -314,6 +355,20 @@ void Editor::handleFileBrowserEvent(const InputEvent& event) {
 }
 
 void Editor::handleMousePress(const InputEvent& event) {
+    // Modos lista: el click mueve el cursor de la lista o activa la entrada
+    // ya seleccionada (ver handleBufferSelectorClick/handleFileBrowserClick).
+    if (state_ == State::BufferSelector) {
+        handleBufferSelectorClick(event.cell);
+        return;
+    }
+    if (state_ == State::FileBrowser) {
+        handleFileBrowserClick(event.cell, /*directoryOnly=*/false);
+        return;
+    }
+    if (state_ == State::SaveAsFileBrowser) {
+        handleFileBrowserClick(event.cell, /*directoryOnly=*/true);
+        return;
+    }
     if (state_ != State::Navegacion && state_ != State::Interaccion &&
         state_ != State::Seleccion) {
         return;

@@ -85,6 +85,9 @@ enum class InputEventType {
     ScrollDown,
     // Click izquierdo (press SGR `...M`). Botones medio/derecho y motion
     // se traducen a None. La celda va en `cell` (0-based), nunca en `text`.
+    // En los modos lista (BufferSelector / FileBrowser / SaveAsFileBrowser)
+    // el click mueve el cursor de la lista o activa la entrada ya
+    // seleccionada (misma accion que Enter; en SaveAs nunca abre archivos).
     MousePress,
     // Arrastre con boton izquierdo (SGR Cb=32 + 'M', con ?1002h). Solo se
     // emite mientras un press previo lo armo (mouseGestureActive_); el Editor
