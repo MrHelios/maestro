@@ -82,6 +82,10 @@ bool spansEqual(const std::vector<SyntaxSpan>& a, const std::vector<SyntaxSpan>&
 
 } // namespace
 
+// -----------------------------------------------------------------------------
+// tokens básicos y comentarios
+// -----------------------------------------------------------------------------
+
 TEST(Clike_EmptyLine) {
     SyntaxHighlighter hl;
     
@@ -364,9 +368,9 @@ TEST(Clike_LineCommentWithKeyword) {
             CHECK(s.end <= 7);
 }
 
-
-
-// --- Identificadores y Palabras Reservadas ---
+// -----------------------------------------------------------------------------
+// Identificadores y Palabras Reservadas
+// -----------------------------------------------------------------------------
 
 TEST(Clike_IdentifierBoundaries_NoPartialKeywords) {
     SyntaxHighlighter hl; 
@@ -402,7 +406,9 @@ TEST(Clike_IdentifierBoundaries_StandaloneKeywordsStillWork) {
     CHECK(hasSpan(spansClass, 0, 5, SyntaxToken::Keyword));
 }
 
-// --- Variantes de Números ---
+// -----------------------------------------------------------------------------
+// Variantes de Números
+// -----------------------------------------------------------------------------
 
 TEST(Clike_NumberVariants_BasicFloatingAndHexFloat) {
     SyntaxHighlighter hl; 
@@ -448,7 +454,9 @@ TEST(Clike_NumberVariants_DigitSeparators) {
     CHECK(!hasAnyToken(spans3, SyntaxToken::Character));
 }
 
-// --- Prefijos de Strings/Chars Ordinarios ---
+// -----------------------------------------------------------------------------
+// Prefijos de Strings/Chars Ordinarios
+// -----------------------------------------------------------------------------
 
 TEST(Clike_OrdinaryStringPrefixes) {
     SyntaxHighlighter hl; 
@@ -506,7 +514,9 @@ TEST(Clike_PrefixedStringDoesNotSwallowFollowingCode) {
     CHECK(hasSpan(spans, 5, 8, SyntaxToken::Type));
 }
 
-// --- Transiciones de Estado Límite ---
+// -----------------------------------------------------------------------------
+// Transiciones de Estado Límite
+// -----------------------------------------------------------------------------
 
 TEST(Clike_BlockComment_EmptyLineKeepsState) {
     SyntaxHighlighter hl; 
@@ -556,7 +566,9 @@ TEST(Clike_RawString_WrongDelimiterDoesNotCloseEarly) {
     CHECK(out.rawDelimLen == 0);
 }
 
-// --- Interacciones Cruzadas ---
+// -----------------------------------------------------------------------------
+// Interacciones Cruzadas
+// -----------------------------------------------------------------------------
 
 TEST(Clike_MarkersInsideStringAreNotTokens) {
     SyntaxHighlighter hl; 
@@ -616,7 +628,9 @@ TEST(Clike_MarkersInsideRawStringAreNotTokens) {
     }
 }
 
-// --- Fortalecimiento de Assertions Existentes ---
+// -----------------------------------------------------------------------------
+// Fortalecimiento de Assertions Existentes
+// -----------------------------------------------------------------------------
 
 TEST(Clike_RawStringOnlyCpp_Strong) {
     SyntaxHighlighter hlC; 
@@ -756,7 +770,10 @@ TEST(Clike_Language_FromFilename) {
     CHECK(languageFromFilename("README")==SyntaxLanguage::None);
 }
 
-// Inyección tardía del renderer 
+// -----------------------------------------------------------------------------
+// Inyección tardía del renderer
+// -----------------------------------------------------------------------------
+
 // crea dos editores con el mismo documento pero con distinto momento de inyección del renderer
 TEST(Clike_fase_c_late_setRenderer_matches_early_renderer_highlight) {
     auto makeDoc = [](Editor& ed) {
@@ -816,7 +833,9 @@ TEST(Clike_fase_c_late_setRenderer_matches_early_renderer_highlight) {
     checkHighlight(late);
 }
 
-// --- Multilinea
+// -----------------------------------------------------------------------------
+// multilínea
+// -----------------------------------------------------------------------------
 
 TEST(Clike_BlockCommentMultiLine_State) {
     SyntaxHighlighter hl; 
@@ -938,7 +957,9 @@ TEST(Clike_RawString_UnclosedAtEofPreservesState) {
     CHECK(st.rawDelimLen == 3);
 }
 
-// --- Comentario de multiple lineas ---
+// -----------------------------------------------------------------------------
+// Integración con SyntaxCache
+// -----------------------------------------------------------------------------
 
 TEST(Clike_syntax_cache_two_dirty_regions_partial_ensure) {
     Document doc;

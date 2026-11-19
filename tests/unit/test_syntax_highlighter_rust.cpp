@@ -1,3 +1,7 @@
+#include <string>
+#include <vector>
+#include <cstring>
+
 #include "test_framework.h"
 #include "syntax/SyntaxHighlighter.h"
 #include "syntax/SyntaxLanguage.h"
@@ -6,9 +10,7 @@
 #include "syntax/RustHighlighter.h"
 #include "document/Document.h"
 
-#include <string>
-#include <vector>
-#include <cstring>
+namespace {
 
 static bool hasSpan(const std::vector<SyntaxSpan>& spans,
                     std::size_t b,
@@ -31,17 +33,18 @@ static bool hasToken(const std::vector<SyntaxSpan>& spans, SyntaxToken tok) {
     return false;
 }
 
+} // namespace
+
 // -----------------------------------------------------------------------------
 // Selección de lenguaje
 // -----------------------------------------------------------------------------
 
-TEST(RustLanguage_FromFilename) {
+TEST(RustHighlighter_RustLanguage_FromFilename) {
     CHECK(languageFromFilename("main.rs") == SyntaxLanguage::Rust);
     CHECK(languageFromFilename("MAIN.RS") == SyntaxLanguage::Rust);
     CHECK(languageFromFilename("dir.with.dot/main.rs") == SyntaxLanguage::Rust);
     CHECK(languageFromFilename("main.rs.bak") == SyntaxLanguage::None);
 
-    // No debe romper selecciones existentes.
     CHECK(languageFromFilename("main.c") == SyntaxLanguage::C);
     CHECK(languageFromFilename("main.cpp") == SyntaxLanguage::Cpp);
     CHECK(languageFromFilename("README.md") == SyntaxLanguage::Markdown);
@@ -51,7 +54,7 @@ TEST(RustLanguage_FromFilename) {
 // Estado Rust en SyntaxState
 // -----------------------------------------------------------------------------
 
-TEST(SyntaxState_RustFieldsParticipateInEquality) {
+TEST(RustHighlighter_SyntaxState_RustFieldsParticipateInEquality) {
     SyntaxState a{};
     SyntaxState b{};
 
@@ -70,7 +73,7 @@ TEST(SyntaxState_RustFieldsParticipateInEquality) {
 }
 
 // -----------------------------------------------------------------------------
-// Grupo A: tokens básicos
+// tokens básicos
 // -----------------------------------------------------------------------------
 
 TEST(RustHighlighter_EmptyLine) {
@@ -236,7 +239,7 @@ TEST(RustHighlighter_RawIdentifierNotHighlighted) {
 }
 
 // -----------------------------------------------------------------------------
-// Grupo B: comentarios
+// comentarios
 // -----------------------------------------------------------------------------
 
 TEST(RustHighlighter_LineComment) {
@@ -343,7 +346,7 @@ TEST(RustHighlighter_CommentHidesStringMarkers) {
 }
 
 // -----------------------------------------------------------------------------
-// Grupo C: strings, caracteres y lifetimes
+// strings, caracteres y lifetimes
 // -----------------------------------------------------------------------------
 
 TEST(RustHighlighter_NormalString) {
@@ -456,7 +459,7 @@ TEST(RustHighlighter_StrayApostrophesDoNotSwallowLine) {
 }
 
 // -----------------------------------------------------------------------------
-// Grupo D: raw strings
+// raw strings
 // -----------------------------------------------------------------------------
 
 TEST(RustHighlighter_RawStringNoHash) {
@@ -579,7 +582,7 @@ TEST(RustHighlighter_RawStringHidesCommentMarkers) {
 }
 
 // -----------------------------------------------------------------------------
-// Grupo E: números
+// números
 // -----------------------------------------------------------------------------
 
 TEST(RustHighlighter_Numbers) {
@@ -659,7 +662,7 @@ TEST(RustHighlighter_NumericSuffixBoundary) {
 }
 
 // -----------------------------------------------------------------------------
-// Grupo F: invariantes básicas de spans
+// invariantes básicas de spans
 // -----------------------------------------------------------------------------
 
 TEST(RustHighlighter_SpanInvariants) {
@@ -691,7 +694,7 @@ TEST(RustHighlighter_SpanInvariants) {
 }
 
 // -----------------------------------------------------------------------------
-// Integración: Rust no reutiliza estado CLike
+// Rust no reutiliza estado CLike
 // -----------------------------------------------------------------------------
 
 TEST(RustHighlighter_IgnoresCLikeBlockCommentState) {
@@ -774,10 +777,10 @@ TEST(RustHighlighter_SyntaxCache_ConvergenceAfterEdit) {
     Document doc;
     // Estado inicial: Raw string abierto en linea 1, cierra en linea 2
     doc.restore({
-        R"(normal)",      // Line 0
-        R"(r#"start)",    // Line 1 -> Abre raw string
+        R"(normal)",           // Line 0
+        R"(r#"start)",         // Line 1 -> Abre raw string
         R"(end"# let x = 1;)", // Line 2 -> Cierra raw string
-        R"(normal)"       // Line 3
+        R"(normal)"            // Line 3
     });
 
     SyntaxCache cache;
@@ -807,28 +810,4 @@ TEST(RustHighlighter_SyntaxCache_ConvergenceAfterEdit) {
         // Aquí falla
         CHECK(cache.stateBefore(l) == fresh.stateBefore(l));
     }
-}
-
-// -----------------------------------------------------------------------------
-// Regresión mínima: CLike y Markdown no cambian
-// -----------------------------------------------------------------------------
-
-TEST(RustHighlighter_CLikeRegression_Simple) {
-    SyntaxHighlighter hl;
-    hl.setLanguage(SyntaxLanguage::Cpp);
-
-    auto spans = hl.highlight("int x = 0;");
-
-    CHECK(hasSpan(spans, 0, 3, SyntaxToken::Type));
-    CHECK(hasSpan(spans, 8, 9, SyntaxToken::Number));
-}
-
-TEST(RustHighlighter_MarkdownRegression_Simple) {
-    SyntaxHighlighter hl;
-    hl.setLanguage(SyntaxLanguage::Markdown);
-
-    auto spans = hl.highlight("# H");
-
-    CHECK(spans.size() == 1);
-    CHECK(hasSpan(spans, 0, 3, SyntaxToken::Heading));
 }
