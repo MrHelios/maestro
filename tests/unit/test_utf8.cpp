@@ -5,21 +5,26 @@
 #include "document/Cursor.h"
 #include "base/utf8.h"
 
-#define U_E "\xc3\xa9"
+#define UTF8_E_ACUTE "\xC3\xA9"
 #define U_DASH "\xe2\x80\x94"
 #define U_EMOJI "\xf0\x9f\x98\x80"
+
+namespace {
 
 static bool validUtf8(const std::string& s) {
     size_t i = 0;
     while (i < s.size()) {
         unsigned char c = static_cast<unsigned char>(s[i]);
         int need;
+        
         if ((c & 0x80) == 0) need = 0;
         else if ((c & 0xE0) == 0xC0) need = 1;
         else if ((c & 0xF0) == 0xE0) need = 2;
         else if ((c & 0xF8) == 0xF0) need = 3;
         else return false;
+        
         if (i + static_cast<size_t>(need) >= s.size()) return false;
+        
         for (int k = 1; k <= need; ++k)
             if ((static_cast<unsigned char>(s[i + static_cast<size_t>(k)]) & 0xC0) != 0x80)
                 return false;
@@ -28,136 +33,145 @@ static bool validUtf8(const std::string& s) {
     return true;
 }
 
-namespace {
-int cols(const std::string& s) {
-    return utf8::columnOf(s, static_cast<int>(s.size()));
-}
-int colAt(const std::string& s, int byte) {
-    return utf8::columnOf(s, byte);
-}
-}
+} //namespace
 
 // ---------------------------------------------------------------------------
 // columnOf: columna visual por caracteres, no por bytes
 // ---------------------------------------------------------------------------
 
-TEST(utf8column_ascii_pure) {
+TEST(utf8_column_one_byte) {
     const std::string s = "hello";
-    CHECK_EQ(colAt(s, 0), 0);
-    CHECK_EQ(colAt(s, 1), 1);
-    CHECK_EQ(colAt(s, 3), 3);
-    CHECK_EQ(colAt(s, 5), 5);
+    
+    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(utf8::columnOf(s, 1), 1);
+    CHECK_EQ(utf8::columnOf(s, 3), 3);
+    CHECK_EQ(utf8::columnOf(s, 5), 5);
 }
 
-TEST(utf8column_two_byte_char) {
-    const std::string s = "caf" U_E;
-    CHECK_EQ(s.size(), 5u);
-    CHECK_EQ(colAt(s, 0), 0);
-    CHECK_EQ(colAt(s, 3), 3);
-    CHECK_EQ(colAt(s, 4), 4);
-    CHECK_EQ(colAt(s, 5), 4);
+TEST(utf8_column_two_byte_char) {
+    const std::string s = "caf" UTF8_E_ACUTE;
+    
+    CHECK_EQ((int)s.size(), 5);
+    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(utf8::columnOf(s, 3), 3);
+    CHECK_EQ(utf8::columnOf(s, 4), 4);
+    CHECK_EQ(utf8::columnOf(s, 5), 4);
 }
 
-TEST(utf8column_three_byte_char) {
+TEST(utf8_column_three_byte_char) {
     const std::string s = "\xe4\xbd\xa0\xe5\xa5\xbd";
-    CHECK_EQ(s.size(), 6u);
-    CHECK_EQ(colAt(s, 0), 0);
-    CHECK_EQ(colAt(s, 3), 2);
-    CHECK_EQ(colAt(s, 6), 4);
+    
+    CHECK_EQ((int)s.size(), 6);
+    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(utf8::columnOf(s, 3), 2);
+    CHECK_EQ(utf8::columnOf(s, 6), 4);
 }
 
-TEST(utf8column_four_byte_char) {
+TEST(utf8_column_four_byte_char) {
     const std::string s = U_EMOJI;
-    CHECK_EQ(s.size(), 4u);
-    CHECK_EQ(colAt(s, 0), 0);
-    CHECK_EQ(colAt(s, 1), 2);
-    CHECK_EQ(colAt(s, 4), 2);
+    
+    CHECK_EQ((int)s.size(), 4);
+    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(utf8::columnOf(s, 1), 2);
+    CHECK_EQ(utf8::columnOf(s, 4), 2);
 }
 
-TEST(utf8column_ascii_then_utf8) {
-    const std::string s = "ab" U_E "cd";
-    CHECK_EQ(s.size(), 6u);
-    CHECK_EQ(colAt(s, 0), 0);
-    CHECK_EQ(colAt(s, 2), 2);
-    CHECK_EQ(colAt(s, 4), 3);
-    CHECK_EQ(colAt(s, 6), 5);
+TEST(utf8_column_ascii_then_utf8) {
+    const std::string s = "ab" UTF8_E_ACUTE "cd";
+    
+    CHECK_EQ((int)s.size(), 6);
+    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(utf8::columnOf(s, 2), 2);
+    CHECK_EQ(utf8::columnOf(s, 4), 3);
+    CHECK_EQ(utf8::columnOf(s, 6), 5);
 }
 
-TEST(utf8column_utf8_then_ascii) {
-    const std::string s = U_E "abcd";
-    CHECK_EQ(s.size(), 6u);
-    CHECK_EQ(colAt(s, 0), 0);
-    CHECK_EQ(colAt(s, 2), 1);
-    CHECK_EQ(colAt(s, 3), 2);
-    CHECK_EQ(colAt(s, 6), 5);
+TEST(utf8_column_utf8_then_ascii) {
+    const std::string s = UTF8_E_ACUTE "abcd";
+    
+    CHECK_EQ((int)s.size(), 6);
+    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(utf8::columnOf(s, 2), 1);
+    CHECK_EQ(utf8::columnOf(s, 3), 2);
+    CHECK_EQ(utf8::columnOf(s, 6), 5);
 }
 
-TEST(utf8column_multiple_utf8_mixed) {
-    const std::string s = "caf" U_E U_DASH "test";
-    CHECK_EQ(s.size(), 12u);
-    CHECK_EQ(colAt(s, 0), 0);
-    CHECK_EQ(colAt(s, 3), 3);
-    CHECK_EQ(colAt(s, 4), 4);
-    CHECK_EQ(colAt(s, 5), 4);
-    CHECK_EQ(colAt(s, 8), 5);
-    CHECK_EQ(colAt(s, 12), 9);
+TEST(utf8_column_multiple_utf8_mixed) {
+    const std::string s = "caf" UTF8_E_ACUTE U_DASH "test";
+    
+    CHECK_EQ((int)s.size(), 12);
+    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(utf8::columnOf(s, 3), 3);
+    CHECK_EQ(utf8::columnOf(s, 4), 4);
+    CHECK_EQ(utf8::columnOf(s, 5), 4);
+    CHECK_EQ(utf8::columnOf(s, 8), 5);
+    CHECK_EQ(utf8::columnOf(s, 12), 9);
 }
 
-TEST(utf8column_byte_beyond_end_clamps) {
-    const std::string s = "caf" U_E;
-    CHECK_EQ(colAt(s, 99), 4);
-    CHECK_EQ(colAt(s, -1), 0);
+TEST(utf8_column_byte_beyond_end_clamps) {
+    const std::string s = "caf" UTF8_E_ACUTE;
+    
+    CHECK_EQ(utf8::columnOf(s, 99), 4);
+    CHECK_EQ(utf8::columnOf(s, -1), 0);
 }
 
 // ---------------------------------------------------------------------------
 // isCellStart / columnOf con bytes invalidos (modelo byte-safe)
 // ---------------------------------------------------------------------------
 
-TEST(cell_orphan_continuation_after_ascii_is_own_cell) {
+TEST(utf8_cell_orphan_continuation_after_ascii_is_own_cell) {
     const std::string s = "A\x81";
+    
     CHECK_EQ(utf8::isCellStart(s, 0), true);
     CHECK_EQ(utf8::isCellStart(s, 1), true);
 }
 
-TEST(cell_valid_continuation_belongs_to_lead) {
-    const std::string s = U_E;
+TEST(utf8_cell_valid_continuation_belongs_to_lead) {
+    const std::string s = UTF8_E_ACUTE;
+    
     CHECK_EQ(utf8::isCellStart(s, 0), true);
     CHECK_EQ(utf8::isCellStart(s, 1), false);
 }
 
-TEST(cell_extra_continuation_after_valid_seq_is_orphan) {
-    const std::string s = U_E "\x80";
+TEST(utf8_cell_extra_continuation_after_valid_seq_is_orphan) {
+    const std::string s = UTF8_E_ACUTE "\x80";
+    
     CHECK_EQ(utf8::isCellStart(s, 0), true);
     CHECK_EQ(utf8::isCellStart(s, 1), false);
     CHECK_EQ(utf8::isCellStart(s, 2), true);
 }
 
-TEST(cell_orphan_continuation_at_line_start) {
+TEST(utf8_cell_orphan_continuation_at_line_start) {
     const std::string s = "\x80\x80";
+    
     CHECK_EQ(utf8::isCellStart(s, 0), true);
     CHECK_EQ(utf8::isCellStart(s, 1), true);
 }
 
-TEST(cell_invalid_lead_is_own_cell) {
+TEST(utf8_cell_invalid_lead_is_own_cell) {
     const std::string s = "\xff\xff";
+    
     CHECK_EQ(utf8::isCellStart(s, 0), true);
     CHECK_EQ(utf8::isCellStart(s, 1), true);
 }
 
-TEST(cell_3byte_valid) {
+TEST(utf8_cell_3byte_valid) {
     const std::string s = "\xe4\xb8\xad";
+    
     CHECK_EQ(utf8::isCellStart(s, 0), true);
     CHECK_EQ(utf8::isCellStart(s, 1), false);
     CHECK_EQ(utf8::isCellStart(s, 2), false);
 }
 
-TEST(column_orphan_continuation_counts_as_column) {
+TEST(utf8_column_orphan_continuation_counts_as_column) {
     const std::string s = "A\x81";
+    
     CHECK_EQ(utf8::columnOf(s, 2), 2);
 }
 
-TEST(isCellStart_out_of_range) {
+TEST(utf8_isCellStart_out_of_range) {
     const std::string s = "abc";
+    
     CHECK_EQ(utf8::isCellStart(s, -1), false);
     CHECK_EQ(utf8::isCellStart(s, -99), false);
     CHECK_EQ(utf8::isCellStart(s, 3), false);
@@ -167,9 +181,10 @@ TEST(isCellStart_out_of_range) {
     CHECK_EQ(utf8::isCellStart("", -1), false);
 }
 
-TEST(cell_mixed_valid_orphan_valid_longer) {
-    const std::string s = U_E "\x80\xe4\xb8\xad";
-    CHECK_EQ(s.size(), 6u);
+TEST(utf8_cell_mixed_valid_orphan_valid_longer) {
+    const std::string s = UTF8_E_ACUTE "\x80\xe4\xb8\xad";
+    
+    CHECK_EQ((int)s.size(), 6);
     CHECK_EQ(utf8::isCellStart(s, 0), true);
     CHECK_EQ(utf8::isCellStart(s, 1), false);
     CHECK_EQ(utf8::isCellStart(s, 2), true);
@@ -179,8 +194,9 @@ TEST(cell_mixed_valid_orphan_valid_longer) {
     CHECK_EQ(utf8::columnOf(s, 6), 4);
 }
 
-TEST(column_orphan_at_start_with_valid) {
-    const std::string s = "\x80" U_E "\xe4\xb8\xad";
+TEST(utf8_column_orphan_at_start_with_valid) {
+    const std::string s = "\x80" UTF8_E_ACUTE "\xe4\xb8\xad";
+    
     CHECK_EQ(utf8::isCellStart(s, 0), true);
     CHECK_EQ(utf8::isCellStart(s, 1), true);
     CHECK_EQ(utf8::isCellStart(s, 2), false);
@@ -188,9 +204,10 @@ TEST(column_orphan_at_start_with_valid) {
     CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 4);
 }
 
-TEST(column_mixed_orphan_interleaved_counts_correctly) {
-    const std::string s = std::string(U_E "\x80\xe4\xb8\xad") + std::string("\x81") + "A";
-    CHECK_EQ(s.size(), 8u);
+TEST(utf8_column_mixed_orphan_interleaved_counts_correctly) {
+    const std::string s = std::string(UTF8_E_ACUTE "\x80\xe4\xb8\xad") + std::string("\x81") + "A";
+    
+    CHECK_EQ((int)s.size(), 8);
     CHECK_EQ(utf8::isCellStart(s, 2), true);
     CHECK_EQ(utf8::isCellStart(s, 6), true);
     CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 6);
@@ -198,42 +215,47 @@ TEST(column_mixed_orphan_interleaved_counts_correctly) {
     CHECK_EQ(utf8::columnOf(s, 6), 4);
 }
 
-TEST(column_byteCol_zero_and_size) {
+TEST(utf8_column_byteCol_zero_and_size) {
     const std::string empty = "";
     CHECK_EQ(utf8::columnOf(empty, 0), 0);
     CHECK_EQ(utf8::columnOf(empty, 1), 0);
     CHECK_EQ(utf8::columnOf("abc", 0), 0);
     CHECK_EQ(utf8::columnOf("abc", 3), 3);
-    const std::string s = U_E U_DASH U_EMOJI;
+    
+    const std::string s = UTF8_E_ACUTE U_DASH U_EMOJI;
     CHECK_EQ(utf8::columnOf(s, 0), 0);
     CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 4);
+    
     const std::string inv = "A\x81\xff";
     CHECK_EQ(utf8::columnOf(inv, 0), 0);
     CHECK_EQ(utf8::columnOf(inv, static_cast<int>(inv.size())), 3);
 }
 
-TEST(column_lead_incompleto_al_final) {
+TEST(utf8_column_lead_incompleto_al_final) {
     const std::string s2 = "a\xC3";
-    CHECK_EQ(s2.size(), 2u);
+    CHECK_EQ((int)s2.size(), 2);
     CHECK_EQ(utf8::isCellStart(s2, 1), true);
     CHECK_EQ(utf8::columnOf(s2, 0), 0);
     CHECK_EQ(utf8::columnOf(s2, 1), 1);
     CHECK_EQ(utf8::columnOf(s2, 2), 2);
+    
     const std::string s3 = "a\xE2\x80";
-    CHECK_EQ(s3.size(), 3u);
+    CHECK_EQ((int)s3.size(), 3);
     CHECK_EQ(utf8::columnOf(s3, 3), 2);
     CHECK_EQ(utf8::columnOf(s3, 2), 2);
+    
     const std::string s4 = "a\xF0\x9F\x98";
-    CHECK_EQ(s4.size(), 4u);
+    CHECK_EQ((int)s4.size(), 4);
     CHECK_EQ(utf8::columnOf(s4, 4), 2);
     CHECK_EQ(utf8::isCellStart(s4, 1), true);
     CHECK_EQ(utf8::isCellStart(s4, 2), false);
     CHECK_EQ(utf8::isCellStart(s4, 3), false);
 }
 
-TEST(column_mezcla_ascii_utf8_bordes) {
-    const std::string s = "a" U_E "b" U_DASH "c" U_EMOJI "d";
-    CHECK_EQ(s.size(), 13u);
+TEST(utf8_column_mezcla_ascii_utf8_bordes) {
+    const std::string s = "a" UTF8_E_ACUTE "b" U_DASH "c" U_EMOJI "d";
+    
+    CHECK_EQ((int)s.size(), 13);
     CHECK_EQ(utf8::columnOf(s, 0), 0);
     CHECK_EQ(utf8::columnOf(s, 1), 1);
     CHECK_EQ(utf8::columnOf(s, 2), 2);
@@ -255,19 +277,20 @@ TEST(column_mezcla_ascii_utf8_bordes) {
 // truncate: columnas visuales sin partir caracter
 // ---------------------------------------------------------------------------
 
-TEST(truncate_never_produces_invalid_utf8) {
+TEST(utf8_truncate_never_produces_invalid_utf8) {
     const std::string cases[] = {
-        "caf" U_E,
+        "caf" UTF8_E_ACUTE,
         "\xe4\xbd\xa0\xe5\xa5\xbd",
         U_DASH,
         U_EMOJI U_EMOJI,
-        "abc" U_E "def",
+        "abc" UTF8_E_ACUTE "def",
         "ab" U_DASH "cd",
         "abc" U_EMOJI "def",
-        U_E U_DASH U_EMOJI,
+        UTF8_E_ACUTE U_DASH U_EMOJI,
     };
+    
     for (const std::string& s : cases) {
-        const int max = cols(s);
+        const int max = utf8::columnOf(s, static_cast<int>(s.size()));
         for (int limit = -5; limit <= max + 5; ++limit) {
             std::string out = utf8::truncate(s, limit);
             if (!validUtf8(out)) {
@@ -279,8 +302,9 @@ TEST(truncate_never_produces_invalid_utf8) {
     }
 }
 
-TEST(truncate_ascii) {
+TEST(utf8_truncate_ascii) {
     const std::string s = "hello";
+    
     CHECK_EQ(utf8::truncate(s, 10), "hello");
     CHECK_EQ(utf8::truncate(s, 5), "hello");
     CHECK_EQ(utf8::truncate(s, 3), "hel");
@@ -288,78 +312,87 @@ TEST(truncate_ascii) {
     CHECK_EQ(utf8::truncate(s, 0), "");
 }
 
-TEST(truncate_two_byte_char) {
-    const std::string s = "caf" U_E;
-    CHECK_EQ(cols(s), 4);
+TEST(utf8_truncate_two_byte_char) {
+    const std::string s = "caf" UTF8_E_ACUTE;
+    
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 4);
     CHECK_EQ(utf8::truncate(s, 3), "caf");
-    CHECK_EQ(utf8::truncate(s, 4), "caf" U_E);
+    CHECK_EQ(utf8::truncate(s, 4), "caf" UTF8_E_ACUTE);
     CHECK_EQ(utf8::truncate(s, 1), "c");
-    CHECK_EQ(utf8::truncate(s, 5), "caf" U_E);
+    CHECK_EQ(utf8::truncate(s, 5), "caf" UTF8_E_ACUTE);
 }
 
-TEST(truncate_three_byte_char) {
+TEST(utf8_truncate_three_byte_char) {
     const std::string s = U_DASH;
-    CHECK_EQ(cols(s), 1);
+    
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 1);
     CHECK_EQ(utf8::truncate(s, 0), "");
     CHECK_EQ(utf8::truncate(s, 1), s);
     CHECK_EQ(utf8::truncate(s, 2), s);
 }
 
-TEST(truncate_three_byte_two_chars) {
+TEST(utf8_truncate_three_byte_two_chars) {
     const std::string t = "\xe4\xbd\xa0" U_DASH;
-    CHECK_EQ(cols(t), 3);
+    
+    CHECK_EQ(utf8::columnOf(t, static_cast<int>(t.size())), 3);
     CHECK_EQ(utf8::truncate(t, 1), "");
     CHECK_EQ(utf8::truncate(t, 2), "\xe4\xbd\xa0");
     CHECK_EQ(utf8::truncate(t, 2).size(), 3u);
     CHECK_EQ(utf8::truncate(t, 3), t);
 }
 
-TEST(truncate_four_byte_char) {
+TEST(utf8_truncate_four_byte_char) {
     const std::string s = U_EMOJI;
-    CHECK_EQ(cols(s), 2);
+    
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 2);
     CHECK_EQ(utf8::truncate(s, 1), "");
     CHECK_EQ(utf8::truncate(s, 2), s);
     CHECK_EQ(utf8::truncate(s, 2).size(), 4u);
     CHECK_EQ(utf8::truncate(s, 0), "");
 }
 
-TEST(truncate_mixed_ascii_utf8_len2) {
-    const std::string s = "abc" U_E "def";
-    CHECK_EQ(cols(s), 7);
+TEST(utf8_truncate_mixed_ascii_utf8_len2) {
+    const std::string s = "abc" UTF8_E_ACUTE "def";
+    
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 7);
     CHECK_EQ(utf8::truncate(s, 3), "abc");
-    CHECK_EQ(utf8::truncate(s, 4), "abc" U_E);
-    CHECK_EQ(utf8::truncate(s, 6), "abc" U_E "de");
+    CHECK_EQ(utf8::truncate(s, 4), "abc" UTF8_E_ACUTE);
+    CHECK_EQ(utf8::truncate(s, 6), "abc" UTF8_E_ACUTE "de");
     CHECK_EQ(utf8::truncate(s, 9), s);
 }
 
-TEST(truncate_mixed_utf8_len3) {
+TEST(utf8_truncate_mixed_utf8_len3) {
     const std::string s = "ab" U_DASH "cd";
-    CHECK_EQ(cols(s), 5);
+    
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 5);
     CHECK_EQ(utf8::truncate(s, 2), "ab");
     CHECK_EQ(utf8::truncate(s, 3), "ab" U_DASH);
     CHECK_EQ(utf8::truncate(s, 6), s);
 }
 
-TEST(truncate_mixed_utf8_len4) {
+TEST(utf8_truncate_mixed_utf8_len4) {
     const std::string s = "abc" U_EMOJI "def";
-    CHECK_EQ(cols(s), 8);
+    
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 8);
     CHECK_EQ(utf8::truncate(s, 3), "abc");
     CHECK_EQ(utf8::truncate(s, 4), "abc");
     CHECK_EQ(utf8::truncate(s, 5), "abc" U_EMOJI);
     CHECK_EQ(utf8::truncate(s, 8), s);
 }
 
-TEST(truncate_all_multibyte) {
-    const std::string s = U_E U_DASH U_EMOJI;
-    CHECK_EQ(cols(s), 4);
-    CHECK_EQ(utf8::truncate(s, 1), U_E);
-    CHECK_EQ(utf8::truncate(s, 2), U_E U_DASH);
-    CHECK_EQ(utf8::truncate(s, 3), U_E U_DASH);
+TEST(utf8_truncate_all_multibyte) {
+    const std::string s = UTF8_E_ACUTE U_DASH U_EMOJI;
+    
+    CHECK_EQ(utf8::columnOf(s, static_cast<int>(s.size())), 4);
+    CHECK_EQ(utf8::truncate(s, 1), UTF8_E_ACUTE);
+    CHECK_EQ(utf8::truncate(s, 2), UTF8_E_ACUTE U_DASH);
+    CHECK_EQ(utf8::truncate(s, 3), UTF8_E_ACUTE U_DASH);
     CHECK_EQ(utf8::truncate(s, 4), s);
 }
 
-TEST(truncate_non_positive_limits) {
+TEST(utf8_truncate_non_positive_limits) {
     const std::string s = "ab" U_DASH "cd";
+    
     CHECK_EQ(utf8::truncate(s, 0), "");
     CHECK_EQ(utf8::truncate(s, -1), "");
     CHECK(validUtf8(utf8::truncate(s, -5)));
@@ -369,85 +402,96 @@ TEST(truncate_non_positive_limits) {
 // range: [fromCol, toCol) sin partir caracter
 // ---------------------------------------------------------------------------
 
-TEST(range_ascii_empty) {
+TEST(utf8_range_ascii_empty) {
     CHECK_EQ(utf8::range("hello", 0, 0), "");
 }
 
-TEST(range_ascii_first_char) {
+TEST(utf8_range_ascii_first_char) {
     CHECK_EQ(utf8::range("hello", 0, 1), "h");
 }
 
-TEST(range_ascii_last_char) {
+TEST(utf8_range_ascii_last_char) {
     CHECK_EQ(utf8::range("hello", 4, 5), "o");
 }
 
-TEST(range_ascii_full) {
+TEST(utf8_range_ascii_full) {
     CHECK_EQ(utf8::range("hello", 0, 5), "hello");
 }
 
-TEST(range_ascii_middle) {
+TEST(utf8_range_ascii_middle) {
     CHECK_EQ(utf8::range("hello", 1, 4), "ell");
 }
 
-TEST(range_utf8_select_ascii_c) {
-    const std::string s = "caf" U_E;
+TEST(utf8_range_utf8_select_ascii_c) {
+    const std::string s = "caf" UTF8_E_ACUTE;
+    
     CHECK_EQ(utf8::range(s, 0, 1), "c");
 }
 
-TEST(range_utf8_select_e) {
-    const std::string s = "caf" U_E;
-    CHECK_EQ(utf8::range(s, 3, 4), U_E);
+TEST(utf8_range_utf8_select_e) {
+    const std::string s = "caf" UTF8_E_ACUTE;
+    
+    CHECK_EQ(utf8::range(s, 3, 4), UTF8_E_ACUTE);
 }
 
-TEST(range_utf8_select_fe) {
-    const std::string s = "caf" U_E;
-    CHECK_EQ(utf8::range(s, 2, 4), "f" U_E);
+TEST(utf8_range_utf8_select_fe) {
+    const std::string s = "caf" UTF8_E_ACUTE;
+    
+    CHECK_EQ(utf8::range(s, 2, 4), "f" UTF8_E_ACUTE);
 }
 
-TEST(range_utf8_select_all) {
-    const std::string s = "caf" U_E;
-    CHECK_EQ(utf8::range(s, 0, 4), "caf" U_E);
+TEST(utf8_range_utf8_select_all) {
+    const std::string s = "caf" UTF8_E_ACUTE;
+    
+    CHECK_EQ(utf8::range(s, 0, 4), "caf" UTF8_E_ACUTE);
     CHECK_EQ(utf8::range(s, 0, 4).size(), 5u);
 }
 
-TEST(range_utf8_range_past_end) {
-    const std::string s = "caf" U_E;
-    CHECK_EQ(utf8::range(s, 0, 99), "caf" U_E);
-    CHECK_EQ(utf8::range(s, 3, 99), U_E);
+TEST(utf8_range_utf8_range_past_end) {
+    const std::string s = "caf" UTF8_E_ACUTE;
+    
+    CHECK_EQ(utf8::range(s, 0, 99), "caf" UTF8_E_ACUTE);
+    CHECK_EQ(utf8::range(s, 3, 99), UTF8_E_ACUTE);
     CHECK_EQ(utf8::range(s, 3, 3), "");
 }
 
-TEST(range_mixed_starts_before_utf8) {
-    const std::string s = "abc" U_E U_DASH U_EMOJI "xyz";
-    CHECK_EQ(utf8::range(s, 0, 4), "abc" U_E);
+TEST(utf8_range_mixed_starts_before_utf8) {
+    const std::string s = "abc" UTF8_E_ACUTE U_DASH U_EMOJI "xyz";
+    
+    CHECK_EQ(utf8::range(s, 0, 4), "abc" UTF8_E_ACUTE);
 }
 
-TEST(range_mixed_ends_after_utf8) {
-    const std::string s = "abc" U_E U_DASH U_EMOJI "xyz";
-    CHECK_EQ(utf8::range(s, 0, 10), "abc" U_E U_DASH U_EMOJI "xyz");
-    CHECK_EQ(utf8::range(s, 2, 6), "c" U_E U_DASH U_EMOJI);
+TEST(utf8_range_mixed_ends_after_utf8) {
+    const std::string s = "abc" UTF8_E_ACUTE U_DASH U_EMOJI "xyz";
+    
+    CHECK_EQ(utf8::range(s, 0, 10), "abc" UTF8_E_ACUTE U_DASH U_EMOJI "xyz");
+    CHECK_EQ(utf8::range(s, 2, 6), "c" UTF8_E_ACUTE U_DASH U_EMOJI);
 }
 
-TEST(range_mixed_only_utf8) {
-    const std::string s = "abc" U_E U_DASH U_EMOJI "xyz";
-    CHECK_EQ(utf8::range(s, 3, 6), U_E U_DASH U_EMOJI);
+TEST(utf8_range_mixed_only_utf8) {
+    const std::string s = "abc" UTF8_E_ACUTE U_DASH U_EMOJI "xyz";
+    
+    CHECK_EQ(utf8::range(s, 3, 6), UTF8_E_ACUTE U_DASH U_EMOJI);
 }
 
-TEST(range_mixed_spans_multibyte) {
-    const std::string s = "abc" U_E U_DASH U_EMOJI "xyz";
-    CHECK_EQ(utf8::range(s, 1, 6), "bc" U_E U_DASH U_EMOJI);
+TEST(utf8_range_mixed_spans_multibyte) {
+    const std::string s = "abc" UTF8_E_ACUTE U_DASH U_EMOJI "xyz";
+    
+    CHECK_EQ(utf8::range(s, 1, 6), "bc" UTF8_E_ACUTE U_DASH U_EMOJI);
 }
 
-TEST(range_reversed_bounds_returns_empty) {
-    const std::string s = "caf" U_E;
+TEST(utf8_range_reversed_bounds_returns_empty) {
+    const std::string s = "caf" UTF8_E_ACUTE;
+    
     CHECK_EQ(utf8::range(s, 4, 1), "");
     CHECK_EQ(utf8::range(s, 4, 0), "");
     CHECK_EQ(utf8::range(s, 1, 0), "");
     CHECK_EQ(utf8::range(s, 5, 3), "");
 }
 
-TEST(range_wide_before_inside_after) {
+TEST(utf8_range_wide_before_inside_after) {
     const std::string s = "abc" U_EMOJI "def";
+    
     CHECK_EQ(utf8::range(s, 0, 3), "abc");
     CHECK_EQ(utf8::range(s, 0, 4), "abc" U_EMOJI);
     CHECK_EQ(utf8::range(s, 0, 5), "abc" U_EMOJI);
@@ -459,12 +503,13 @@ TEST(range_wide_before_inside_after) {
     CHECK_EQ(utf8::range(s, 5, 6), "d");
 }
 
-TEST(range_never_produces_invalid_utf8) {
+TEST(utf8_range_never_produces_invalid_utf8) {
     const std::string cases[] = {
-        "caf" U_E,
-        "abc" U_E U_DASH U_EMOJI "xyz",
-        U_E U_DASH U_EMOJI,
+        "caf" UTF8_E_ACUTE,
+        "abc" UTF8_E_ACUTE U_DASH U_EMOJI "xyz",
+        UTF8_E_ACUTE U_DASH U_EMOJI,
     };
+    
     for (const std::string& s : cases) {
         const int total = utf8::columnOf(s, static_cast<int>(s.size()));
         for (int from = 0; from <= total + 3; ++from)
@@ -479,9 +524,10 @@ TEST(range_never_produces_invalid_utf8) {
     }
 }
 
-TEST(cellStartBefore_orphan_overflow_at_zero_consistent) {
+TEST(utf8_cellStartBefore_orphan_overflow_at_zero_consistent) {
     std::string s0 = std::string("\xC3\x80\x80", 3);
     std::string s1 = std::string("a\xC3\x80\x80", 4);
+    
     CHECK_EQ(utf8::cellStartBefore(s0, 3), 2);
     CHECK_EQ(utf8::cellStartBefore(s1, 4), 3);
     CHECK_EQ(utf8::alignStart(s0, 2), 2);
@@ -490,14 +536,14 @@ TEST(cellStartBefore_orphan_overflow_at_zero_consistent) {
     CHECK_EQ(utf8::isCellStart(s1, 3), true);
 }
 
-TEST(isValid_empty_and_ascii) {
+TEST(utf8_isValid_empty_and_ascii) {
     CHECK(utf8::isValid(""));
     CHECK(utf8::isValid("hello"));
     CHECK(utf8::isValid("café"));
     CHECK(utf8::isValid("😀"));
 }
 
-TEST(isValid_rejects_overlong_and_surrogates) {
+TEST(utf8_isValid_rejects_overlong_and_surrogates) {
     CHECK(!utf8::isValid("\xC0\x80"));
     CHECK(!utf8::isValid("\xE0\x80\x80"));
     CHECK(!utf8::isValid("\xED\xA0\x80"));
@@ -506,57 +552,67 @@ TEST(isValid_rejects_overlong_and_surrogates) {
     CHECK(!utf8::isValid("\x80"));
 }
 
-TEST(columnCache_invalidation_explicit_same_storage) {
+TEST(utf8_columnCache_invalidation_explicit_same_storage) {
     std::string line = "aaaaaaaaaa";
-    line.reserve(32);
     Cursor cur;
+    
+    line.reserve(32);
     cur.col = 10;
     CHECK_EQ(cur.visualColumn(line), 10);
+    
     const char* oldData = line.data();
     int oldSize = (int)line.size();
     line[5] = char(0xC3);
     line[6] = char(0xA9);
+    
     CHECK_EQ(line.data(), oldData);
     CHECK_EQ((int)line.size(), oldSize);
     CHECK_EQ(utf8::columnOf(line, 10), 9);
     CHECK_EQ(cur.visualColumn(line), 10);
+    
     cur.invalidateColumnCache();
     CHECK_EQ(cur.visualColumn(line), 9);
     CHECK_EQ(cur.visualColumn(line), utf8::columnOf(line, 10));
 }
 
-TEST(columnCache_contract_caller_must_invalidate) {
+TEST(utf8_columnCache_contract_caller_must_invalidate) {
     std::string line = "abcdefgh";
     Cursor cur;
+    
     cur.col = 8;
     CHECK_EQ(cur.visualColumn(line), 8);
+    
     std::string mutated = "abcd";
     mutated += "\xC3\xA9";
     mutated += "fg";
     line.assign(mutated);
     CHECK_EQ((int)line.size(), 8);
     CHECK_EQ(cur.visualColumn(line), 8);
+    
     cur.invalidateColumnCache();
     CHECK_EQ(cur.visualColumn(line), 7);
 }
 
-TEST(columnCache_reallocation_no_false_hit) {
+TEST(utf8_columnCache_reallocation_no_false_hit) {
     std::string line = "abcdefgh";
-    line.reserve(16);
     Cursor cur;
+    
+    line.reserve(16);
     cur.col = 8;
     CHECK_EQ(cur.visualColumn(line), 8);
+    
     const char* oldData = line.data();
     int oldSize = (int)line.size();
     line.append(100, 'x');
     CHECK(line.data() != oldData);
     CHECK((int)line.size() != oldSize);
     CHECK_EQ(cur.visualColumn(line), utf8::columnOf(line, 8));
+    
     cur.col = (int)line.size();
     CHECK_EQ(cur.visualColumn(line), utf8::columnOf(line, (int)line.size()));
 }
 
-TEST(columnCache_correctness_exhaustive) {
+TEST(utf8_columnCache_correctness_exhaustive) {
     auto makeMixed = [](int cols) {
         std::string s;
         s.reserve(cols * 3);
@@ -568,6 +624,7 @@ TEST(columnCache_correctness_exhaustive) {
         }
         return s;
     };
+    
     auto buildExpected = [](const std::string& line) {
         std::vector<int> expected(line.size() + 1);
         int col = 0;
@@ -584,12 +641,15 @@ TEST(columnCache_correctness_exhaustive) {
         expected[n] = col;
         return expected;
     };
+    
     auto verify = [&](const std::string& line, int startByte) {
         const int n = static_cast<int>(line.size());
         const auto expected = buildExpected(line);
+        
         startByte = std::min(startByte, n);
         startByte = utf8::alignStart(line, startByte);
         std::vector<int> steps;
+        
         int b = startByte;
         for (int k = 0; k < 100 && b > 0; ++k) {
             int prev = utf8::cellStartBefore(line, b);
@@ -597,21 +657,27 @@ TEST(columnCache_correctness_exhaustive) {
             steps.push_back(prev);
             b = prev;
         }
+        
         if (steps.empty()) return;
+        
         Cursor cur;
         cur.col = startByte;
         CHECK_EQ(cur.visualColumn(line), expected[startByte]);
+        
         for (int v : steps) {
             cur.col = v;
             CHECK_EQ(cur.visualColumn(line), expected[v]);
         }
+        
         std::vector<int> jumps;
         jumps.reserve(32 + steps.size() * 2);
         jumps.push_back(startByte);
+        
         if (!steps.empty()) {
             jumps.push_back(steps.front());
             jumps.push_back(steps.back());
         }
+        
         jumps.push_back(n / 2);
         jumps.push_back(0);
         jumps.push_back(80);
@@ -620,25 +686,34 @@ TEST(columnCache_correctness_exhaustive) {
         jumps.push_back(n - 1);
         jumps.push_back(1);
         jumps.push_back(50000);
+        
         if (n > 10) {
             jumps.push_back(10);
             jumps.push_back(n - 10);
         }
+        
         for (int iter = 0; iter < 2; ++iter) {
             jumps.push_back(startByte);
-            for (int v : steps) jumps.push_back(v);
+            for (int v : steps) 
+                jumps.push_back(v);
+            
             jumps.push_back(n / 2);
-            for (int k = 0; k < 5 && k < static_cast<int>(steps.size()); ++k) jumps.push_back(steps[k]);
+            
+            for (int k = 0; k < 5 && k < static_cast<int>(steps.size()); ++k) 
+                jumps.push_back(steps[k]);
+            
             jumps.push_back(0);
             jumps.push_back(80);
             jumps.push_back(n);
         }
+        
         for (int raw : jumps) {
             int v = utf8::alignStart(line, std::min(std::max(raw, 0), n));
             cur.col = v;
             CHECK_EQ(cur.visualColumn(line), expected[v]);
         }
     };
+    
     std::string ascii100k(100000, 'a');
     std::string utf8_100k = makeMixed(40000);
     verify(ascii100k, 50000);
@@ -646,16 +721,19 @@ TEST(columnCache_correctness_exhaustive) {
     verify(utf8_100k, static_cast<int>(utf8_100k.size()));
 }
 
-TEST(columnCache_consistency_wide) {
+TEST(utf8_columnCache_consistency_wide) {
     std::string line = "a\xE2\x9D\x8C" "bc\xF0\x9F\x98\x80" "\xE4\xB8\xAD";
     int n = static_cast<int>(line.size());
     std::vector<int> cells;
+    
     for (int i = 0; i < n; ) {
         if (!utf8::isCellStart(line, i)) { ++i; continue; }
         cells.push_back(i);
         i += utf8::cellLen(line, i, n);
     }
+    
     cells.push_back(n);
+    
     Cursor cur;
     for (int pos : cells) {
         cur.col = pos;
@@ -664,6 +742,7 @@ TEST(columnCache_consistency_wide) {
         int direct = utf8::columnOf(line, pos);
         CHECK_EQ(cached, direct);
     }
+    
     cur.col = 0;
     cur.invalidateColumnCache();
     for (size_t k = 0; k < cells.size(); ++k) {
@@ -673,9 +752,11 @@ TEST(columnCache_consistency_wide) {
         int direct = utf8::columnOf(line, pos);
         CHECK_EQ(cached, direct);
     }
+    
     cur.col = n;
     cur.invalidateColumnCache();
     (void)cur.visualColumn(line);
+    
     for (int k = static_cast<int>(cells.size()) - 1; k >= 0; --k) {
         int pos = cells[k];
         cur.col = pos;
@@ -685,7 +766,7 @@ TEST(columnCache_consistency_wide) {
     }
 }
 
-TEST(codepointWidth_boundaries_fixed) {
+TEST(utf8_codepointWidth_boundaries_fixed) {
     CHECK_EQ(utf8::codepointWidth(0x1F320), 2);
     CHECK_EQ(utf8::codepointWidth(0x1F321), 1);
     CHECK_EQ(utf8::codepointWidth(0x1F32C), 1);
@@ -706,7 +787,7 @@ TEST(codepointWidth_boundaries_fixed) {
     CHECK_EQ(utf8::codepointWidth(0x1FAF8), 2);
 }
 
-TEST(codepointWidth_direct) {
+TEST(utf8_codepointWidth_direct) {
     CHECK_EQ(utf8::codepointWidth('A'), 1);
     CHECK_EQ(utf8::codepointWidth(0xE9), 1);
     CHECK_EQ(utf8::codepointWidth(0x2014), 1);
@@ -724,7 +805,7 @@ TEST(codepointWidth_direct) {
     CHECK_EQ(utf8::codepointWidth(0x1FA70), 2);
 }
 
-TEST(byteForColumn_wide) {
+TEST(utf8_byteForColumn_wide) {
     const std::string s = "abc" U_EMOJI;
     CHECK_EQ(utf8::byteForColumn(s, 0), 0);
     CHECK_EQ(utf8::byteForColumn(s, 1), 1);
@@ -734,9 +815,14 @@ TEST(byteForColumn_wide) {
     CHECK_EQ(utf8::byteForColumn(s, 5), 7);
 }
 
-TEST(apis_concordance_ae_dash_emoji_zhong) {
+TEST(utf8_apis_concordance_ae_dash_emoji_zhong) {
     const std::string line = "a\xc3\xa9\xe2\x80\x94\xf0\x9f\x98\x80\xe4\xb8\xad" "b";
-    struct Case { int bytePos; int col; };
+    
+    struct Case { 
+        int bytePos;
+        int col;
+    };
+    
     Case cases[] = {
         {0, 0},
         {1, 1},
@@ -746,6 +832,7 @@ TEST(apis_concordance_ae_dash_emoji_zhong) {
         {13, 7},
         {14, 8},
     };
+    
     for (auto c : cases) {
         CHECK_EQ(utf8::columnOf(line, c.bytePos), c.col);
         CHECK_EQ(utf8::byteForColumn(line, c.col), c.bytePos);
@@ -753,11 +840,12 @@ TEST(apis_concordance_ae_dash_emoji_zhong) {
         CHECK_EQ(cur.visualColumn(line), c.col);
         CHECK_EQ(utf8::columnOf(line, utf8::byteForColumn(line, c.col)), c.col);
     }
+    
     CHECK_EQ(utf8::columnOf(line, 4), 3);
     CHECK_EQ(utf8::byteForColumn(line, 4), 6);
 }
 
-TEST(codepointWidth_eaw_gap_boundaries) {
+TEST(utf8_codepointWidth_eaw_gap_boundaries) {
     CHECK_EQ(utf8::codepointWidth(0x1F202), 2);
     CHECK_EQ(utf8::codepointWidth(0x1F203), 1);
     CHECK_EQ(utf8::codepointWidth(0x1F20F), 1);
@@ -777,41 +865,44 @@ TEST(codepointWidth_eaw_gap_boundaries) {
     CHECK_EQ(utf8::codepointWidth(0x1FA00), 1);
 }
 
-
 // ---------------------------------------------------------------------------
 // splitCells: troceado de un commit IME en celdas (una por InsertChar)
 // ---------------------------------------------------------------------------
 
-TEST(splitCells_vacio) {
+TEST(utf8_splitCells_vacio) {
     CHECK(utf8::splitCells("").empty());
 }
 
-TEST(splitCells_ascii_uno_por_byte) {
+TEST(utf8_splitCells_ascii_uno_por_byte) {
     auto v = utf8::splitCells("abc");
-    CHECK_EQ(v.size(), 3u);
+    CHECK_EQ((int)v.size(), 3);
     CHECK_EQ(v[0], "a");
     CHECK_EQ(v[1], "b");
     CHECK_EQ(v[2], "c");
 }
 
-TEST(splitCells_commit_ime_multicaracter) {
-    // Commit típico del IME: varios caracteres confirmados de una vez.
-    const std::string s = std::string("a") + U_E + U_EMOJI;
+// Commit típico del IME: varios caracteres confirmados de una vez.
+TEST(utf8_splitCells_commit_ime_multicaracter) {
+    const std::string s = std::string("a") + UTF8_E_ACUTE + U_EMOJI;
     auto v = utf8::splitCells(s);
-    CHECK_EQ(v.size(), 3u);
+    
+    CHECK_EQ((int)v.size(), 3);
     CHECK_EQ(v[0], "a");
-    CHECK_EQ(v[1], U_E);
+    CHECK_EQ(v[1], UTF8_E_ACUTE);
     CHECK_EQ(v[2], U_EMOJI);
-    // Recomposición byte a byte exacta (nada se pierde ni se duplica).
+    
+    // Recomposición byte a byte exacta
     std::string join;
-    for (const auto& c : v) join += c;
+    for (const auto& c : v) 
+        join += c;
     CHECK_EQ(join, s);
 }
 
-TEST(splitCells_bytes_invalidos_byte_safe) {
-    // Lead inválido / continuación huérfana: celdas propias de 1 byte.
+// Lead inválido / continuación huérfana: celdas propias de 1 byte.
+TEST(utf8_splitCells_bytes_invalidos_byte_safe) {
     const std::string s("\xff", 1);
     auto v = utf8::splitCells(s);
+    
     CHECK_EQ(v.size(), 1u);
     CHECK_EQ(v[0], s);
 }
@@ -819,27 +910,29 @@ TEST(splitCells_bytes_invalidos_byte_safe) {
 // codepointAt con secuencia invalida seguida de ASCII: debe consumir
 // solamente el byte inicial invalido (len=1) para que el ASCII siguiente
 // siga decodificandose normalmente.
-TEST(codepointAt_invalido_despuis_consume_un_byte) {
-    // Byte inicial de 3 bytes seguido de continuacion invalida, luego 'A'.
-    // La secuencia invalida se rechaza (len=1) y la 'A' se decodifica como 65.
+// Byte inicial de 3 bytes seguido de continuacion invalida, luego 'A'.
+// La secuencia invalida se rechaza (len=1) y la 'A' se decodifica como 65.
+TEST(utf8_codepointAt_invalido_despuis_consume_un_byte) {
     const std::string s("\xE2" "A", 3);  // 0xE2 lead invalido, 0x41 = 'A'
     int len = 0;
     uint32_t cp = utf8::codepointAt(s, 0, 3, len);
-    CHECK_EQ(cp, 0u);             // secuencia invalida
-    CHECK_EQ(len, 1);             // consume solo el byte inicial
+    
+    CHECK_EQ((int)cp, 0);  // secuencia invalida
+    CHECK_EQ(len, 1);      // consume solo el byte inicial
 
     cp = utf8::codepointAt(s, 1, 3, len);
-    CHECK_EQ(cp, 65u);            // 'A'
+    CHECK_EQ(cp, 65u);     // 'A'
     CHECK_EQ(len, 1);
 
     // Byte inicial de 4 bytes seguido de ASCII sin continuaciones: se rechaza.
     const std::string s2("\xF0" "A", 3);  // 0xF0 lead de 4 bytes, 0x41 = 'A'
     len = 0;
+    
     cp = utf8::codepointAt(s2, 0, 3, len);
-    CHECK_EQ(cp, 0u);             // secuencia invalida (faltan continuaciones)
-    CHECK_EQ(len, 1);             // consume solo el byte inicial
+    CHECK_EQ(cp, 0u);      // secuencia invalida (faltan continuaciones)
+    CHECK_EQ(len, 1);      // consume solo el byte inicial
 
     cp = utf8::codepointAt(s2, 1, 3, len);
-    CHECK_EQ(cp, 65u);            // 'A'
+    CHECK_EQ(cp, 65u);     // 'A'
     CHECK_EQ(len, 1);
 }
