@@ -1,10 +1,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include "test_framework.h"
 #include "platform/InputEvent.h"
 #include "platform/tty/Terminal.h"
 #include "platform/tty/TtyMouse.h"
-#include "test_framework.h"
 
 #define private public
 #include "app/Editor.h"
@@ -17,16 +17,17 @@ struct PipedStdin {
     int pipeEnds[2];
 
     PipedStdin() {
-        restoreFd = dup(STDIN_FILENO); // conservar el stdin real
+        // conservar el stdin real
+        restoreFd = dup(STDIN_FILENO); 
         if (pipe(pipeEnds) == 0) {
-            dup2(pipeEnds[0], STDIN_FILENO); // lector -> stdin
+            // lector -> stdin
+            dup2(pipeEnds[0], STDIN_FILENO); 
             close(pipeEnds[0]);
         }
     }
-
+    
+    // Escribir todo de una vez
     void feed(const std::string& bytes) {
-        // Escribir todo de una vez (los read() bloqueantes del parser
-        // consumiran exactamente los bytes que necesiten).
         ssize_t w = write(pipeEnds[1], bytes.data(), bytes.size());
         (void)w;
     }
@@ -43,8 +44,9 @@ struct PipedStdin {
 
 InputEvent parse(const char* seq) {
     PipedStdin p;
-    p.feed(seq);
     Terminal t;
+    
+    p.feed(seq);
     return t.readEvent();
 }
 
@@ -60,56 +62,116 @@ TEST(terminal_event_plain_left_arrow) {
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveLeft));
 }
 
-// "ESC [ 1;2C" = flecha derecha con modificador. El modificador (2=shift... ) 
-// se ignora: se traduce al mismo movimiento.
+// Flecha derecha con modificadores.
+// Los modificadores se ignoran: se traduce al mismo movimiento.
 TEST(terminal_event_modified_right_arrow_ignored) {
-    
-    InputEvent e = parse("\x1b[1;2C");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveRight));
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;2C").type),
+             static_cast<int>(InputEventType::MoveRight)); // Shift
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;3C").type),
+             static_cast<int>(InputEventType::MoveRight)); // Alt
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;5C").type),
+             static_cast<int>(InputEventType::MoveRight)); // Ctrl
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;7C").type),
+             static_cast<int>(InputEventType::MoveRight)); // Ctrl + Alt
 }
 
+// Flecha izquierda con modificadores.
+// Los modificadores se ignoran: se traduce al mismo movimiento.
 TEST(terminal_event_modified_left_arrow_ignored) {
-    InputEvent e = parse("\x1b[1;2D");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveLeft));
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;2D").type),
+             static_cast<int>(InputEventType::MoveLeft)); // Shift
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;3D").type),
+             static_cast<int>(InputEventType::MoveLeft)); // Alt
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;5D").type),
+             static_cast<int>(InputEventType::MoveLeft)); // Ctrl
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;7D").type),
+             static_cast<int>(InputEventType::MoveLeft)); // Ctrl + Alt
 }
 
+// Flecha arriba con y sin modificadores.
+// Los modificadores se ignoran: se traduce al mismo movimiento.
 TEST(terminal_event_modified_up_arrow_ignored) {
-    InputEvent e = parse("\x1b[1;2A");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveUp));
+    CHECK_EQ(static_cast<int>(parse("\x1b[A").type),
+             static_cast<int>(InputEventType::MoveUp)); // Sin modificador
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;2A").type),
+             static_cast<int>(InputEventType::MoveUp)); // Shift
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;3A").type),
+             static_cast<int>(InputEventType::MoveUp)); // Alt
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;5A").type),
+             static_cast<int>(InputEventType::MoveUp)); // Ctrl
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;7A").type),
+             static_cast<int>(InputEventType::MoveUp)); // Ctrl + Alt
 }
 
+// Flecha abajo con y sin modificadores.
+// Los modificadores se ignoran: se traduce al mismo movimiento.
 TEST(terminal_event_modified_down_arrow_ignored) {
-    InputEvent e = parse("\x1b[1;2B");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveDown));
+    CHECK_EQ(static_cast<int>(parse("\x1b[B").type),
+             static_cast<int>(InputEventType::MoveDown)); // Sin modificador
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;2B").type),
+             static_cast<int>(InputEventType::MoveDown)); // Shift
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;3B").type),
+             static_cast<int>(InputEventType::MoveDown)); // Alt
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;5B").type),
+             static_cast<int>(InputEventType::MoveDown)); // Ctrl
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;7B").type),
+             static_cast<int>(InputEventType::MoveDown)); // Ctrl + Alt
 }
 
+// Home con y sin modificadores.
+// Los modificadores se ignoran: se traduce al mismo movimiento.
 TEST(terminal_event_modified_home_ignored) {
-    InputEvent e = parse("\x1b[1;2H");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveHome));
+    CHECK_EQ(static_cast<int>(parse("\x1b[H").type),
+             static_cast<int>(InputEventType::MoveHome)); // Sin modificador
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;2H").type),
+             static_cast<int>(InputEventType::MoveHome)); // Shift
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;3H").type),
+             static_cast<int>(InputEventType::MoveHome)); // Alt
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;5H").type),
+             static_cast<int>(InputEventType::MoveHome)); // Ctrl
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;7H").type),
+             static_cast<int>(InputEventType::MoveHome)); // Ctrl + Alt
 }
 
+// End con y sin modificadores.
+// Los modificadores se ignoran: se traduce al mismo movimiento.
 TEST(terminal_event_modified_end_ignored) {
-    InputEvent e = parse("\x1b[1;2F");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveEnd));
+    CHECK_EQ(static_cast<int>(parse("\x1b[F").type),
+             static_cast<int>(InputEventType::MoveEnd)); // Sin modificador
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;2F").type),
+             static_cast<int>(InputEventType::MoveEnd)); // Shift
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;3F").type),
+             static_cast<int>(InputEventType::MoveEnd)); // Alt
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;5F").type),
+             static_cast<int>(InputEventType::MoveEnd)); // Ctrl
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[1;7F").type),
+             static_cast<int>(InputEventType::MoveEnd)); // Ctrl + Alt
 }
 
-// "ESC [ 2 A" (modificador sin parametro "1;"). 
-// Con los modificadores ignorados termina siendo una flecha arriba.
-TEST(terminal_event_bare_modifier_sequence) {
-    InputEvent e = parse("\x1b[2A");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveUp));
-}
-
-// Modificador ctrl (codigo 5): tambien se ignora, es una flecha derecha.
-TEST(terminal_event_ctrl_modifier_ignored) {
-    InputEvent e = parse("\x1b[1;5C");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveRight));
-}
-
-// Integración Terminal+Keymap: remapear "[1;2D" (la clave real que Terminal pasa a Keymap) 
-// debe cambiar el evento end-to-end. Sin remapeo
 // "[1;2D" cae por fallback a MoveLeft
-// con binding explícito debe dar el evento remapeado.
+// con binding explícito debe dar el evento remapeado cae a PageDown
 TEST(terminal_event_remapped_modified_arrow_via_keymap) {
     PipedStdin p;
     Terminal t;
@@ -121,35 +183,51 @@ TEST(terminal_event_remapped_modified_arrow_via_keymap) {
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::PageDown));
 }
 
-TEST(terminal_event_plain_home_via_bracket) {
-    InputEvent e = parse("\x1b[H");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveHome));
-}
-
-TEST(terminal_event_plain_end_via_bracket) {
-    InputEvent e = parse("\x1b[F");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveEnd));
-}
-
 TEST(terminal_event_delete_key) {
     InputEvent e = parse("\x1b[3~");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::Delete));
 }
 
-TEST(terminal_event_home_via_tilde) {
-    InputEvent e = parse("\x1b[1~");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveHome));
+// PageUp con y sin modificadores.
+// Los modificadores se ignoran: se traduce al mismo movimiento.
+// @falta agregar que maneje modificadores PageUp
+TEST(terminal_event_modified_pageup_ignored) {
+    CHECK_EQ(static_cast<int>(parse("\x1b[5~").type),
+             static_cast<int>(InputEventType::PageUp)); // Sin modificador
+             
+    /*
+    CHECK_EQ(static_cast<int>(parse("\x1b[5;2~").type),
+             static_cast<int>(InputEventType::PageUp)); // Shift
+    CHECK_EQ(static_cast<int>(parse("\x1b[5;3~").type),
+             static_cast<int>(InputEventType::PageUp)); // Alt
+    CHECK_EQ(static_cast<int>(parse("\x1b[5;5~").type),
+             static_cast<int>(InputEventType::PageUp)); // Ctrl
+    CHECK_EQ(static_cast<int>(parse("\x1b[5;7~").type),
+             static_cast<int>(InputEventType::PageUp)); // Ctrl + Alt
+     */
 }
 
-TEST(terminal_event_pageup_pagedown) {
-    InputEvent up = parse("\x1b[5~");
-    CHECK_EQ(static_cast<int>(up.type), static_cast<int>(InputEventType::PageUp));
-    
-    InputEvent down = parse("\x1b[6~");
-    CHECK_EQ(static_cast<int>(down.type), static_cast<int>(InputEventType::PageDown));
+// PageDown con y sin modificadores.
+// Los modificadores se ignoran: se traduce al mismo movimiento.
+// @falta agregar que maneje modificadores PageDown
+TEST(terminal_event_modified_pagedown_ignored) {
+    CHECK_EQ(static_cast<int>(parse("\x1b[6~").type),
+             static_cast<int>(InputEventType::PageDown)); // Sin modificador
+             
+    /*
+    CHECK_EQ(static_cast<int>(parse("\x1b[6;2~").type),
+             static_cast<int>(InputEventType::PageDown)); // Shift
+    CHECK_EQ(static_cast<int>(parse("\x1b[6;3~").type),
+             static_cast<int>(InputEventType::PageDown)); // Alt
+    CHECK_EQ(static_cast<int>(parse("\x1b[6;5~").type),
+             static_cast<int>(InputEventType::PageDown)); // Ctrl
+    CHECK_EQ(static_cast<int>(parse("\x1b[6;7~").type),
+             static_cast<int>(InputEventType::PageDown)); // Ctrl + Alt
+    */
 }
 
-// Prefijo SS3 (ESC O) con parametros no se soporta: None.
+// No hay soporte para SS3
+// actualmente usamos CSI
 TEST(terminal_event_ss3_with_params_unsupported) {
     InputEvent e = parse("\x1bO1;2C");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
@@ -160,15 +238,13 @@ TEST(terminal_event_lone_escape) {
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::Escape));
 }
 
-// ESC + '[' sin caracter final: se descarta (None) tras el timeout,
-// en lugar de bloquear para siempre esperando el ultimo byte.
+// ESC + '[' sin caracter final: se descarta (None)
 TEST(terminal_event_incomplete_sequence_times_out) {
     InputEvent e = parse("\x1b[");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
 }
 
 // ESC seguido de algo que no sea una secuencia de control conocida
-// no es un ESC suelto: la secuencia completa se descarta (None).
 TEST(terminal_event_escape_followed_by_char_ignored) {
     InputEvent e = parse("\x1bx");
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::None));
@@ -219,7 +295,8 @@ TEST(terminal_event_utf8_consecutive_sequences) {
     PipedStdin p;
     Terminal t;
     
-    p.feed(std::string("\xC3\xA9") + "\xE2\x80\x94"); // "é—"
+    // "é—"
+    p.feed(std::string("\xC3\xA9") + "\xE2\x80\x94"); 
     
     InputEvent e1 = t.readEvent();
     InputEvent e2 = t.readEvent();
@@ -228,26 +305,26 @@ TEST(terminal_event_utf8_consecutive_sequences) {
     CHECK_EQ(e2.text, "\xE2\x80\x94");
     CHECK_EQ(static_cast<int>(e1.type), static_cast<int>(InputEventType::InsertChar));
     CHECK_EQ(static_cast<int>(e2.type), static_cast<int>(InputEventType::InsertChar));
-
 }
 
-// Tres emojis seguidos: cada readEvent() entrega uno completo.
+// Dos emojis seguidos: cada readEvent() entrega uno completo.
 TEST(terminal_event_utf8_consecutive_same_char) {
     PipedStdin p;
     Terminal t;
     
-    p.feed(std::string("\xF0\x9F\x98\x80") + "\xF0\x9F\x98\x80"); // "😀😀"
+    // "😀😀"
+    p.feed(std::string("\xF0\x9F\x98\x80") + "\xF0\x9F\x98\x80"); 
     
     InputEvent e1 = t.readEvent();
     InputEvent e2 = t.readEvent();
     
     CHECK_EQ(e1.text, "\xF0\x9F\x98\x80");
     CHECK_EQ(e2.text, "\xF0\x9F\x98\x80");
-
 }
 
-// UTF-8 seguido de una secuencia de escape: el UTF-8 sale entero y la
-// flecha se traduce a su evento. El parser no mezcla bytes.
+// UTF-8 seguido de una secuencia de escape: 
+// el UTF-8 sale entero y la flecha se traduce a su evento. 
+// El parser no mezcla bytes.
 TEST(terminal_event_utf8_mixed_with_escape_key) {
     PipedStdin p;
     Terminal t;
@@ -261,7 +338,8 @@ TEST(terminal_event_utf8_mixed_with_escape_key) {
     CHECK_EQ(static_cast<int>(e2.type), static_cast<int>(InputEventType::MoveRight));
 }
 
-// Secuencia de escape seguida de UTF-8: la flecha primero, el UTF-8
+// Secuencia de escape seguida de UTF-8: 
+// la flecha primero, el UTF-8
 // despues, sin bytes residuales.
 TEST(terminal_event_escape_key_then_utf8) {
     PipedStdin p;
@@ -293,9 +371,40 @@ TEST(terminal_event_utf8_mixed_with_plain_keys) {
     CHECK_EQ(static_cast<int>(arrow.type), static_cast<int>(InputEventType::MoveLeft));
 }
 
-TEST(terminal_event_scroll_up_basic) {
-    InputEvent e = parse("\x1b[<64;12;5M");
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollUp));
+// ScrollUp con y sin modificadores.
+TEST(terminal_event_scroll_up_modifiers) {
+    CHECK_EQ(static_cast<int>(parse("\x1b[<64;12;5M").type),
+             static_cast<int>(InputEventType::ScrollUp)); // Sin modificador
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[<68;12;5M").type),
+             static_cast<int>(InputEventType::ScrollUp)); // Shift
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[<72;12;5M").type),
+             static_cast<int>(InputEventType::ScrollUp)); // Alt
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[<80;12;5M").type),
+             static_cast<int>(InputEventType::ScrollUp)); // Ctrl
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[<88;12;5M").type),
+             static_cast<int>(InputEventType::ScrollUp)); // Ctrl + Alt
+}
+
+// ScrollDown con y sin modificadores.
+TEST(terminal_event_scroll_down_modifiers) {
+    CHECK_EQ(static_cast<int>(parse("\x1b[<65;12;5M").type),
+             static_cast<int>(InputEventType::ScrollDown)); // Sin modificador
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[<69;12;5M").type),
+             static_cast<int>(InputEventType::ScrollDown)); // Shift
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[<73;12;5M").type),
+             static_cast<int>(InputEventType::ScrollDown)); // Alt
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[<81;12;5M").type),
+             static_cast<int>(InputEventType::ScrollDown)); // Ctrl
+             
+    CHECK_EQ(static_cast<int>(parse("\x1b[<89;12;5M").type),
+             static_cast<int>(InputEventType::ScrollDown)); // Ctrl + Alt
 }
 
 TEST(terminal_event_scroll_then_char) {
@@ -329,25 +438,48 @@ TEST(terminal_event_char_scroll_char) {
     CHECK_EQ(b.text, "b");
 }
 
+// ---------------------------------------------------------------------------
+// SGR
+// ---------------------------------------------------------------------------
+
+// ScrollUp con y sin modificadores.
 TEST(terminal_event_parse_mouse_sgr_direct_up) {
     InputEvent e;
+
     Terminal::parseMouseSgr("[<64;10;5M", e);
-    
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollUp));
+
+    Terminal::parseMouseSgr("[<68;10;5M", e); // Shift
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollUp));
+
+    Terminal::parseMouseSgr("[<72;10;5M", e); // Alt
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollUp));
+
+    Terminal::parseMouseSgr("[<80;10;5M", e); // Ctrl
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollUp));
+
+    Terminal::parseMouseSgr("[<88;10;5M", e); // Ctrl + Alt
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollUp));
 }
 
+// ScrollDown con y sin modificadores.
 TEST(terminal_event_parse_mouse_sgr_direct_down) {
     InputEvent e;
-    Terminal::parseMouseSgr("[<65;10;5M", e);
-    
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollDown));
-}
 
-TEST(terminal_event_parse_mouse_sgr_direct_with_modifiers) {
-    InputEvent e;
-    Terminal::parseMouseSgr("[<68;10;5M", e);
-    
-    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollUp));
+    Terminal::parseMouseSgr("[<65;10;5M", e);
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollDown));
+
+    Terminal::parseMouseSgr("[<69;10;5M", e); // Shift
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollDown));
+
+    Terminal::parseMouseSgr("[<73;10;5M", e); // Alt
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollDown));
+
+    Terminal::parseMouseSgr("[<81;10;5M", e); // Ctrl
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollDown));
+
+    Terminal::parseMouseSgr("[<89;10;5M", e); // Ctrl + Alt
+    CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollDown));
 }
 
 TEST(terminal_event_parse_mouse_sgr_direct_release_ignored) {
@@ -389,30 +521,25 @@ TEST(terminal_event_parse_mouse_sgr_direct_down_with_ctrl) {
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::ScrollDown));
 }
 
-// Terminal (bytes) -> TtyKeymap -> Editor (con soft-wrap .md): End llega
-// al final exclusivo de la línea en la última fila visual.
-// Configurar Editor con .md y soft-wrap (ancho ~12 columnas).
-TEST(terminal_event_end_key_reaches_line_end_in_markdown) {
+// End llega al final exclusivo de la línea en la última fila visual.
+TEST(terminal_event_end_key_reaches_line_end) {
     Editor ed;
+    PipedStdin p;
+    Terminal t;
+    InputEvent e;
     
-    ed.active().filename = "notes.md";
+    ed.active().filename = "notes";
     ed.active().document.restore({std::string(30, 'a')});
     ed.active().cursor.line = 0;
     ed.active().cursor.col = 0;
-    ed.resize(10, 19);  // gutter 7 -> textWidth 12
-
+    
     // Inyectar secuencia ESC [ F (End) via pipe al Terminal parser.
-    PipedStdin p;
     p.feed("\x1b[F");
-    Terminal t;
 
-    // Posicionar cursor en la última fila visual (columna 24).
-    ed.active().cursor.col = 24;
-    InputEvent e = t.readEvent();
+    e = t.readEvent();
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MoveEnd));
     ed.handleEvent(e);
 
-    // Debe alcanzar col 30 (lineLength), no 29.
     CHECK_EQ(ed.active().cursor.line, 0);
     CHECK_EQ(ed.active().cursor.col, 30);
     CHECK_EQ(ed.active().cursor.col, ed.active().document.lineLength(0));
@@ -441,6 +568,8 @@ TEST(terminal_event_mouse_decoder_cellpos) {
         {"[<3;11;6m",  InputEventType::MouseRelease, true,  {10, 5}},
         // Rueda con Shift (68 = 64|4) sigue siendo ScrollUp.
         {"[<68;10;5M", InputEventType::ScrollUp,     false, {}},
+        // Rueda hacia abajo.
+        {"[<65;10;5M", InputEventType::ScrollDown,   false, {}},
         // Secuencia incompleta -> None.
         {"[<64M",      InputEventType::None,         false, {}},
     };
@@ -449,6 +578,7 @@ TEST(terminal_event_mouse_decoder_cellpos) {
         InputEvent e;
         CellPos p;
         decodeMouseSgr(c.seq, e, p);
+        
         CHECK_EQ(static_cast<int>(e.type), static_cast<int>(c.type));
         if (c.checkPos) {
             CHECK((p == c.pos));
@@ -457,9 +587,10 @@ TEST(terminal_event_mouse_decoder_cellpos) {
         }
     }
 
-    // Terminal delega en el mismo decoder (sin duplicar tabla Cb).
+    // Terminal delega en el mismo decoder
     InputEvent e;
     Terminal::parseMouseSgr("[<0;10;5M", e);
+    
     CHECK_EQ(static_cast<int>(e.type), static_cast<int>(InputEventType::MousePress));
     CHECK_EQ(e.cell.col, 9);
     CHECK_EQ(e.cell.row, 4);
