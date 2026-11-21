@@ -160,6 +160,8 @@ bool GuiKeymap::isRepeatable(InputEventType type) const {
         case InputEventType::PageDown:
         case InputEventType::Backspace:
         case InputEventType::Delete:
+        case InputEventType::Undo:
+        case InputEventType::Redo:
             return true;
         default:
             return false;

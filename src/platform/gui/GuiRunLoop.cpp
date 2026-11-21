@@ -952,15 +952,9 @@ int GuiRunLoop::run() {
                     }
                     break;
                 case SDL_KEYDOWN: {
-                    // Teclado completo vía GuiKeymap: SDL_Keysym se adapta
-                    // a vocabulario propio (GuiKey.h, sin SDL) en el límite
-                    // SDL y el keymap traduce a InputEvent semántico.
-                    // La repetición se conserva y el keymap la filtra:
-                    // navegación/borrado repiten siempre; Enter solo si el
-                    // estado actual inserta una fila (Interaccion). En
-                    // prompts/selectores Enter repetido sigue suprimido.
-                    // KEYDOWN nunca lleva texto imprimible (sin doble
-                    // inserción: el texto viene por SDL_TEXTINPUT).
+                    // Teclado completo vía GuiKeymap:
+                    // SDL_Keysym se adapta a vocabulario propio (GuiKey.h, sin SDL) 
+                    // en el límite SDL y el keymap traduce a InputEvent semántico.
                     InputEvent ie;
                     bool send = false;
                     const bool enterInsertsLine =

@@ -5,18 +5,28 @@
 #include "platform/InputEvent.h"  // usa InputEvent común
 #include "helpers/FakeClipboard.h"
 #include "platform/clipboard/SystemClipboard.h"
+
 #ifdef HAVE_X11
 #include "platform/clipboard/X11Clipboard.h"
 #endif
+
 #define private public
 #include "app/Editor.h"
 #undef private
 
+namespace {
 static InputEvent insertChar(const std::string& s) {
     InputEvent e; e.type = InputEventType::InsertChar; e.text = s; return e;
 }
-static InputEvent esc() { InputEvent e; e.type = InputEventType::Escape; return e; }
-static void press(Editor& ed, InputEventType t) { InputEvent e; e.type = t; ed.handleEvent(e); }
+
+static InputEvent esc() { 
+    InputEvent e; e.type = InputEventType::Escape; return e; 
+}
+
+static void press(Editor& ed, InputEventType t) { 
+    InputEvent e; e.type = t; ed.handleEvent(e); 
+}
+
 static void type(Editor& ed, const std::string& s) {
     if (ed.state_ != State::Interaccion) {
         if (ed.state_ == State::Seleccion) ed.handleEvent(esc());
@@ -24,12 +34,15 @@ static void type(Editor& ed, const std::string& s) {
     }
     for (unsigned char c : s) ed.handleEvent(insertChar(std::string(1, (char)c)));
 }
+} // namespace
 
 TEST(system_clipboard_fake_copy_paste_simple) {
     FakeClipboard::resetGlobal();
     FakeClipboard cb;
+    
     CHECK(cb.copy("hola"));
     CHECK(cb.ownsClipboard());
+    
     auto p = cb.paste();
     CHECK(p.has_value());
     CHECK_EQ(*p, "hola");
@@ -38,7 +51,9 @@ TEST(system_clipboard_fake_copy_paste_simple) {
 TEST(system_clipboard_fake_empty_initial) {
     FakeClipboard::resetGlobal();
     FakeClipboard cb;
+    
     CHECK(!cb.ownsClipboard());
+    
     auto p = cb.paste();
     CHECK(p.has_value());
     CHECK_EQ(*p, "");
@@ -47,13 +62,16 @@ TEST(system_clipboard_fake_empty_initial) {
 TEST(system_clipboard_fake_utf8) {
     FakeClipboard::resetGlobal();
     FakeClipboard cb;
+    
     std::string cafe = std::string("caf\xC3\xA9");
     std::string ae = std::string("\xC3\xA1\xC3\xA9\xC3\xAD\xC3\xB3\xC3\xBA");
     std::string em = std::string("\xE2\x80\x94");
     std::string jp = std::string("\xE3\x81\x93\xE3\x82\x93\xE3\x81\xAB\xE3\x81\xA1\xE3\x81\xAF");
     std::string emoji = std::string("\xF0\x9F\x98\x80");
+    
     for (auto s : {cafe, ae, em, jp, emoji}) {
         CHECK(cb.copy(s));
+        
         auto p = cb.paste();
         CHECK(p.has_value());
         CHECK_EQ(*p, s);
@@ -63,8 +81,10 @@ TEST(system_clipboard_fake_utf8) {
 TEST(system_clipboard_fake_multiline) {
     FakeClipboard::resetGlobal();
     FakeClipboard cb;
+    
     std::string multi = "linea 1\nlinea 2\nlinea 3";
     CHECK(cb.copy(multi));
+    
     auto p = cb.paste();
     CHECK(p.has_value());
     CHECK_EQ(*p, multi);
@@ -73,11 +93,13 @@ TEST(system_clipboard_fake_multiline) {
 TEST(system_clipboard_fake_ownership_loss) {
     FakeClipboard::resetGlobal();
     FakeClipboard a, b;
+    
     CHECK(a.copy("A"));
     CHECK(a.ownsClipboard());
     CHECK(b.copy("B"));
     CHECK(b.ownsClipboard());
     CHECK(!a.ownsClipboard());
+    
     auto p = a.paste();
     CHECK(p.has_value());
     CHECK_EQ(*p, "B");
@@ -86,9 +108,11 @@ TEST(system_clipboard_fake_ownership_loss) {
 TEST(system_clipboard_fake_external_copy) {
     FakeClipboard::resetGlobal();
     FakeClipboard a;
+    
     CHECK(a.copy("A"));
     a.simulateExternalCopy("B");
     CHECK(!a.ownsClipboard());
+    
     auto p = a.paste();
     CHECK(p.has_value());
     CHECK_EQ(*p, "B");
@@ -97,6 +121,7 @@ TEST(system_clipboard_fake_external_copy) {
 TEST(system_clipboard_fake_copy_error) {
     FakeClipboard::resetGlobal();
     FakeClipboard cb;
+    
     cb.setFailCopy(true);
     CHECK(!cb.copy("hola"));
     CHECK(!cb.ownsClipboard());
@@ -105,8 +130,10 @@ TEST(system_clipboard_fake_copy_error) {
 TEST(system_clipboard_fake_paste_error) {
     FakeClipboard::resetGlobal();
     FakeClipboard cb;
+    
     cb.copy("hola");
     cb.setFailPaste(true);
+    
     auto p = cb.paste();
     CHECK(!p.has_value());
 }
@@ -114,8 +141,10 @@ TEST(system_clipboard_fake_paste_error) {
 TEST(system_clipboard_fake_processEvents_noop) {
     FakeClipboard::resetGlobal();
     FakeClipboard cb;
+    
     cb.copy("x");
     cb.processEvents();
+    
     auto p = cb.paste();
     CHECK(p.has_value());
     CHECK_EQ(*p, "x");
@@ -123,9 +152,11 @@ TEST(system_clipboard_fake_processEvents_noop) {
 
 TEST(system_clipboard_editor_copy_paste_simple) {
     FakeClipboard::resetGlobal();
+    
     auto fc = std::make_unique<FakeClipboard>();
     FakeClipboard* raw = fc.get();
     Editor ed(std::move(fc));
+    
     type(ed, "hola");
     press(ed, InputEventType::Escape);
     press(ed, InputEventType::MoveHome);
@@ -135,6 +166,7 @@ TEST(system_clipboard_editor_copy_paste_simple) {
     ed.handleEvent(insertChar("c"));
     CHECK_EQ(raw->paste().value(), "ho");
     CHECK(!ed.hasSelection());
+    
     press(ed, InputEventType::MoveEnd);
     ed.handleEvent(insertChar("p"));
     CHECK_EQ(ed.active().document.lineAt(0), "holaho");
@@ -144,8 +176,10 @@ TEST(system_clipboard_editor_paste_empty) {
     FakeClipboard::resetGlobal();
     auto fc = std::make_unique<FakeClipboard>();
     Editor ed(std::move(fc));
+    
     type(ed, "abc");
     press(ed, InputEventType::Escape);
+    
     size_t undoBefore = ed.active().undoStack.size();
     ed.handleEvent(insertChar("p"));
     CHECK_EQ(ed.active().undoStack.size(), undoBefore);
@@ -156,13 +190,17 @@ TEST(system_clipboard_editor_utf8) {
     FakeClipboard::resetGlobal();
     auto fc = std::make_unique<FakeClipboard>();
     Editor ed(std::move(fc));
+    
     ed.active().document.restore({std::string("caf\xC3\xA9")});
     ed.active().cursor.col = 0;
     press(ed, InputEventType::MoveHome);
+    
     ed.handleEvent(insertChar("s"));
     press(ed, InputEventType::MoveEnd);
+    
     ed.handleEvent(insertChar("c"));
     press(ed, InputEventType::MoveEnd);
+    
     ed.handleEvent(insertChar("p"));
     CHECK_EQ(ed.active().document.lineAt(0), std::string("caf\xC3\xA9")+std::string("caf\xC3\xA9"));
 }
@@ -171,18 +209,24 @@ TEST(system_clipboard_editor_multiline) {
     FakeClipboard::resetGlobal();
     auto fc = std::make_unique<FakeClipboard>();
     Editor ed(std::move(fc));
+    
     ed.active().document.restore({"linea 1", "linea 2", "linea 3"});
-    ed.active().cursor.line = 0; ed.active().cursor.col = 0;
+    ed.active().cursor.line = 0; 
+    ed.active().cursor.col = 0;
     press(ed, InputEventType::MoveHome);
+    
     ed.handleEvent(insertChar("s"));
     press(ed, InputEventType::MoveEnd);
     press(ed, InputEventType::MoveDown);
     press(ed, InputEventType::MoveDown);
     ed.handleEvent(insertChar("c"));
+    
     auto block = ed.getClipboardBlock();
     CHECK(block == (std::vector<std::string>{"linea 1","linea 2","linea 3"}));
+    
     ed.active().document.restore({"X"});
-    ed.active().cursor.line = 0; ed.active().cursor.col = 1;
+    ed.active().cursor.line = 0; 
+    ed.active().cursor.col = 1;
     ed.handleEvent(insertChar("p"));
     CHECK(ed.active().document.snapshot() == (std::vector<std::string>{"Xlinea 1","linea 2","linea 3"}));
 }
@@ -192,9 +236,11 @@ TEST(system_clipboard_editor_cut_failure_aborts) {
     auto fc = std::make_unique<FakeClipboard>();
     FakeClipboard* raw = fc.get();
     Editor ed(std::move(fc));
+    
     type(ed, "hola");
     press(ed, InputEventType::Escape);
     press(ed, InputEventType::MoveHome);
+    
     ed.handleEvent(insertChar("s"));
     press(ed, InputEventType::MoveRight);
     press(ed, InputEventType::MoveRight);
@@ -211,6 +257,7 @@ TEST(system_clipboard_editor_ownsClipboard) {
     auto fc = std::make_unique<FakeClipboard>();
     FakeClipboard* raw = fc.get();
     Editor ed(std::move(fc));
+    
     CHECK(!raw->ownsClipboard());
     type(ed, "ab");
     press(ed, InputEventType::Escape);
@@ -219,8 +266,10 @@ TEST(system_clipboard_editor_ownsClipboard) {
     press(ed, InputEventType::MoveEnd);
     ed.handleEvent(insertChar("c"));
     CHECK(raw->ownsClipboard());
+    
     raw->simulateExternalCopy("external");
     CHECK(!raw->ownsClipboard());
+    
     press(ed, InputEventType::MoveEnd);
     ed.handleEvent(insertChar("p"));
     CHECK_EQ(ed.active().document.lineAt(0), "abexternal");
@@ -231,6 +280,7 @@ TEST(system_clipboard_editor_external_is_source_of_truth) {
     auto fc = std::make_unique<FakeClipboard>();
     FakeClipboard* raw = fc.get();
     Editor ed(std::move(fc));
+    
     type(ed, "A");
     press(ed, InputEventType::Escape);
     press(ed, InputEventType::MoveHome);
@@ -238,6 +288,7 @@ TEST(system_clipboard_editor_external_is_source_of_truth) {
     press(ed, InputEventType::MoveEnd);
     ed.handleEvent(insertChar("c"));
     CHECK_EQ(raw->paste().value(), "A");
+    
     raw->simulateExternalCopy("B");
     press(ed, InputEventType::MoveEnd);
     ed.handleEvent(insertChar("p"));
@@ -251,14 +302,20 @@ TEST(system_clipboard_x11_fallback_no_display) {
     bool hadDisplay = oldDisplay != nullptr;
     ::unsetenv("DISPLAY");
     X11Clipboard cb;
-    if (hadDisplay) ::setenv("DISPLAY", saved.c_str(), 1);
-    else ::unsetenv("DISPLAY");
+    
+    if (hadDisplay) 
+        ::setenv("DISPLAY", saved.c_str(), 1);
+    else 
+        ::unsetenv("DISPLAY");
+
     CHECK(!cb.isAvailable());
     CHECK(cb.copy("fallback"));
     CHECK(cb.ownsClipboard());
+    
     auto p = cb.paste();
     CHECK(p.has_value());
     CHECK_EQ(*p, "fallback");
+    
     cb.processEvents();
     CHECK(cb.ownsClipboard());
 }

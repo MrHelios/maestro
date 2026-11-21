@@ -5,14 +5,10 @@
 #include "platform/InputEvent.h"
 #include "platform/gui/GuiKey.h"
 
-// IGuiKeymap — interfaz GUI-ONLY (decisión 2 de architecture.md §3).
-//
-// El mapeo `tecla lógica + modificadores -> InputEventType` es vocabulario
-// del backend GUI, no común: nunca reutiliza ITtyKeymap (byte de control /
-// contenido de secuencia ESC) y ambas producen el mismo InputEvent
-// semántico (platform/InputEvent.h). El keymap solo traduce; no conoce
-// modos ni estado del Editor (anti-patrón §5): no sabe qué es Prefix,
-// Navegación ni ningún comando.
+// IGuiKeymap — interfaz GUI-ONLY
+// El mapeo `tecla lógica + modificadores -> InputEventType` 
+// es vocabulario del backend GUI. 
+// nunca reutiliza ITtyKeymap (byte de control / contenido de secuencia ESC) 
 class IGuiKeymap {
 public:
     virtual ~IGuiKeymap() = default;
@@ -28,13 +24,11 @@ public:
     virtual std::optional<InputEventType> mapKey(
         const GuiKeyPress& press,
         bool allowRepeatedNewline = false) const = 0;
-    // Política base de repetición (SDL_KEYDOWN con repeat != 0): solo
-    // navegación (flechas, Home/End, PgUp/PgDn) y borrado (Backspace,
-    // Delete) repiten; todo lo demás (Enter, Escape, Prefix, Save, SaveAs,
-    // Quit, Undo/Redo) no. mapKey la aplica: con repeat == true las
-    // acciones no repetibles devuelven std::nullopt, salvo InsertNewline
-    // cuando allowRepeatedNewline indica que el estado lo permite. Se
-    // expone para tests y documentación.
+    // Política base de repetición 
+    // (SDL_KEYDOWN con repeat != 0)
+    // repiten navegación (flechas, Home/End, PgUp/PgDn), 
+    // borrado (Backspace, Delete) 
+    // e historial (Undo/Redo: mantener la tecla recorre el historial paso a paso)
     virtual bool isRepeatable(InputEventType type) const = 0;
     // Remapeo en tiempo de ejecución (misma frontera que
     // Terminal::keymapIface() -> ITtyKeymap): el Editor nunca cambia aunque

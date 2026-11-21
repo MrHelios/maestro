@@ -112,6 +112,7 @@ constexpr InputEventType kRepeatableEventTypes[] = {
     InputEventType::MoveHome,  InputEventType::MoveEnd,
     InputEventType::PageUp,    InputEventType::PageDown,
     InputEventType::Backspace, InputEventType::Delete,
+    InputEventType::Undo,      InputEventType::Redo,
 };
 
 constexpr GuiKeySym kAllKeySyms[] = {
@@ -645,7 +646,7 @@ TEST(gui_keymap_printable_never_maps) {
 }
 
 // --- Repetición ---
-TEST(gui_keymap_repeat_nav_repeats_actions_suppress) {
+TEST(gui_keymap_repeat_nav_y_historial_repite_acciones_suprimidas) {
     GuiKeymap km;
     
     // Mantener flecha/borrado: repite (un evento por SDL_KEYDOWN con repeat).
@@ -655,17 +656,24 @@ TEST(gui_keymap_repeat_nav_repeats_actions_suppress) {
              static_cast<int>(InputEventType::PageDown));
     CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::Backspace, false, false, false, true))),
              static_cast<int>(InputEventType::Backspace));
+
+    // Mantener Ctrl+Z/U/Y: repite Undo/Redo (hold = recorrer historial).
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyZ, true, false, false, true))),
+             static_cast<int>(InputEventType::Undo));
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyU, true, false, false, true))),
+             static_cast<int>(InputEventType::Undo));
+    CHECK_EQ(static_cast<int>(*km.mapKey(key(GuiKeySym::KeyY, true, false, false, true))),
+             static_cast<int>(InputEventType::Redo));
              
     // Mantener Enter/Escape: no repite salvo el contexto explícito de
     // InsertNewline (ver guikeymap_repeat_enter_solo_con_contexto).
     CHECK(!km.mapKey(key(GuiKeySym::Enter, false, false, false, true)).has_value());
-    // Mantener Ctrl+K/S/Q/U/Y/Z/Escape: no repite (evita reabrir el prefijo
-    // o ejecutar guardar/salir/deshacer en ráfaga por accidente).
+    // Mantener Ctrl+K/S/Q/Escape: no repite (evita reabrir el prefijo o
+    // ejecutar guardar/salir en ráfaga por accidente).
     CHECK(!km.mapKey(key(GuiKeySym::KeyK, true, false, false, true)).has_value());
     CHECK(!km.mapKey(key(GuiKeySym::KeyS, true, false, false, true)).has_value());
     CHECK(!km.mapKey(key(GuiKeySym::KeyS, true, false, true, true)).has_value());
     CHECK(!km.mapKey(key(GuiKeySym::KeyQ, true, false, false, true)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyU, true, false, false, true)).has_value());
     CHECK(!km.mapKey(key(GuiKeySym::Escape, false, false, false, true)).has_value());
 }
 
@@ -686,7 +694,9 @@ TEST(gui_keymap_repeat_enter_solo_con_contexto) {
                             true)),
              static_cast<int>(InputEventType::InsertNewline));
              
-    // El contexto solo habilita InsertNewline; el resto sigue suprimido.
+    // El contexto solo habilita InsertNewline; el resto conserva su
+    // política propia (Escape/Prefix/Save/Quit suprimidos; Undo ya repite
+    // independientemente del contexto).
     CHECK(!km.mapKey(key(GuiKeySym::Escape, false, false, false, true), true)
                .has_value());
     CHECK(!km.mapKey(key(GuiKeySym::KeyK, true, false, false, true), true)
@@ -695,8 +705,9 @@ TEST(gui_keymap_repeat_enter_solo_con_contexto) {
                .has_value());
     CHECK(!km.mapKey(key(GuiKeySym::KeyQ, true, false, false, true), true)
                .has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyU, true, false, false, true), true)
-               .has_value());
+    CHECK_EQ(static_cast<int>(
+                 *km.mapKey(key(GuiKeySym::KeyU, true, false, false, true), true)),
+             static_cast<int>(InputEventType::Undo));
 }
 
 TEST(gui_keymap_enter_repetido_inserta_filas) {
@@ -730,6 +741,112 @@ TEST(gui_keymap_enter_repetido_inserta_filas) {
     CHECK_EQ(b.document.lineCount(), 6);
     CHECK_EQ(b.cursor.line, 5);
     CHECK_EQ(b.cursor.col, 0);
+}
+
+// Hold Ctrl+Z: la pulsación inicial deshace un paso y cada KEYDOWN con
+// repeat=true deshace el siguiente, hasta vaciar el historial.
+TEST(gui_keymap_hold_ctrl_z_repite_undo) {
+    GuiKeymap km;
+    Editor ed;
+
+    // 'i' entra en Interaccion; cada caracter posterior es una edicion
+    // separada (sin reemplazo de seleccion), igual que en E2E-02.
+    ed.handleEvent(insertStr("i"));
+    ed.handleEvent(insertStr("a"));
+    ed.handleEvent(insertStr("b"));
+    ed.handleEvent(insertStr("c"));
+
+    Buffer& b = ed.getActiveBufferForTesting();
+    CHECK_EQ(b.document.lineAt(0), "abc");
+    CHECK_EQ(b.undoStack.size(), 3u);
+
+    // Pulsacion inicial (repeat=false): un solo paso.
+    const auto initial =
+        km.mapKey(key(GuiKeySym::KeyZ, true, false, false, false));
+    CHECK(initial.has_value());
+    if (!initial) return;
+    CHECK_EQ(static_cast<int>(*initial),
+             static_cast<int>(InputEventType::Undo));
+
+    InputEvent e;
+    e.type = *initial;
+    ed.handleEvent(e);
+    CHECK_EQ(b.document.lineAt(0), "ab");
+
+    // Hold (repeat=true): cada KEYDOWN repetido deshace otro paso.
+    const auto repeated =
+        km.mapKey(key(GuiKeySym::KeyZ, true, false, false, true));
+    CHECK(repeated.has_value());
+    if (!repeated) return;
+    CHECK_EQ(static_cast<int>(*repeated),
+             static_cast<int>(InputEventType::Undo));
+
+    e.type = *repeated;
+    ed.handleEvent(e);
+    CHECK_EQ(b.document.lineAt(0), "a");
+    ed.handleEvent(e);
+    CHECK_EQ(b.document.lineAt(0), "");
+    CHECK_EQ(b.undoStack.size(), 0u);
+
+    // Repeticiones extra con historial vacio: no-op, sin crash.
+    ed.handleEvent(e);
+    CHECK_EQ(b.document.lineAt(0), "");
+    CHECK_EQ(b.undoStack.size(), 0u);
+}
+
+// Hold Ctrl+Y: la pulsación inicial rehace un paso y cada KEYDOWN con
+// repeat=true rehace el siguiente, hasta vaciar el redo pendiente.
+TEST(gui_keymap_hold_ctrl_y_repite_redo) {
+    GuiKeymap km;
+    Editor ed;
+
+    ed.handleEvent(insertStr("i"));
+    ed.handleEvent(insertStr("a"));
+    ed.handleEvent(insertStr("b"));
+    ed.handleEvent(insertStr("c"));
+
+    Buffer& b = ed.getActiveBufferForTesting();
+
+    // Vaciar undo: documento vacio, 3 pasos pendientes en redo.
+    InputEvent undo;
+    undo.type = InputEventType::Undo;
+    for (int i = 0; i < 3; ++i) ed.handleEvent(undo);
+    CHECK_EQ(b.document.lineAt(0), "");
+    CHECK_EQ(b.undoStack.size(), 0u);
+    CHECK_EQ(b.redoStack.size(), 3u);
+
+    // Pulsacion inicial (repeat=false): un solo redo.
+    const auto initial =
+        km.mapKey(key(GuiKeySym::KeyY, true, false, false, false));
+    CHECK(initial.has_value());
+    if (!initial) return;
+    CHECK_EQ(static_cast<int>(*initial),
+             static_cast<int>(InputEventType::Redo));
+
+    InputEvent e;
+    e.type = *initial;
+    ed.handleEvent(e);
+    CHECK_EQ(b.document.lineAt(0), "a");
+
+    // Hold (repeat=true): cada KEYDOWN repetido rehace otro paso.
+    const auto repeated =
+        km.mapKey(key(GuiKeySym::KeyY, true, false, false, true));
+    CHECK(repeated.has_value());
+    if (!repeated) return;
+    CHECK_EQ(static_cast<int>(*repeated),
+             static_cast<int>(InputEventType::Redo));
+
+    e.type = *repeated;
+    ed.handleEvent(e);
+    CHECK_EQ(b.document.lineAt(0), "ab");
+    ed.handleEvent(e);
+    CHECK_EQ(b.document.lineAt(0), "abc");
+    CHECK_EQ(b.redoStack.size(), 0u);
+
+    // Repeticiones extra sin redo pendiente: no-op, sin crash.
+    ed.handleEvent(e);
+    CHECK_EQ(b.document.lineAt(0), "abc");
+    CHECK_EQ(b.redoStack.size(), 0u);
 }
 
 // --- Remapeo y defaults ---
@@ -1173,11 +1290,17 @@ TEST(gui_keymap_no_repeat_exhaustivo_headless) {
         if (!contains(kRepeatableEventTypes, t)) CHECK(!km.isRepeatable(t));
     }
     
-    // mapKey con repeat suprime aunque el enlace exista (evita ráfagas de
-    // guardar/salir/deshacer al mantener la tecla).
-    CHECK(!km.mapKey(key(GuiKeySym::KeyU, true, false, false, true)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyZ, true, false, false, true)).has_value());
-    CHECK(!km.mapKey(key(GuiKeySym::KeyY, true, false, false, true)).has_value());
+    // mapKey con repeat suprime guardar/salir aunque el enlace exista (evita
+    // ráfagas accidentales); Undo/Redo sí repiten a propósito (hold).
+    CHECK_EQ(static_cast<int>(
+                 *km.mapKey(key(GuiKeySym::KeyU, true, false, false, true))),
+             static_cast<int>(InputEventType::Undo));
+    CHECK_EQ(static_cast<int>(
+                 *km.mapKey(key(GuiKeySym::KeyZ, true, false, false, true))),
+             static_cast<int>(InputEventType::Undo));
+    CHECK_EQ(static_cast<int>(
+                 *km.mapKey(key(GuiKeySym::KeyY, true, false, false, true))),
+             static_cast<int>(InputEventType::Redo));
     CHECK(!km.mapKey(key(GuiKeySym::KeyQ, true, false, false, true)).has_value());
     CHECK(!km.mapKey(key(GuiKeySym::KeyPadEnter, false, false, false, true))
                .has_value());
