@@ -1,20 +1,14 @@
-#include <chrono>
-#include <fstream>
 #include <memory>
 #include <string>
-#include <thread>
 
 #include "test_framework.h"
 #include "platform/clipboard/ClipboardFactory.h"
 #include "platform/clipboard/SdlClipboard.h"
-#include "filesystem/InotifyFileWatcher.h"
-#include "platform/gui/GuiRunLoop.h"
 #include "rendering/Sink.h"
 
 #define private public
 #include "app/Editor.h"
 #undef private
-#include "helpers/FakeClipboard.h"
 
 namespace {
 
@@ -228,46 +222,4 @@ TEST(sdl_clipboard_editor_select_all_copy_paste) {
     CHECK_EQ(f.ed.active().document.lineAt(2), "tresuno");
     CHECK_EQ(f.ed.active().document.lineAt(3), "dos");
     CHECK_EQ(f.ed.active().document.lineAt(4), "tres");
-}
-
-// --- FILEWATCHER
-// @cleanup: posiblemente lo movamos a otro archivo
-// ademas solo tiene un caso, deberia que extenderlo
-
-// abrimos un archivo en el editor
-// inyectamos un cambio por afuera
-// y verificamos que el filewatcher, detecta el cambio
-TEST(sdl_clipboard_watcher_idle_step_reloads_external_change) {
-    TempFile f;
-    f.write("A\n");
-    
-    auto sc = std::make_unique<SdlClipboard>();
-    auto w = std::make_unique<InotifyFileWatcher>();
-    Editor ed(std::move(sc), std::move(w));
-    
-    // desactivamos render real del editor
-    muteRender(ed);
-    
-    CHECK(ed.loadIntoActiveBuffer(f.path));
-    CHECK_EQ(ed.active().document.lineAt(0), "A");
-    {
-        // inyectamos nuevo contenido al archivo    
-        std::ofstream out(f.path, std::ios::binary | std::ios::trunc);
-        out << "B\n";
-    }
-    
-    GuiRunLoop loop(ed);
-    bool reloaded = false;
-    for (int k = 0; k < 30; ++k) {
-        ed.pollExternalEvents();  // lo que run() hace al tope de la vuelta
-        loop.idleStep(std::chrono::steady_clock::now());
-        if (ed.active().document.lineAt(0) == "B") {
-            reloaded = true;
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    CHECK(reloaded);
-    CHECK_EQ(ed.active().document.lineAt(0), "B");
-    CHECK(!ed.active().modified);
 }
