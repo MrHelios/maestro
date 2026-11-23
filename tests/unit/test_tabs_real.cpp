@@ -29,19 +29,18 @@ static Document docOf(const std::vector<const char*>& lines) {
 
 // byte -> visual
 TEST(tab_real_byte_to_visual_A_tab_B) {
-    Cursor c;
     std::string s = "A\tB";
     
     CHECK_EQ((int)s.size(), 3);
     // 'A' -> columna visual 0
-    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(expectedVisual(s, 0), 0);
     // '\t' empieza en la columna visual 1 
     // con TAB_WIDTH=4 avanza al siguiente tabstop: 4
-    CHECK_EQ(utf8::columnOf(s, 1), 1);
+    CHECK_EQ(expectedVisual(s, 1), 1);
     // 'B' -> columna visual 4
-    CHECK_EQ(utf8::columnOf(s, 2), 4);
+    CHECK_EQ(expectedVisual(s, 2), 4);
     // fin de linea -> columna visual 5
-    CHECK_EQ(utf8::columnOf(s, 3), 5);
+    CHECK_EQ(expectedVisual(s, 3), 5);
 }
 
 // caso que el tab esta en 0 (columna)
@@ -50,11 +49,11 @@ TEST(tab_real_byte_to_visual_tab_A) {
     
     CHECK_EQ((int)s.size(), 2);
     // \t
-    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(expectedVisual(s, 0), 0);
     // A
-    CHECK_EQ(utf8::columnOf(s, 1), 4);
+    CHECK_EQ(expectedVisual(s, 1), 4);
     // fin de linea
-    CHECK_EQ(utf8::columnOf(s, 2), 5);
+    CHECK_EQ(expectedVisual(s, 2), 5);
 }
 
 // caso que el tab esta en 1 (columna)
@@ -63,17 +62,17 @@ TEST(tab_real_byte_to_visual_A_tab_B_tab_C) {
     
     CHECK_EQ((int)s.size(), 5);
     // A
-    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(expectedVisual(s, 0), 0);
     // tab
-    CHECK_EQ(utf8::columnOf(s, 1), 1);
+    CHECK_EQ(expectedVisual(s, 1), 1);
     // B
-    CHECK_EQ(utf8::columnOf(s, 2), 4);
+    CHECK_EQ(expectedVisual(s, 2), 4);
     // tab
-    CHECK_EQ(utf8::columnOf(s, 3), 5);
+    CHECK_EQ(expectedVisual(s, 3), 5);
     // C
-    CHECK_EQ(utf8::columnOf(s, 4), 8);
+    CHECK_EQ(expectedVisual(s, 4), 8);
     // fin de linea
-    CHECK_EQ(utf8::columnOf(s, 5), 9);
+    CHECK_EQ(expectedVisual(s, 5), 9);
 }
 
 // caso que el tab esta en 2 (columna)
@@ -82,15 +81,15 @@ TEST(tab_real_byte_to_visual_A_B_tab_C) {
     
     CHECK_EQ((int)s.size(), 4);
     // A
-    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(expectedVisual(s, 0), 0);
     // B
-    CHECK_EQ(utf8::columnOf(s, 1), 1);
+    CHECK_EQ(expectedVisual(s, 1), 1);
     // tab
-    CHECK_EQ(utf8::columnOf(s, 2), 2);
+    CHECK_EQ(expectedVisual(s, 2), 2);
     // C
-    CHECK_EQ(utf8::columnOf(s, 3), 4);
+    CHECK_EQ(expectedVisual(s, 3), 4);
     // fin de linea
-    CHECK_EQ(utf8::columnOf(s, 4), 5);
+    CHECK_EQ(expectedVisual(s, 4), 5);
 }
 
 // caso que el tab esta en 3 (columna)
@@ -99,21 +98,21 @@ TEST(tab_real_byte_to_visual_ABC_tab_DEF) {
     
     CHECK_EQ((int)s.size(), 7);
     // A
-    CHECK_EQ(utf8::columnOf(s, 0), 0);
+    CHECK_EQ(expectedVisual(s, 0), 0);
     // B
-    CHECK_EQ(utf8::columnOf(s, 1), 1);
+    CHECK_EQ(expectedVisual(s, 1), 1);
     // C
-    CHECK_EQ(utf8::columnOf(s, 2), 2);
+    CHECK_EQ(expectedVisual(s, 2), 2);
     // \t
-    CHECK_EQ(utf8::columnOf(s, 3), 3);
+    CHECK_EQ(expectedVisual(s, 3), 3);
     // D
-    CHECK_EQ(utf8::columnOf(s, 4), 4);
+    CHECK_EQ(expectedVisual(s, 4), 4);
     // E
-    CHECK_EQ(utf8::columnOf(s, 5), 5);
+    CHECK_EQ(expectedVisual(s, 5), 5);
     // F
-    CHECK_EQ(utf8::columnOf(s, 6), 6);
+    CHECK_EQ(expectedVisual(s, 6), 6);
     // fin de linea
-    CHECK_EQ(utf8::columnOf(s, 7), 7);
+    CHECK_EQ(expectedVisual(s, 7), 7);
 }
 
 // gap property:
@@ -125,8 +124,8 @@ TEST(tab_real_advances_to_next_tab_stop) {
 
         const int expected = ((col / 4) + 1) * 4;
 
-        CHECK_EQ(utf8::columnOf(s, col), col);
-        CHECK_EQ(utf8::columnOf(s, col + 1), expected);
+        CHECK_EQ(expectedVisual(s, col), col);
+        CHECK_EQ(expectedVisual(s, col + 1), expected);
     }
 }
 
@@ -302,7 +301,7 @@ TEST(tab_real_backspace) {
     c.col -= bytes;
     CHECK_EQ(d.lineAt(0), "AB");
     CHECK_EQ(c.col, 1);
-    CHECK_EQ(utf8::columnOf(d.lineAt(0), c.col), 1);
+    CHECK_EQ(expectedVisual(d.lineAt(0), c.col), 1);
     
     Document d2 = docOf({"\tA"});
     
@@ -315,7 +314,7 @@ TEST(tab_real_backspace) {
     c.col -= bytes;
     CHECK_EQ(d2.lineAt(0), "A");
     CHECK_EQ(c.col, 0);
-    CHECK_EQ(utf8::columnOf(d2.lineAt(0), c.col), 0);
+    CHECK_EQ(expectedVisual(d2.lineAt(0), c.col), 0);
     
     Document d3 = docOf({"AB\t"});
     
@@ -328,7 +327,7 @@ TEST(tab_real_backspace) {
     c.col -= bytes;
     CHECK_EQ(d3.lineAt(0), "AB");
     CHECK_EQ(c.col, 2);
-    CHECK_EQ(utf8::columnOf(d3.lineAt(0), c.col), 2);
+    CHECK_EQ(expectedVisual(d3.lineAt(0), c.col), 2);
 }
 
 TEST(tab_real_delete) {
@@ -343,7 +342,7 @@ TEST(tab_real_delete) {
     CHECK_EQ(bytes, 1);
     CHECK_EQ(d.lineAt(0), "AB");
     CHECK_EQ(c.col, 1);
-    CHECK_EQ(utf8::columnOf(d.lineAt(0), c.col), 1);
+    CHECK_EQ(expectedVisual(d.lineAt(0), c.col), 1);
 
     // Tabulador al inicio.
     Document d2 = docOf({"\tA"});
@@ -355,7 +354,7 @@ TEST(tab_real_delete) {
     CHECK_EQ(bytes, 1);
     CHECK_EQ(d2.lineAt(0), "A");
     CHECK_EQ(c.col, 0);
-    CHECK_EQ(utf8::columnOf(d2.lineAt(0), c.col), 0);
+    CHECK_EQ(expectedVisual(d2.lineAt(0), c.col), 0);
 
     // Tabulador al final.
     Document d3 = docOf({"AB\t"});
@@ -367,18 +366,17 @@ TEST(tab_real_delete) {
     CHECK_EQ(bytes, 1);
     CHECK_EQ(d3.lineAt(0), "AB");
     CHECK_EQ(c.col, 2);
-    CHECK_EQ(utf8::columnOf(d3.lineAt(0), c.col), 2);
+    CHECK_EQ(expectedVisual(d3.lineAt(0), c.col), 2);
 }
 
 // la expansion debe ser visual, no por bytes
 TEST(tab_real_end_visual_expanded) {
     std::string s = "A\tB";
-    CHECK(utf8::columnOf(s, (int)s.size()) > (int)s.size());
+    CHECK(expectedVisual(s, (int)s.size()) > (int)s.size());
     
     s = "\tA";
-    CHECK(utf8::columnOf(s, (int)s.size()) > (int)s.size());
+    CHECK(expectedVisual(s, (int)s.size()) > (int)s.size());
     
     s = "ABC\tDEF";
-    CHECK(utf8::columnOf(s, (int)s.size()) >= (int)s.size());
-    CHECK_EQ(utf8::columnOf(s, (int)s.size()), expectedVisual(s, (int)s.size()));
+    CHECK(expectedVisual(s, (int)s.size()) >= (int)s.size());
 }
