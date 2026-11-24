@@ -1,7 +1,7 @@
 // Tests de cursor e IME con chrome anclado.
-// Todos los tests llevan el prefijo `chrome_anchored_` para poder filtrarlos.
 
 #include "test_framework.h"
+
 #include "rendering/gui/GuiRenderer.h"
 #include "rendering/gui/GuiChromePixels.h"
 
@@ -12,7 +12,7 @@ namespace {
 
 constexpr int kCw = 10;
 constexpr int kCh = 19;
-constexpr int kH = 428;   // anclado (residuo de 10px)
+constexpr int kH = 428;        // anclado
 constexpr int kHLegacy = 437;  // 437 % 19 == 0 -> NO anclado
 
 Layout makeLayout(int contentH, int chromeH = 2) {
@@ -30,11 +30,11 @@ FrameCursor makeCursor(int row, int col, FrameCursorShape shape = FrameCursorSha
     return c;
 }
 
-// Fila visual (en píxeles) de una celda lógica. Es la lógica compartida por
-// cursorPixelRect() e imeRectPx(): ambos deben consultar la misma geometría.
+// Fila visual (en píxeles) de una celda lógica. 
+// Es la lógica compartida por cursorPixelRect() e imeRectPx(): 
+// ambos deben consultar la misma geometría.
 // El topInset se suma UNA sola vez, aquí.
-int cellTopPx(const FrameCursor& cur, const Layout& lo,
-              const BottomChromeGeometry& geom, int topInset) {
+int cellTopPx(const FrameCursor& cur, const Layout& lo, const BottomChromeGeometry& geom, int topInset) {
     int y = cur.cell.row * kCh;
     if (geom.anchored && cur.cell.row >= lo.chrome.row) {
         const int chromeRow = cur.cell.row - lo.chrome.row;
@@ -44,8 +44,7 @@ int cellTopPx(const FrameCursor& cur, const Layout& lo,
     return y + topInset;
 }
 
-GuiPixelRect cursorRect(const FrameCursor& cur, const Layout& lo,
-                        const BottomChromeGeometry& geom, int topInset) {
+GuiPixelRect cursorRect(const FrameCursor& cur, const Layout& lo, const BottomChromeGeometry& geom, int topInset) {
     GuiPixelRect r;
     r.x = cur.cell.col * kCw;
     r.y = cellTopPx(cur, lo, geom, topInset);
@@ -55,8 +54,7 @@ GuiPixelRect cursorRect(const FrameCursor& cur, const Layout& lo,
     return r;
 }
 
-GuiPixelRect imeRect(const FrameCursor& cur, const Layout& lo,
-                     const BottomChromeGeometry& geom, int topInset) {
+GuiPixelRect imeRect(const FrameCursor& cur, const Layout& lo, const BottomChromeGeometry& geom, int topInset) {
     GuiPixelRect r;
     r.x = cur.cell.col * kCw;
     r.y = cellTopPx(cur, lo, geom, topInset);
@@ -68,77 +66,78 @@ GuiPixelRect imeRect(const FrameCursor& cur, const Layout& lo,
 
 } // namespace
 
-// Cursor en StatusBar -> rect dentro de su celda visual
-TEST(chrome_anchored_cursor_rect_statusbar) {
+// verificamos que se cree un cursor en el messagebar
+TEST(chrome_anchored_cursor_rect) {
     const Layout lo = makeLayout(20);
     const BottomChromeGeometry geom = bottomChromeGeometry(kH, kCh, lo.content.height, lo.chrome.height);
+
     CHECK(geom.anchored);
 
-    const FrameCursor cur = makeCursor(lo.chrome.row, 5, FrameCursorShape::Block);
-    const GuiPixelRect r = cursorRect(cur, lo, geom, 0);
+    struct Case {
+        int row;
+        int col;
+        FrameCursorShape shape;
+        int expectedY;
+        int expectedW;
+    };
 
-    CHECK(r.valid);
-    CHECK_EQ(r.y, geom.statusTop);
-    CHECK_EQ(r.h, kCh);
-    CHECK_EQ(r.x, 5 * kCw);
-    CHECK_EQ(r.w, kCw);
-}
+    const Case cases[] = {
+        {lo.chrome.row,     5, FrameCursorShape::Block, geom.statusTop,  1 * kCw},
+        {lo.chrome.row + 1, 8, FrameCursorShape::Bar,   geom.messageTop, 2},
+    };
 
-// Cursor en MessageBar -> rect dentro de su celda visual
-TEST(chrome_anchored_cursor_rect_messagebar) {
-    const Layout lo = makeLayout(20);
-    const BottomChromeGeometry geom = bottomChromeGeometry(kH, kCh, lo.content.height, lo.chrome.height);
-    CHECK(geom.anchored);
+    for (const auto& tc : cases) {
+        const FrameCursor cur = makeCursor(tc.row, tc.col, tc.shape);
+        const GuiPixelRect r = cursorRect(cur, lo, geom, 0);
 
-    const FrameCursor cur = makeCursor(lo.chrome.row + 1, 8, FrameCursorShape::Bar);
-    const GuiPixelRect r = cursorRect(cur, lo, geom, 0);
-
-    CHECK(r.valid);
-    CHECK_EQ(r.y, geom.messageTop);
-    CHECK_EQ(r.h, kCh);
-    CHECK_EQ(r.x, 8 * kCw);
-    CHECK_EQ(r.w, 2);
+        CHECK(r.valid);
+        CHECK_EQ(r.y, tc.expectedY);
+        CHECK_EQ(r.h, kCh);
+        CHECK_EQ(r.x, tc.col * kCw);
+        CHECK_EQ(r.w, tc.expectedW);
+    }
 }
 
 // IME en StatusBar -> misma celda visual que el cursor
-TEST(chrome_anchored_ime_rect_statusbar) {
+TEST(chrome_anchored_ime_rect_matches_cursor) {
     const Layout lo = makeLayout(20);
-    const BottomChromeGeometry geom = bottomChromeGeometry(kH, kCh, lo.content.height, lo.chrome.height);
+    const BottomChromeGeometry geom =
+        bottomChromeGeometry(kH, kCh, lo.content.height, lo.chrome.height);
+
     CHECK(geom.anchored);
 
-    const FrameCursor cur = makeCursor(lo.chrome.row, 3);
-    const GuiPixelRect ime = imeRect(cur, lo, geom, 0);
-    const GuiPixelRect cr = cursorRect(cur, lo, geom, 0);
+    struct Case {
+        int row;
+        int col;
+        int expectedY;
+    };
 
-    CHECK_EQ(ime.y, geom.statusTop);
-    CHECK_EQ(ime.h, kCh);
-    CHECK_EQ(ime.w, kCw);
-    CHECK_EQ(ime.y, cr.y);
-    CHECK_EQ(ime.x, cr.x);
+    const Case cases[] = {
+        {lo.chrome.row,     3,  geom.statusTop},
+        {lo.chrome.row + 1, 12, geom.messageTop},
+    };
+
+    for (const auto& tc : cases) {
+        const FrameCursor cur = makeCursor(tc.row, tc.col);
+        const GuiPixelRect ime = imeRect(cur, lo, geom, 0);
+        const GuiPixelRect cr = cursorRect(cur, lo, geom, 0);
+
+        CHECK(ime.valid);
+        CHECK(cr.valid);
+        CHECK_EQ(ime.x, cr.x);
+        CHECK_EQ(ime.y, cr.y);
+        CHECK_EQ(ime.w, kCw);
+        CHECK_EQ(ime.h, kCh);
+        CHECK_EQ(ime.y, tc.expectedY);
+    }
 }
 
-// IME en MessageBar -> misma celda visual que el cursor
-TEST(chrome_anchored_ime_rect_messagebar) {
-    const Layout lo = makeLayout(20);
-    const BottomChromeGeometry geom = bottomChromeGeometry(kH, kCh, lo.content.height, lo.chrome.height);
-    CHECK(geom.anchored);
-
-    const FrameCursor cur = makeCursor(lo.chrome.row + 1, 12, FrameCursorShape::Bar);
-    const GuiPixelRect ime = imeRect(cur, lo, geom, 0);
-    const GuiPixelRect cr = cursorRect(cur, lo, geom, 0);
-
-    CHECK_EQ(ime.y, geom.messageTop);
-    CHECK_EQ(ime.h, kCh);
-    CHECK_EQ(ime.w, kCw);
-    CHECK_EQ(ime.y, cr.y);
-    CHECK_EQ(ime.x, cr.x);
-}
-
-// El inset de la barra de título se aplica una sola vez (cursor e IME)
+// El inset de la barra de título se aplica una sola vez
 TEST(chrome_anchored_title_inset_applied_once) {
     const int topInset = 28;
     const Layout lo = makeLayout(20);
     const BottomChromeGeometry geom = bottomChromeGeometry(kH, kCh, lo.content.height, lo.chrome.height);
+    
     CHECK(geom.anchored);
 
     const FrameCursor cur = makeCursor(lo.chrome.row + 1, 7);
