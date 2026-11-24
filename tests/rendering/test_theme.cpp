@@ -1,52 +1,50 @@
-// Tests del TtyTheme (v1.2): verifican que el esquema de color es un valor
-// inyectable y que los componentes realmente lo usan (no quedan colores
-// hardcodeados). Dos propiedades esenciales:
-//   1. El TtyTheme por defecto reproduce EXACTAMENTE los colores que estaban
-//      hardcodeados en v1.1 (constantes kStatusBar* / kCurrentLineStyle /
-//      kSelectionStyle / kMessage*).
-//   2. Cambiar el TtyTheme cambia el output: cada componente (Renderer y
-//      StatusBar) lee sus colores del TtyTheme, no de constantes globales.
+// Tests del TtyTheme: 
+// verifican que el esquema de color es un valor
+// inyectable y que los componentes realmente lo usan.
+// Cambiar el TtyTheme cambia el output
+
 #include <string>
 
 #include "test_framework.h"
 #include "helpers/test_render_utils.h"
 #include "app/ChromePresentation.h"
 
-#include "rendering/tty/TtyTheme.h"
 #include "document/Document.h"
 #include "document/Cursor.h"
 #include "layout/Layout.h"
 #include "layout/Viewport.h"
+#include "rendering/tty/TtyTheme.h"
 #include "rendering/tty/TtyRenderer.h"
 #include "rendering/tty/TtyChrome.h"
 
 namespace {
 
 constexpr const char* kTestBgMagenta = "\x1b[45m";
-constexpr const char* kTestBgRed = "\x1b[41m";
-constexpr const char* kTestBgBlue = "\x1b[44m";
-constexpr const char* kTestBgGreen = "\x1b[42m";
-constexpr const char* kTestFgRed = "\x1b[31m";
+constexpr const char* kTestBgRed     = "\x1b[41m";
+constexpr const char* kTestBgBlue    = "\x1b[44m";
+constexpr const char* kTestBgGreen   = "\x1b[42m";
+constexpr const char* kTestFgRed     = "\x1b[31m";
 constexpr const char* kTestFgMagenta = "\x1b[35m";
-constexpr const char* kTestFgYellow = "\x1b[33m";
-constexpr const char* kTestFgWhite = "\x1b[37m";
-constexpr const char* kTestFgBlack = "\x1b[30m";
-constexpr const char* kTestReset = "\x1b[0m";
+constexpr const char* kTestFgYellow  = "\x1b[33m";
+constexpr const char* kTestFgWhite   = "\x1b[37m";
+constexpr const char* kTestFgBlack   = "\x1b[30m";
+constexpr const char* kTestReset     = "\x1b[0m";
 
 // Construye un frame minimo que ejercita currentLine y selection.
 std::string editorFrameWithSelection(const TtyTheme& theme, int width = 200) {
     Document doc;
-    doc.restore({"hello world"});
     Viewport vp;
+    Cursor cur;
+    TtyRenderer r;
+    Selection sel;
+    
+    doc.restore({"hello world"});
     vp.top = 0;
     vp.height = 2;
     vp.width = width;
-    Cursor cur;
     cur.line = 0;
     cur.col = 0;
-    TtyRenderer r;
     r.setTheme(theme);
-    Selection sel;
     sel.anchor = Position{0, 0};
     sel.position = Position{0, 5};
     return r.buildScreen(doc, cur, vp, "/a/b.txt", false,
@@ -54,15 +52,16 @@ std::string editorFrameWithSelection(const TtyTheme& theme, int width = 200) {
 }
 
 // Monta el frame del selector de buffers con el primer elemento seleccionado
-// (ejercita theme_.selection en la lista).
 std::string bufferFrameWithSelection(const TtyTheme& theme, int width = 200) {
     TtyRenderer tr;
+    
     tr.setTheme(theme);
     return tr.buildBufferListScreen({"aa.txt", "bb.txt"}, 0, 0, width, 5);
 }
 
 std::string fileFrameWithSelection(const TtyTheme& theme, int width = 200) {
     TtyRenderer tr;
+    
     tr.setTheme(theme);
     return tr.buildFileListScreen(
         std::vector<FileListItem>{{"aa.txt", false}, {"bb.txt", false}}, 0, 0,
@@ -71,10 +70,9 @@ std::string fileFrameWithSelection(const TtyTheme& theme, int width = 200) {
 
 } // namespace
 
-// Garantiza que defaultTheme() conserve compatibilidad visual con el
-// esquema anterior.
 TEST(theme_default_matches_legacy_colors) {
     const TtyTheme t = defaultTheme();
+    
     CHECK_EQ(t.background, std::string(kDarkBackground));
     CHECK_EQ(t.currentLine, std::string(kCurrentLineStyle));
     CHECK_EQ(t.selection, std::string(kSelectionStyle));
@@ -89,14 +87,12 @@ TEST(theme_default_matches_legacy_colors) {
     CHECK_EQ(t.reset, std::string(kDarkReset));
 }
 
-// ---------------------------------------------------------------------------
-// El TtyTheme por defecto define los estilos del lenguaje visual v1.3:
-// gutter, marcador, item activo de listas, prompts, indicador [*]
-// (v1.4: antes [modificado])
-// y los accents por estado.
-// ---------------------------------------------------------------------------
+
+// El TtyTheme por defecto define los estilos del lenguaje visual
+// gutter, marcador, item activo de listas, prompts, indicador y los accents por estado.
 TEST(theme_defaults_new_visual_language) {
     const TtyTheme t = defaultTheme();
+    
     CHECK_EQ(t.lineNumber, std::string(kLineNumberStyle));
     CHECK_EQ(t.gutterCurrent, std::string(kGutterCurrentStyle));
     CHECK_EQ(t.marker, std::string(kMarkerStyle));
@@ -110,9 +106,8 @@ TEST(theme_defaults_new_visual_language) {
     CHECK_EQ(t.accentBuffers, std::string(kAccentBuffers));
     CHECK_EQ(t.accentGuardar, std::string(kAccentGuardar));
     CHECK_EQ(t.accentAbrir, std::string(kAccentAbrir));
-    // El lenguaje ACTIVO se unifica: el item de lista usa el mismo gris de
-    // fondo que la fila del cursor del editor. El fg puede diferir (el item
-    // activo usa listSelectedFg), por eso se compara solo la parte de fondo.
+    
+    // comparamos el background color de la linea seleccionada
     auto bgOf = [](const std::string& s) {
         const size_t p = s.find("\x1b[48;");
         return p == std::string::npos ? std::string() : s.substr(p);
@@ -124,40 +119,44 @@ TEST(theme_renderer_uses_theme_for_selection_and_currentline) {
     TtyTheme t = defaultTheme();
     t.currentLine = kTestBgMagenta;
     t.selection = kTestBgRed;
-    t.reset = kTestReset;
 
     const std::string frame = editorFrameWithSelection(t);
-    // La fila del cursor (linea 0) lleva el estilo de fila del tema: el
-    // bloque seleccionado gana y se abre con t.selection, pero el estilo
-    // de fila del tema aparece en el frame (parte antes/despues y relleno).
+    
+    // la linea actual utiliza el color definido
     CHECK(frame.find(t.currentLine) != std::string::npos);
-    // El bloque seleccionado (los primeros 5 chars) lleva el color de
-    // seleccion del tema, no el video inverso global de la maquina.
+    
+    // el texto actual utiliza el estilo de seleccion del tema
     CHECK(frame.find(t.selection + "hello") != std::string::npos);
-    // El default theme SEGUIRIA usando video inverso: el output debe
-    // diferir con este tema, demostrando que el TtyTheme se usa.
+    
+    // los frames son de difente color
     CHECK(frame != editorFrameWithSelection(defaultTheme()));
 }
 
 TEST(theme_lists_use_listselected_not_selection) {
     const std::string base = bufferFrameWithSelection(defaultTheme());
+    
     TtyTheme t1 = defaultTheme();
     t1.selection = kTestBgRed;
     CHECK_EQ(bufferFrameWithSelection(t1), base);
+    
     TtyTheme t2 = defaultTheme();
     t2.listSelected = kTestBgRed;
     CHECK(bufferFrameWithSelection(t2) != base);
+    
     CHECK(base.find(defaultTheme().listSelected) != std::string::npos);
 }
 
 TEST(theme_file_lists_use_listselected_not_selection) {
     const std::string base = fileFrameWithSelection(defaultTheme());
+    
     TtyTheme t1 = defaultTheme();
     t1.selection = kTestBgRed;
     CHECK_EQ(fileFrameWithSelection(t1), base);
+    
     TtyTheme t2 = defaultTheme();
     t2.listSelected = kTestBgRed;
     CHECK(fileFrameWithSelection(t2) != base);
+    
     CHECK(base.find(defaultTheme().listSelected) != std::string::npos);
 }
 
@@ -172,8 +171,13 @@ TEST(theme_chrome_uses_theme_for_colors) {
     TtyChrome bar;
     bar.setTheme(t);
 
-    Rect area; area.row = 0; area.col = 0; area.width = 60; area.height = 2;
+    Rect area;
     ChromeData d;
+    
+    area.row = 0; 
+    area.col = 0; 
+    area.width = 60; 
+    area.height = 2;
     d.statusBar.name = "archivo.txt";
     d.statusBar.path = "/ruta";
     d.statusBar.estado = "NAVEGACION";
@@ -185,23 +189,27 @@ TEST(theme_chrome_uses_theme_for_colors) {
     CHECK(out.find(t.statusBarName + "archivo.txt") != std::string::npos);
     CHECK(out.find(t.statusBarAccent) != std::string::npos); // - NAVEGACION
     CHECK(out.find(t.error + "error grave") != std::string::npos);
-    // Con default theme el output es distinto: se usa el TtyTheme, no constantes.
+    
+    // Con default theme el output es distinto
     TtyChrome plainBar;
     CHECK(out != plainBar.render(area, d));
 }
 
-// Regresión: en tema claro el indicador [*] debe ser rojo también en el
-// backend TTY (no el amarillo del tema oscuro). Se comprueba el valor del
-// tema y la secuencia realmente emitida por el StatusBar.
+// en tema claro el indicador [*] debe ser rojo también en el backend TTY
 TEST(theme_light_status_modified_marker_is_red) {
     const TtyTheme t = lightTheme();
+
+    // \x1b[1m: activa negrita (bold).
+    // \x1b[38;2;215;0;0m: establece el color del texto (foreground) rojo.
     CHECK_EQ(t.statusBarModified, "\x1b[1m\x1b[38;2;215;0;0m");
     CHECK(t.statusBarModified.find("221;221;0") == std::string::npos);
 
     TtyChrome bar;
-    bar.setTheme(t);
-    Rect area; area.row = 0; area.col = 0; area.width = 60; area.height = 2;
+    Rect area; 
     ChromeData d;
+    
+    area.row = 0; area.col = 0; area.width = 60; area.height = 2;
+    bar.setTheme(t);
     d.statusBar.name = "x.cc";
     d.statusBar.path = "/tmp";
     d.statusBar.estado = "NAVEGACION";
@@ -211,10 +219,8 @@ TEST(theme_light_status_modified_marker_is_red) {
     CHECK(out.find(t.statusBarModified + " [*]") != std::string::npos);
 }
 
-// ---------------------------------------------------------------------------
-// El backend propaga su TtyTheme a la barra de estado compartida: cambiar el
-// tema altera la barra de todas las pantallas (editor y listas).
-// ---------------------------------------------------------------------------
+// El backend propaga su TtyTheme a la barra de estado compartida: 
+// cambiar el tema altera la barra de todas las pantallas (editor y listas).
 TEST(theme_renderer_propagates_to_chrome) {
     TtyTheme t = defaultTheme();
     t.statusBar = kTestBgGreen;
@@ -244,10 +250,10 @@ TEST(theme_renderer_propagates_to_chrome) {
         MessageBarData("ayuda"), 80, 5);
     CHECK(file.find(t.statusBar) != std::string::npos);
 
-    // Con el default theme la barra usaria otro color: el TtyTheme se propaga.
+    // Con el default theme la barra usaria otro color:
+    // Con el tema custom (barra verde) el frame NO contiene el gris del default theme
+    // con un Renderer sin setTheme si.
     TtyRenderer r2;
-    // Con el tema custom (barra verde) el frame NO contiene el gris del
-    // default theme; con un Renderer sin setTheme si.
     CHECK(ed.find(defaultTheme().statusBar) == std::string::npos);
     std::string edDefault = r2.buildScreen(doc, cur, vp, "/a/b.txt", false,
                                            makeChromeRequest("", State::Navegacion),
@@ -256,9 +262,8 @@ TEST(theme_renderer_propagates_to_chrome) {
     CHECK(ed != edDefault);
 }
 
-// Cada reset debe reestablecer el background de la status bar. Esto evita
-// que segmentos con estilos propios dejen zonas de la fila sin el background
-// del TtyTheme.
+// Cada reset debe reestablecer el background de la status bar. 
+// Esto evita que segmentos con estilos propios dejen zonas de la fila sin el background
 TEST(theme_chrome_background_covers_full_width) {
     TtyTheme t = defaultTheme();
     t.statusBar = kTestBgBlue;
@@ -287,6 +292,7 @@ TEST(theme_chrome_background_covers_full_width) {
     size_t nl = out.find("\r\n");
     std::string row = (nl == std::string::npos) ? out : out.substr(0, nl);
     CHECK(row.find(t.statusBar) != std::string::npos);
+    
     size_t pos = 0;
     int resets = 0;
     while (true) {
