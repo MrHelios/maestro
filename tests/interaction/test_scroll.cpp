@@ -8,6 +8,7 @@
 
 TEST(scroll_up_moves_viewport) {
     Editor ed;
+    ed.active().filename = "test.txt";  // no-wrap: camino identidad
     std::vector<std::string> lines;
     for (int i = 0; i < 100; ++i) lines.push_back("line " + std::to_string(i));
     ed.active().document.restore(lines);
@@ -21,6 +22,7 @@ TEST(scroll_up_moves_viewport) {
 
 TEST(scroll_down_moves_viewport) {
     Editor ed;
+    ed.active().filename = "test.txt";  // no-wrap: camino identidad
     std::vector<std::string> lines;
     for (int i = 0; i < 100; ++i) lines.push_back("line " + std::to_string(i));
     ed.active().document.restore(lines);
@@ -47,6 +49,7 @@ TEST(scroll_up_clamps_at_top) {
 
 TEST(scroll_down_clamps_at_bottom) {
     Editor ed;
+    ed.active().filename = "test.txt";  // no-wrap: camino identidad
     std::vector<std::string> lines;
     for (int i = 0; i < 50; ++i) lines.push_back("l");
     ed.active().document.restore(lines);
@@ -60,6 +63,7 @@ TEST(scroll_down_clamps_at_bottom) {
 
 TEST(scroll_does_not_move_cursor) {
     Editor ed;
+    ed.active().filename = "test.txt";  // no-wrap: camino identidad
     std::vector<std::string> lines;
     for (int i = 0; i < 100; ++i) lines.push_back("l");
     ed.active().document.restore(lines);
@@ -73,6 +77,7 @@ TEST(scroll_does_not_move_cursor) {
 
 TEST(scroll_in_selection_does_not_extend) {
     Editor ed;
+    ed.active().filename = "test.txt";  // no-wrap: camino identidad
     std::vector<std::string> lines;
     for (int i = 0; i < 100; ++i) lines.push_back("l");
     ed.active().document.restore(lines);
@@ -89,6 +94,7 @@ TEST(scroll_in_selection_does_not_extend) {
 
 TEST(scroll_does_not_snap_back_on_render) {
     Editor ed;
+    ed.active().filename = "test.txt";  // no-wrap: camino identidad
     NullSink null;
     ed.setSink(null);
     std::vector<std::string> lines;
@@ -122,6 +128,7 @@ TEST(scroll_small_file_no_move) {
 
 TEST(scroll_renders_new_window) {
     Editor ed;
+    ed.active().filename = "test.txt";  // no-wrap: camino identidad
     std::vector<std::string> lines;
     for (int i = 0; i < 100; ++i) lines.push_back("line " + std::to_string(i));
     ed.active().document.restore(lines);
@@ -139,6 +146,7 @@ TEST(scroll_renders_new_window) {
 
 TEST(scroll_repeated_up_clamps_at_top) {
     Editor ed;
+    ed.active().filename = "test.txt";  // no-wrap: camino identidad
     std::vector<std::string> lines;
     for (int i = 0; i < 100; ++i) lines.push_back("l");
     ed.active().document.restore(lines);
@@ -153,6 +161,7 @@ TEST(scroll_repeated_up_clamps_at_top) {
 
 TEST(scroll_repeated_down_clamps_at_max) {
     Editor ed;
+    ed.active().filename = "test.txt";  // no-wrap: camino identidad
     std::vector<std::string> lines;
     for (int i = 0; i < 100; ++i) lines.push_back("l");
     ed.active().document.restore(lines);
@@ -168,6 +177,7 @@ TEST(scroll_repeated_down_clamps_at_max) {
 
 TEST(scroll_never_negative_nor_beyond_eof) {
     Editor ed;
+    ed.active().filename = "test.txt";  // no-wrap: camino identidad
     std::vector<std::string> lines;
     for (int i = 0; i < 100; ++i) lines.push_back("l");
     ed.active().document.restore(lines);
@@ -495,22 +505,21 @@ TEST(EditorScrollInfo_UsesVisualRowsWithMarkdownWrap) {
     ed.active().filename = "notes.md";  // activa soft-wrap
     // 3 líneas largas que harán wrap con ancho pequeño
     ed.active().document.restore({
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",  // 40 chars -> 4 rows con width=10
-        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",  // 40 chars -> 4 rows
-        "cccccccccccccccccccccccccccccccccccccccc"   // 40 chars -> 4 rows
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",  // 40 chars -> 3 filas con textWidth=17
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",  // 40 chars -> 3 filas
+        "cccccccccccccccccccccccccccccccccccccccc"   // 40 chars -> 3 filas
     });
     ed.active().viewport.height = 5;
-    ed.active().viewport.width = 20;  // gutter ~3, textWidth ~17 -> 3 rows por línea
+    ed.active().viewport.width = 20;  // gutter ~3, textWidth ~17 -> 3 filas por línea
     ed.active().viewport.top = 0;
 
     auto info = ed.scrollInfo();
 
-    // Con wrap: total = visual rows (idx.totalRows()), no document.lineCount()
+    // Con wrap la unidad de scroll es la LÍNEA LÓGICA: total = lineCount(),
+    // visible = cuántas líneas caben en el viewport (filas visuales).
     CHECK_EQ(info.top, 0);
-    CHECK_EQ(info.visible, 5);
-    // 3 líneas * ~3 visual rows cada una = ~9 visual rows totales
-    CHECK(info.total > 3);  // más que lineCount()=3
-    CHECK(info.total <= 12); // razonable: 3 líneas * 4 rows máx
+    CHECK_EQ(info.visible, 2);  // 5 filas / 3 filas por línea -> 2 líneas
+    CHECK_EQ(info.total, 3);    // document.lineCount(), no visual rows
     CHECK(info.enabled());
 }
 
@@ -529,6 +538,7 @@ TEST(EditorScrollSetViewportTop_ClampsNegativeToZero) {
 
 TEST(EditorScrollSetViewportTop_ClampsToLastScrollableRow) {
     Editor ed;
+    ed.active().filename = "test.txt";  // no-wrap: camino identidad
     std::vector<std::string> lines(30, "x");
     ed.active().document.restore(lines);
     ed.active().viewport.height = 7;
@@ -586,7 +596,10 @@ TEST(EditorScrollSetViewportTop_DoesNotMoveCursor) {
 
         ed.setViewportTop(3);
 
-        CHECK_EQ(ed.active().viewport.top, 3);
+        // maxTop con wrap: las 3 líneas NO caben en el viewport (5 filas,
+        // cada línea ocupa 3 filas -> 9 totales), visibleLines(0,5)=2 < 3,
+        // así que se puede scrollar hasta la última línea: maxTop = 2.
+        CHECK_EQ(ed.active().viewport.top, 2); // clamp a maxTop = lineCount - 1
         // Cursor permanece en la posición original
         CHECK_EQ(ed.active().cursor.line, 0);
         CHECK_EQ(ed.active().cursor.col, 0);

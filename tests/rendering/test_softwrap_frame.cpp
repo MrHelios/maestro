@@ -28,7 +28,7 @@ TEST(softwrap_frame_cursor_uses_visual_row) {
     Document doc;
     doc.restore({"abcdefghij"});
     softwrap::Index idx;
-    CHECK(idx.ensure(doc, 7, true)); // textWidth = width(14) - gutter(7)
+    CHECK(idx.ensure(doc, 7, true, 0, 5)); // textWidth = width(14) - gutter(7)
 
     Viewport vp = viewport(0, 5, 14);
     Cursor cursor;
@@ -49,7 +49,7 @@ TEST(softwrap_frame_clamps_viewport_top_for_cursor) {
     Document doc;
     doc.restore({"abcdefghij"});
     softwrap::Index idx;
-    CHECK(idx.ensure(doc, 7, true));
+    CHECK(idx.ensure(doc, 7, true, 0, 5));
 
     // top fuera del máximo válido: contenido y cursor deben usar el mismo
     // top corregido (0), no el valor crudo.
@@ -72,7 +72,7 @@ TEST(softwrap_frame_cursor_at_boundary_starts_next_row) {
     Document doc;
     doc.restore({"abcdefghij"});
     softwrap::Index idx;
-    CHECK(idx.ensure(doc, 7, true));
+    CHECK(idx.ensure(doc, 7, true, 0, 5));
 
     Viewport vp = viewport(0, 5, 14);
     Cursor cursor;
@@ -98,7 +98,7 @@ TEST(softwrap_diff_reuses_cache_when_frame_unchanged) {
 
     Viewport vp = viewport(0, 5, 24); // gutter 7, textWidth 17
     softwrap::Index idx;
-    CHECK(idx.ensure(doc, 17, true));
+    CHECK(idx.ensure(doc, 17, true, 0, 5));
     CHECK(idx.enabled());
 
     Cursor cursor;

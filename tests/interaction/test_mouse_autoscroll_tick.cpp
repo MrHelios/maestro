@@ -169,6 +169,7 @@ TEST(mouse_tick_holds_edge_at_limit) {
     // En top==maxTop el tick no puede scrollear pero sostiene el borde
     // (cursor en ultima linea) hasta que el mouse vuelva.
     Editor ed;
+    ed.active().filename = "test.txt";  // no-wrap: camino identidad
     ed.active().document.restore(
         {"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7"});
     ed.active().viewport.height = 4;
@@ -299,4 +300,43 @@ TEST(mouse_tick_last_row_does_not_arm) {
     CHECK(!ed.tickMouseAutoscroll(t0 + kStep * 10));
     CHECK_EQ(ed.active().viewport.top, 10);
     CHECK_EQ(ed.active().cursor.line, 13);
+}
+
+// Autoscroll del mouse en soft-wrap: usa topOffset para desplazar filas
+// visuales dentro de una línea larga, no solo saltar entre líneas lógicas.
+// 1 línea de 30 chars, textWidth=12 -> 3 filas visuales. Viewport de 2 filas.
+TEST(mouse_drag_wrap_scrolls_topOffset_inside_long_line) {
+    Editor ed;
+    ed.active().filename = "notes.md";
+    NullSink null;
+    ed.setSink(null);
+    ed.active().document.restore({std::string(30, 'a')});
+    ed.active().viewport.height = 2;
+    ed.active().viewport.width = 19;   // textWidth = 12
+    ed.active().viewport.top = 0;
+    ed.active().viewport.topOffset = 0;
+    ed.active().cursor.line = 0;
+    ed.active().cursor.col = 0;
+    ed.resize(4, 19);   // 4 filas de terminal - 2 chrome = 2 filas de contenido
+
+    // Armar gesto con press en primera fila de contenido (col 4 = gutter).
+    ed.handleEvent(mousePressAt(4, 1));
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().viewport.topOffset, 0);
+
+    // Arrastrar por debajo del viewport: avanza topOffset de 0 a 1.
+    ed.handleEvent(mouseDragAt(4, 3));  // relRow = 2 >= h=2
+    CHECK_EQ(static_cast<int>(ed.state_), static_cast<int>(State::Seleccion));
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().viewport.topOffset, 1);
+
+    // Arrastrar otra vez por debajo: ya no hay más filas (maxFirstRow = 1).
+    ed.handleEvent(mouseDragAt(4, 3));
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().viewport.topOffset, 1);
+
+    // Arrastrar a la primera fila visible (relRow=0): decrementa topOffset de 1 a 0.
+    ed.handleEvent(mouseDragAt(4, 1));
+    CHECK_EQ(ed.active().viewport.top, 0);
+    CHECK_EQ(ed.active().viewport.topOffset, 0);
 }

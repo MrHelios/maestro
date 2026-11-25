@@ -341,7 +341,7 @@ TEST(softwrap_nameless_buffer_applies_softwrap) {
         CHECK(spy.lastWrapIndex != nullptr);
         CHECK(spy.lastWrapIndex->enabled());
         // 30 chars con textWidth 12 -> 3 filas visuales (12 + 12 + 6).
-        CHECK_EQ(spy.lastWrapIndex->totalRows(), 3);
+        CHECK_EQ(spy.lastWrapIndex->rowCount(), 3);
 
         // El wrap activo debe estar en el indice: el limite entre filas
         // (col 12) resuelve a la fila visual 1, no a la linea logica 0.
@@ -413,7 +413,7 @@ TEST(softwrap_page_down_selection_at_bottom_limit) {
     setupWrapEditor(ed, wrappedLines(20));
     ed.active().cursor.line = 19;
     ed.active().cursor.col = 0;
-    ed.active().viewport.top = 52; // maxTop = 60 filas - 8
+    ed.active().viewport.top = 17; // maxTop = 20 líneas - 3 filas lógicas/log
     enterSeleccion(ed);
 
     press(ed, InputEventType::PageDown);
@@ -666,7 +666,7 @@ TEST(softwrap_page_down_at_last_logical_line_stays) {
     setupWrapEditor(ed, wrappedLines(20));
     ed.active().cursor.line = 19;
     ed.active().cursor.col = 0;
-    ed.active().viewport.top = 52; // maxTop: ya pegado al final
+    ed.active().viewport.top = 17; // maxTop: ya pegado al final
 
     press(ed, InputEventType::PageDown);
     CHECK_EQ(ed.active().cursor.line, 19);
@@ -697,7 +697,9 @@ TEST(softwrap_page_down_cursor_stays_in_viewport) {
     CHECK_EQ(ed.active().cursor.line, 18);
     // ...y su fila visual debe seguir dentro del viewport [top, top + height).
     const int cursorRow = ed.wrapIndex().visualRowOf({ed.active().cursor.line, ed.active().cursor.col});
-    CHECK(cursorRow >= ed.active().viewport.top);
-    CHECK(cursorRow < ed.active().viewport.top + ed.active().viewport.height);
+    const int baseRow = ed.wrapIndex().firstRowOfLine(ed.active().viewport.top);
+    CHECK(baseRow >= 0);
+    CHECK(cursorRow >= baseRow);
+    CHECK(cursorRow < baseRow + ed.active().viewport.height);
 }
 

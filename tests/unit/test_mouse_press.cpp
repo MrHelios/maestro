@@ -882,6 +882,7 @@ TEST(mouse_drag_chrome_scrolls_when_content_below) {
 // no hay nada que desplazar (scroll imposible)
 TEST(mouse_drag_chrome_at_maxTop_clamps_to_edge) {
     Editor ed;
+    ed.getActiveBufferForTesting().filename = "test.txt";  // no-wrap: camino identidad
     Buffer& b = ed.getActiveBufferForTesting();
     
     b.document.restore({"l0", "l1", "l2", "l3", "l4", "l5", "l6", "l7"});
