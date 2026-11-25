@@ -633,6 +633,10 @@ private:
     // el Frame resultante lleva cursor.visible==false y ningun backend
     // debe pintar/clamparlo al borde.
     void applyScroll(int delta);
+    // Desplazamiento visual en soft-wrap: mueve `delta` filas visuales usando
+    // topOffset dentro de la línea actual y top entre líneas. Compartido por
+    // applyScroll() y el autoscroll del mouse. Retorna true si se movió.
+    bool scrollWrapVisual(int delta);
     // Scroll de los modos lista (BufferSelector / FileBrowser / SaveAs):
     // reporta si el state actual tiene una fuente de scroll propia (listado)
     // en vez del viewport de un buffer.
