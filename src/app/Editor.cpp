@@ -1324,7 +1324,6 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
     // avanzar topOffset dentro de la línea actual antes de pasar a la
     // siguiente línea lógica. Así, una línea más alta que el viewport se
     // puede recorrer fila visual a fila visual en lugar de saltar de línea.
-    bool scrolled = false;
     if (relRow < 0 && b.viewport.top <= 0) {
         // Borde superior: fuera del contenido por arriba.
         if (wrap && idx) {
@@ -1336,7 +1335,6 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
                 return idx->positionAt(b.document, base,
                                        std::max(0, relCol - gutterW));
             }
-            scrolled = true;
         } else {
             return dragEdgePosition(relRow, relCol, b.viewport, b.document,
                                     h, totalW);
@@ -1353,7 +1351,6 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
                 if (visualCol >= rowWidth) return dragEofPosition(b.document);
                 return idx->positionAt(b.document, lastRow, visualCol);
             }
-            scrolled = true;
         } else {
             return dragEdgePosition(relRow, relCol, b.viewport, b.document,
                                     h, totalW);
@@ -1368,18 +1365,14 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
         if (wrap) {
             if (relRow <= 0) {
                 scrollWrapVisual(-1);
-                scrolled = true;
             } else if (relRow >= h) {
                 scrollWrapVisual(1);
-                scrolled = true;
             }
         } else {
             if (relRow <= 0 && b.viewport.top > 0) {
                 b.viewport.top--;
-                scrolled = true;
             } else if (relRow >= h && b.viewport.top < maxTop) {
                 b.viewport.top++;
-                scrolled = true;
             }
         }
     }
@@ -1387,7 +1380,6 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
         if (relCol <= gutterW && b.viewport.left > 0) {
             b.viewport.left--;
             if (b.viewport.left < 0) b.viewport.left = 0;
-            scrolled = true;
         } else if (relCol >= totalW - 1 && textW > 0) {
             // Guard contra deriva infinita en lineas cortas: solo scroll a la
             // derecha si la linea borde tiene contenido oculto mas alla del
@@ -1400,20 +1392,8 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
             const int visWidth = utf8::columnOf(ls, static_cast<int>(ls.size()));
             if (visWidth > b.viewport.left + textW) {
                 b.viewport.left++;
-                scrolled = true;
             }
         }
-    }
-
-    if (!scrolled) {
-        // Sin scroll: mapeo normal (puede ser nullopt fuera del area de
-        // contenido, en el chrome inferior, que
-        // aqui ya se trato como borde inferior si habia scroll posible;
-        // si no habia scroll posible se ignora el evento).
-        if (wrap && idx) {
-            return screenToCursorWrap(*idx, cell, layout, b.viewport, b.document, gutterW);
-        }
-        return screenToCursor(cell, layout, b.viewport, b.document);
     }
 
     // Tras scrollear, la posicion es el borde visible (mismo helper que
