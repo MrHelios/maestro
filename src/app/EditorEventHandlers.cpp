@@ -1493,15 +1493,17 @@ void Editor::clearSearchHighlight() {
 void Editor::centerViewportOnCursor() {
     Buffer& b = active();
     if (isWrapEnabledFor(b)) {
-        const softwrap::Index& idx = wrapFor(this, b);
-        int totalRows = idx.totalRows();
-        int h = b.viewport.height;
+        // En wrap `viewport.top` es una línea lógica y `topOffset` la fila
+        // visual dentro de esa línea. Centrar la línea lógica del cursor con
+        // offset 0 (primera fila visible).
+        const int h = b.viewport.height;
         if (h <= 0) return;
-        int vr = idx.visualRowOf({b.cursor.line, b.cursor.col});
-        int maxTop = std::max(0, totalRows - h);
-        int desiredTop = vr - h / 2;
+        const softwrap::Index& idx = wrapFor(this, b);
+        const int maxTop = idx.maxTop(b.viewport.top, h);
+        int desiredTop = b.cursor.line - h / 2;
         desiredTop = std::max(0, std::min(desiredTop, maxTop));
         b.viewport.top = desiredTop;
+        b.viewport.topOffset = 0;
         b.viewport.left = 0;
         return;
     }
