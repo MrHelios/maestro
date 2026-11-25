@@ -157,14 +157,14 @@ void TtyRenderer::renderEditorContent(
 
     if (wrap) {
         const softwrap::Index& idx = fb.wrapIndex(wrapIndex_);
-        int visualTop = viewport.top;
-        const int maxVisualTop = std::max(0, idx.totalRows() - area.height);
-        if (visualTop > maxVisualTop) visualTop = maxVisualTop;
-        if (visualTop < 0) visualTop = 0;
+        const int topLine = std::clamp(viewport.top, 0,
+                                       std::max(0, doc.lineCount() - 1));
+        int base = idx.firstRowOfViewport(topLine, viewport.topOffset);
+        if (base < 0) base = 0;
 
         for (int row = 0; row < area.height; ++row) {
-            int visualRow = visualTop + row;
-            softwrap::VisualRow vr = idx.rowAt(visualRow);
+            int windowRow = base + row;
+            softwrap::VisualRow vr = idx.rowAt(windowRow);
             encoder_.appendRow(out, fb.buildContentRow(
                 doc, cursor, viewport, sel, std::nullopt, std::nullopt,
                 std::nullopt, vr, gutterW, textWidth));
