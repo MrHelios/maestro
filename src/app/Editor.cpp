@@ -451,7 +451,7 @@ void Editor::registerCommands() {
                 int prefCol = preferredVisualCol_.value_or(
                     visualColumnOf(idx, b.document, {b.cursor.line, b.cursor.col}));
                 preferredVisualCol_ = prefCol;
-                Position np = idx.positionAt(b.document, idx.firstRowOfLine(prevLine), prefCol);
+                Position np = idx.positionAtFirstRow(b.document, prevLine, prefCol);
                 if (state_ == State::Seleccion) {
                     beginSelection();
                     b.cursor.line = np.line;
@@ -490,7 +490,7 @@ void Editor::registerCommands() {
                 int prefCol = preferredVisualCol_.value_or(
                     visualColumnOf(idx, b.document, {b.cursor.line, b.cursor.col}));
                 preferredVisualCol_ = prefCol;
-                Position np = idx.positionAt(b.document, idx.firstRowOfLine(nextLine), prefCol);
+                Position np = idx.positionAtFirstRow(b.document, nextLine, prefCol);
                 if (state_ == State::Seleccion) {
                     beginSelection();
                     b.cursor.line = np.line;
@@ -517,21 +517,15 @@ void Editor::registerCommands() {
         Buffer& b = active();
         if (state_ == State::Seleccion && b.selectAllActive) return;
         if (isWrapEnabledFor(b)) {
-            const softwrap::Index& idx = wrapFor(this, b);
-            // Inicio de la LINEA LOGICA (primera fila visual), no de la fila
-            // visual donde cae el cursor. Soft-wrap solo aplica a archivos .md.
-            int firstRow = idx.firstRowOfLine(b.cursor.line);
+            // Inicio de la LINEA LOGICA. En wrap el cursor puede estar en una
+            // fila de continuación; Inicio siempre va al comienzo lógico.
             if (state_ == State::Seleccion) {
                 beginSelection();
-                Position np = idx.positionAt(b.document, firstRow, 0);
-                b.cursor.line = np.line;
-                b.cursor.col = np.col;
+                b.cursor.col = 0;
                 updateSelectionPosition();
                 resetPreferredVisualColumn();
             } else if (state_ == State::Navegacion || state_ == State::Interaccion) {
-                Position np = idx.positionAt(b.document, firstRow, 0);
-                b.cursor.line = np.line;
-                b.cursor.col = np.col;
+                b.cursor.col = 0;
                 resetPreferredVisualColumn();
             }
         } else {
@@ -550,26 +544,16 @@ void Editor::registerCommands() {
         Buffer& b = active();
         if (state_ == State::Seleccion && b.selectAllActive) return;
         if (isWrapEnabledFor(b)) {
-            const softwrap::Index& idx = wrapFor(this, b);
-            // Fin de la LINEA LOGICA (ultima fila visual: fin exclusivo),
-            // no de la fila visual donde cae el cursor. Soft-wrap solo aplica
-            // a archivos .md.
-            int firstRow = idx.firstRowOfLine(b.cursor.line);
-            int rows = idx.rowsInLine(b.cursor.line);
-            int lastRow = firstRow + rows - 1;
-            const softwrap::VisualRow& lastRowVisual = idx.rowAt(lastRow);
-            int lastRowWidth = lastRowVisual.columnEnd - lastRowVisual.columnBegin;
+            // Fin de la LINEA LOGICA (posición exclusiva), no de la fila
+            // visual donde cae el cursor.
+            const int endCol = b.document.lineLength(b.cursor.line);
             if (state_ == State::Seleccion) {
                 beginSelection();
-                Position np = idx.positionAt(b.document, lastRow, lastRowWidth);
-                b.cursor.line = np.line;
-                b.cursor.col = np.col;
+                b.cursor.col = endCol;
                 updateSelectionPosition();
                 resetPreferredVisualColumn();
             } else if (state_ == State::Navegacion || state_ == State::Interaccion) {
-                Position np = idx.positionAt(b.document, lastRow, lastRowWidth);
-                b.cursor.line = np.line;
-                b.cursor.col = np.col;
+                b.cursor.col = endCol;
                 resetPreferredVisualColumn();
             }
         } else {
@@ -1024,14 +1008,25 @@ void Editor::renderFrame() {
 
         bool wrap = isWrapEnabledFor(b);
         if (wrap) {
-            // En wrap: forzar left=0 y clamp top a filas visuales
+            // En wrap `viewport.top` es una LÍNEA LÓGICA. Forzar left=0 y
+            // acotar top al rango de líneas del documento.
             b.viewport.left = 0;
-            const softwrap::Index& idx = wrapFor(this, b);
-            int totalVisualRows = idx.totalRows();
-            int contentH = b.viewport.height;
-            if (contentH > 0) {
-                int maxTop = std::max(0, totalVisualRows - contentH);
-                if (b.viewport.top > maxTop) b.viewport.top = maxTop;
+            const int lineCount = b.document.lineCount();
+            if (b.viewport.top < 0) b.viewport.top = 0;
+            if (b.viewport.top > lineCount - 1)
+                b.viewport.top = std::max(0, lineCount - 1);
+
+            // Si el documento puede caber en el viewport, el índice cubre todo
+            // el documento (ver ensure()) y maxTop() es exacto: recupera
+            // top=0 cuando las filas visuales totales entran en la altura.
+            if (b.viewport.height > 0 && b.viewport.height >= lineCount &&
+                b.viewport.top > 0) {
+                const softwrap::Index& full = wrapFor(this, b);
+                const int mt = full.maxTop(b.viewport.top, b.viewport.height);
+                if (b.viewport.top > mt) {
+                    b.viewport.top = mt;
+                    b.viewport.topOffset = 0;
+                }
             }
         }
 
@@ -1061,17 +1056,130 @@ void Editor::renderFrame() {
             } else {
                 if (wrap) {
                     const softwrap::Index& idx = wrapFor(this, b);
-                    int vr = idx.visualRowOf({b.cursor.line, b.cursor.col});
-                    // scrollToCursor visual
-                    int contentH = b.viewport.height;
+                    // Validar topOffset inmediatamente tras obtener el índice
+                    // actualizado (puede haberse reconstruido por resize o
+                    // edición que reduzca filas de la línea top). Hacerlo ANTES
+                    // de cualquier uso de visualRowOf/firstRowOfViewport.
+                    b.viewport.topOffset = idx.clampTopOffset(b.viewport.top,
+                                                               b.viewport.topOffset);
+                    const int contentH = b.viewport.height;
                     if (contentH > 0) {
-                        if (vr < b.viewport.top) {
-                            b.viewport.top = vr;
-                        } else if (vr >= b.viewport.top + contentH) {
-                            b.viewport.top = vr - contentH + 1;
+                        if (!idx.coversLine(b.cursor.line)) {
+                            // El cursor quedó fuera de la ventana (salto
+                            // lejano): reubicar el top hacia el cursor antes de
+                            // mapear. Arriba del viewport: top = cursor.line.
+                            // Abajo: top = cursor.line - contentH + 1 (el cursor
+                            // queda en la última fila visible).
+                            int desiredTop = 0;
+                            if (b.cursor.line < idx.firstLine())
+                                desiredTop = b.cursor.line;
+                            else
+                                desiredTop = std::max(0, b.cursor.line - contentH + 1);
+                            b.viewport.top = desiredTop;
+                            b.viewport.topOffset = 0;
                         }
-                        int maxTop = std::max(0, idx.totalRows() - contentH);
-                        if (b.viewport.top > maxTop) b.viewport.top = maxTop;
+                        // `wrapFor` re-solicita la ventana (rebuild si el top
+                        // cambió) y devuelve la misma instancia.
+                        const softwrap::Index& idx2 = wrapFor(this, b);
+                        const int curRow =
+                            idx2.visualRowOf({b.cursor.line, b.cursor.col});
+                        int topRow = idx2.firstRowOfViewport(b.viewport.top,
+                                                             b.viewport.topOffset);
+                        if (topRow < 0) topRow = 0;
+                        const int rel = curRow - topRow;
+                        if (rel < 0) {
+                            // Cursor arriba de la vista: su línea pasa a ser
+                            // la primera visible, offset 0.
+                            b.viewport.top = b.cursor.line;
+                            b.viewport.topOffset = 0;
+                        } else if (rel >= contentH) {
+                            // Cursor debajo de la vista.
+                            if (b.cursor.line == b.viewport.top) {
+                                // Misma línea lógica que top: ajustar
+                                // topOffset para que el cursor quede en la
+                                // última fila visible (scroll fino dentro de
+                                // la línea larga).
+                                const int firstOfLine =
+                                    idx2.firstRowOfLine(b.cursor.line);
+                                int newOffset = curRow - firstOfLine - contentH + 1;
+                                b.viewport.topOffset =
+                                    idx2.clampTopOffset(b.viewport.top, newOffset);
+                            } else {
+                                // Línea diferente: buscar la línea cuyo
+                                // intervalo visual contenga `target` (la
+                                // primera fila que permitiría al cursor
+                                // quedar en la última fila visible). Si
+                                // target cae dentro de una línea anterior,
+                                // empezar ahí con el topOffset adecuado para
+                                // mostrar contexto previo antes del cursor.
+                                const int target = curRow - contentH + 1;
+                                int l = b.cursor.line;
+                                bool found = false;
+
+                                // Buscar hacia atrás: ¿target cae dentro del
+                                // rango visual de alguna línea anterior?
+                                while (l > idx2.firstLine()) {
+                                    const int prevFirst =
+                                        idx2.firstRowOfLine(l - 1);
+                                    const int prevRows =
+                                        idx2.rowsInLine(l - 1);
+                                    const int prevLast =
+                                        prevFirst + prevRows - 1;
+
+                                    if (target >= prevFirst &&
+                                        target <= prevLast) {
+                                        // target cae dentro de esta línea
+                                        // anterior: empezar ahí.
+                                        b.viewport.top = l - 1;
+                                        b.viewport.topOffset =
+                                            target - prevFirst;
+                                        found = true;
+                                        break;
+                                    }
+
+                                    if (target < prevFirst) {
+                                        // target está antes de esta línea:
+                                        // seguir buscando hacia atrás.
+                                        --l;
+                                    } else {
+                                        // target está después de esta línea:
+                                        // ninguna línea anterior puede
+                                        // contenerlo.
+                                        break;
+                                    }
+                                }
+
+                                if (!found) {
+                                    // No se encontró una línea que contenga
+                                    // target: subir el top hasta que el
+                                    // cursor quede en (o por encima de) la
+                                    // última fila visible.
+                                    while (l > idx2.firstLine() &&
+                                           idx2.firstRowOfLine(l - 1) >=
+                                               target)
+                                        --l;
+                                    b.viewport.top = l;
+                                    if (l == b.cursor.line) {
+                                        // La línea del cursor es la nueva
+                                        // top: calcular offset para que el
+                                        // cursor quede visible (última fila
+                                        // visible de la línea larga).
+                                        const int firstOfLine =
+                                            idx2.firstRowOfLine(
+                                                b.cursor.line);
+                                        int newOffset =
+                                            curRow - firstOfLine -
+                                            contentH + 1;
+                                        b.viewport.topOffset =
+                                            idx2.clampTopOffset(
+                                                b.viewport.top,
+                                                newOffset);
+                                    } else {
+                                        b.viewport.topOffset = 0;
+                                    }
+                                }
+                            }
+                        }
                     }
                 } else {
                     b.viewport.scrollToCursor(
@@ -1094,8 +1202,8 @@ void Editor::renderFrame() {
         std::optional<BracketPair> toRender =
             (state_ == State::Seleccion) ? std::nullopt : bracketPair_;
 
+        const softwrap::Index& idx = wrapFor(this, b);
         if (wrap) {
-            const softwrap::Index& idx = wrapFor(this, b);
             renderer_->setWrapIndex(&idx);
         } else {
             renderer_->setWrapIndex(nullptr);
@@ -1137,12 +1245,18 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
 
     bool wrap = isWrapEnabledFor(b);
     const softwrap::Index* idx = nullptr;
+    int totalVisualRows = b.document.lineCount();
+    int textW = 0;
     if (wrap) {
         idx = &wrapFor(this, b);
+        // En wrap `totalVisualRows` es la cantidad de filas visuales de la
+        // ventana del índice; al EOF la ventana cubre el documento completo.
+        totalVisualRows = idx->rowCount();
+    } else {
+        textW = totalW - gutterW;  // wrap no usa scroll horizontal
     }
-    int totalVisualRows = wrap ? idx->totalRows() : b.document.lineCount();
-    int textW = wrap ? 0 : totalW - gutterW;  // wrap no usa scroll horizontal
-    int maxTop = std::max(0, totalVisualRows - h);
+    int maxTop = wrap ? idx->maxTop(b.viewport.top, h)
+                      : std::max(0, totalVisualRows - h);
 
     // Intencion de autoscroll temporal (solo vertical, solo gesto de mouse:
     // unico llamador con gesto armado, mas el tick que re-ejecuta fuera).
@@ -1181,7 +1295,14 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
     const bool insideRows = relRow >= 0 && relRow < h;
     if (insideRows) {
         int visualRow = b.viewport.top + relRow;
-        if (visualRow >= totalVisualRows) {
+        if (wrap) {
+            int base = idx->firstRowOfViewport(b.viewport.top, b.viewport.topOffset);
+            if (base < 0) return std::nullopt;
+            visualRow = base + relRow;
+        }
+        const int totalRows = wrap ? idx->rowCount()
+                                   : b.document.lineCount();
+        if (visualRow >= totalRows) {
             // Más allá del EOF: el extremo de selección debe ser el EOF
             // lógico (después del último carácter), no la última celda que
             // devolvería positionAt() para un cursor/End.
@@ -1198,37 +1319,69 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
     // Se devuelve la posicion clampada al borde en lugar de caer en screenToCursor()
     // (nullopt). Solo activo durante seleccion por mouse: esta funcion solo
     // se llama desde handleMouseDrag con gesto armado (press previo valido).
-    if (relRow < 0 && b.viewport.top <= 0) {
-        if (wrap && idx) {
-            return idx->positionAt(b.document, 0, std::max(0, relCol - gutterW));
-        }
-        return dragEdgePosition(relRow, relCol, b.viewport, b.document, h, totalW);
-    }
-    if (relRow >= h && b.viewport.top >= maxTop) {
-        if (wrap && idx) {
-            const int lastRow = totalVisualRows - 1;
-            const int visualCol = std::max(0, relCol - gutterW);
-            const softwrap::VisualRow& row = idx->rowAt(lastRow);
-            const int rowWidth = row.columnEnd - row.columnBegin;
-            if (visualCol >= rowWidth) return dragEofPosition(b.document);
-            return idx->positionAt(b.document, lastRow, visualCol);
-        }
-        return dragEdgePosition(relRow, relCol, b.viewport, b.document, h, totalW);
-    }
-
-    // Autoscroll por bordes (1 linea / 1 celda por evento). Asimetrico en
-    // vertical como el armado de arriba: la primera fila (relRow == 0, que
-    // ES contenido) scrollea por la misma DECISION sustituta —el fuera
-    // hacia arriba no es reportable—; la ultima fila es exclusiva (el
-    // fuera real es el chrome inferior, relRow >= h). En wrap no hay
-    // scroll horizontal.
+    //
+    // En soft-wrap, el desplazamiento por bordes usa scrollWrapVisual para
+    // avanzar topOffset dentro de la línea actual antes de pasar a la
+    // siguiente línea lógica. Así, una línea más alta que el viewport se
+    // puede recorrer fila visual a fila visual en lugar de saltar de línea.
     bool scrolled = false;
-    if (relRow <= 0 && b.viewport.top > 0) {
-        b.viewport.top--;
-        scrolled = true;
-    } else if (relRow >= h && b.viewport.top < maxTop) {
-        b.viewport.top++;
-        scrolled = true;
+    if (relRow < 0 && b.viewport.top <= 0) {
+        // Borde superior: fuera del contenido por arriba.
+        if (wrap && idx) {
+            // Intentar desplazar topOffset hacia arriba antes de rendirse.
+            if (!scrollWrapVisual(-1)) {
+                int base = idx->firstRowOfViewport(b.viewport.top,
+                                                   b.viewport.topOffset);
+                if (base < 0) base = 0;
+                return idx->positionAt(b.document, base,
+                                       std::max(0, relCol - gutterW));
+            }
+            scrolled = true;
+        } else {
+            return dragEdgePosition(relRow, relCol, b.viewport, b.document,
+                                    h, totalW);
+        }
+    } else if (relRow >= h && b.viewport.top >= maxTop) {
+        // Borde inferior: fuera del contenido por abajo (chrome).
+        if (wrap && idx) {
+            // Intentar desplazar topOffset hacia abajo antes de rendirse.
+            if (!scrollWrapVisual(1)) {
+                const int lastRow = idx->rowCount() - 1;
+                const int visualCol = std::max(0, relCol - gutterW);
+                const softwrap::VisualRow& row = idx->rowAt(lastRow);
+                const int rowWidth = row.columnEnd - row.columnBegin;
+                if (visualCol >= rowWidth) return dragEofPosition(b.document);
+                return idx->positionAt(b.document, lastRow, visualCol);
+            }
+            scrolled = true;
+        } else {
+            return dragEdgePosition(relRow, relCol, b.viewport, b.document,
+                                    h, totalW);
+        }
+    } else {
+        // Autoscroll por bordes internos (1 línea / 1 celda por evento).
+        // Asimetría deliberada: hacia arriba, la primera fila visible
+        // (relRow == 0) cuenta como intención porque la terminal no reporta
+        // filas sobre el contenido; hacia abajo, la última fila es exclusiva
+        // (el fuera real es el chrome inferior, relRow >= h, ya tratado más
+        // arriba). En wrap no hay scroll horizontal.
+        if (wrap) {
+            if (relRow <= 0) {
+                scrollWrapVisual(-1);
+                scrolled = true;
+            } else if (relRow >= h) {
+                scrollWrapVisual(1);
+                scrolled = true;
+            }
+        } else {
+            if (relRow <= 0 && b.viewport.top > 0) {
+                b.viewport.top--;
+                scrolled = true;
+            } else if (relRow >= h && b.viewport.top < maxTop) {
+                b.viewport.top++;
+                scrolled = true;
+            }
+        }
     }
     if (!wrap) {
         if (relCol <= gutterW && b.viewport.left > 0) {
@@ -1266,9 +1419,13 @@ std::optional<Position> Editor::resolveMouseDragPosition(CellPos cell) {
     // Tras scrollear, la posicion es el borde visible (mismo helper que
     // el camino tilde: una sola copia de la logica de columnas).
     if (wrap && idx) {
-        int visualRow = std::clamp(b.viewport.top + relRow, 0, totalVisualRows - 1);
+        const softwrap::Index& idx2 = wrapFor(this, b);
+        int visualRow = idx2.firstRowOfViewport(b.viewport.top, b.viewport.topOffset);
+        if (visualRow < 0) visualRow = 0;
+        visualRow += relRow;
+        visualRow = std::clamp(visualRow, 0, std::max(0, idx2.rowCount() - 1));
         int visualCol = std::max(0, relCol - gutterW);
-        return idx->positionAt(b.document, visualRow, visualCol);
+        return idx2.positionAt(b.document, visualRow, visualCol);
     }
     return dragEdgePosition(relRow, relCol, b.viewport, b.document, h,
                             totalW);
@@ -1382,18 +1539,15 @@ void Editor::applyPage(int dir) {
     if (isWrapEnabledFor(b)) {
         const softwrap::Index& idx = wrapFor(this, b);
         const int count = b.document.lineCount();
-        const int totalRows = idx.totalRows();
         const int h = b.viewport.height;
         if (h <= 0) return;
-        const int maxTop = std::max(0, totalRows - h);
 
-        // Repag/AvPag navegan entre LÍNEAS LÓGICAS (misma idea que las flechas
-        // verticales): una página equivale a viewport.height líneas lógicas,
-        // el destino se resuelve desde el inicio de la línea lógica y la
-        // columna preferida se adapta a los límites de la línea destino. Antes
-        // la página se calculaba sobre filas visuales, así que con softwrap un
-        // AvPag/RePag pudo aterrizar en una fila de continuación en vez de en
-        // la línea lógica destino.
+        // Repag/AvPag navegan entre LÍNEAS LÓGICAS (viewport.top ya es
+        // línea lógica en wrap): una página equivale a viewport.height líneas
+        // lógicas, el destino se resuelve desde el comienzo de la línea
+        // lógica y la columna preferida se adapta a los límites de la línea
+        // destino. Antes la página se calculaba sobre filas visuales relativas
+        // al viewport (que en wrap eran filas dentro de una misma línea).
         int targetLine = (dir < 0) ? b.cursor.line - h : b.cursor.line + h;
         if (dir < 0) targetLine = std::max(0, targetLine);
         else targetLine = std::min(targetLine, count - 1);
@@ -1404,25 +1558,19 @@ void Editor::applyPage(int dir) {
                 visualColumnOf(idx, b.document, {b.cursor.line, b.cursor.col}));
             // Página es navegación vertical: conserva la preferencia entre pasos.
             preferredVisualCol_ = prefVisualCol;
-            Position target = idx.positionAt(b.document, idx.firstRowOfLine(targetLine), prefVisualCol);
+            Position target = idx.positionAtFirstRow(b.document, targetLine, prefVisualCol);
             b.cursor.line = target.line;
             b.cursor.col = target.col;
         }
         if (state_ == State::Seleccion) updateSelectionPosition();
 
-        // El viewport baja/accede una pagina (viewport.height filas) en la
-        // misma direccion, con los bordes como en el modo sin wrap. El top se
-        // limita al intervalo [minTop, maxVisibleTop] para garantizar que la
-        // fila visual del cursor quede visible: sin este limite el AvPag podia
-        // dejar el cursor por encima del viewport (targetRow < top).
-        const int targetRow = idx.visualRowOf({b.cursor.line, b.cursor.col});
-        const int minTop = std::max(0, targetRow - h + 1);
-        const int maxVisibleTop = std::min(maxTop, targetRow);
-        if (dir < 0) {
-            b.viewport.top = std::clamp(std::max(0, b.viewport.top - h), minTop, maxVisibleTop);
-        } else {
-            b.viewport.top = std::clamp(std::min(maxTop, b.viewport.top + h), minTop, maxVisibleTop);
-        }
+        // El viewport baja/accede una página (viewport.height líneas) en la
+        // misma dirección. El top se limita al intervalo máximo para que el
+        // cursor quede dentro del viewport.
+        const int maxTop = idx.maxTop(b.viewport.top, h);
+        const int newTop = std::clamp(b.viewport.top + dir * h, 0, maxTop);
+        b.viewport.top = std::min(newTop, b.cursor.line);
+        b.viewport.topOffset = 0;
         return;
     }
     const int count = b.document.lineCount(); // >= 1: siempre hay una linea
@@ -1472,14 +1620,7 @@ void Editor::applyPage(int dir) {
 void Editor::applyScroll(int delta) {
     Buffer& b = active();
     if (isWrapEnabledFor(b)) {
-        const softwrap::Index& idx = wrapFor(this, b);
-        int totalRows = idx.totalRows();
-        int h = b.viewport.height;
-        if (h <= 0) return;
-        int maxTop = std::max(0, totalRows - h);
-        int oldTop = b.viewport.top;
-        b.viewport.top = std::min(std::max(b.viewport.top + delta, 0), maxTop);
-        if (b.viewport.top != oldTop) suppressScrollToCursor_ = true;
+        scrollWrapVisual(delta);
         return;
     }
     const int count = b.document.lineCount();
@@ -1493,6 +1634,68 @@ void Editor::applyScroll(int delta) {
     const int oldTop = b.viewport.top;
     b.viewport.top = std::min(std::max(b.viewport.top + delta, 0), maxTop);
     if (b.viewport.top != oldTop) suppressScrollToCursor_ = true;
+}
+
+bool Editor::scrollWrapVisual(int delta) {
+    Buffer& b = active();
+    const int h = b.viewport.height;
+    if (h <= 0 || delta == 0) return false;
+
+    const int oldTop = b.viewport.top;
+    const int oldOffset = b.viewport.topOffset;
+
+    int remaining = delta;
+    while (remaining != 0) {
+        // Reconstruye la ventana alrededor del top actual si hace falta.
+        const softwrap::Index& idx = wrapFor(this, b);
+
+        int curRow = idx.firstRowOfViewport(b.viewport.top,
+                                            b.viewport.topOffset);
+        if (curRow < 0) curRow = 0;
+
+        // Límite consistente con maxTop(): la última línea lógica puede
+        // quedar como primera fila visible (top = lineCount - 1). La última
+        // fila visual de la ventana actual es el tope local; al llegar ahí
+        // la siguiente iteración reconstruye la ventana y sigue avanzando.
+        const int maxRow = idx.rowCount() - 1;
+
+        int target = std::clamp(curRow + remaining, 0, maxRow);
+
+        // Nunca moverse en sentido contrario al delta (puede pasar si la
+        // ventana en el final del doc es más chica que h).
+        if (remaining > 0) target = std::max(target, curRow);
+        else               target = std::min(target, curRow);
+
+        const int moved = target - curRow;
+        if (moved == 0) break;  // límite real del documento (o sin progreso)
+
+        // Fila visual `target` (relativa a la ventana) -> (línea, subfila).
+        int l = b.viewport.top;
+        int first = idx.firstRowOfLine(l);
+        if (target < first) {
+            while (l > idx.firstLine() &&
+                   idx.firstRowOfLine(l) > target)
+                --l;
+            first = idx.firstRowOfLine(l);
+        } else {
+            while (l + 1 < idx.endLine() &&
+                   target >= first + idx.rowsInLine(l)) {
+                ++l;
+                first = idx.firstRowOfLine(l);
+            }
+        }
+        b.viewport.top = l;
+        b.viewport.topOffset = target - first;
+
+        remaining -= moved;
+        // La próxima iteración llama a wrapFor() con el nuevo top y
+        // reconstruye la ventana si llegamos a su borde.
+    }
+
+    const bool changed = b.viewport.top != oldTop ||
+                         b.viewport.topOffset != oldOffset;
+    if (changed) suppressScrollToCursor_ = true;
+    return changed;
 }
 
 void Editor::jumpSelectAllEdge(bool toEnd) {
@@ -1725,24 +1928,20 @@ void Editor::updateBracketHighlight() {
     Buffer& b = active();
     Position cur{b.cursor.line, b.cursor.col};
 
-    bool wrap = isWrapEnabledFor(b);
     int top, bottom;
-    if (wrap) {
-        const softwrap::Index& idx = wrapFor(this, b);
-        int vtop = b.viewport.top;
-        int height = b.viewport.height;
-        int vbottom = std::min(vtop + height, idx.totalRows());
-        // Convertir filas visuales a rango de líneas lógicas
-        int firstLine = idx.rowAt(vtop).docLine;
-        int lastLine = idx.rowAt(std::max(0, vbottom - 1)).docLine;
-        top = std::max(0, firstLine);
-        bottom = std::min(b.document.lineCount(), lastLine + 1);
-        // Para cache, usar viewport top visual
+    if (isWrapEnabledFor(b)) {
+        // En wrap `viewport.top` es una línea lógica: el viewport cubre como
+        // máximo viewport.height líneas (cada una aporta >= 1 fila visual), así
+        // que el rango visible cabe en el mismo esquema líneas.
+        top = std::max(0, b.viewport.top);
+        int height = std::max(0, b.viewport.height);
+        bottom = std::min(b.document.lineCount(), top + height);
+        // Para cache, usar viewport top lógico
         if (cur == lastBracketCursor_ &&
             b.document.version() == lastBracketVersion_ &&
             b.document.instanceId() == lastBracketInstanceId_ &&
-            b.viewport.top == lastBracketViewportTop_ &&
-            vbottom == lastBracketViewportBottom_) {
+            top == lastBracketViewportTop_ &&
+            bottom == lastBracketViewportBottom_) {
             return;
         }
     } else {
@@ -1787,43 +1986,33 @@ void Editor::updateBracketHighlight() {
     lastBracketCursor_ = cur;
     lastBracketVersion_ = b.document.version();
     lastBracketInstanceId_ = b.document.instanceId();
-    if (wrap) {
-        const softwrap::Index& idx = wrapFor(this, b);
-        lastBracketViewportTop_ = b.viewport.top;
-        lastBracketViewportBottom_ = std::min(b.viewport.top + b.viewport.height, idx.totalRows());
-    } else {
-        lastBracketViewportTop_ = top;
-        lastBracketViewportBottom_ = bottom;
-    }
+    lastBracketViewportTop_ = top;
+    lastBracketViewportBottom_ = bottom;
 }
 
 void Editor::refreshBracketAfterJump() {
     Buffer& b = active();
     Position cur{b.cursor.line, b.cursor.col};
 
-    bool wrap = isWrapEnabledFor(b);
     int top, bottom;
-    if (wrap) {
-        const softwrap::Index& idx = wrapFor(this, b);
-        int vtop = b.viewport.top;
-        int height = b.viewport.height;
-        int vbottom = std::min(vtop + height, idx.totalRows());
-        int firstLine = idx.rowAt(vtop).docLine;
-        int lastLine = idx.rowAt(std::max(0, vbottom - 1)).docLine;
-        top = std::max(0, firstLine);
-        bottom = std::min(b.document.lineCount(), lastLine + 1);
+    if (isWrapEnabledFor(b)) {
+        // En wrap `viewport.top` es una línea lógica: el rango visible en
+        // líneas cabe en top..top + height (cada línea aporta >= 1 fila).
+        top = std::max(0, b.viewport.top);
+        const int height = std::max(0, b.viewport.height);
+        bottom = std::min(b.document.lineCount(), top + height);
 
         // Fast path O(1): incluye top y bottom para detectar resizes
         if (cur == lastBracketCursor_ &&
             b.document.version() == lastBracketVersion_ &&
             b.document.instanceId() == lastBracketInstanceId_ &&
-            b.viewport.top == lastBracketViewportTop_ &&
-            vbottom == lastBracketViewportBottom_) {
+            top == lastBracketViewportTop_ &&
+            bottom == lastBracketViewportBottom_) {
             return;
         }
     } else {
         top = std::max(0, b.viewport.top);
-        int height = std::max(0, b.viewport.height);
+        const int height = std::max(0, b.viewport.height);
         bottom = std::min(b.document.lineCount(), top + height);
 
         // Fast path O(1): incluye top y bottom para detectar resizes
@@ -1853,14 +2042,8 @@ void Editor::refreshBracketAfterJump() {
     lastBracketCursor_ = cur;
     lastBracketVersion_ = b.document.version();
     lastBracketInstanceId_ = b.document.instanceId();
-    if (wrap) {
-        const softwrap::Index& idx = wrapFor(this, b);
-        lastBracketViewportTop_ = b.viewport.top;
-        lastBracketViewportBottom_ = std::min(b.viewport.top + b.viewport.height, idx.totalRows());
-    } else {
-        lastBracketViewportTop_ = top;
-        lastBracketViewportBottom_ = bottom;
-    }
+    lastBracketViewportTop_ = top;
+    lastBracketViewportBottom_ = bottom;
 }
 
 Editor::ScrollInfo Editor::scrollInfo() {
@@ -1870,7 +2053,16 @@ Editor::ScrollInfo Editor::scrollInfo() {
 
     if (isWrapEnabledFor(b)) {
         const softwrap::Index& idx = wrapFor(this, b);
-        total = idx.totalRows();
+        // En wrap la unidad de scroll es la línea lógica; `visible` es la
+        // cantidad de líneas que caben en el viewport (filas visuales).
+        const int visible = idx.visibleLines(b.viewport.top, b.viewport.height,
+                                              b.viewport.topOffset);
+        total = b.document.lineCount();
+        return ScrollInfo{
+            b.viewport.top,
+            visible,
+            total
+        };
     }
 
     return ScrollInfo{
@@ -1921,11 +2113,19 @@ void Editor::setViewportTop(int top) {
 
     if (info.visible <= 0) {
         b.viewport.top = 0;
+        b.viewport.topOffset = 0;
         return;
     }
 
-    const int maxTop = std::max(0, info.total - info.visible);
+    int maxTop;
+    if (isWrapEnabledFor(b)) {
+        const softwrap::Index& idx = wrapFor(this, b);
+        maxTop = idx.maxTop(b.viewport.top, b.viewport.height);
+    } else {
+        maxTop = std::max(0, info.total - info.visible);
+    }
     b.viewport.top = std::clamp(top, 0, maxTop);
+    b.viewport.topOffset = 0;
 
     // NOTA: no se mueve el cursor. El scrollbar solo cambia el viewport.
     // manualScroll evita que scrollToCursor devuelva el viewport
