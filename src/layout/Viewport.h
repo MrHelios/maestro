@@ -5,7 +5,8 @@
 
 class Viewport {
 public:
-    int top = 0;
+    int top = 0;          // primera línea lógica visible (wrap) / fila visual (no-wrap)
+    int topOffset = 0;    // desplazamiento visual dentro de la línea `top` (wrap): 0..filas_de_línea-1
     int left = 0;
     int height = 24;
     int width = 80;
