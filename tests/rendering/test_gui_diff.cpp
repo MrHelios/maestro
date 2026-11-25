@@ -1227,7 +1227,7 @@ TEST(gui_diff_softwrap_cursor_move_fuerza_completo_y_paridad_dto) {
     Cursor cur;
     const int textWidth = vp.width - gutterWidth(doc.lineCount(), vp.width);
     softwrap::Index idx;
-    CHECK(idx.ensure(doc, textWidth, true));
+    CHECK(idx.ensure(doc, textWidth, true, vp.top, vp.height));
     CHECK(idx.enabled());
     gui.setWrapIndex(&idx);
 
@@ -1291,7 +1291,7 @@ TEST(gui_diff_softwrap_cursor_move_fuerza_completo_y_paridad_dto) {
     }
 }
 
-// Soft Wrap + scroll de una fila: `viewport.top` avanza una FILA VISUAL.
+// Soft Wrap + scroll: `viewport.top` avanza una LÍNEA LÓGICA.
 // Rotar snapshots como docLine+1 y construir `top + H - 1` como línea
 // documental reconstruiría la fila equivocada (y perdería continuaciones).
 // El camino rápido debe declinar y coincidir con el frame completo.
@@ -1305,7 +1305,7 @@ TEST(gui_diff_softwrap_scroll_fuerza_completo_y_paridad_dto) {
     cur.col = 20;  // continuación de L0
     const int textWidth = vp.width - gutterWidth(doc.lineCount(), vp.width);
     softwrap::Index idx;
-    CHECK(idx.ensure(doc, textWidth, true));
+    CHECK(idx.ensure(doc, textWidth, true, vp.top, vp.height));
     CHECK(idx.enabled());
     gui.setWrapIndex(&idx);
 
@@ -1316,15 +1316,16 @@ TEST(gui_diff_softwrap_scroll_fuerza_completo_y_paridad_dto) {
 
     instrument::enable(true);
     instrument::resetFrame();
-    vp.top = 1;  // scroll +1 en filas visuales
+    cur.line = 1;      // cursor en la primera fila visible tras el scroll
+    cur.col = 0;
+    vp.top = 1;  // scroll +1 línea lógica
     renderDoc(gui, sink, doc, cur, vp, navChrome());
     auto scrolled = instrument::snapshotAndReset();
     instrument::enable(false);
     CHECK_EQ(scrolled.renderEditorRow, 6u);  // frame completo, no O(1)
-    // La nueva fila 0 es la continuación L0 en columnBegin 17, no L0 desde 0.
+    // La nueva fila 0 es la línea L1 ("corta"), no la continuación de L0.
     CHECK(gui.lastContentRows()[0].isCurrentLine);
-    CHECK(contains(gui.lastContentRows()[0].plain(), std::string(16, 'a')));
-    CHECK(contains(gui.lastContentRows()[2].plain(), "corta"));
+    CHECK(contains(gui.lastContentRows()[0].plain(), "corta"));
     std::vector<std::string> fastPlain;
     std::vector<bool> fastCur;
     captureContent(gui, fastPlain, fastCur);
@@ -1339,6 +1340,62 @@ TEST(gui_diff_softwrap_scroll_fuerza_completo_y_paridad_dto) {
     for (size_t i = 0; i < fastPlain.size(); ++i) {
         CHECK_EQ(gui.lastContentRows()[i].plain(), fastPlain[i]);
         CHECK_EQ(gui.lastContentRows()[i].isCurrentLine, fastCur[i]);
+    }
+}
+
+// Soft Wrap: cambiar solo topOffset (top constante) debe forzar frame
+// completo, porque la primera fila visual del viewport se desplaza.
+// El fast path de GUI clavea por (top, topOffset, ...); un cambio de
+// topOffset con top igual invalida el caché.
+TEST(gui_diff_softwrap_topoffset_changes_force_full_frame) {
+    GuiRenderer gui;
+    NullTestSink sink;
+    Document doc;
+    doc.restore(softWrapLines());
+    Viewport vp = makeVp(6, 24);
+    Cursor cur;
+    cur.col = 20;  // continuación de L0
+    const int textWidth = vp.width - gutterWidth(doc.lineCount(), vp.width);
+    softwrap::Index idx;
+    CHECK(idx.ensure(doc, textWidth, true, vp.top, vp.height));
+    CHECK(idx.enabled());
+    gui.setWrapIndex(&idx);
+
+    // Render inicial: top=0, topOffset=0 -> primera fila visual es la de L0.
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    const auto firstRows = gui.lastContentRows();
+    CHECK_EQ(firstRows.size(), static_cast<size_t>(6));
+    CHECK(contains(firstRows[0].plain(), std::string(16, 'a')));  // L0 desde col 0
+
+    // Cambiar solo topOffset a 1 (top permanece 0). La primera fila visual
+    // ahora es la continuación de L0 (columna 16), no L0 desde 0.
+    vp.topOffset = 1;
+
+    instrument::enable(true);
+    instrument::resetFrame();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    auto offsetChanged = instrument::snapshotAndReset();
+    instrument::enable(false);
+
+    // Debe ser frame completo: topOffset cambió aunque top sea igual.
+    CHECK_EQ(offsetChanged.renderEditorRow, 6u);
+    // La primera fila mostrada es la continuación de L0, no L0 desde 0.
+    CHECK(!contains(gui.lastContentRows()[0].plain(), std::string(16, 'a'))
+          || gui.lastContentRows()[0].plain() != firstRows[0].plain());
+
+    // Paridad: renderizar dos veces con el mismo topOffset=1 debe dar el
+    // mismo resultado.
+    const auto secondRows = gui.lastContentRows();
+    gui.invalidateCache();
+    renderDoc(gui, sink, doc, cur, vp, navChrome());
+    CHECK(gui.lastWasFull());
+    CHECK_EQ(gui.lastContentRows().size(), secondRows.size());
+    CHECK(gui.lastContentRows() == secondRows);
+    for (size_t i = 0; i < secondRows.size(); ++i) {
+        CHECK_EQ(gui.lastContentRows()[i].plain(), secondRows[i].plain());
+        CHECK_EQ(gui.lastContentRows()[i].isCurrentLine,
+                 secondRows[i].isCurrentLine);
     }
 }
 
@@ -1361,7 +1418,7 @@ TEST(gui_sdl_softwrap_fast_paths_paridad_pixeles_con_full) {
     Cursor cur;
     const int textWidth = vp.width - gutterWidth(doc.lineCount(), vp.width);
     softwrap::Index idx;
-    CHECK(idx.ensure(doc, textWidth, true));
+    CHECK(idx.ensure(doc, textWidth, true, vp.top, vp.height));
     CHECK(idx.enabled());
     gui.setWrapIndex(&idx);
 

@@ -18,8 +18,11 @@
 
 #include "test_framework.h"
 #include "layout/Gutter.h"
+#include "layout/SoftWrap.h"
+#include "layout/Viewport.h"
 #include "rendering/Sink.h"
 #include "platform/InputEvent.h"  // usa InputEvent común
+#include "helpers/test_gui_chrome_common.h"  // makeVp
 
 #define private public
 #include "app/ChromePresentation.h"
@@ -29,6 +32,11 @@
 #undef private
 
 namespace {
+
+std::vector<std::string> softWrapLines() {
+    return {std::string(40, 'a'), "corta", std::string(40, 'b'),
+            std::string(40, 'c')};
+}
 
 struct TinyTerm {
     int rows;
@@ -228,14 +236,14 @@ struct DiffHarness {
     int kRows;
 
     explicit DiffHarness(int lines) {
-        ed.active().document.restore(
+        ed.getActiveBufferForTesting().document.restore(
             std::vector<std::string>(static_cast<size_t>(lines),
                                      std::string(80, 'x')));
-        ed.state_ = State::Interaccion;
-        kRows = ed.active().viewport.height + 2;
+        ed.executeCommand("navegacion.interaccion");
+        kRows = ed.getActiveBufferForTesting().viewport.height + 2;
     }
 
-    Buffer& buf() { return ed.active(); }
+    Buffer& buf() { return ed.getActiveBufferForTesting(); }
 
     std::string getDiffOutput() {
         Buffer& b = buf();
@@ -244,6 +252,65 @@ struct DiffHarness {
             makeChromeRequest(Message(""), State::Navegacion), b.selection);
     }
 };
+
+// TtyDiff: cambiar solo topOffset (top constante) debe forzar frame completo,
+// porque la primera fila visual del viewport se desplaza. La condición de
+// reutilización de caché (buildDiffFrame) no comparaba topOffset, así que un
+// cambio de topOffset con top igual reutilizaba rowCache_ desfasado.
+TEST(render_diff_softwrap_topoffset_changes_force_full_frame) {
+    // Mismo fixture que gui_diff_softwrap_topoffset_changes_force_full_frame.
+    Document doc;
+    doc.restore(softWrapLines());
+    Viewport vp = makeVp(6, 24);
+    Cursor cur;
+    cur.col = 20;  // continuación de L0
+    const int textWidth = vp.width - gutterWidth(doc.lineCount(), vp.width);
+    softwrap::Index idx;
+    CHECK(idx.ensure(doc, textWidth, true, vp.top, vp.height));
+    CHECK(idx.enabled());
+
+    TtyRenderer r;
+    r.setWrapIndex(&idx);
+
+    // 1) top=0, topOffset=0 -> construye caché.
+    std::string first = r.buildDiffFrame(
+        doc, cur, vp, "notes.md", false,
+        makeChromeRequest(Message(""), State::Navegacion), std::nullopt);
+    CHECK(r.hasCache());
+    CHECK(!first.empty());
+
+    // 2) Solo cambia topOffset a 1 (top permanece 0).
+    vp.topOffset = 1;
+    CHECK_EQ(vp.top, 0);
+
+    std::string incremental = r.buildDiffFrame(
+        doc, cur, vp, "notes.md", false,
+        makeChromeRequest(Message(""), State::Navegacion), std::nullopt);
+
+    // El diff no puede estar vacío: la primera fila visual cambió.
+    CHECK(!incremental.empty());
+
+    // 3) Oráculo: renderer nuevo, frame completo con el mismo viewport.
+    TtyRenderer fresh;
+    softwrap::Index idx2;
+    CHECK(idx2.ensure(doc, textWidth, true, vp.top, vp.height));
+    fresh.setWrapIndex(&idx2);
+    std::string full = fresh.buildScreen(
+        doc, cur, vp, "notes.md", false,
+        makeChromeRequest(Message(""), State::Navegacion), std::nullopt);
+
+    // Las filas de contenido deben coincidir con el frame completo.
+    TinyTerm viaDiff(vp.height + 2), viaFull(vp.height + 2);
+    viaDiff.apply(incremental);
+    viaFull.apply(full);
+    CHECK(viaDiff == viaFull);
+
+    // 4) Volver a topOffset=0 también debe invalidar.
+    vp.topOffset = 0;
+    r.buildDiffFrame(
+        doc, cur, vp, "notes.md", false,
+        makeChromeRequest(Message(""), State::Navegacion), std::nullopt);
+}
 
 } // namespace
 
