@@ -9,8 +9,9 @@
 #include "rendering/tty/TtyScroll.h"
 
 void TtyDiff::updateCacheState(const Viewport& viewport, const Cursor& cursor,
-                               const Document& doc) {
+                               const Document& doc, int topOffset) {
     lastViewportTop_ = viewport.top;
+    lastViewportTopOffset_ = topOffset;
     lastViewportLeft_ = viewport.left;
     lastCursorLine_ = cursor.line;
     lastCursorCol_ = cursor.col;
@@ -171,17 +172,18 @@ void TtyDiff::rebuildCache(
     bool wrap = idx && idx->enabled();
 
     if (wrap) {
-        const int totalVisualRows = idx->totalRows();
-        int visualTop = viewport.top;
-        const int maxVisualTop = std::max(0, totalVisualRows - contentH);
-        if (visualTop > maxVisualTop) visualTop = maxVisualTop;
-        if (visualTop < 0) visualTop = 0;
+        // `viewport.top` es la primera línea lógica visible; `topOffset` es
+        // la fila visual dentro de esa línea desde la cual empieza el viewport.
+        const int topLine = std::clamp(viewport.top, 0,
+                                       std::max(0, doc.lineCount() - 1));
+        int base = idx->firstRowOfViewport(topLine, viewport.topOffset);
+        if (base < 0) base = 0;
 
         int maxDocLineNeeded = 0;
         for (int r = 0; r < contentH; ++r) {
-            const int visualRow = visualTop + r;
-            if (visualRow >= totalVisualRows) break;
-            const softwrap::VisualRow& vr = idx->rowAt(visualRow);
+            const int windowRow = base + r;
+            if (windowRow >= idx->rowCount()) break;
+            const softwrap::VisualRow& vr = idx->rowAt(windowRow);
             if (vr.docLine >= doc.lineCount()) continue;
             if (vr.docLine > maxDocLineNeeded) maxDocLineNeeded = vr.docLine;
         }
@@ -194,8 +196,8 @@ void TtyDiff::rebuildCache(
 
         rowCache_.clear();
         for (int r = 0; r < contentH; ++r) {
-            const int visualRow = visualTop + r;
-            softwrap::VisualRow vr = idx->rowAt(visualRow);
+            const int windowRow = base + r;
+            softwrap::VisualRow vr = idx->rowAt(windowRow);
             rowCache_.push_back(encoder_.encodeRow(builder_.buildContentRow(
                 doc, cursor, viewport, sel, searchSel, bracketOpen, bracketClose,
                 vr, gutterW, textWidth)));
@@ -387,7 +389,7 @@ std::string TtyDiff::buildScrollFrame(
     emitCurrentCursor(out, doc, cursor, viewport, g, chrome,
                       /*endFrame=*/false);
 
-    updateCacheState(viewport, cursor, doc);
+    updateCacheState(viewport, cursor, doc, 0);
     return out;
 }
 
@@ -422,6 +424,10 @@ std::string TtyDiff::buildDiffFrame(
 
     const bool wrapEnabled = wrapIndex && wrapIndex->enabled();
 
+    // En wrap, topOffset desplaza la primera fila visual aunque top sea igual.
+    // En no-wrap no participa en el layout visual.
+    const int effTopOffset = wrapEnabled ? viewport.topOffset : 0;
+
     bool bracketChanged = false;
     if (!hasLastBracketPair_) bracketChanged = true;
     else if (lastBracketPair_ != bracketPair) bracketChanged = true;
@@ -429,14 +435,16 @@ std::string TtyDiff::buildDiffFrame(
         viewport.height != lastViewportH_ || cachedContentH_ != contentH ||
         !sameLayout(cachedLayout_, layout) ||
         geom.gutterW != lastGutterW_ || bracketChanged ||
-        wrapEnabled != lastWrapEnabled_) {
+        wrapEnabled != lastWrapEnabled_ ||
+        effTopOffset != lastViewportTopOffset_) {   // ← nuevo
         rebuildCache(doc, cursor, viewport, filename, modified, chrome,
                      selection, searchHighlight, bracketPair, wrapIndex, layout);
         lastViewportW_ = viewport.width;
         lastViewportH_ = viewport.height;
         lastGutterW_ = geom.gutterW;
         lastWrapEnabled_ = wrapEnabled;
-        updateCacheState(viewport, cursor, doc);
+        lastViewportTopOffset_ = effTopOffset;   // ← nuevo
+        updateCacheState(viewport, cursor, doc, effTopOffset);
         std::string out;
         encoder_.beginFrame(out);
         for (auto& row : rowCache_) {
@@ -531,7 +539,7 @@ std::string TtyDiff::buildDiffFrame(
     lastGutterW_ = fresh.gutterW;
 
     if (!chrome.cursorVisibleByMode) {
-        updateCacheState(viewport, cursor, doc);
+        updateCacheState(viewport, cursor, doc, effTopOffset);
         return out;
     }
     {
@@ -541,6 +549,6 @@ std::string TtyDiff::buildDiffFrame(
                           /*endFrame=*/false);
     }
 
-    updateCacheState(viewport, cursor, doc);
+    updateCacheState(viewport, cursor, doc, effTopOffset);
     return out;
 }

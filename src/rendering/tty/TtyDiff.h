@@ -59,6 +59,7 @@ public:
         hasLastChromeData_ = false;
         lastGutterW_ = -1;
         lastWrapEnabled_ = false;
+        lastViewportTopOffset_ = 0;   // ← nuevo
     }
 
     // Observabilidad para tests (solo lectura): estado del cache diferencial.
@@ -121,6 +122,7 @@ private:
     int lastViewportW_ = -1;
     int lastViewportH_ = -1;
     int lastViewportTop_ = 0;
+    int lastViewportTopOffset_ = 0;   // ← topOffset usado al construir rowCache_
     int lastViewportLeft_ = 0;
     int lastCursorLine_ = 0;
     int lastCursorCol_ = 0;
@@ -201,5 +203,5 @@ private:
                     bool visible, bool endFrame);
 
     void updateCacheState(const Viewport& viewport, const Cursor& cursor,
-                          const Document& doc);
+                          const Document& doc, int topOffset);
 };
