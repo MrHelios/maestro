@@ -194,15 +194,22 @@ bool FrameBuilder::editorCursorPos(const Document& doc,
     if (g.wrapEnabled) {
         const softwrap::Index* idx = g.wrapIndex;
         if (!idx) return false;
+        // `viewport.top` es una línea lógica. Si el cursor quedó fuera de la
+        // ventana del índice, no hay posición visual válida que pintar.
+        const int lineCount = doc.lineCount();
+        const int topLine = std::clamp(viewport.top, 0,
+                                       std::max(0, lineCount - 1));
+        if (!idx->coversLine(cursor.line)) {
+            out = CellPos{};
+            return false;
+        }
         int vr = idx->visualRowOf({cursor.line, cursor.col});
-        // Mismo clamp vertical que usa buildFrame para el contenido: si el
-        // viewport quedó por debajo del máximo válido, cursor y filas deben
-        // compartir el top efectivo.
-        int top = viewport.top;
-        const int contentH = g.layout.content.height;
-        const int maxTop = std::max(0, idx->totalRows() - contentH);
-        if (top > maxTop) top = maxTop;
-        int row = vr - top;
+        int base = idx->firstRowOfViewport(topLine, viewport.topOffset);
+        if (vr < 0 || base < 0) {
+            out = CellPos{};
+            return false;
+        }
+        int row = g.layout.content.row + (vr - base);
         int vc = idx->visualColumnOf(doc, {cursor.line, cursor.col});
         int col = g.gutterW + vc + g.layout.content.col;
         const int rowLo = g.layout.content.row;
@@ -637,16 +644,18 @@ Frame FrameBuilder::buildFrame(const Document& doc,
     bool wrap = g.wrapEnabled;
 
     if (wrap) {
-        int totalVisualRows = idx->totalRows();
-        int maxVisualTop = std::max(0, totalVisualRows - contentH);
-        int visualTop = viewport.top;
-        if (visualTop > maxVisualTop) visualTop = maxVisualTop;
+        // `viewport.top` es la primera LÍNEA LÓGICA visible; `topOffset` es
+        // la fila visual dentro de esa línea desde la cual empieza el viewport.
+        const int topLine = std::clamp(viewport.top, 0,
+                                       std::max(0, doc.lineCount() - 1));
+        int base = idx->firstRowOfViewport(topLine, viewport.topOffset);
+        if (base < 0) base = 0;
 
         int maxDocLineNeeded = 0;
         for (int r = 0; r < contentH; ++r) {
-            int visualRow = visualTop + r;
-            if (visualRow >= totalVisualRows) break;
-            const softwrap::VisualRow& vr = idx->rowAt(visualRow);
+            int windowRow = base + r;
+            if (windowRow >= idx->rowCount()) break;
+            const softwrap::VisualRow& vr = idx->rowAt(windowRow);
             if (vr.docLine >= doc.lineCount()) continue;
             if (vr.docLine > maxDocLineNeeded) maxDocLineNeeded = vr.docLine;
         }
@@ -659,8 +668,8 @@ Frame FrameBuilder::buildFrame(const Document& doc,
 
         f.contentRows.reserve(static_cast<size_t>(std::max(0, contentH)));
         for (int r = 0; r < contentH; ++r) {
-            int visualRow = visualTop + r;
-            softwrap::VisualRow vr = idx->rowAt(visualRow);
+            int windowRow = base + r;
+            softwrap::VisualRow vr = idx->rowAt(windowRow);
             f.contentRows.push_back(buildContentRow(doc, cursor, viewport, sel,
                                                     searchSel, bracketOpen,
                                                     bracketClose, vr, gutterW,
