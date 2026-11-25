@@ -73,9 +73,12 @@ inline bool isWrapEnabledFor(const Buffer& b) {
 }
 
 // Asegura que el índice de wrap del buffer activo esté actualizado.
+// La ventana del índice se define desde la primera línea lógica visible
+// (`viewport.top`) y la altura en filas del viewport.
 inline const softwrap::Index& wrapFor(Editor* ed, const Buffer& b) {
     int tw = textWidthFor(b.viewport, b.document.lineCount());
-    ed->wrapIndex().ensure(b.document, tw, isWrapEnabledFor(b));
+    ed->wrapIndex().ensure(b.document, tw, isWrapEnabledFor(b),
+                           b.viewport.top, b.viewport.height);
     return ed->wrapIndex();
 }
 
@@ -112,9 +115,13 @@ inline std::optional<Position> screenToCursorWrap(const softwrap::Index& idx,
     if (relRow < 0 || relRow >= layout.content.height) return std::nullopt;
     if (relCol < 0) return std::nullopt;
 
-    int visualRow = viewport.top + relRow;
-    if (visualRow < 0) return std::nullopt;
-    if (visualRow >= idx.totalRows()) return std::nullopt;
+    // `viewport.top` es una línea lógica y `topOffset` la fila visual dentro
+    // de esa línea desde la cual empieza el viewport. `firstRowOfViewport`
+    // devuelve la fila visual relativa a la ventana del índice.
+    const int base = idx.firstRowOfViewport(viewport.top, viewport.topOffset);
+    if (base < 0) return std::nullopt;
+    const int visualRow = base + relRow;
+    if (visualRow < 0 || visualRow >= idx.rowCount()) return std::nullopt;
 
     if (relCol < gutterW) {
         // Click en gutter: inicio de la fila visual
