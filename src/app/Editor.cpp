@@ -1633,11 +1633,11 @@ bool Editor::scrollWrapVisual(int delta) {
                                             b.viewport.topOffset);
         if (curRow < 0) curRow = 0;
 
-        // Límite consistente con maxTop(): la última línea lógica puede
-        // quedar como primera fila visible (top = lineCount - 1). La última
-        // fila visual de la ventana actual es el tope local; al llegar ahí
-        // la siguiente iteración reconstruye la ventana y sigue avanzando.
-        const int maxRow = idx.rowCount() - 1;
+        // Límite: la última fila visual que puede ser la primera del viewport.
+        // Cuando el documento cabe entero en el viewport (rowCount <= h), no
+        // hay scroll posible (maxRow = 0).
+        int maxRow = idx.rowCount() - h;
+        if (maxRow < 0) maxRow = 0;
 
         int target = std::clamp(curRow + remaining, 0, maxRow);
 
