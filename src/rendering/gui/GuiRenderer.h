@@ -588,6 +588,7 @@ private:
     // Invariante (etapa scroll): contentRows_[i] representa el docLine
     // contentTop_ + i. Se publica en el camino completo y se rota en scroll ±1.
     mutable int contentTop_ = -1;
+    mutable int contentTopOffset_ = 0;
     mutable int contentLeft_ = -1;
     mutable int contentVpWidth_ = -1;
     mutable int contentVpHeight_ = -1;

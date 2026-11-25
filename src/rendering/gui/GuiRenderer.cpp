@@ -1507,9 +1507,13 @@ bool GuiRenderer::tryFastCursorMove(
         return false;  // edición o cambio de buffer
     }
     if (doc.lineCount() != contentLineCount_) return false;
-    // Mismo viewport.top (sin scroll; el scroll ±1 es la etapa siguiente) y
-    // mismo left/ancho/alto (un scroll horizontal o resize cambia todas).
-    if (viewport.top != contentTop_ || viewport.left != contentLeft_ ||
+    // Mismo viewport.top y topOffset (sin scroll; el scroll ±1 es la etapa
+    // siguiente) y mismo left/ancho/alto (un scroll horizontal o resize cambia
+    // todas). En soft-wrap, un cambio de topOffset con top constante desplaza
+    // la primera fila visual y debe invalidar el caché.
+    if (viewport.top != contentTop_ ||
+        viewport.topOffset != contentTopOffset_ ||
+        viewport.left != contentLeft_ ||
         viewport.width != contentVpWidth_ ||
         viewport.height != contentVpHeight_) {
         return false;
@@ -1729,10 +1733,10 @@ bool GuiRenderer::tryFastScrollLine(
     // Precondiciones (etapa scroll ±1). Si alguna falla, false SIN mutar:
     // el caller cae al camino completo. Deltas != ±1 (saltos, páginas),
     // edición, cambios visuales o geometría incompatible van por full.
-    // Con Soft Wrap `viewport.top` es una fila visual, no una línea
-    // documental: rotar `contentRows_` como docLine+1 y construir "la línea
-    // entrante" produciría filas incorrectas. Se desactiva hasta implementar
-    // rangos por índice visual.
+    // Con Soft Wrap `viewport.top` es una línea lógica y `topOffset` la fila
+    // visual dentro de ella: rotar `contentRows_` como docLine+1 y construir
+    // "la línea entrante" no es válido si topOffset cambió dentro de una línea
+    // larga. Se desactiva hasta implementar rangos por índice visual.
     if (frameBuilder_.isWrapEnabled(wrapIndex_)) return false;
     if (!contentHasCache_) return false;
     // El layout completo (incluye chrome) debe coincidir con el cacheado.
@@ -1741,7 +1745,9 @@ bool GuiRenderer::tryFastScrollLine(
     // solo por viewport.height.
     if (!sameLayout(layout, contentLayout_)) return false;
     const int delta = viewport.top - contentTop_;
+    const int deltaOff = viewport.topOffset - contentTopOffset_;
     if (delta != 1 && delta != -1) return false;
+    if (deltaOff != 0) return false;
     // Selección/búsqueda/bracket: se admiten si son IGUALES a las cacheadas
     // (el overlay es función de docLine y la rotación lo preserva); cualquier
     // cambio invalida el camino rápido.
@@ -1908,6 +1914,7 @@ bool GuiRenderer::tryFastScrollLine(
     contentHasCache_ = true;
     lastIsList_ = false;
     contentTop_ = viewport.top;
+    contentTopOffset_ = viewport.topOffset;
     contentModified_ = modified;
     contentCursorLine_ = cursor.line;
     contentSelection_ = selection;
@@ -2194,6 +2201,7 @@ void GuiRenderer::renderScreenDiff(
     // completo y lo consumen/rotan los caminos rápidos. Sin esto el fast path
     // nunca podría validar sus precondiciones.
     contentTop_ = viewport.top;
+    contentTopOffset_ = viewport.topOffset;
     contentLeft_ = viewport.left;
     contentVpWidth_ = viewport.width;
     contentVpHeight_ = viewport.height;
