@@ -1602,8 +1602,9 @@ TEST(gui_chrome_segmentos_concatenan_linea_headless) {
 }
 
 TEST(gui_paleta_valores_congelados_headless) {
-    auto rgb = [](uint8_t r, uint8_t g, uint8_t b) 
+    auto rgb = [](uint8_t r, uint8_t g, uint8_t b) {
         return GuiColor{r, g, b, 0xFF};
+    };
         
     // Fondos y cursor por tema.
     CHECK(guichrome::background(true) == rgb(0x12, 0x13, 0x14));
