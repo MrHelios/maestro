@@ -1,10 +1,11 @@
 #include <string>
 #include <vector>
 
+#include "test_framework.h"
+
 #include "document/Document.h"
 #include "document/Position.h"
 #include "layout/SoftWrap.h"
-#include "test_framework.h"
 
 namespace {
 
@@ -189,18 +190,36 @@ TEST(softwrap_zero_width_does_not_rebuild_forever) {
     CHECK(!idx.enabled());
 }
 
+// rowCount() solo cuenta las filas visuales de la ventana [firstLine(), endLine()), 
+// nunca las del documento completo. Para conocer el total real habría que recorrerlo.
 TEST(softwrap_no_total_global_de_filas) {
-    // El índice acotado no mantiene totales globales: el total de filas
-    // visuales del documento no está disponible sin recorrerlo.
-    Document d = docOf({"abcdefghij"});
+    // 100 líneas lógicas de una sola fila visual cada una.
+    Document d = docOf(std::vector<std::string>(100, "abc"));
     softwrap::Index idx;
 
     CHECK(idx.ensure(d, 5, true, 0, 3));
-    CHECK_EQ(idx.rowCount(), 2);
+    
+    // Ventana: first = 0, end = min(100, 0+3+5+1) = 9.
+    CHECK_EQ(idx.firstLine(), 0);
+    CHECK_EQ(idx.endLine(), 9);
+    
+    // rowCount() refleja la ventana (9 filas), no el documento (100).
+    CHECK_EQ(idx.rowCount(), 9);
+    CHECK_EQ(idx.lineCount(), 100);
+    CHECK(idx.coversLine(8));
+    CHECK(!idx.coversLine(9));
+
+    // Al desplazarse, la ventana se mueve y rowCount() cambia: no hay un
+    // total global estable en ninguna de las dos posiciones.
+    CHECK(idx.ensure(d, 5, true, 50, 3));
+    // Ventana: first = 50-5 = 45, end = min(100, 50+3+5+1) = 59.
+    CHECK_EQ(idx.firstLine(), 45);
+    CHECK_EQ(idx.endLine(), 59);
+    CHECK_EQ(idx.rowCount(), 14);
 }
 
-// visibleLines() debe considerar topOffset: solo las filas restantes de la
-// primera línea cuentan hacia el viewport.
+// visibleLines() debe considerar topOffset: 
+// que son filas visuales de una fila logica arriba del viewport
 TEST(softwrap_visibleLines_respects_topOffset) {
     Document d = docOf({
         std::string(30, 'a'),  // 3 filas visuales con width=12 (12+12+6)
@@ -208,6 +227,7 @@ TEST(softwrap_visibleLines_respects_topOffset) {
         "c",                   // 1 fila
         "d",                   // 1 fila
     });
+    
     softwrap::Index idx;
     CHECK(idx.ensure(d, 12, true, 0, 4));
     CHECK_EQ(idx.rowsInLine(0), 3);
@@ -215,15 +235,27 @@ TEST(softwrap_visibleLines_respects_topOffset) {
     CHECK_EQ(idx.rowsInLine(2), 1);
     CHECK_EQ(idx.rowsInLine(3), 1);
 
-    // height=2, topOffset=2: L0 aporta 1 fila (la 2), L1 aporta 1 => 2 líneas.
+    // viewport = fila cero
+    // height   = 2 (espacio en el viewport)
+    // topOffset= 2 (hay dos linea visuales arriba del viewport)
+    // por lo tanto se ven dos filas logicas: 0 y 1
     CHECK_EQ(idx.visibleLines(0, 2, 2), 2);
 
-    // height=2, topOffset=0: L0 aporta 3 filas (>=2), solo 1 línea cabe.
+    // viewport = fila cero
+    // height   = 2 (espacio en el viewport)
+    // topOffset= 0 (no hay lineas visuales arriba del viewport)
+    // por lo tanto se ve la fila logica 0
     CHECK_EQ(idx.visibleLines(0, 2, 0), 1);
 
-    // height=5, topOffset=0: L0=3, L1=1, L2=1 => 3 líneas (5 filas).
+    // viewport = fila cero
+    // height   = 5 (espacio en el viewport)
+    // topOffset= 0 (no hay lineas visuales arriba del viewport)
+    // por lo tanto se ven 3 filas logicas
     CHECK_EQ(idx.visibleLines(0, 5, 0), 3);
 
-    // height=5, topOffset=1: L0 restante=2, L1=1, L2=1, L3=1 => 4 líneas.
+    // viewport = fila cero
+    // height   = 5 (espacio en el viewport)
+    // topOffset= 1 (hay una lineas visual arriba del viewport)
+    // por lo tanto se ven 4 filas logicas
     CHECK_EQ(idx.visibleLines(0, 5, 1), 4);
 }
