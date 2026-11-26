@@ -1,4 +1,15 @@
+// Tests de softwrap frame:
+// verificamos que el render calcule bien el softwrap
+//
+// Casos del plan:
+//   - cursor en la 2da fila visual de una linea logica
+//   - viewport.top fuera del rango valido (99)
+//   - cursor justo en el limite exacto del wrap (col 7)
+//   - mover el cursor dentro de la misma fila visual
+
 #include <string>
+
+#include "test_framework.h"
 
 #include "app/ChromePresentation.h"
 #include "app/EditorState.h"
@@ -9,7 +20,6 @@
 #include "rendering/frame/Frame.h"
 #include "rendering/frame/FrameBuilder.h"
 #include "rendering/tty/TtyRenderer.h"
-#include "test_framework.h"
 
 namespace {
 
@@ -24,10 +34,13 @@ Viewport viewport(int top, int height, int width) {
 
 } // namespace
 
+// creamos un documento de una linea logica pero que requiere
+// dos lineas visuales y verificamos que el frame lo cargue correctamente
 TEST(softwrap_frame_cursor_uses_visual_row) {
     Document doc;
-    doc.restore({"abcdefghij"});
     softwrap::Index idx;
+    
+    doc.restore({"abcdefghij"});
     CHECK(idx.ensure(doc, 7, true, 0, 5)); // textWidth = width(14) - gutter(7)
 
     Viewport vp = viewport(0, 5, 14);
@@ -45,13 +58,18 @@ TEST(softwrap_frame_cursor_uses_visual_row) {
     CHECK_EQ(f.cursor.cell.col, 8); // gutter 7 + columna relativa 1
 }
 
+// El viewport comienza fuera del rango válido.
+// El cursor debe calcularse usando el top corregido.
+// utilizamos softwrap esa es la innovacion ??
 TEST(softwrap_frame_clamps_viewport_top_for_cursor) {
     Document doc;
-    doc.restore({"abcdefghij"});
     softwrap::Index idx;
+    
+    doc.restore({"abcdefghij"});
     CHECK(idx.ensure(doc, 7, true, 0, 5));
 
-    // top fuera del máximo válido: contenido y cursor deben usar el mismo
+    // top fuera del máximo válido: 
+    // contenido y cursor deben usar el mismo
     // top corregido (0), no el valor crudo.
     Viewport vp = viewport(99, 5, 10);
     Cursor cursor;
@@ -68,10 +86,12 @@ TEST(softwrap_frame_clamps_viewport_top_for_cursor) {
     CHECK_EQ(f.cursor.cell.col, 8);
 }
 
+// verificamos que en el limites empezamos en una nueva fila
 TEST(softwrap_frame_cursor_at_boundary_starts_next_row) {
     Document doc;
-    doc.restore({"abcdefghij"});
     softwrap::Index idx;
+    
+    doc.restore({"abcdefghij"});
     CHECK(idx.ensure(doc, 7, true, 0, 5));
 
     Viewport vp = viewport(0, 5, 14);
@@ -89,11 +109,14 @@ TEST(softwrap_frame_cursor_at_boundary_starts_next_row) {
     CHECK_EQ(f.cursor.cell.col, 7); // inicio de la continuación
 }
 
+// si movemos el cursor el frame no se regenera
 TEST(softwrap_diff_reuses_cache_when_frame_unchanged) {
     Document doc;
     std::vector<std::string> lines;
+    
     lines.push_back("ALPHA " + std::string(40, 'a'));
-    for (int i = 1; i < 12; ++i) lines.push_back(std::string(40, 'b'));
+    for (int i = 1; i < 12; ++i) 
+        lines.push_back(std::string(40, 'b'));
     doc.restore(lines);
 
     Viewport vp = viewport(0, 5, 24); // gutter 7, textWidth 17
@@ -108,17 +131,14 @@ TEST(softwrap_diff_reuses_cache_when_frame_unchanged) {
     TtyRenderer r;
     r.setWrapIndex(&idx);
     const ChromeRequest chrome = makeChromeRequest("", State::Navegacion);
-
-    const std::string full =
-        r.buildDiffFrame(doc, cursor, vp, "notes.md", false, chrome);
+    const std::string full = r.buildDiffFrame(doc, cursor, vp, "notes.md", false, chrome);
     CHECK(r.hasCache());
     CHECK(full.find("ALPHA") != std::string::npos);
 
-    // Mover el cursor dentro de la misma línea visual no cambia ninguna
-    // fila: el frame diferencial no debe reconstruir ni reenviar el texto.
+    // Mover el cursor dentro de la misma línea visual no cambia ninguna fila: 
+    // el frame diferencial no debe reconstruir ni reenviar el texto.
     Cursor moved = cursor;
     moved.col = 5;
-    const std::string diff =
-        r.buildDiffFrame(doc, moved, vp, "notes.md", false, chrome);
+    const std::string diff = r.buildDiffFrame(doc, moved, vp, "notes.md", false, chrome);
     CHECK(diff.find("ALPHA") == std::string::npos);
 }
