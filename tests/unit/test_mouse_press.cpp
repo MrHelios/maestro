@@ -1,6 +1,7 @@
 #include <chrono>
 
 #include "test_framework.h"
+
 #include "app/Editor.h"
 #include "document/Document.h"
 #include "layout/Layout.h"
@@ -853,9 +854,9 @@ TEST(mouse_drag_autoscroll_horizontal) {
     CHECK(ed.hasSelection());
 }
 
-// Gesto sobre el chrome (relRow >= h) con documento debajo:
-// scrollea 1 linea y extiende la seleccion, nunca nullopt silencioso.
-TEST(mouse_drag_chrome_scrolls_when_content_below) {
+// mover el mouse con click and drag hasta el chrome
+// verificar seleccion y scroll
+TEST(mouse_drag_chrome_scrolls_down) {
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
     b.filename = "test.cpp";  // sin soft-wrap: el test mide semantica sin wrap
@@ -870,16 +871,16 @@ TEST(mouse_drag_chrome_scrolls_when_content_below) {
     
     ed.processEventForTesting(mousePress(8, 1));         // fila doc 0
     ed.processEventForTesting(mouseDrag(8, 5));          // statusbar (relRow=4)
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Seleccion));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Seleccion));
     CHECK_EQ(b.viewport.top, 1);                         // hubo scroll, no se ignoro
     CHECK_EQ(b.cursor.line, 4);                          // borde inferior revelado (1+3)
     CHECK(b.selection.has_value());
     CHECK(ed.hasSelection());
 }
 
-// Gesto sobre el chrome ya en el ultimo viewport (top == maxTop):
-// no hay nada que desplazar (scroll imposible)
+// cursor en ultima linea
+// click and drag, activa seleccion
+// pero no se hace scroll
 TEST(mouse_drag_chrome_at_maxTop_clamps_to_edge) {
     Editor ed;
     ed.getActiveBufferForTesting().filename = "test.txt";  // no-wrap: camino identidad
@@ -896,13 +897,11 @@ TEST(mouse_drag_chrome_at_maxTop_clamps_to_edge) {
     
     ed.processEventForTesting(mousePress(8, 4));           // fila doc 7, arma
     ed.processEventForTesting(mouseDrag(8, 3));            // fila doc 6, inicia rango
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Seleccion));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Seleccion));
     CHECK_EQ(b.cursor.line, 6);
     
     ed.processEventForTesting(mouseDrag(8, 5));            // chrome: clamp al borde
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Seleccion));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Seleccion));
     CHECK_EQ(b.viewport.top, 4);                           // sin scroll: ya en el limite
     CHECK_EQ(b.cursor.line, 7);                            // marca la ultima fila
     CHECK_EQ(b.cursor.col, 0);
@@ -913,9 +912,9 @@ TEST(mouse_drag_chrome_at_maxTop_clamps_to_edge) {
     CHECK_EQ(b.selection->position.col, 0);
 }
 
-// Gesto real: press + varios drags (incluye cambio de direccion) +
-// release. El anchor permanece fijo en el press y position sigue al
-// ultimo drag; el Selection no se recrea en cada evento.
+// press + varios drags (incluye cambio de direccion) + release. 
+// El anchor permanece fijo en el press y position sigue al ultimo drag.
+// Seleccion no se recrea en cada evento.
 TEST(mouse_drag_multiple_anchor_fixed_position_follows) {
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
@@ -932,14 +931,14 @@ TEST(mouse_drag_multiple_anchor_fixed_position_follows) {
     // gutter=7: celda col = 7 + visual (0-based).
     ed.processEventForTesting(mousePress(8, 1)); // anchor (0,0)
     ed.processEventForTesting(mouseDrag(10, 2));  // (1,2)
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Seleccion));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Seleccion));
     CHECK_EQ(b.selection->anchor.line, 0);
     CHECK_EQ(b.selection->anchor.col, 0);
     CHECK_EQ(b.selection->position.line, 1);
     CHECK_EQ(b.selection->position.col, 2);
     
     ed.processEventForTesting(mouseDrag(12, 3)); // (2,4)
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Seleccion));
     CHECK_EQ(b.selection->anchor.line, 0);
     CHECK_EQ(b.selection->anchor.col, 0);
     CHECK_EQ(b.selection->position.line, 2);
@@ -953,6 +952,7 @@ TEST(mouse_drag_multiple_anchor_fixed_position_follows) {
     CHECK_EQ(sel->end.col, 4);
     
     ed.processEventForTesting(mouseDrag(9, 1)); // vuelta a (0,1)
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Seleccion));
     CHECK_EQ(b.selection->anchor.line, 0);
     CHECK_EQ(b.selection->anchor.col, 0);
     CHECK_EQ(b.selection->position.line, 0);
@@ -961,8 +961,7 @@ TEST(mouse_drag_multiple_anchor_fixed_position_follows) {
     CHECK_EQ(b.cursor.col, 1);
     
     ed.processEventForTesting(mouseRelease(9, 1));
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Seleccion));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Seleccion));
     CHECK_EQ(b.selection->anchor.line, 0);
     CHECK_EQ(b.selection->anchor.col, 0);
     CHECK_EQ(b.selection->position.line, 0);
@@ -970,7 +969,8 @@ TEST(mouse_drag_multiple_anchor_fixed_position_follows) {
     CHECK(ed.hasSelection());
 }
 
-// Caso base: seleccion por drag y luego click en otro texto valido.
+// Caso base: 
+// seleccion por drag y luego click en otro texto valido.
 TEST(mouse_click_after_mouse_drag_clears_on_text) {
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
@@ -986,54 +986,24 @@ TEST(mouse_click_after_mouse_drag_clears_on_text) {
     ed.processEventForTesting(mousePress(8, 1));      // (0,0)
     ed.processEventForTesting(mouseDrag(10, 2));      // (1,2)
     ed.processEventForTesting(mouseRelease(10, 2));
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Seleccion));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());
     
     // Click en otro texto valido: debe limpiar y volver a Navegacion.
     ed.processEventForTesting(mousePress(8, 1));
     ed.processEventForTesting(mouseRelease(8, 1));
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Navegacion));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Navegacion));
     CHECK(!b.selection.has_value());
     CHECK(!ed.hasSelection());
 }
 
-// Click en fila `~` (viewport pero mas alla del EOF) tambien debe limpiar.
-TEST(mouse_click_after_mouse_drag_on_tilde_clears) {
+// Click en cualquier zona del chrome es un no-op:
+// no mueve el cursor, no modifica la selección,
+// no cambia el estado ni arma un nuevo gesto de mouse.
+TEST(mouse_click_on_chrome_does_not_change_selection_or_state) {
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
-    
-    b.document.restore({"a", "b"});
-    b.viewport.height = 10;
-    b.viewport.width = 20;
-    b.viewport.top = 0;
-    b.viewport.left = 0;
-    b.cursor.line = 0;
-    b.cursor.col = 0;
-    
-    ed.processEventForTesting(mousePress(8, 1)); // (0,0)
-    ed.processEventForTesting(mouseDrag(9, 1));  // (0,1)
-    ed.processEventForTesting(mouseRelease(9, 1));
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Seleccion));
-    CHECK(ed.hasSelection());
-    
-    // Fila visible 4 = docLine 4 >= lineCount (2): fila `~`.
-    ed.processEventForTesting(mousePress(14, 5));
-    ed.processEventForTesting(mouseRelease(14, 5));
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Navegacion));
-    CHECK(!b.selection.has_value());
-    CHECK(!ed.hasSelection());
-}
 
-// Click en el chrome es un no-op: no mueve el cursor, no toca la
-// seleccion, no cambia el estado ni arma el gesto de mouse.
-TEST(mouse_click_after_mouse_drag_on_chrome_does_not_change_state) {
-    Editor ed;
-    Buffer& b = ed.getActiveBufferForTesting();
-    
     b.document.restore({"hello", "world"});
     b.viewport.height = 10;
     b.viewport.width = 20;
@@ -1042,61 +1012,32 @@ TEST(mouse_click_after_mouse_drag_on_chrome_does_not_change_state) {
     b.cursor.line = 0;
     b.cursor.col = 0;
     ed.resize(12, 20);
-    
-    ed.processEventForTesting(mousePress(8, 1));        // (0,0)
-    ed.processEventForTesting(mouseDrag(10, 2));        // (1,2)
+
+    ed.processEventForTesting(mousePress(8, 1));
+    ed.processEventForTesting(mouseDrag(10, 2));
     ed.processEventForTesting(mouseRelease(10, 2));
+
     CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
              static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());
-    
-    // Contenido = filas 1..10 (1-based); 11 es la primera de statusbar.
-    ed.processEventForTesting(mousePress(14, 11));      // StatusBar: no-op
-    ed.processEventForTesting(mouseRelease(14, 11));
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Seleccion));       // sin cambios
-    CHECK(b.selection.has_value());                     // seleccion mantiene
-    CHECK(ed.hasSelection());
-    CHECK_EQ(b.cursor.line, 1);                         // cursor sin mover
-    CHECK_EQ(b.cursor.col, 2);
+
+    // StatusBar (fila 11) y MessageBar (fila 12).
+    for (int row : {11, 12}) {
+        ed.processEventForTesting(mousePress(14, row));
+        ed.processEventForTesting(mouseRelease(14, row));
+
+        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
+                 static_cast<int>(State::Seleccion));
+        CHECK(b.selection.has_value());
+        CHECK(ed.hasSelection());
+        CHECK_EQ(b.cursor.line, 1);
+        CHECK_EQ(b.cursor.col, 2);
+    }
 }
 
-// Verifica que un click en el MessageBar tampoco modifica el estado.
-TEST(mouse_click_on_messagebar_does_not_change_state) {
-    Editor ed;
-    Buffer& b = ed.getActiveBufferForTesting();
-    
-    b.document.restore({"hello", "world"});
-    b.viewport.height = 10;
-    b.viewport.width = 20;
-    b.viewport.top = 0;
-    b.viewport.left = 0;
-    b.cursor.line = 0;
-    b.cursor.col = 0;
-    ed.resize(12, 20);
-    
-    ed.processEventForTesting(mousePress(8, 1));          // (0,0)
-    ed.processEventForTesting(mouseDrag(10, 2));          // (1,2)
-    ed.processEventForTesting(mouseRelease(10, 2));
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Seleccion));
-    CHECK(ed.hasSelection());
-    
-    // 12 es la segunda fila del chrome (MessageBar).
-    ed.processEventForTesting(mousePress(14, 12));        // MessageBar: no-op
-    ed.processEventForTesting(mouseRelease(14, 12));
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Seleccion));         // sin cambios
-    CHECK(b.selection.has_value());                       // seleccion mantiene
-    CHECK(ed.hasSelection());
-    CHECK_EQ(b.cursor.line, 1);                           // cursor sin mover
-    CHECK_EQ(b.cursor.col, 2);
-}
-
-// Escenario del reporte: abrir archivo con contenido, seleccionar
-// arrastrando, soltar, y luego hacer click en otra parte del codigo
-// para ir a otra posicion. El highlight debe borrarse EN EL PRESS,
-// sin esperar al release.
+// abrir archivo con contenido, seleccionar arrastrando, soltar
+// luego hacer click en otra parte del codigo para ir a otra posicion. 
+// El highlight debe borrarse EN EL PRESS, sin esperar al release.
 TEST(mouse_press_after_mouse_drag_clears_highlight_immediately) {
     Editor ed;
     Buffer& b = ed.getActiveBufferForTesting();
@@ -1110,24 +1051,23 @@ TEST(mouse_press_after_mouse_drag_clears_highlight_immediately) {
     b.cursor.col = 0;
     ed.resize(12, 40);
     
-    ed.processEventForTesting(mousePress(8, 1)); // anchor (0,0)
-    ed.processEventForTesting(mouseDrag(12, 2));  // (1,4)
+    ed.processEventForTesting(mousePress(8, 1));    // anchor (0,0)
+    ed.processEventForTesting(mouseDrag(12, 2));    // (1,4)
     ed.processEventForTesting(mouseRelease(12, 2));
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Seleccion));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Seleccion));
     CHECK(ed.hasSelection());
     
-    // Click en otra posicion: solo el press, todavia sin release.
-    ed.processEventForTesting(mousePress(13, 3)); // (2,5)
+    // Click en otra posicion: 
+    // solo el press, todavia sin release.
+    ed.processEventForTesting(mousePress(13, 3));   // (2,5)
     CHECK_EQ(b.cursor.line, 2);
     CHECK_EQ(b.cursor.col, 5);
-    CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-             static_cast<int>(State::Navegacion));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Navegacion));
     CHECK(!b.selection.has_value());
     CHECK(!ed.hasSelection());
 }
 
-// ScreenToCursor acepta CellPos 0-based.
+// ScreenToCursor posicion validas y posicion invalidas
 TEST(mouse_screen_to_cursor_cellpos) {
     Document doc;
     Layout layout = computeLayout(24, 80);
@@ -1139,20 +1079,29 @@ TEST(mouse_screen_to_cursor_cellpos) {
     vp.width = 80;
     vp.height = 22;
     
-    // CellPos 0-based: 
-    // (col=7, row=0) = primera celda de texto
+    // primera celda de texto
+    // (col=7, row=0)
     auto p = screenToCursor(CellPos{7, 0}, layout, vp, doc);
     CHECK(p.has_value());
     CHECK_EQ(p->line, 0);
     CHECK_EQ(p->col, 0);
     
+    // ultima fila
+    p = screenToCursor(CellPos{7, 1}, layout, vp, doc);
+    CHECK(p.has_value());
+    CHECK_EQ(p->line, 1);
+    CHECK_EQ(p->col, 0);
+    
+    // primera fila con ~
+    p = screenToCursor(CellPos{7, 2}, layout, vp, doc);
+    CHECK(!p.has_value());
+    
     // Fuera del contenido: nullopt.
     CHECK(!screenToCursor(CellPos{1000, 1000}, layout, vp, doc).has_value());
 }
 
-// Sin gesto de mouse armado debe ser no-op observable:
+// si no hay click and drag
 // no mueve cursor ni viewport, no crea selección, no detiene el loop.
-// El camino armado sigue cubierto por mouse_tick_* (vía tickMouseAutoscroll).
 TEST(mouse_fase_c_tick_without_gesture_is_noop) {
     Editor ed;
     const int lineBefore = ed.getActiveBufferForTesting().cursor.line;
@@ -1177,12 +1126,9 @@ TEST(mouse_fase_c_tick_without_gesture_is_noop) {
     CHECK(ed.isRunning());
 }
 
-// El camino de eventos solo expira mensajes: con autoscroll armado,
-// clearExpiredMessages() no consulta el oráculo ni mueve nada (eso
-// pertenece al timeout, vía tick()). Pinea la corrección del loop:
-// eventos y wakeups externos ya no dan pasos extra ni dejan la pantalla
-// desactualizada.
-TEST(mouse_fase_c_event_path_does_not_autoscroll) {
+// verifica que cuando hacemos cick y drag (hasta fuera del contenido)
+// se activa el autoscroll
+TEST(mouse_autoscroll_with_click_and_drag) {
     Editor ed;
     InputEvent press, drag;
     std::vector<std::string> lines;
@@ -1212,7 +1158,10 @@ TEST(mouse_fase_c_event_path_does_not_autoscroll) {
     CHECK(ed.hasSelection());
 
     int oracleCalls = 0;
-    ed.setMouseButtonPressedQuery([&] { ++oracleCalls; return true; });
+    ed.setMouseButtonPressedQuery([&] { 
+        ++oracleCalls; return true; 
+    });
+    
     const int topBefore = ed.getActiveBufferForTesting().viewport.top;
     const int lineBefore = ed.getActiveBufferForTesting().cursor.line;
     const auto now = std::chrono::steady_clock::now();
@@ -1231,49 +1180,49 @@ TEST(mouse_fase_c_event_path_does_not_autoscroll) {
     CHECK_EQ(ed.getActiveBufferForTesting().viewport.top, topBefore + 1);
 }
 
-// --- Headless extra: celda inválida -> Editor no arma gesto ---
-// El píxel fuera de métrica da CellPos inválida (nunca {0,0} espurio) y el
-// Editor la trata como fuera de contenido: cancela selección si la había y
-// no arma gesto (el drag posterior sin press se ignora).
+// El píxel fuera de métrica da CellPos inválida
+// el Editor la trata como fuera de contenido
+// cancela selección si la había
 TEST(mouse_gui_celda_invalida_no_arma_gesto_headless) {
     InputEvent pressInv = makeMousePressEvent(CellPos{});
-    
     CHECK(!pressInv.cell.valid());
-    CHECK_EQ(static_cast<int>(pressInv.type),
-             static_cast<int>(InputEventType::MousePress));
+    CHECK_EQ(static_cast<int>(pressInv.type), static_cast<int>(InputEventType::MousePress));
+    
     // Editor: press inválido desde Navegación no mueve el cursor ni arma.
-    {
-        Editor ed;
-        ed.getActiveBufferForTesting().document.restore({"hola", "mundo"});
-        InputEvent press = makeMousePressEvent(CellPos{});
-        ed.handleEvent(press);
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::Navegacion));
-        CHECK_EQ(ed.getActiveBufferForTesting().cursor.line, 0);
-        CHECK_EQ(ed.getActiveBufferForTesting().cursor.col, 0);
-        // Drag sin press previo: ignorado (sin selección, sin crash).
-        InputEvent drag = makeMouseDragEvent(CellPos{5, 0});
-        ed.handleEvent(drag);
-        CHECK(!ed.hasSelection());
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::Navegacion));
-    }
-    // Editor: press inválido desde Selección cancela a Navegación (igual que
-    // click en el chrome), sin dejar gesto armado.
-    {
-        Editor ed;
-        ed.getActiveBufferForTesting().document.restore({"hola mundo"});
-        InputEvent s;
-        s.type = InputEventType::InsertChar;
-        s.text = "s";
-        ed.handleEvent(s);
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::Seleccion));
-        ed.handleEvent(makeMousePressEvent(CellPos{}));
-        CHECK_EQ(static_cast<int>(ed.getStateForTesting()),
-                 static_cast<int>(State::Navegacion));
-        CHECK(!ed.hasSelection());
-        ed.handleEvent(makeMouseDragEvent(CellPos{5, 0}));
-        CHECK(!ed.hasSelection());
-    }
+    Editor ed;
+    ed.getActiveBufferForTesting().document.restore({"hola", "mundo"});
+    InputEvent press = makeMousePressEvent(CellPos{});
+    ed.handleEvent(press);
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Navegacion));
+    CHECK_EQ(ed.getActiveBufferForTesting().cursor.line, 0);
+    CHECK_EQ(ed.getActiveBufferForTesting().cursor.col, 0);
+    
+    // Drag sin press previo: ignorado (sin selección, sin crash).
+    InputEvent drag = makeMouseDragEvent(CellPos{5, 0});
+    ed.handleEvent(drag);
+    CHECK(!ed.hasSelection());
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Navegacion));
+}
+
+// Editor: press inválido desde Selección cancela a Navegación
+// (igual que click en el chrome)
+TEST(mouse_gui_celda_invalida_chrome_cancela_seleccion) {
+    InputEvent pressInv = makeMousePressEvent(CellPos{});
+    CHECK(!pressInv.cell.valid());
+    CHECK_EQ(static_cast<int>(pressInv.type), static_cast<int>(InputEventType::MousePress));
+    
+    Editor ed;
+    InputEvent s;
+    ed.getActiveBufferForTesting().document.restore({"hola mundo"});
+    s.type = InputEventType::InsertChar;
+    s.text = "s";
+    ed.handleEvent(s);
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Seleccion));
+    
+    ed.handleEvent(makeMousePressEvent(CellPos{}));
+    CHECK_EQ(static_cast<int>(ed.getStateForTesting()), static_cast<int>(State::Navegacion));
+    CHECK(!ed.hasSelection());
+    
+    ed.handleEvent(makeMouseDragEvent(CellPos{5, 0}));
+    CHECK(!ed.hasSelection());
 }
