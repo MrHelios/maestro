@@ -227,6 +227,125 @@ TEST(bracket_matcher_ignore_block_comment) {
     CHECK(findMatchingBracket(doc, {1,8}, SyntaxLanguage::Cpp).has_value());
 }
 
+/*
+*  El cursor DENTRO de un string no debe desactivar el highlight de los
+*  corchetes que encierran al string. Solo se ignoran los corchetes que
+*  estan dentro del string, no el contexto que lo rodea.
+*/
+TEST(bracket_matcher_cursor_inside_string_highlights_enclosing) {
+    Document doc;
+
+    for (auto lang : getSyntaxLanguages()) {
+        doc.restore({"(\"hola\")"});
+        // Cursor en medio del string (byte 3 = 'o').
+        auto p = findMatchingBracket(doc, {0, 3}, lang);
+        CHECK(p.has_value());
+        if (p.has_value()) {
+            CHECK_EQ(p->open.line, 0); CHECK_EQ(p->open.col, 0);
+            CHECK_EQ(p->close.line, 0); CHECK_EQ(p->close.col, 7);
+        }
+
+        // Cursor sobre la comilla inicial (tambien dentro del string).
+        p = findMatchingBracket(doc, {0, 1}, lang);
+        CHECK(p.has_value());
+        if (p.has_value()) {
+            CHECK_EQ(p->open.col, 0); CHECK_EQ(p->close.col, 7);
+        }
+    }
+}
+
+/*
+*  Un bracket dentro del string se ignora, pero si el cursor esta sobre el,
+*  el par externo que encierra al string debe seguir marcandose.
+*/
+TEST(bracket_matcher_cursor_inside_string_with_brackets) {
+    Document doc;
+
+    // El ')' dentro del string no debe cerrar el par del '(' externo.
+    doc.restore({"(\"a)b\")"});
+    auto p = findMatchingBracket(doc, {0, 4}, SyntaxLanguage::Cpp); // 'b'
+    CHECK(p.has_value());
+    if (p.has_value()) {
+        CHECK_EQ(p->open.col, 0);
+        CHECK_EQ(p->close.col, 6);
+    }
+
+    // Cursor sobre un '[' que vive dentro del string.
+    doc.restore({"(\"[\")"});
+    p = findMatchingBracket(doc, {0, 2}, SyntaxLanguage::Cpp); // '[' del string
+    CHECK(p.has_value());
+    if (p.has_value()) {
+        CHECK_EQ(p->open.col, 0);
+        CHECK_EQ(p->close.col, 4);
+    }
+}
+
+/*
+*  Cursor dentro de un comentario: los brackets del comentario se ignoran,
+*  pero los que encierran al comentario se siguen marcando.
+*/
+TEST(bracket_matcher_cursor_inside_line_comment_highlights_enclosing) {
+    Document doc;
+    doc.restore({"{", "// hola", "}"});
+
+    auto p = findMatchingBracket(doc, {1, 3}, SyntaxLanguage::Cpp);
+    CHECK(p.has_value());
+    if (p.has_value()) {
+        CHECK_EQ(p->open.line, 0); CHECK_EQ(p->open.col, 0);
+        CHECK_EQ(p->close.line, 2); CHECK_EQ(p->close.col, 0);
+    }
+}
+
+TEST(bracket_matcher_cursor_inside_block_comment_highlights_enclosing) {
+    Document doc;
+    doc.restore({"{", "/* hola */", "}"});
+
+    auto p = findMatchingBracket(doc, {1, 3}, SyntaxLanguage::Cpp);
+    CHECK(p.has_value());
+    if (p.has_value()) {
+        CHECK_EQ(p->open.line, 0); CHECK_EQ(p->open.col, 0);
+        CHECK_EQ(p->close.line, 2); CHECK_EQ(p->close.col, 0);
+    }
+}
+
+/*
+*  Mismo comportamiento en las APIs incrementales que usa el Editor
+*  (findMatchingBracketFrom / findMatchingBracketBounded).
+*/
+TEST(bracket_matcher_from_cursor_inside_string_highlights_enclosing) {
+    Document doc;
+    doc.restore({"(\"hola\")"});
+
+    SyntaxCache cache;
+    cache.setLanguage(SyntaxLanguage::Cpp);
+    cache.ensureValid(doc, doc.lineCount());
+    auto src = makeWarmCacheSource(cache);
+
+    auto p = findMatchingBracketFrom(doc, {0, 3}, SyntaxLanguage::Cpp, src);
+    CHECK(p.has_value());
+    if (p.has_value()) {
+        CHECK_EQ(p->open.line, 0); CHECK_EQ(p->open.col, 0);
+        CHECK_EQ(p->close.line, 0); CHECK_EQ(p->close.col, 7);
+    }
+}
+
+TEST(bracket_matcher_bounded_cursor_inside_comment_highlights_enclosing) {
+    Document doc;
+    doc.restore({"{", "// hola", "}"});
+
+    SyntaxCache cache;
+    cache.setLanguage(SyntaxLanguage::Cpp);
+    cache.ensureValid(doc, doc.lineCount());
+    auto src = makeWarmCacheSource(cache);
+
+    auto p = findMatchingBracketBounded(doc, {1, 3}, SyntaxLanguage::Cpp, src, 0, 3);
+    CHECK(p.has_value());
+    if (p.has_value()) {
+        CHECK_EQ(p->open.line, 0); CHECK_EQ(p->open.col, 0);
+        CHECK_EQ(p->close.line, 2); CHECK_EQ(p->close.col, 0);
+    }
+}
+
 TEST(bracket_matcher_unicode_before) {
     Document doc; 
     

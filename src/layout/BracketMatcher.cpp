@@ -1,16 +1,17 @@
-#include "layout/BracketMatcher.h"
-#include "syntax/SyntaxHighlighter.h"
-#include "syntax/SyntaxLanguage.h"
 #include <algorithm>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "layout/BracketMatcher.h"
+#include "syntax/SyntaxHighlighter.h"
+#include "syntax/SyntaxLanguage.h"
+
 namespace {
 
-bool isOpen(char c) { return c == '(' || c == '[' || c == '{'; }
-bool isClose(char c) { return c == ')' || c == ']' || c == '}'; }
+bool isOpen(char c)    { return c == '(' || c == '[' || c == '{'; }
+bool isClose(char c)   { return c == ')' || c == ']' || c == '}'; }
 bool isBracket(char c) { return isOpen(c) || isClose(c); }
 
 char matchingClose(char o) {
@@ -394,10 +395,10 @@ std::optional<BracketPair> findMatchingBracketGeneric(
     if (col < 0) return std::nullopt;
     if (col > (int)line.size()) col = (int)line.size();
 
-    if (col < (int)line.size() && isIgnoredInSpans(posSpans, col)) {
-        return std::nullopt;
-    }
-
+    // Estar dentro de un string/comentario no invalida el match: 
+    // los brackets que viven dentro de esos spans se ignoran mas abajo, 
+    // pero un par que encierra al string/comentario debe seguir marcandose.
+    
     char bracket = 0;
     Position bracketPos = pos;
     bool hasBracket = false;
