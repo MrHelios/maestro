@@ -1,28 +1,45 @@
-// ===========================================================================
-// Correccion del RENDER DIFERENCIAL (buildDiffFrame).
+// Tests del render diferencial (buildDiffFrame): 
+// un mini-emulador aplica el delta sobre una pantalla y comprueba que, tras edicion/scroll/undo/modal,
+// queda IDENTICA al redibujo completo (buildScreen).
 //
-// Contrato del delta: para cada fila cambiada emite CSI {fila};1H + \x1b[K +
-// contenido de la fila completa. Aca un mini-emulador aplica EXACTAMENTE ese
-// contrato sobre una pantalla y verificamos que, tras secuencias reales de
-// edicion/scroll/undo/pantalla modal, la pantalla resultante sea IDENTICA a
-// la que produce el redibujo completo (buildScreen).
+// Casos del plan:
+//   - softwrap: solo cambia topOffset con top constante        -> frame completo
+//   - tipeo repetido                                           -> identico al full
+//   - edicion de lineas (backspace + newline)                  -> identico al full
+//   - navegacion vertical (down/up)                            -> identico al full
+//   - undo / redo                                              -> identico al full
+//   - una tecla emite menos bytes que un frame completo
+//   - segundo frame sin cambios solo mueve el cursor
+//   - editar una linea reescribe solo esa fila
+//   - acortar una linea limpia los caracteres eliminados
+//   - desplazar el viewport actualiza las filas visibles
+//   - navegar con scroll actualiza las filas visibles
+//   - file browser: la pantalla muestra los archivos
+//   - cache invalidada (vuelta de modal)                       -> frame completo
+//   - mensaje temporal: aparece y se limpia                    -> identico al full
+//   - selector de buffers: muestra la lista y no autoinvalida
+//   - resize del viewport                                      -> frame completo
+//   - chrome: statusBar y message se repintan por separado
+//   - mismo texto, distinto MessageKind                        -> repinta el mensaje
+//   - gutter 99999->100000 lineas                              -> rebuild completo
 //
-// Propiedad economica adicional: una tecla no debe emitir el frame entero.
-// ---------------------------------------------------------------------------
+// Invariante central: 
+// cada delta deja la pantalla IDENTICA al frame completo;
+// una vez construido el cache no se permite borrado total (\x1b[2J).
 
 #include <chrono>
 #include <cstdio>
-#include <functional>
 #include <string>
 #include <vector>
 
+#include "helpers/test_gui_chrome_common.h"  // makeVp
 #include "test_framework.h"
+
 #include "layout/Gutter.h"
 #include "layout/SoftWrap.h"
 #include "layout/Viewport.h"
 #include "rendering/Sink.h"
 #include "platform/InputEvent.h"  // usa InputEvent común
-#include "helpers/test_gui_chrome_common.h"  // makeVp
 
 #define private public
 #include "app/ChromePresentation.h"
@@ -234,6 +251,10 @@ struct DiffHarness {
     Editor ed;
     TtyRenderer r;  // driver del diff (el Editor ya no expone el backend)
     int kRows;
+    // Pantallas acumuladas: una recibe los deltas, la otra los frames completos.
+    // Persisten entre acciones para comparar el estado tras cada paso.
+    TinyTerm viaDiff{0};
+    TinyTerm viaFull{0};
 
     explicit DiffHarness(int lines) {
         ed.getActiveBufferForTesting().document.restore(
@@ -241,6 +262,8 @@ struct DiffHarness {
                                      std::string(80, 'x')));
         ed.executeCommand("navegacion.interaccion");
         kRows = ed.getActiveBufferForTesting().viewport.height + 2;
+        viaDiff = TinyTerm(kRows);
+        viaFull = TinyTerm(kRows);
     }
 
     Buffer& buf() { return ed.getActiveBufferForTesting(); }
@@ -253,51 +276,100 @@ struct DiffHarness {
     }
 };
 
-// TtyDiff: cambiar solo topOffset (top constante) debe forzar frame completo,
-// porque la primera fila visual del viewport se desplaza. La condición de
-// reutilización de caché (buildDiffFrame) no comparaba topOffset, así que un
-// cambio de topOffset con top igual reutilizaba rowCache_ desfasado.
+// Aplica el siguiente delta sobre la pantalla acumulada y verifica que coincide
+// con el frame completo equivalente. También exige que el delta no haga un
+// borrado total una vez que el renderer ya tiene caché.
+void checkDiffMatchesFull(DiffHarness& h) {
+    Buffer& b = h.buf();
+    b.viewport.scrollToCursor(b.cursor);
+    const bool allowFullClear = !h.r.hasCache();
+    const std::string full = h.r.buildScreen(
+        b.document, b.cursor, b.viewport, b.filename, b.modified,
+        makeChromeRequest(Message(""), State::Navegacion), b.selection);
+    checkDiffMatchesFull(h.viaDiff, h.viaFull, h.getDiffOutput(), full,
+                         allowFullClear);
+}
+
+// Primer frame: el renderer aún no tiene caché, así que se permite el borrado
+// total que emite buildDiffFrame al arrancar.
+void checkInitialFrame(DiffHarness& h) {
+    checkDiffMatchesFull(h);
+}
+
+void typeRepeatedly(DiffHarness& h, char c, int times) {
+    for (int i = 0; i < times; ++i) h.ed.handleEvent(key(c));
+}
+
+void pressBackspace(DiffHarness& h) {
+    h.ed.handleEvent(move(InputEventType::Backspace));
+}
+
+void insertNewline(DiffHarness& h) {
+    h.ed.handleEvent(move(InputEventType::InsertNewline));
+}
+
+void moveDown(DiffHarness& h, int times) {
+    for (int i = 0; i < times; ++i) h.ed.handleEvent(move(InputEventType::MoveDown));
+}
+
+void moveUp(DiffHarness& h, int times) {
+    for (int i = 0; i < times; ++i) h.ed.handleEvent(move(InputEventType::MoveUp));
+}
+
+void undo(DiffHarness& h) {
+    h.ed.handleEvent(move(InputEventType::Undo));
+}
+
+void redo(DiffHarness& h) {
+    h.ed.handleEvent(move(InputEventType::Redo));
+}
+
+} // namespace
+
+// TtyDiff: 
+// cambiar solo topOffset (top constante) debe forzar frame completo, porque la primera fila visual 
+// del viewport se desplaza. 
 TEST(render_diff_softwrap_topoffset_changes_force_full_frame) {
-    // Mismo fixture que gui_diff_softwrap_topoffset_changes_force_full_frame.
     Document doc;
-    doc.restore(softWrapLines());
     Viewport vp = makeVp(6, 24);
     Cursor cur;
+    softwrap::Index idx;
+    
+    doc.restore(softWrapLines());
     cur.col = 20;  // continuación de L0
     const int textWidth = vp.width - gutterWidth(doc.lineCount(), vp.width);
-    softwrap::Index idx;
     CHECK(idx.ensure(doc, textWidth, true, vp.top, vp.height));
     CHECK(idx.enabled());
 
     TtyRenderer r;
     r.setWrapIndex(&idx);
 
-    // 1) top=0, topOffset=0 -> construye caché.
-    std::string first = r.buildDiffFrame(
-        doc, cur, vp, "notes.md", false,
-        makeChromeRequest(Message(""), State::Navegacion), std::nullopt);
+    // top=0, topOffset=0 -> construye caché.
+    std::string first = r.buildDiffFrame(doc, cur, vp, "notes.md", false, 
+                                        makeChromeRequest(Message(""), State::Navegacion), 
+                                        std::nullopt);
     CHECK(r.hasCache());
     CHECK(!first.empty());
 
-    // 2) Solo cambia topOffset a 1 (top permanece 0).
+    // Solo cambia topOffset a 1 (top permanece 0).
     vp.topOffset = 1;
     CHECK_EQ(vp.top, 0);
-
-    std::string incremental = r.buildDiffFrame(
-        doc, cur, vp, "notes.md", false,
-        makeChromeRequest(Message(""), State::Navegacion), std::nullopt);
-
+    
     // El diff no puede estar vacío: la primera fila visual cambió.
+    std::string incremental = r.buildDiffFrame(doc, cur, vp, "notes.md", false,
+                                            makeChromeRequest(Message(""), State::Navegacion), 
+                                            std::nullopt);
     CHECK(!incremental.empty());
 
-    // 3) Oráculo: renderer nuevo, frame completo con el mismo viewport.
+    // Oráculo: renderer nuevo, frame completo con el mismo viewport.
     TtyRenderer fresh;
     softwrap::Index idx2;
+    
     CHECK(idx2.ensure(doc, textWidth, true, vp.top, vp.height));
     fresh.setWrapIndex(&idx2);
-    std::string full = fresh.buildScreen(
-        doc, cur, vp, "notes.md", false,
-        makeChromeRequest(Message(""), State::Navegacion), std::nullopt);
+    std::string full = fresh.buildScreen(doc, cur, vp, "notes.md", false,
+                                        makeChromeRequest(Message(""), State::Navegacion), 
+                                        std::nullopt);
 
     // Las filas de contenido deben coincidir con el frame completo.
     TinyTerm viaDiff(vp.height + 2), viaFull(vp.height + 2);
@@ -305,228 +377,339 @@ TEST(render_diff_softwrap_topoffset_changes_force_full_frame) {
     viaFull.apply(full);
     CHECK(viaDiff == viaFull);
 
-    // 4) Volver a topOffset=0 también debe invalidar.
+    // Volver a topOffset=0 también debe invalidar.
     vp.topOffset = 0;
-    r.buildDiffFrame(
-        doc, cur, vp, "notes.md", false,
-        makeChromeRequest(Message(""), State::Navegacion), std::nullopt);
+    std::string back = r.buildDiffFrame(doc, cur, vp, "notes.md", false,
+                                        makeChromeRequest(Message(""), State::Navegacion), 
+                                        std::nullopt);                
+    TtyRenderer freshBack;
+    softwrap::Index idx3;
+    CHECK(idx3.ensure(doc, textWidth, true, vp.top, vp.height));
+    
+    freshBack.setWrapIndex(&idx3);
+    std::string fullBack = fresh.buildScreen(doc, cur, vp, "notes.md", false,
+                                        makeChromeRequest(Message(""), State::Navegacion), 
+                                        std::nullopt);
+    TinyTerm viaBack(vp.height + 2), viaFullBack(vp.height + 2);
+    viaBack.apply(back);
+    viaFullBack.apply(fullBack);
+    
+    CHECK(viaBack == viaFullBack);
 }
 
-} // namespace
-
-TEST(render_diff_pantalla_identica_al_frame_completo) {
+TEST(render_diff_matches_full_after_typing) {
     DiffHarness h(300);
-    Buffer& b = h.buf();
 
-    TinyTerm viaDiff(h.kRows);
-    TinyTerm viaFull(h.kRows);
+    checkInitialFrame(h);
 
-    auto syncBoth = [&](const std::function<void()>& action) {
-        action();
-        b.viewport.scrollToCursor(b.cursor);
-        bool allowFullClear = !h.r.hasCache();
-        checkDiffMatchesFull(viaDiff, viaFull,
-            h.getDiffOutput(),
-            h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message(""), State::Navegacion), b.selection),
-            allowFullClear);
-    };
+    typeRepeatedly(h, 'a', 20);
+    checkDiffMatchesFull(h);
 
-    syncBoth([] {});
+    typeRepeatedly(h, 'a', 20);
+    checkDiffMatchesFull(h);
+}
 
-    for (int burst = 0; burst < 3; ++burst) {
-        syncBoth([&] { for (int i = 0; i < 20; ++i) h.ed.handleEvent(key('a')); });
-    }
+TEST(render_diff_matches_full_after_editing_lines) {
+    DiffHarness h(300);
 
-    syncBoth([&] { h.ed.handleEvent(move(InputEventType::Backspace)); });
-    syncBoth([&] { h.ed.handleEvent(move(InputEventType::InsertNewline)); });
-    syncBoth([&] {
-        for (int i = 0; i < 40; ++i) h.ed.handleEvent(move(InputEventType::MoveDown));
-    });
-    syncBoth([&] {
-        for (int i = 0; i < 60; ++i) h.ed.handleEvent(move(InputEventType::MoveUp));
-    });
+    checkInitialFrame(h);
 
-    syncBoth([&] { h.ed.handleEvent(move(InputEventType::Undo)); });
-    syncBoth([&] { h.ed.handleEvent(move(InputEventType::Redo)); });
+    pressBackspace(h);
+    checkDiffMatchesFull(h);
+
+    insertNewline(h);
+    checkDiffMatchesFull(h);
+}
+
+TEST(render_diff_matches_full_after_vertical_navigation) {
+    DiffHarness h(300);
+
+    checkInitialFrame(h);
+
+    moveDown(h, 40);
+    checkDiffMatchesFull(h);
+
+    moveUp(h, 60);
+    checkDiffMatchesFull(h);
+}
+
+TEST(render_diff_matches_full_after_undo_redo) {
+    DiffHarness h(300);
+
+    checkInitialFrame(h);
+
+    typeRepeatedly(h, 'a', 20);
+    checkDiffMatchesFull(h);
+
+    undo(h);
+    checkDiffMatchesFull(h);
+
+    redo(h);
+    checkDiffMatchesFull(h);
 }
 
 TEST(render_diff_tecla_emite_menos_que_frame_completo) {
     DiffHarness h(300);
     Buffer& b = h.buf();
 
+    // Preparar la caché del renderer incremental.
     h.getDiffOutput();
 
-    const std::size_t fullSize = h.r.buildScreen(
-        b.document, b.cursor, b.viewport, b.filename, b.modified,
-        makeChromeRequest(Message(""), State::Navegacion), b.selection).size();
+    // Medir un frame completo con un renderer independiente.
+    TtyRenderer fullRenderer;
+    const std::size_t fullFrameBytes = fullRenderer.buildScreen(b.document, b.cursor, b.viewport,b.filename, b.modified,
+                                                    makeChromeRequest(Message(""), State::Navegacion),b.selection).size();
 
-    const std::size_t deltaSize = [&] {
-        h.ed.handleEvent(key('a'));
-        return h.getDiffOutput().size();
-    }();
-
-    CHECK(deltaSize < fullSize / 4);
-    std::printf("      delta tecla: %zu bytes vs frame completo %zu bytes\n",
-                deltaSize, fullSize);
+    // Escribir un carácter y medir la salida incremental.
+    h.ed.handleEvent(key('a'));
+    const std::size_t incrementalBytes = h.getDiffOutput().size();
+    CHECK(incrementalBytes < fullFrameBytes / 4);
 }
 
 TEST(render_diff_segundo_frame_solo_mueve_cursor) {
     DiffHarness h(300);
-    const std::string init = h.getDiffOutput();
     TinyTerm viaDiff(h.kRows), viaFull(h.kRows);
-    viaDiff.apply(init);
-    viaFull.apply(init);
-    const std::size_t fullSize = h.r.buildScreen(
-        h.buf().document, h.buf().cursor, h.buf().viewport, h.buf().filename,
-        h.buf().modified, makeChromeRequest(Message(""), State::Navegacion), h.buf().selection).size();
+    Buffer& b = h.buf();
 
-    h.buf().cursor.col = 5;
-    const std::string delta = h.getDiffOutput();
-    const std::string full = h.r.buildScreen(
-        h.buf().document, h.buf().cursor, h.buf().viewport, h.buf().filename,
-        h.buf().modified, makeChromeRequest(Message(""), State::Navegacion), h.buf().selection);
+    // Sincronizar ambas terminales con el frame inicial.
+    const std::string initialFrame = h.getDiffOutput();
+    viaDiff.apply(initialFrame);
+    viaFull.apply(initialFrame);
 
-    checkDiffMatchesFull(viaDiff, viaFull, delta, full, false);
-    CHECK(delta.size() < fullSize / 4);
+    // Medir el tamaño de referencia con un renderer independiente.
+    TtyRenderer fullRenderer;
+    const std::size_t fullFrameBytes =
+        fullRenderer.buildScreen(
+            b.document, b.cursor, b.viewport,
+            b.filename, b.modified,
+            makeChromeRequest(Message(""), State::Navegacion),
+            b.selection
+        ).size();
+
+    // Mover el cursor sin modificar el documento.
+    b.cursor.col = 5;
+    const std::string cursorUpdate = h.getDiffOutput();
+
+    // Verificar que el resultado incremental sea correcto.
+    TtyRenderer oracleRenderer;
+    const std::string expectedFrame =
+        oracleRenderer.buildScreen(
+            b.document, b.cursor, b.viewport,
+            b.filename, b.modified,
+            makeChromeRequest(Message(""), State::Navegacion),
+            b.selection
+        );
+
+    checkDiffMatchesFull(
+        viaDiff, viaFull, cursorUpdate, expectedFrame, false
+    );
+
+    // Mover el cursor no debería requerir redibujar toda la pantalla.
+    CHECK(cursorUpdate.size() < fullFrameBytes / 4);
 }
 
 TEST(render_diff_edicion_una_sola_linea_solo_esa_fila) {
     DiffHarness h(300);
-    const std::string init = h.getDiffOutput();
     TinyTerm viaDiff(h.kRows), viaFull(h.kRows);
-    viaDiff.apply(init);
-    viaFull.apply(init);
 
-    const int targetLine = h.buf().cursor.line;
-    h.buf().document.lineAt(targetLine);
+    // Sincronizar las terminales con el frame inicial.
+    const std::string initialFrame = h.getDiffOutput();
+    viaDiff.apply(initialFrame);
+    viaFull.apply(initialFrame);
+
+    // Modificar un carácter de la línea actual.
     h.ed.handleEvent(key('Z'));
+
     const std::string delta = h.getDiffOutput();
     const std::string full = h.r.buildScreen(
-        h.buf().document, h.buf().cursor, h.buf().viewport, h.buf().filename,
-        h.buf().modified, makeChromeRequest(Message(""), State::Navegacion), h.buf().selection);
+        h.buf().document, h.buf().cursor, h.buf().viewport,
+        h.buf().filename, h.buf().modified,
+        makeChromeRequest(Message(""), State::Navegacion),
+        h.buf().selection
+    );
 
+    // El resultado incremental debe coincidir con el frame completo.
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, false);
-    int rewrites = 0;
-    for (std::size_t p = 0; (p = delta.find("\x1b[K", p)) != std::string::npos; ++rewrites, ++p) {}
-    // 1 fila editada + 1 statusBar + 1 margen (frágil: ajustar si se añade wrap/indicador)
-    CHECK(rewrites >= 1 && rewrites <= 3);
+
+    // Contar las filas que se limpian para reescribirse.
+    int rewrittenRows = 0;
+    for (std::size_t pos = 0;
+         (pos = delta.find("\x1b[K", pos)) != std::string::npos;
+         ++rewrittenRows, ++pos) {}
+
+    CHECK(rewrittenRows >= 1 && rewrittenRows <= 3);
 }
 
-TEST(render_diff_linea_se_encoge_no_deja_basura) {
+TEST(render_diff_al_acortar_linea_limpia_caracteres_eliminados) {
     DiffHarness h(300);
     Buffer& b = h.buf();
     TinyTerm viaDiff(h.kRows), viaFull(h.kRows);
 
     bool allow1 = !h.r.hasCache();
-    for (int i = 0; i < 20; ++i) h.ed.handleEvent(key('a'));
+    for (int i = 0; i < 20; ++i) 
+        h.ed.handleEvent(key('a'));
     b.viewport.scrollToCursor(b.cursor);
     std::string delta = h.getDiffOutput();
-    std::string full = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message(""), State::Navegacion), b.selection);
+    std::string full = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, 
+                                        makeChromeRequest(Message(""), State::Navegacion), b.selection);
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, allow1);
 
-    for (int i = 0; i < 10; ++i) h.ed.handleEvent(move(InputEventType::Backspace));
+    for (int i = 0; i < 10; ++i) 
+        h.ed.handleEvent(move(InputEventType::Backspace));
     b.viewport.scrollToCursor(b.cursor);
-
     delta = h.getDiffOutput();
-    full = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message(""), State::Navegacion), b.selection);
+    full = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, 
+                            makeChromeRequest(Message(""), State::Navegacion), b.selection);
 
     CHECK(delta.find("\x1b[K") != std::string::npos);
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, true);
     CHECK(viaDiff.screen[0].find("aaaaaaaaaa") != std::string::npos);
+    // TinyTerm inicializa las celdas de su pantalla con x para poder detectar posiciones que nunca fueron dibujadas.
     CHECK(viaDiff.screen[0].find("xxxxxxxxxx") != std::string::npos);
 }
 
-TEST(render_diff_scroll_reescribe_filas_sin_borrado_total) {
+TEST(render_diff_al_desplazar_viewport_actualiza_filas_visibles) {
     DiffHarness h(300);
-    const std::string init = h.getDiffOutput();
-    TinyTerm viaDiff(h.kRows), viaFull(h.kRows);
-    viaDiff.apply(init);
-    viaFull.apply(init);
+    Buffer& b = h.buf();
 
-    h.buf().viewport.top = 5;
-    h.buf().cursor.line = 10;
+    TinyTerm viaDiff(h.kRows), viaFull(h.kRows);
+
+    // Estado inicial: viewport en el comienzo del documento.
+    b.viewport.top = 0;
+    b.cursor.line = 0;
+
+    const std::string initialFrame = h.getDiffOutput();
+    viaDiff.apply(initialFrame);
+    viaFull.apply(initialFrame);
+
+    // Desplazar el viewport cinco líneas.
+    b.viewport.top = 5;
+    b.cursor.line = 10;
+
     const std::string delta = h.getDiffOutput();
     const std::string full = h.r.buildScreen(
-        h.buf().document, h.buf().cursor, h.buf().viewport, h.buf().filename,
-        h.buf().modified, makeChromeRequest(Message(""), State::Navegacion), h.buf().selection);
+        b.document, b.cursor, b.viewport,
+        b.filename, b.modified,
+        makeChromeRequest(Message(""), State::Navegacion),
+        b.selection
+    );
 
+    // El resultado incremental debe coincidir con el frame completo.
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, false);
-    int rewrites = 0;
-    for (std::size_t p = 0; (p = delta.find("\x1b[K", p)) != std::string::npos; ++rewrites, ++p) {}
-    CHECK(rewrites >= h.buf().viewport.height);
+
+    // El desplazamiento debe actualizar las filas visibles.
+    int rewrittenRows = 0;
+    for (std::size_t pos = 0;
+         (pos = delta.find("\x1b[K", pos)) != std::string::npos;
+         ++rewrittenRows, ++pos) {}
+
+    CHECK(rewrittenRows >= b.viewport.height);
 }
 
-TEST(render_diff_scroll_realista_reescribe_filas_sin_borrado_total) {
+TEST(render_diff_navegacion_vertical_con_scroll_actualiza_filas_visibles) {
     DiffHarness h(300);
     Buffer& b = h.buf();
     TinyTerm viaDiff(h.kRows), viaFull(h.kRows);
 
-    h.getDiffOutput();
+    // Sincronizar las terminales con el frame inicial.
+    const std::string initialFrame = h.getDiffOutput();
+    viaDiff.apply(initialFrame);
+    viaFull.apply(initialFrame);
 
-    for (int i = 0; i < 30; ++i) h.ed.handleEvent(move(InputEventType::MoveDown));
+    // Simular navegación vertical que provoca desplazamiento.
+    for (int i = 0; i < 30; ++i)
+        h.ed.handleEvent(move(InputEventType::MoveDown));
+
     b.viewport.scrollToCursor(b.cursor);
 
     const std::string delta = h.getDiffOutput();
     const std::string full = h.r.buildScreen(
-        b.document, b.cursor, b.viewport, b.filename, b.modified,
-        makeChromeRequest(Message(""), State::Navegacion), b.selection);
+        b.document, b.cursor, b.viewport,
+        b.filename, b.modified,
+        makeChromeRequest(Message(""), State::Navegacion),
+        b.selection
+    );
 
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, false);
-    int rewrites = 0;
-    for (std::size_t p = 0; (p = delta.find("\x1b[K", p)) != std::string::npos; ++rewrites, ++p) {}
-    CHECK(rewrites >= b.viewport.height);
+
+    // El desplazamiento debe actualizar las filas visibles.
+    int rewrittenRows = 0;
+    for (std::size_t pos = 0;
+         (pos = delta.find("\x1b[K", pos)) != std::string::npos;
+         ++rewrittenRows, ++pos) {}
+
+    CHECK(rewrittenRows >= b.viewport.height);
 }
 
-TEST(render_diff_vuelta_de_filebrowser_es_completo) {
-    DiffHarness h(300);
-    NullSink null;
-    TtyRenderer tr;
-    h.getDiffOutput();
-    tr.renderFileList(std::vector<FileListItem>{{"a.txt", false}, {"b.txt", false}}, 0, 0, "/tmp", MessageBarData(""), 80, 24, null);
-    // El backend no se autoinvalida: el caller invalida al entrar/salir
-    // del modal (igual que Editor::renderFrame).
-    h.r.invalidateCache();
-    CHECK(!h.r.hasCache());
-    const std::string trasFileList = h.getDiffOutput();
-    CHECK(trasFileList.find("\x1b[2J\x1b[H") != std::string::npos);
+TEST(render_filebrowser_muestra_archivos) {
+    // StringSink: a diferencia de NullSink, conserva los bytes emitidos para
+    // poder comprobar que el listado se generó de verdad.
+    StringSink sink;
+    TtyRenderer renderer;
+
+    const std::vector<FileListItem> files{
+        {"a.txt", false},
+        {"b.txt", false}
+    };
+
+    renderer.renderFileList(
+        files, 0, 0, "/tmp",
+        MessageBarData(""),
+        80, 24, sink
+    );
+
+    // El frame no puede estar vacío y debe contener ambos nombres, la ruta
+    // y el contador de selección (1/2 para el primer archivo).
+    CHECK(!sink.buf.empty());
+    CHECK(sink.buf.find("a.txt") != std::string::npos);
+    CHECK(sink.buf.find("b.txt") != std::string::npos);
+    CHECK(sink.buf.find("/tmp") != std::string::npos);
+    CHECK(sink.buf.find("1/2") != std::string::npos);
+
+    // La etiqueta del modo abrir también forma parte del chrome.
+    CHECK(sink.buf.find("ABRIR ARCHIVO") != std::string::npos);
 }
 
-TEST(render_diff_mensaje_temporal) {
+// El selector de buffers es un modal: se dibuja con el mismo backend, pero no
+// invalida el cache diferencial por si solo. El caller (Editor::renderFrame)
+// invalida al entrar/salir, y el primer frame de vuelta es un rebuild total.
+TEST(render_diff_vuelta_de_selector_de_buffers_es_completa) {
     DiffHarness h(300);
-    Buffer& b = h.buf();
-    TinyTerm viaDiff(h.kRows), viaFull(h.kRows);
+    StringSink modal;
 
-    const std::string init = h.getDiffOutput();
-    viaDiff.apply(init);
-    viaFull.apply(init);
-
-    b.viewport.scrollToCursor(b.cursor);
-    std::string deltaMsg = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message("Guardando..."), State::Navegacion), b.selection);
-    std::string fullMsg = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message("Guardando..."), State::Navegacion), b.selection);
-
-    checkDiffMatchesFull(viaDiff, viaFull, deltaMsg, fullMsg, false);
-
-    std::string deltaClear = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message(""), State::Navegacion), b.selection);
-    std::string fullClear = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, makeChromeRequest(Message(""), State::Navegacion), b.selection);
-
-    checkDiffMatchesFull(viaDiff, viaFull, deltaClear, fullClear, false);
-}
-
-TEST(render_diff_invalidacion_por_modal_y_resize) {
-    DiffHarness h(300);
-    NullSink null;
-    TtyRenderer tr;
-
+    // Cache inicial del editor.
     h.getDiffOutput();
     CHECK(h.r.hasCache());
 
-    tr.renderBufferList({"uno", "dos"}, 0, 0, 80, 24, null);
-    // Idem arriba: el backend no se autoinvalida.
+    h.r.renderBufferList({"uno", "dos"}, 0, 0, 80, 24, modal);
+
+    // La salida es la pantalla del selector, con ambos buffers visibles.
+    CHECK(!modal.buf.empty());
+    CHECK(modal.buf.find("Buffers") != std::string::npos);
+    CHECK(modal.buf.find("SELECCIONAR") != std::string::npos);
+    CHECK(modal.buf.find("1/2") != std::string::npos);
+    CHECK(modal.buf.find("uno") != std::string::npos);
+    CHECK(modal.buf.find("dos") != std::string::npos);
+
+    // Renderizar el modal no invalida el cache diferencial.
+    CHECK(h.r.hasCache());
+
+    // Vuelta al editor: el caller invalida y el frame siguiente es completo.
     h.r.invalidateCache();
     CHECK(!h.r.hasCache());
     const std::string trasModal = h.getDiffOutput();
     CHECK(trasModal.find("\x1b[2J\x1b[H") != std::string::npos);
     CHECK(h.r.hasCache());
+}
+
+// Cambiar la altura del viewport (resize) sin invalidar el cache también
+// fuerza rebuild total: la geometría cacheada ya no sirve.
+TEST(render_diff_resize_fuerza_frame_completo) {
+    DiffHarness h(300);
+
+    h.getDiffOutput();
+    CHECK(h.r.hasCache());
+    CHECK(h.r.lastViewportH() != 30);
 
     h.buf().viewport.height = 30;
     const std::string trasResize = h.getDiffOutput();
@@ -534,10 +717,83 @@ TEST(render_diff_invalidacion_por_modal_y_resize) {
     CHECK_EQ(h.r.lastViewportH(), 30);
 }
 
-// Contrato de composicion a nivel diff: ChromeData = StatusBar + MessageBar.
-// Solo-cambia-statusBar reescribe solo la fila 1 del chrome; solo-cambia-message
-// reescribe solo la fila 2. Las filas se identifican por su CUP de rewrite
-// (col 1); el cursor cae en el contenido (col != 1).
+TEST(render_diff_cache_invalidada_fuerza_frame_completo) {
+    DiffHarness h(300);
+    Buffer& b = h.buf();
+
+    // Construir la caché inicial.
+    h.getDiffOutput();
+    CHECK(h.r.hasCache());
+
+    // Simular la pantalla modal (file browser) dibujada por el mismo backend:
+    // escribe un frame completo sobre el terminal, pero no toca el cache
+    // diferencial del editor.
+    StringSink modal;
+    h.r.renderFileList(
+        std::vector<FileListItem>{{"a.txt", false}, {"b.txt", false}},
+        0, 0, "/tmp", MessageBarData(""), 80, 24, modal);
+    CHECK(!modal.buf.empty());
+    CHECK(h.r.hasCache());
+
+    // Al volver del modal el caller (Editor::renderFrame) invalida el cache:
+    // el estado que quedó en pantalla ya no corresponde al del editor.
+    h.r.invalidateCache();
+    CHECK(!h.r.hasCache());
+
+    const std::string output = h.getDiffOutput();
+
+    // El siguiente frame es un rebuild total, no un delta sobre el modal.
+    CHECK(output.find("\x1b[2J\x1b[H") != std::string::npos);
+    CHECK(h.r.hasCache());
+
+    // Además de limpiar, debe reescribir todas las filas del contenido.
+    int rewrittenRows = 0;
+    for (std::size_t pos = 0;
+         (pos = output.find("\x1b[K", pos)) != std::string::npos;
+         ++rewrittenRows, ++pos) {}
+    CHECK(rewrittenRows >= b.viewport.height);
+
+    // Y la pantalla resultante coincide con el frame completo canónico.
+    const std::string full = h.r.buildScreen(
+        b.document, b.cursor, b.viewport, b.filename, b.modified,
+        makeChromeRequest(Message(""), State::Navegacion), b.selection);
+    TinyTerm viaDiff(h.kRows), viaFull(h.kRows);
+    viaDiff.apply(output);
+    viaFull.apply(full);
+    CHECK(viaDiff == viaFull);
+}
+
+TEST(render_diff_mostrar_y_quitar_mensaje_temporal) {
+    DiffHarness h(300);
+    Buffer& b = h.buf();
+    TinyTerm viaDiff(h.kRows), viaFull(h.kRows);
+
+    const std::string init = h.getDiffOutput();
+    viaDiff.apply(init);
+    viaFull.apply(init);
+
+    b.viewport.scrollToCursor(b.cursor);
+    std::string deltaMsg = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, b.filename, b.modified, 
+                                            makeChromeRequest(Message("Guardando..."), State::Navegacion), b.selection);
+    std::string fullMsg = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, 
+                                            makeChromeRequest(Message("Guardando..."), State::Navegacion), b.selection);
+                                            
+    checkDiffMatchesFull(viaDiff, viaFull, deltaMsg, fullMsg, false);
+
+    std::string deltaClear = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, b.filename, b.modified, 
+                                                makeChromeRequest(Message(""), State::Navegacion), b.selection);
+    std::string fullClear = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified, 
+                                            makeChromeRequest(Message(""), State::Navegacion), b.selection);
+                                            
+    checkDiffMatchesFull(viaDiff, viaFull, deltaClear, fullClear, false);
+}
+
+// Contrato de composicion a nivel diff: 
+// ChromeData = StatusBar + MessageBar.
+// Solo-cambia-statusBar reescribe solo la fila 1 del chrome; 
+// solo-cambia-message reescribe solo la fila 2. 
+// Las filas se identifican por su CUP de rewrite (col 1); 
+// el cursor cae en el contenido (col != 1).
 TEST(render_diff_chrome_status_and_message_isolated) {
     DiffHarness h(10);
     Buffer& b = h.buf();
@@ -547,27 +803,20 @@ TEST(render_diff_chrome_status_and_message_isolated) {
     b.viewport.left = 0;
     b.cursor.line = 0;
     b.cursor.col = 0;
+    
     // contentH == viewport.height cuando hay chrome (ver calculateLayout).
     const int contentH = b.viewport.height;
-    const std::string statusCup =
-        "\x1b[" + std::to_string(contentH + 1) + ";1H";
-    const std::string messageCup =
-        "\x1b[" + std::to_string(contentH + 2) + ";1H";
+    const std::string statusCup = "\x1b[" + std::to_string(contentH + 1) + ";1H";
+    const std::string messageCup = "\x1b[" + std::to_string(contentH + 2) + ";1H";
 
     // Prime: frame completo con a.txt / msg uno.
-    std::string prime = h.r.buildDiffFrame(
-        b.document, b.cursor, b.viewport, "a.txt", false,
-        makeChromeRequest(Message("msg uno", MessageKind::Info, std::nullopt),
-                          State::Navegacion),
-        b.selection);
+    std::string prime = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, "a.txt", false,
+        makeChromeRequest(Message("msg uno", MessageKind::Info, std::nullopt),State::Navegacion),b.selection);
     CHECK(prime.find("\x1b[2J") != std::string::npos);
 
     // Solo StatusBar (mismo Message): debe tocar fila 1, no fila 2.
-    std::string deltaStatus = h.r.buildDiffFrame(
-        b.document, b.cursor, b.viewport, "b.txt", false,
-        makeChromeRequest(Message("msg uno", MessageKind::Info, std::nullopt),
-                          State::Navegacion),
-        b.selection);
+    std::string deltaStatus = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, "b.txt", false,
+        makeChromeRequest(Message("msg uno", MessageKind::Info, std::nullopt),State::Navegacion),b.selection);
     CHECK(deltaStatus.find("\x1b[2J") == std::string::npos);
     CHECK(deltaStatus.find(statusCup) != std::string::npos);
     CHECK(deltaStatus.find(messageCup) == std::string::npos);
@@ -575,9 +824,7 @@ TEST(render_diff_chrome_status_and_message_isolated) {
     // Solo MessageBar (mismo StatusBar): debe tocar fila 2, no fila 1.
     std::string deltaMessage = h.r.buildDiffFrame(
         b.document, b.cursor, b.viewport, "b.txt", false,
-        makeChromeRequest(Message("msg dos", MessageKind::Info, std::nullopt),
-                          State::Navegacion),
-        b.selection);
+        makeChromeRequest(Message("msg dos", MessageKind::Info, std::nullopt),State::Navegacion),b.selection);
     CHECK(deltaMessage.find("\x1b[2J") == std::string::npos);
     CHECK(deltaMessage.find(messageCup) != std::string::npos);
     CHECK(deltaMessage.find(statusCup) == std::string::npos);
@@ -597,49 +844,34 @@ TEST(render_diff_mismo_texto_distinto_kind_repinta) {
     b.cursor.line = 0;
     b.cursor.col = 0;
     const int contentH = b.viewport.height;
-    const std::string statusCup =
-        "\x1b[" + std::to_string(contentH + 1) + ";1H";
-    const std::string messageCup =
-        "\x1b[" + std::to_string(contentH + 2) + ";1H";
+    const std::string statusCup = "\x1b[" + std::to_string(contentH + 1) + ";1H";
+    const std::string messageCup = "\x1b[" + std::to_string(contentH + 2) + ";1H";
 
     // Prime: "hola" Prompt (estilo distinto al resto de mensajes).
-    std::string prime = h.r.buildDiffFrame(
-        b.document, b.cursor, b.viewport, "a.txt", false,
-        makeChromeRequest(Message("hola", MessageKind::Prompt, std::nullopt),
-                          State::Navegacion),
-        b.selection);
+    std::string prime = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, "a.txt", false,
+        makeChromeRequest(Message("hola", MessageKind::Prompt, std::nullopt),State::Navegacion),b.selection);
     CHECK(prime.find("\x1b[2J") != std::string::npos);
 
     // Mismo texto, distinto kind: repinta la fila inferior, no la superior.
-    std::string deltaKind = h.r.buildDiffFrame(
-        b.document, b.cursor, b.viewport, "a.txt", false,
-        makeChromeRequest(Message("hola", MessageKind::Error, std::nullopt),
-                          State::Navegacion),
-        b.selection);
-    CHECK(deltaKind.find("\x1b[2J") == std::string::npos);
+    std::string deltaKind = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, "a.txt", false,
+        makeChromeRequest(Message("hola", MessageKind::Error, std::nullopt),State::Navegacion),b.selection);
+    CHECK(deltaKind.find("\x1b[2J")  == std::string::npos);
     CHECK(deltaKind.find(messageCup) != std::string::npos);
-    CHECK(deltaKind.find(statusCup) == std::string::npos);
+    CHECK(deltaKind.find(statusCup)  == std::string::npos);
 
     // Misma presentación (texto y kind): sin repintado del chrome.
     // El `expiry` temporal del Message ya no viaja al rendering por
     // construcción (makeChromeRequest solo lleva texto + tipo), asi que dos
     // Messages que difieren solo en vencimiento producen el mismo request.
-    std::string deltaExpiry = h.r.buildDiffFrame(
-        b.document, b.cursor, b.viewport, "a.txt", false,
-        makeChromeRequest(Message("hola", MessageKind::Error, std::nullopt),
-                          State::Navegacion),
-        b.selection);
-    CHECK(deltaExpiry.find("\x1b[2J") == std::string::npos);
+    std::string deltaExpiry = h.r.buildDiffFrame(b.document, b.cursor, b.viewport, "a.txt", false,
+        makeChromeRequest(Message("hola", MessageKind::Error, std::nullopt),State::Navegacion),b.selection);
+    CHECK(deltaExpiry.find("\x1b[2J")  == std::string::npos);
     CHECK(deltaExpiry.find(messageCup) == std::string::npos);
-    CHECK(deltaExpiry.find(statusCup) == std::string::npos);
+    CHECK(deltaExpiry.find(statusCup)  == std::string::npos);
 }
 
-// Regresion BUG VISUAL gutter: al cruzar 99999->100000 lineas el ancho del
-// gutter pasa de 7 a 8 columnas. Con el viewport pegado al fondo, agregar la
-// linea produce deltaTop==1; antes entraba al fast path de scroll de region,
-// que solo repinta la fila entrante y deja las ya dibujadas con el gutter
-// viejo (numeros desalineados). El contrato es: cambio de ancho de gutter =>
-// rebuild total del viewport.
+// Regresion BUG VISUAL gutter: 
+// al cruzar 99999->100000 lineas el ancho del gutter pasa de 7 a 8 columnas. 
 TEST(render_diff_gutter_crece_repinta_viewport_completo) {
     DiffHarness h(99999);
     Buffer& b = h.buf();
@@ -653,8 +885,8 @@ TEST(render_diff_gutter_crece_repinta_viewport_completo) {
     const std::string init = h.getDiffOutput();
     viaDiff.apply(init);
     viaFull.apply(init);
-    CHECK_EQ(b.document.lineCount(), 99999);
     // Con 99999 lineas el gutter es el minimo de 7 columnas (campo 5 + gap 2).
+    CHECK_EQ(b.document.lineCount(), 99999);
     CHECK_EQ(h.r.lastGutterW(), 7);
 
     h.ed.handleEvent(move(InputEventType::InsertNewline));
@@ -662,36 +894,31 @@ TEST(render_diff_gutter_crece_repinta_viewport_completo) {
     CHECK_EQ(b.document.lineCount(), 100000);
 
     const std::string delta = h.getDiffOutput();
-    const std::string full = h.r.buildScreen(
-        b.document, b.cursor, b.viewport, b.filename, b.modified,
-        makeChromeRequest(Message(""), State::Navegacion), b.selection);
+    const std::string full = h.r.buildScreen(b.document, b.cursor, b.viewport, b.filename, b.modified,
+                                            makeChromeRequest(Message(""), State::Navegacion), b.selection);
 
     // 100000 lineas => gutter de 8 columnas y rebuild total (no scroll parcial).
     CHECK_EQ(h.r.lastGutterW(), 8);
     CHECK(delta.find("\x1b[2J\x1b[H") != std::string::npos);
     checkDiffMatchesFull(viaDiff, viaFull, delta, full, /*allowFullClear=*/true);
 
-    // Todas las filas visibles quedaron alineadas con el gutter nuevo. El
-    // prefijo incluye campo alineado a la derecha + gap; 99999 y 100000 viven en 8 columnas.
+    // Todas las filas visibles quedaron alineadas con el gutter nuevo.
+    // El prefijo incluye campo alineado a la derecha + gap; 99999 y 100000 viven en 8 columnas.
     auto gutterPrefix = [](int lineNumber, const GutterMetrics& gm) {
         std::string num = std::to_string(lineNumber);
         if (static_cast<int>(num.size()) > gm.numberField)
             num = num.substr(num.size() - static_cast<size_t>(gm.numberField));
         int pad = std::max(0, gm.numberField - static_cast<int>(num.size()));
-        return std::string(static_cast<size_t>(pad), ' ') + num +
-               std::string(static_cast<size_t>(gm.gap), ' ');
+        return std::string(static_cast<size_t>(pad), ' ') + num + std::string(static_cast<size_t>(gm.gap), ' ');
     };
+    
     const GutterMetrics gm = gutterMetrics(b.document.lineCount(), b.viewport.width);
     for (int row = 0; row < b.viewport.height; ++row) {
         const int lineNumber = b.viewport.top + row + 1;
-        if (lineNumber > b.document.lineCount()) break;
-        CHECK_EQ(viaDiff.screen[static_cast<size_t>(row)].substr(0, gm.total),
-                 gutterPrefix(lineNumber, gm));
+        if (lineNumber > b.document.lineCount()) 
+            break;
+        CHECK_EQ(viaDiff.screen[static_cast<size_t>(row)].substr(0, gm.total), gutterPrefix(lineNumber, gm));
     }
-    CHECK_EQ(viaDiff.screen[static_cast<size_t>(b.viewport.height - 2)]
-                 .substr(0, 8),
-             " 99999  ");
-    CHECK_EQ(viaDiff.screen[static_cast<size_t>(b.viewport.height - 1)]
-                 .substr(0, 8),
-             "100000  ");
+    CHECK_EQ(viaDiff.screen[static_cast<size_t>(b.viewport.height - 2)].substr(0, 8)," 99999  ");
+    CHECK_EQ(viaDiff.screen[static_cast<size_t>(b.viewport.height - 1)].substr(0, 8),"100000  ");
 }
