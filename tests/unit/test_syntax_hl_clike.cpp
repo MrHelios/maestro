@@ -5,6 +5,8 @@
 #include <algorithm>
 
 #include "test_framework.h"
+#include "helpers/test_tty_renderer.h"
+
 #include "syntax/SyntaxHighlighter.h"
 #include "syntax/SyntaxCache.h"
 #include "syntax/SyntaxLanguage.h"
@@ -13,7 +15,6 @@
 #include "app/Editor.h"
 #include "document/Document.h"
 #include "rendering/Sink.h"
-#include "helpers/test_tty_renderer.h"
 
 namespace {
 
@@ -180,12 +181,43 @@ TEST(Clike_Preprocessor) {
     auto spans = hl.highlight(line1);
     
     checkSpanInvariants(spans, line1);
-    CHECK(hasSpan(spans, 0, 19, SyntaxToken::Preprocessor));
+    CHECK(hasSpan(spans, 0, 8, SyntaxToken::Preprocessor));
     
     std::string line2 = "  #define FOO 1";
     auto spans2 = hl.highlight(line2);
     checkSpanInvariants(spans2, line2);
-    CHECK(hasSpan(spans2, 2, 15, SyntaxToken::Preprocessor));
+    CHECK(hasSpan(spans2, 2, 9, SyntaxToken::Preprocessor));
+}
+
+TEST(Clike_PreprocessorStopsAtFirstSpace) {
+    SyntaxHighlighter hl;
+    hl.setLanguage(SyntaxLanguage::Cpp);
+
+    // Solo la directiva se pinta; el resto sigue el highlight normal.
+    std::string line1 = "#include \"data.cpp\"";
+    auto spans1 = hl.highlight(line1);
+    checkSpanInvariants(spans1, line1);
+    CHECK(hasSpan(spans1, 0, 8, SyntaxToken::Preprocessor));
+    CHECK(hasSpan(spans1, 9, 19, SyntaxToken::String));
+
+    std::string line2 = "#define INFORMATION 42";
+    auto spans2 = hl.highlight(line2);
+    checkSpanInvariants(spans2, line2);
+    CHECK(hasSpan(spans2, 0, 7, SyntaxToken::Preprocessor));
+    CHECK(!hasSpan(spans2, 0, line2.size(), SyntaxToken::Preprocessor));
+    CHECK(hasSpan(spans2, 20, 22, SyntaxToken::Number));
+
+    // Con espacios tras '#', la directiva es solo '#'.
+    std::string line3 = "#  include <x>";
+    auto spans3 = hl.highlight(line3);
+    checkSpanInvariants(spans3, line3);
+    CHECK(hasSpan(spans3, 0, 1, SyntaxToken::Preprocessor));
+
+    // Sin espacio, se pinta hasta fin de línea.
+    std::string line4 = "#endif";
+    auto spans4 = hl.highlight(line4);
+    checkSpanInvariants(spans4, line4);
+    CHECK(hasSpan(spans4, 0, 6, SyntaxToken::Preprocessor));
 }
 
 TEST(Clike_PreprocessorAfterBlockComment) {
@@ -197,7 +229,7 @@ TEST(Clike_PreprocessorAfterBlockComment) {
     
     checkSpanInvariants(spans, line1);
     CHECK(hasSpan(spans, 0, 13, SyntaxToken::Comment));
-    CHECK(hasSpan(spans, 14, 25, SyntaxToken::Preprocessor));
+    CHECK(hasSpan(spans, 14, 21, SyntaxToken::Preprocessor));
 }
 
 TEST(Clike_PreprocessorWithCodeBefore) {
@@ -227,7 +259,7 @@ TEST(Clike_PreprocessorMultipleLeadingComments) {
     checkSpanInvariants(spans, line);
     CHECK(hasSpan(spans, 0, 4, SyntaxToken::Comment));
     CHECK(hasSpan(spans, 5, 10, SyntaxToken::Comment));
-    CHECK(hasSpan(spans, 11, 20, SyntaxToken::Preprocessor));
+    CHECK(hasSpan(spans, 11, 18, SyntaxToken::Preprocessor));
 }
 
 TEST(Clike_Numbers) {
@@ -895,7 +927,7 @@ TEST(Clike_Preprocessor_Miltiline_AfterBlockComment) {
     
     checkSpanInvariants(spans2, line2);
     CHECK(hasSpan(spans2, 0, 9, SyntaxToken::Comment));
-    CHECK(hasSpan(spans2, 10, 21, SyntaxToken::Preprocessor));
+    CHECK(hasSpan(spans2, 10, 17, SyntaxToken::Preprocessor));
 }
 
 TEST(Clike_RawStringMultiline) {
